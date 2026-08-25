@@ -1,0 +1,149 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createCipheriv, randomBytes } from 'node:crypto'
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
+import { answerQuestions, busyEnterMode, extractText, renderQuestions } from '../lib/channels/manager.js'
+import { extractOutboundAttachments } from '../lib/agent-runtime.js'
+
+function encrypt(value, key) {
+  const cipher = createCipheriv('aes-128-ecb', key, null)
+  return Buffer.concat([cipher.update(value), cipher.final()])
+}
+
+async function withFetch(handler, run) {
+  const previous = globalThis.fetch
+  globalThis.fetch = handler
+  try { await run() } finally { globalThis.fetch = previous }
+}
+
+test('downloads and decrypts WeChat images with a raw base64 AES key', async () => {
+  const key = randomBytes(16)
+  const image = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('test-image')])
+  const encrypted = encrypt(image, key)
+  await withFetch(async url => {
+    assert.match(String(url), /^https:\/\/novac2c\.cdn\.weixin\.qq\.com\/c2c\/download/)
+    return new Response(encrypted, { status: 200, headers: { 'content-length': String(encrypted.length) } })
+  }, async () => {
+    const attachment = await receiveWeixinMedia({
+      type: 2,
+      image_item: { media: { encrypt_query_param: 'image-token', aes_key: key.toString('base64') } },
+    })
+    assert.equal(attachment?.kind, 'image')
+    assert.equal(attachment?.name, '微信图片.png')
+    assert.equal(attachment?.mediaType, 'image/png')
+    assert.deepEqual(Buffer.from(attachment?.data ?? []), image)
+  })
+})
+
+test('downloads and decrypts WeChat files with a base64-encoded hex AES key', async () => {
+  const key = randomBytes(16)
+  const file = Buffer.from('partner document')
+  const encrypted = encrypt(file, key)
+  await withFetch(async () => new Response(encrypted, { status: 200 }), async () => {
+    const attachment = await receiveWeixinMedia({
+      type: 4,
+      file_item: {
+        file_name: '../工作说明.md',
+        content_type: 'text/markdown',
+        media: { full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/download?id=1', aes_key: Buffer.from(key.toString('hex')).toString('base64') },
+      },
+    })
+    assert.equal(attachment?.kind, 'file')
+    assert.equal(attachment?.name, '_工作说明.md')
+    assert.equal(attachment?.mediaType, 'text/markdown')
+    assert.deepEqual(Buffer.from(attachment?.data ?? []), file)
+  })
+})
+
+test('rejects media URLs outside trusted WeChat domains before fetching', async () => {
+  let called = false
+  await withFetch(async () => { called = true; return new Response() }, async () => {
+    await assert.rejects(
+      receiveWeixinMedia({ type: 4, file_item: { media: { full_url: 'https://example.com/private.pdf' } } }),
+      /下载地址不可信/,
+    )
+  })
+  assert.equal(called, false)
+})
+
+test('extracts text and voice transcripts without media placeholder text', () => {
+  assert.equal(extractText([
+    { type: 1, text_item: { text: ' 文字消息 ' } },
+    { type: 2, image_item: {} },
+    { type: 3, voice_item: { text: '语音转写' } },
+    { type: 4, file_item: { file_name: '资料.pdf' } },
+  ]), '文字消息\n\n语音转写')
+})
+
+test('only exposes supported real files inside the companion workspace', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'dsh-partner-media-'))
+  const root = join(base, 'partner')
+  const outside = join(base, 'outside.pdf')
+  try {
+    await mkdir(root)
+    const image = join(root, '结果图.png')
+    const document = join(root, '报告.pdf')
+    const unsupported = join(root, '程序.exe')
+    const escaped = join(root, 'escape.pdf')
+    await writeFile(image, 'png')
+    await writeFile(document, 'pdf')
+    await writeFile(unsupported, 'exe')
+    await writeFile(outside, 'outside')
+    await symlink(outside, escaped)
+    const result = await extractOutboundAttachments([
+      `[图片](${image})`,
+      `[报告](<${document}>)`,
+      '`结果图.png`',
+      unsupported,
+      outside,
+      escaped,
+    ].join('\n'), root)
+    assert.deepEqual(result.map(item => ({ name: item.name, kind: item.kind })), [
+      { name: '结果图.png', kind: 'image' },
+      { name: '报告.pdf', kind: 'file' },
+    ])
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('resolves a generated relative attachment named in inline code', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-partner-relative-media-'))
+  try {
+    await writeFile(join(root, 'AI资讯汇总.pptx'), 'presentation')
+    const result = await extractOutboundAttachments('做好了：`AI资讯汇总.pptx`', root)
+    assert.equal(result.length, 1)
+    assert.equal(result[0]?.name, 'AI资讯汇总.pptx')
+    assert.equal(result[0]?.kind, 'file')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('renders and parses DSH questions for a text-only channel', () => {
+  const questions = [{
+    id: 'mode', header: '运行方式', question: '选择执行方式',
+    options: [{ label: '继续', description: '执行当前方案' }, { label: '取消' }],
+  }, {
+    id: 'targets', question: '选择目标', multiSelect: true,
+    options: [{ label: '图片' }, { label: '文档' }, { label: '消息' }],
+  }]
+  assert.match(renderQuestions(questions), /1\. 继续 — 执行当前方案/)
+  assert.match(renderQuestions(questions), /分号分隔/)
+  assert.deepEqual(answerQuestions(questions, '1；1,3'), { answers: [
+    { id: 'mode', selected: ['继续'] },
+    { id: 'targets', selected: ['图片', '消息'] },
+  ] })
+  assert.deepEqual(answerQuestions([questions[0]], '换一种方式'), { answers: [
+    { id: 'mode', selected: [], custom: '换一种方式' },
+  ] })
+})
+
+test('adopts the global busy-enter preference with a queue-safe fallback', () => {
+  assert.equal(busyEnterMode({ get: () => ({ busyEnter: 'steer' }) }), 'steer')
+  assert.equal(busyEnterMode({ get: () => ({ busyEnter: 'queue' }) }), 'queue')
+  assert.equal(busyEnterMode({ get: () => undefined }), 'queue')
+})

@@ -1,0 +1,10 @@
+- insert:
+    - id: partner
+      name: '@lemoncat7/dsh-partner'
+      config:
+        statePath: !!js dshHomePath('partner/state.json')
+        exposeWeb: true
+        apiPrefix: /partner-local/v1
+        defaultCwd: ''
+        autoStartChannels: true
+        timeZone: Asia/Shanghai
