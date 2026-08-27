@@ -13,6 +13,9 @@ import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { completedTurnEvents, extractOutboundAttachments } from '../agent-runtime.js'
+import type { PartnerReply } from '../channel-message.js'
 
 type ChannelContext = Context & { apiProxy: ApiProxy; settings: SettingsProvider }
 
@@ -33,6 +36,7 @@ export class ChannelManager {
   private readonly contextTokens = new Map<string, string>()
   private readonly operations = new Map<string, Set<Promise<void>>>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
+  private readonly outboundQueues = new Map<string, Promise<void>>()
   private interactionController: AbortController | undefined
   private interactionTask: Promise<void> | undefined
 
@@ -125,13 +129,46 @@ export class ChannelManager {
   }
 
   async sendProactive(channelId: string, userId: string, text: string): Promise<void> {
+    await this.sendProactiveReply(channelId, userId, { text, attachments: [] })
+  }
+
+  async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
+    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
+    const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
+    if (route === undefined) return
+    const events = completedTurnEvents(session.events, event)
+    if (!isAutonomousDeliveryTurn(events)) return
+    const text = events
+      .filter(item => item.type === 'assistant/message' && !item.data.interrupted)
+      .map(item => item.type === 'assistant/message' ? item.data.message.content
+        .filter(block => block.type === 'text').map(block => block.text).join('\n') : '')
+      .filter(Boolean).join('\n\n').trim()
+    if (!text) return
+    const receipt = `outbound:${session.id}:${event.data.turn}`
+    if (this.store.snapshot().recentReceipts.includes(receipt)) return
+    const key = `${route.channelId}:${route.userId}`
+    const previous = this.outboundQueues.get(key) ?? Promise.resolve()
+    const current = previous.catch(() => {}).then(async () => {
+      if (this.store.snapshot().recentReceipts.includes(receipt)) return
+      const reply = { text, attachments: route.cwd ? await extractOutboundAttachments(text, route.cwd) : [] }
+      await this.sendProactiveReply(route.channelId, route.userId, reply)
+      await this.rememberReceipt(receipt)
+    })
+    this.outboundQueues.set(key, current)
+    try { await current } finally { if (this.outboundQueues.get(key) === current) this.outboundQueues.delete(key) }
+  }
+
+  private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply): Promise<void> {
     const channel = requiredChannel(this.store, channelId)
     if (!channel.enabled) throw new Error('微信渠道已停用')
     const pairing = this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)
     if (pairing?.status !== 'approved') throw new Error('微信联系人尚未批准')
     const credential = await this.credentials.read(channelId)
     const token = this.contextTokens.get(`${channelId}:${userId}`)
-    await new WeixinApi(credential.baseUrl, credential.botToken).sendText(userId, text, token, AbortSignal.timeout(30_000))
+    const api = new WeixinApi(credential.baseUrl, credential.botToken)
+    const signal = AbortSignal.timeout(30_000)
+    await api.sendText(userId, reply.text, token, signal)
+    for (const attachment of reply.attachments) await api.sendAttachment(userId, attachment, token, signal)
   }
 
   private async pollLoop(channel: WeixinChannel, api: WeixinApi, signal: AbortSignal): Promise<void> {
@@ -281,6 +318,14 @@ export class ChannelManager {
       if (state.recentReceipts.length > 800) state.recentReceipts.splice(0, state.recentReceipts.length - 800)
     })
   }
+}
+
+export function isAutonomousDeliveryTurn(events: readonly SessionEvent[]): boolean {
+  return events.some(event => event.type === 'user/message'
+    && event.data.source.kind === 'plugin'
+    && event.data.source.plugin === 'tool-goal'
+    && event.data.source.form === 'notice'
+    && event.data.source.summary?.startsWith('complete:'))
 }
 
 export function requiredChannel(store: PartnerStore, id: string): WeixinChannel {

@@ -3,6 +3,7 @@ import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
+import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { Config as ConfigSchema, resolveConfig, type Config as PartnerConfig } from './config.js'
 import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
@@ -19,13 +20,14 @@ export const Config = ConfigSchema
 export type Config = PartnerConfig
 export * from './domain.js'
 export const name = 'dsh-partner'
-export const inject = ['credentials', 'attachments', 'agents', 'agentDefaultModel', 'agentPresets', 'apiProxy', 'settings', 'systemPrompt', 'workspaceRegistry', 'llm']
+export const inject = ['credentials', 'attachments', 'agents', 'agentDefaultModel', 'agentPresets', 'apiProxy', 'settings', 'systemPrompt', 'tools', 'workspaceRegistry', 'llm']
 
 type RuntimeContext = Context & {
   credentials: CredentialProvider
   agentDefaultModel: AgentDefaultModelConfig
   workspaceRegistry: WorkspaceRegistry
   agentPresets: AgentPresets
+  tools: ToolRuntime
   webServer?: WebServerLike
   inject?(services: string[], callback: (ctx: RuntimeContext) => void): unknown
 }
@@ -43,10 +45,11 @@ export function apply(context: Context, config: PartnerConfig): void {
     }
     const reflection = new MemoryReflectionService(ctx, memory)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection)
-    const disposeJournalObserver = ctx.on('session/event', (session, event) => {
-      void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
-    })
     const channels = new ChannelManager(ctx, store, credentials, agents)
+    const disposeSessionObserver = ctx.on('session/event', (session, event) => {
+      void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
+      void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
+    })
     channels.startInteractionBridge()
     const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, resolved.timeZone)
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, resolved.timeZone)
@@ -67,7 +70,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
     return async () => {
       disposeApi?.()
-      disposeJournalObserver()
+      disposeSessionObserver()
       await heartbeat.close()
       await dailyReview.close()
       await channels.close()

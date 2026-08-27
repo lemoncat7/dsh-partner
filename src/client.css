@@ -115,8 +115,28 @@
 .dsh-partner-topbar > div > span:last-child { display: grid; gap: 2px; }
 .dsh-partner-topbar strong { font-size: var(--partner-font-label); font-weight: 620; }
 .dsh-partner-topbar small { color: var(--dsw-alias-label-tertiary); font-size: var(--partner-font-caption); }
-.dsh-partner-topbar > button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9px; color: var(--dsw-alias-label-secondary); background: transparent; cursor: pointer; }
-.dsh-partner-topbar > button:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-partner-topbar [data-xiaohei-workspace-close] {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+.dsh-partner-topbar [data-xiaohei-workspace-close]:hover {
+  border-color: var(--partner-border);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.dsh-partner-topbar [data-xiaohei-workspace-close]:active { transform: scale(.96); }
+.dsh-partner-topbar [data-xiaohei-workspace-close] > svg { display: block; pointer-events: none; }
 .dsh-partner-grid { display: grid; grid-template-columns: 206px minmax(520px, 1fr); min-width: 0; min-height: 0; }
 
 .dsh-partner-roster { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 20px 10px 14px; border-right: 1px solid var(--partner-border); background: color-mix(in srgb, var(--partner-raised) 94%, var(--partner-surface)); }

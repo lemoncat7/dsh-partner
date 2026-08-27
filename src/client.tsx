@@ -392,7 +392,7 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
     </section>
 
     <section className="dsh-partner-automation">
-      <header><span><strong>低打扰心跳</strong><small>按周期检查未完成事项和真正有价值的新信息；无内容时不会发消息。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.heartbeat.enabled} aria-label="启用伙伴心跳" onClick={() => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, enabled: !current.heartbeat.enabled } }))}><i /></button></header>
+      <header><span><strong>主动巡察</strong><small>周期唤醒后在有限预算内发现并核实多个线索；只有值得告诉你的内容才会发送。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.heartbeat.enabled} aria-label="启用伙伴心跳" onClick={() => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, enabled: !current.heartbeat.enabled } }))}><i /></button></header>
       <div className="dsh-partner-automation-fields is-heartbeat">
         <Field label="检查间隔"><select value={automation.heartbeat.intervalMinutes} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, intervalMinutes: Number(event.target.value) } }))}><option value={30}>30 分钟</option><option value={60}>1 小时</option><option value={180}>3 小时</option><option value={360}>6 小时</option><option value={720}>12 小时</option><option value={1440}>24 小时</option></select></Field>
         <Field label="免打扰开始"><input type="number" min={0} max={23} value={automation.heartbeat.quietStartHour} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, quietStartHour: Number(event.target.value) } }))} /></Field>

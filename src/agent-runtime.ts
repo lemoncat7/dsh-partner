@@ -11,10 +11,12 @@ import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Workspace, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
+import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
+import { heartbeatMessage, heartbeatPrompt, renderHeartbeatContext } from './autonomy.js'
 import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 
@@ -23,11 +25,15 @@ type RuntimeContext = Context & {
   agentDefaultModel: AgentDefaultModelConfig
   agentPresets: AgentPresets
   workspaceRegistry: WorkspaceRegistry
+  tools: ToolRuntime
 }
+
+const HEARTBEAT_TIMEOUT_MS = 120_000
 
 export class PartnerAgentRuntime {
   private readonly handles = new Map<string, AgentHandle>()
   private readonly queues = new Map<string, Promise<void>>()
+  private readonly heartbeatQueues = new Map<string, Promise<string | undefined>>()
   private readonly steeringQueues = new Map<string, Promise<void>>()
   private readonly workspaces = new Map<string, Promise<Workspace>>()
 
@@ -98,11 +104,23 @@ export class PartnerAgentRuntime {
 
   async heartbeat(companion: Companion, route: ChannelSession): Promise<string | undefined> {
     const key = `${route.channelId}:${route.userId}`
-    const previous = this.queues.get(key) ?? Promise.resolve()
-    let output: string | undefined
-    const current = previous.catch(() => {}).then(async () => { output = await this.driveHeartbeat(companion, route) })
-    this.queues.set(key, current)
-    try { await current; return output } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
+    const queued = this.heartbeatQueues.get(key)
+    if (queued !== undefined) return queued
+    const current = this.runHeartbeatWhenIdle(key, companion, route)
+    this.heartbeatQueues.set(key, current)
+    try { return await current } finally { if (this.heartbeatQueues.get(key) === current) this.heartbeatQueues.delete(key) }
+  }
+
+  private async runHeartbeatWhenIdle(key: string, companion: Companion, route: ChannelSession): Promise<string | undefined> {
+    for (;;) {
+      await this.queues.get(key)?.catch(() => {})
+      const agent = await this.ensureAgent(companion, route)
+      if (agent.status !== 'idle') await agent.whenIdle()
+      const stableSeq = agent.session.seq
+      await delay(2_000)
+      if (this.queues.has(key) || agent.status !== 'idle' || agent.session.seq !== stableSeq) continue
+      return this.driveHeartbeat(agent)
+    }
   }
 
   async observeSessionEvent(session: Session, event: SessionEvent): Promise<void> {
@@ -127,29 +145,27 @@ export class PartnerAgentRuntime {
     })
   }
 
-  private async driveHeartbeat(companion: Companion, route: ChannelSession): Promise<string | undefined> {
-    const agent = await this.ensureAgent(companion, route)
-    if (agent.status !== 'idle') return undefined
-    const recalled = await this.memory?.recall(companion.id, memoryScope(route.channelId, route.userId), '未完成任务 承诺 跟进 风险 提醒', 16).catch(() => [])
-    if (recalled && recalled.length > 0) agent.inject(createUserMessage({
-      content: [{ type: 'text', text: renderMemory(recalled) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '心跳召回相关长期记忆' },
+  private async driveHeartbeat(agent: Agent): Promise<string | undefined> {
+    const tools = this.ctx.tools.schemas(agent)
+    agent.inject(createUserMessage({
+      content: [{ type: 'text', text: renderHeartbeatContext({ tools }) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: `心跳已注入 ${tools.length} 项可用工具` },
     }))
     const startSeq = agent.session.seq
     agent.followup(createUserMessage({
-      content: [{ type: 'text', text: [
-        '执行一次伙伴心跳检查。结合当前会话、召回的结构化记忆、每日回顾和可用工具，判断现在是否确实有一条值得主动告诉用户的信息。',
-        '检查范围：用户明确交代但尚未完成的事项、承诺过的后续跟进、临近风险，以及通过当前已挂载知识库或工具获得的真正有用的新发现。',
-        '所有主动报告必须能从当前会话、该联系人的结构化记忆、每日回顾或工具结果中找到依据；不得为了活跃而寒暄，不得虚构进展，不得重复近期提醒。',
-        '如果没有必要通知，只回复：NO_ACTION',
-        '如果需要通知，只输出准备发送给用户的简短中文消息，不要解释这是心跳。',
-      ].join('\n') }],
+      content: [{ type: 'text', text: heartbeatPrompt() }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' },
     }))
-    await agent.whenIdle()
-    const response = extractAssistantText(agent, startSeq).trim()
-    if (!response || /^NO_ACTION[。.!！]?$/i.test(response)) return undefined
-    return response
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      agent.cancel({ kind: 'hook', reason: 'dsh-partner heartbeat exceeded its two-minute budget' }, { keepInbox: true })
+    }, HEARTBEAT_TIMEOUT_MS)
+    timeout.unref?.()
+    try { await agent.whenIdle() }
+    finally { clearTimeout(timeout) }
+    if (timedOut) throw new Error('伙伴心跳超过两分钟，已安全终止')
+    return heartbeatMessage(extractAssistantText(agent, startSeq))
   }
 
   async resetCompanion(companionId: string): Promise<void> {
@@ -183,6 +199,7 @@ export class PartnerAgentRuntime {
   async close(): Promise<void> {
     await Promise.all([...this.handles.values()].map(handle => handle.dispose().catch(() => {})))
     this.handles.clear()
+    this.heartbeatQueues.clear()
     this.steeringQueues.clear()
   }
 
@@ -322,6 +339,10 @@ export class PartnerAgentRuntime {
     }
     await (await workspace).attachSession(route.sessionId as SessionId)
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds))
 }
 
 export async function extractOutboundAttachments(text: string, cwd: string): Promise<PartnerOutboundAttachment[]> {

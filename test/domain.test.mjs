@@ -10,6 +10,7 @@ import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { parseDailyReview, parseReflection } from '../lib/memory-reflection.js'
 import { localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
+import { heartbeatMessage, heartbeatPrompt, renderHeartbeatContext } from '../lib/autonomy.js'
 
 test('evaluates heartbeat schedules in the configured timezone', () => {
   const morning = Date.parse('2026-08-25T01:30:00.000Z') // 09:30 in Shanghai
@@ -100,6 +101,43 @@ test('instructs code-mode companions to route SDK tools through run_code', () =>
   assert.match(protocol, /await tools\.web_search/)
   assert.match(protocol, /绝不要直接发起名为 `web_search` 的顶层工具调用/)
   assert.match(protocol, /立即在同一轮改用 `run_code` 重试/)
+})
+
+test('keeps the established heartbeat decision prompt and forbids JSON output', () => {
+  const prompt = heartbeatPrompt()
+  assert.match(prompt, /执行一次伙伴主动巡察/)
+  assert.match(prompt, /选择最多三条真正有价值的方向/)
+  assert.match(prompt, /关注变化、学习新知和整理现状/)
+  assert.match(prompt, /总计最多调用六次工具/)
+  assert.match(prompt, /大约两分钟内收束/)
+  assert.match(prompt, /不得只调用一次工具就结束/)
+  assert.match(prompt, /必须实际调用只读发现或检索工具/)
+  assert.match(prompt, /优先从当前挂载知识库开始/)
+  assert.match(prompt, /不允许未经检查直接回复 NO_ACTION/)
+  assert.match(prompt, /不得创建、修改、删除内容/)
+  assert.match(prompt, /如果没有必要通知，只回复：NO_ACTION/)
+  assert.match(prompt, /不要输出 JSON/)
+  assert.doesNotMatch(prompt, /结构化记忆|每日回顾|当前会话/)
+})
+
+test('injects only the scoped tool catalog into heartbeat context', () => {
+  const text = renderHeartbeatContext({
+    tools: [
+      { name: 'knowledge_search', description: '搜索当前会话挂载的知识库', parameters: { type: 'object', properties: {} } },
+      { name: 'web_search', description: '搜索公开网页', parameters: { type: 'object', properties: {} } },
+    ],
+  })
+  assert.match(text, /真实可用工具/)
+  assert.match(text, /knowledge_search：搜索当前会话挂载的知识库/)
+  assert.match(text, /web_search：搜索公开网页/)
+  assert.doesNotMatch(text, /近期每日回顾/)
+  assert.doesNotMatch(text, /长期待关注|偏好|情绪|记忆/)
+})
+
+test('maps heartbeat output directly to silence or a user-facing notification', () => {
+  assert.equal(heartbeatMessage('NO_ACTION'), undefined)
+  assert.equal(heartbeatMessage('NO_ACTION。'), undefined)
+  assert.equal(heartbeatMessage('发现一条值得提醒的新信息'), '发现一条值得提醒的新信息')
 })
 
 test('collects user messages from a completed turn by event boundaries', () => {

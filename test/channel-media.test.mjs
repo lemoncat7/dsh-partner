@@ -5,13 +5,20 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
-import { answerQuestions, busyEnterMode, extractText, renderQuestions } from '../lib/channels/manager.js'
+import { answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
 import { extractOutboundAttachments } from '../lib/agent-runtime.js'
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
   return Buffer.concat([cipher.update(value), cipher.final()])
 }
+
+test('routes completed autonomous goals without mirroring ordinary plugin notices', () => {
+  const goal = { type: 'user/message', data: { source: { kind: 'plugin', plugin: 'tool-goal', form: 'notice', summary: 'complete: finished' } } }
+  const heartbeat = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' } } }
+  assert.equal(isAutonomousDeliveryTurn([goal]), true)
+  assert.equal(isAutonomousDeliveryTurn([heartbeat]), false)
+})
 
 async function withFetch(handler, run) {
   const previous = globalThis.fetch
