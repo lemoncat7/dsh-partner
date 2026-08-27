@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Long-lived AI companions with WeChat channel routing for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -99,7 +99,6 @@
     "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
     "@deepseek-ai/dsh-user-questions": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-workspace": "0.1.1-rc.2",
-    "@lemoncat7/dsh-plugin-ui": "file:../dsh-plugin-ui",
     "@types/node": "^24.0.0",
     "@types/react": "18.3.28",
     "esbuild": "^0.25.0",
