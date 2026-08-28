@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Companion } from './domain.js'
-import { extractConcernResources, type ConcernCandidate, type ConcernWatchKind } from './concern-domain.js'
+import { concernSubjectSimilarity, extractConcernResources, type ConcernCandidate, type ConcernWatchKind } from './concern-domain.js'
 import type { ConversationTurn, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryKind, MemoryRelationKind, ReflectionResult } from './memory-domain.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
@@ -68,10 +68,21 @@ export class MemoryReflectionService {
     const result = parseReflection(output)
     await this.store.consolidate(turn, result)
     const resources = extractConcernResources(turn.user)
-    const candidates = resources.length === 0 ? result.concerns : result.concerns.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
+    const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
+    const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
     await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, explicitConcernDirective(turn.user) ? 'explicit' : 'implicit', turn.at)
+    if (turn.concernDirective !== undefined) await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
     await this.store.prune(companion.id, companion.automation.memory.retentionDays)
   }
+}
+
+export function protectConcernDirective(
+  candidates: ConcernCandidate[],
+  directive: ConversationTurn['concernDirective'],
+): ConcernCandidate[] {
+  return directive === undefined
+    ? candidates
+    : candidates.filter(item => item.operation !== 'upsert' || concernSubjectSimilarity(item.subject, directive.subject) < .74)
 }
 
 export function explicitConcernDirective(value: string): boolean {

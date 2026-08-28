@@ -79,6 +79,18 @@ export interface ConcernActivity {
   observations: ConcernObservation[]
 }
 
+export type ConcernLifecycleAction = 'ignore' | 'resolve'
+
+export interface ConcernLifecycleRequest {
+  action: ConcernLifecycleAction
+  target: string
+}
+
+export interface AppliedConcernLifecycleDirective extends ConcernLifecycleRequest {
+  concernId: string
+  subject: string
+}
+
 export function concernInterval(priority: number, origin: ConcernOrigin): number {
   const hours = priority >= .85 ? 3 : priority >= .65 ? 8 : priority >= .4 ? 24 : 72
   return hours * 3_600_000 * (origin === 'explicit' ? .75 : 1)
@@ -122,6 +134,50 @@ export function normalizeConcernSubject(value: string): string {
   return value.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
 }
 
+/** Parse only explicit, named lifecycle commands; ambiguous references remain model-assisted. */
+export function concernLifecycleRequest(value: string): ConcernLifecycleRequest | undefined {
+  const text = value.normalize('NFKC').replace(/\s+/gu, ' ').trim()
+  if (!text || /[?？]\s*$/u.test(text) || /^(?:为什么|为何|怎么|怎会|是不是|是否|难道)/u.test(text)) return undefined
+  const ignoreVerb = '(?:不|不要|不用|无需|别|取消|停止)(?:再|继续)?(?:关注|留意|盯着|盯|跟进|惦记|记着|巡检|巡查|观察|检查|管)'
+  const leading = text.match(new RegExp(`^(?:(?:请|麻烦)[，,:： ]*)?(?:(?:我|你|伙伴)(?:现在|以后|也)?[，,:： ]*)?(?:让(?:伙伴|你)[，,:： ]*)?${ignoreVerb}(?:一下)?[，,:： ]*([^，。！？；;\\n]+)`, 'u'))
+  const trailing = text.match(new RegExp(`^([^，。！？；;\\n]+?)[，,:： ]*(?:我|让(?:伙伴|你))?[，,:： ]*${ignoreVerb}(?:了|啦|吧)?$`, 'u'))
+  const ignored = cleanLifecycleTarget(leading?.[1] ?? trailing?.[1] ?? '')
+  if (ignored) return { action: 'ignore', target: ignored }
+
+  const resolved = text.match(/^([^，。！？；;\n]+?)[，,:： ]*(?:已经|已)?(?:解决|完成|搞定|闭环)(?:了|啦|吧)?$/u)
+  const resolvedTarget = cleanLifecycleTarget(resolved?.[1] ?? '')
+  return resolvedTarget ? { action: 'resolve', target: resolvedTarget } : undefined
+}
+
+/** Conservative fuzzy score for a named command and an existing concern subject. */
+export function concernSubjectSimilarity(leftValue: string, rightValue: string): number {
+  const left = normalizeConcernSubject(leftValue.normalize('NFKC'))
+  const right = normalizeConcernSubject(rightValue.normalize('NFKC'))
+  if (!left || !right) return 0
+  if (left === right) return 1
+  const longest = Math.max(left.length, right.length)
+  const containment = left.includes(right) || right.includes(left) ? Math.min(left.length, right.length) / longest : 0
+  const subsequence = longestCommonSubsequence(left, right) / longest
+  const pairs = bigramDice(left, right)
+  return Math.max(containment, subsequence, pairs)
+}
+
+export function selectConcernLifecycleTarget(
+  request: ConcernLifecycleRequest,
+  concerns: readonly PartnerConcern[],
+): PartnerConcern | undefined {
+  const ranked = concerns
+    .filter(item => item.state !== 'archived')
+    .map(item => ({ item, score: concernSubjectSimilarity(request.target, item.subject) }))
+    .filter(item => item.score >= .74)
+    .sort((left, right) => right.score - left.score || right.item.updatedAt - left.item.updatedAt)
+  const first = ranked[0]
+  if (first === undefined) return undefined
+  const second = ranked[1]
+  if (first.score < 1 && second !== undefined && first.score - second.score < .1) return undefined
+  return first.item
+}
+
 export function focusedConcernQuery(value: string): string {
   return value.normalize('NFKC')
     .replace(/(?:请|麻烦|帮我|替我|让伙伴|让你|关注|留意|盯着|跟进|惦记|记着|帮忙看看)/gu, ' ')
@@ -161,4 +217,48 @@ export function extractConcernResources(value: string): ConcernResource[] {
 
 export function clamp(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : .5
+}
+
+function cleanLifecycleTarget(value: string): string {
+  const target = value
+    .replace(/^[“”"'「」『』\s]+|[“”"'「」『』\s]+$/gu, '')
+    .replace(/^(?:关于|对于|对|这个|这件事|那个)[，,:： ]*/u, '')
+    .replace(/[，,:： ]*(?:了|啦|吧|就行|即可)$/u, '')
+    .trim()
+  return /^(?:这个|这件事|那个|它|这些|那件事)$/u.test(target) || normalizeConcernSubject(target).length < 2 ? '' : target.slice(0, 300)
+}
+
+function longestCommonSubsequence(left: string, right: string): number {
+  const previous = new Uint16Array(right.length + 1)
+  const current = new Uint16Array(right.length + 1)
+  for (const leftCharacter of left) {
+    current.fill(0)
+    let column = 1
+    for (const rightCharacter of right) {
+      current[column] = leftCharacter === rightCharacter
+        ? (previous[column - 1] ?? 0) + 1
+        : Math.max(previous[column] ?? 0, current[column - 1] ?? 0)
+      column += 1
+    }
+    previous.set(current)
+  }
+  return previous[right.length] ?? 0
+}
+
+function bigramDice(left: string, right: string): number {
+  if (left.length < 2 || right.length < 2) return 0
+  const available = new Map<string, number>()
+  for (let index = 0; index < left.length - 1; index += 1) {
+    const pair = left.slice(index, index + 2)
+    available.set(pair, (available.get(pair) ?? 0) + 1)
+  }
+  let matches = 0
+  for (let index = 0; index < right.length - 1; index += 1) {
+    const pair = right.slice(index, index + 2)
+    const count = available.get(pair) ?? 0
+    if (count <= 0) continue
+    matches += 1
+    available.set(pair, count - 1)
+  }
+  return (2 * matches) / (left.length + right.length - 2)
 }

@@ -1,4 +1,4 @@
-import type { ConcernCandidate } from './concern-domain.js'
+import type { AppliedConcernLifecycleDirective, ConcernCandidate } from './concern-domain.js'
 
 export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
@@ -11,6 +11,7 @@ export interface ConversationTurn {
   at: number
   user: string
   assistant: string
+  concernDirective?: AppliedConcernLifecycleDirective
 }
 
 export interface MemoryEvidence {

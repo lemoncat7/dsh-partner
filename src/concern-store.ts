@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
   clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, interruptDecision, normalizeConcernSubject,
+  concernLifecycleRequest, selectConcernLifecycleTarget,
   type ConcernActivity, type ConcernCandidate, type ConcernObservation, type ConcernObservationCandidate,
-  type ConcernOrigin, type ConcernState, type ObservationDecision, type PartnerConcern,
+  type AppliedConcernLifecycleDirective, type ConcernOrigin, type ConcernState, type ObservationDecision, type PartnerConcern,
 } from './concern-domain.js'
 
 type SqlRow = Record<string, unknown>
@@ -55,6 +56,28 @@ export class PartnerConcernStore {
     const concern = (await this.list(companionId, scopeId)).find(item => normalizeConcernSubject(item.subject) === normalizeConcernSubject(descriptor.subject))
     if (!concern) throw new Error('concern could not be created')
     return concern
+  }
+
+  async applyUserDirective(
+    companionId: string,
+    scopeId: string,
+    value: string,
+    now = Date.now(),
+  ): Promise<AppliedConcernLifecycleDirective | undefined> {
+    const request = concernLifecycleRequest(value)
+    if (request === undefined) return undefined
+    return this.serialValue(this.path(companionId), async () => {
+      const database = await this.open(companionId)
+      try {
+        const rows = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND scope_id IN (?, '*')
+          AND state != 'archived' ORDER BY score DESC, updated_at DESC LIMIT 80`).all(companionId, scopeId) as SqlRow[]
+        const target = selectConcernLifecycleTarget(request, rows.map(concernFromRow))
+        if (target === undefined) return undefined
+        if (request.action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', updated_at = ? WHERE id = ?").run(now, target.id)
+        else database.prepare("UPDATE concerns SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").run(now, now, target.id)
+        return { ...request, concernId: target.id, subject: target.subject }
+      } finally { database.close() }
+    })
   }
 
   async list(companionId: string, scopeId?: string, includeArchived = false, limit = 100): Promise<PartnerConcern[]> {

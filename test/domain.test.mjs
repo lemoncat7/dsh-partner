@@ -10,8 +10,8 @@ import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToo
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { PartnerConcernStore } from '../lib/concern-store.js'
-import { concernDecay, concernInterval, extractConcernResources, interruptDecision, normalizeConcernSubject } from '../lib/concern-domain.js'
-import { explicitConcernDirective, parseDailyReview, parseReflection } from '../lib/memory-reflection.js'
+import { concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
+import { explicitConcernDirective, parseDailyReview, parseReflection, protectConcernDirective } from '../lib/memory-reflection.js'
 import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
 import { concernObservationPrompt } from '../lib/autonomy.js'
 
@@ -402,6 +402,36 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
     const archived = (await store.list('companion-1', undefined, true)).find(item => item.subject === '很久以前的临时问题')
     assert.equal(archived?.state, 'archived')
     assert.equal((await store.list('companion-1')).some(item => item.subject === '很久以前的临时问题'), false)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('applies explicit named concern lifecycle commands without relying on model wording', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-directive-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const now = Date.now()
+    await store.applyCandidates('companion-1', 'weixin:user', [{
+      subject: '罗小黑工作台样图', reason: '视觉方向尚未闭环', operation: 'upsert', priority: .72,
+      confidence: .95, watchKind: 'workspace', watchQuery: '罗小黑工作台样图变化',
+    }], 'implicit', now)
+
+    assert.deepEqual(concernLifecycleRequest('不关注 罗小黑工作样图'), { action: 'ignore', target: '罗小黑工作样图' })
+    assert.deepEqual(concernLifecycleRequest('我以后不用再巡检罗小黑工作样图了'), { action: 'ignore', target: '罗小黑工作样图' })
+    assert.equal(concernSubjectSimilarity('罗小黑工作样图', '罗小黑工作台样图') >= .74, true)
+    const before = await store.list('companion-1', 'weixin:user')
+    assert.equal(selectConcernLifecycleTarget({ action: 'ignore', target: '罗小黑工作样图' }, before)?.subject, '罗小黑工作台样图')
+
+    const applied = await store.applyUserDirective('companion-1', 'weixin:user', '不关注 罗小黑工作样图', now + 1)
+    assert.equal(applied?.concernId, before[0]?.id)
+    assert.equal(applied?.action, 'ignore')
+    assert.equal((await store.list('companion-1', 'weixin:user')).length, 0)
+    assert.equal((await store.list('companion-1', 'weixin:user', true))[0]?.state, 'archived')
+
+    assert.equal(concernLifecycleRequest('为什么不关注罗小黑工作样图？'), undefined)
+    assert.deepEqual(protectConcernDirective([
+      { subject: '罗小黑工作样图', reason: '模型误判', operation: 'upsert', priority: .8, confidence: .8, watchKind: 'workspace', watchQuery: '样图' },
+      { subject: 'SSH 终端遮挡', reason: '另一个问题', operation: 'upsert', priority: .7, confidence: .8, watchKind: 'workspace', watchQuery: 'SSH' },
+    ], { concernId: applied?.concernId ?? '', action: 'ignore', target: '罗小黑工作样图', subject: '罗小黑工作台样图' }).map(item => item.subject), ['SSH 终端遮挡'])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 

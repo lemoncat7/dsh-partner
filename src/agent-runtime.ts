@@ -249,20 +249,24 @@ export class PartnerAgentRuntime {
   }
 
   async observeSessionEvent(session: Session, event: SessionEvent): Promise<void> {
-    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed' || this.reflection === undefined) return
+    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
     if (route === undefined) return
     const companion = this.store.snapshot().companions.find(item => item.id === route.companionId)
-    if (companion === undefined || !companion.automation.memory.enabled) return
+    if (companion === undefined) return
     const events = completedTurnEvents(session.events, event)
     const prompt = events.find(item => item.type === 'user/message' && item.data.source.kind === 'user')
     const replies = events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
     const userText = prompt?.type === 'user/message' ? textContent(prompt.data.content) : ''
     const assistantText = replies.flatMap(item => item.type === 'assistant/message' ? [textContent(item.data.message.content)] : []).filter(Boolean).join('\n\n')
     if (!userText || !assistantText) return
+    const scopeId = memoryScope(route.channelId, route.userId)
+    const concernDirective = await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)
+    if (!companion.automation.memory.enabled || this.reflection === undefined) return
     await this.reflection.reflect(companion, {
-      id: `turn-${randomUUID()}`, companionId: companion.id, scopeId: memoryScope(route.channelId, route.userId),
+      id: `turn-${randomUUID()}`, companionId: companion.id, scopeId,
       sessionId: session.id, at: event.time, user: userText, assistant: assistantText,
+      ...(concernDirective === undefined ? {} : { concernDirective }),
     })
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === route.id)
