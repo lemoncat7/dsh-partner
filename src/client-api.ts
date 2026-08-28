@@ -39,7 +39,8 @@ export interface ConcernView {
 }
 export interface ConcernObservationView {
   id: string; concernId: string; event: string; evidence: string; source: string; interruptScore: number
-  decision: 'drop' | 'remember' | 'defer' | 'feed' | 'notify'; createdAt: number; mentionedAt?: number
+  decision: 'drop' | 'remember' | 'defer' | 'feed' | 'notify'; notificationRuleEffect: 'auto' | 'notify' | 'suppress'
+  notificationRuleReason: string; decisionReason: string; createdAt: number; mentionedAt?: number
 }
 export interface ConcernActivityView { concerns: ConcernView[]; observations: ConcernObservationView[] }
 export interface ConcernSourceView { kind: 'file' | 'knowledge'; label: string; detail: string; token: string }

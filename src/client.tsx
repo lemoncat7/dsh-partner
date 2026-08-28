@@ -13,7 +13,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
 import cssText from './client.css'
-import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot } from './client-api.js'
+import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
 
@@ -356,10 +356,12 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
       await onChanged()
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
-  const trigger = async (): Promise<void> => {
+  const trigger = async (concernId?: string): Promise<void> => {
     setBusy(true); setError(undefined); setNotice(undefined)
     try {
-      const result = await api<{ checked: boolean; sent: boolean; reason?: string }>(`/companions/${companion.id}/heartbeat/trigger`, { method: 'POST' })
+      const result = await api<{ checked: boolean; sent: boolean; reason?: string }>(`/companions/${companion.id}/heartbeat/trigger`, {
+        method: 'POST', body: JSON.stringify(concernId ? { concernId } : {}),
+      })
       setNotice(result.sent ? '心跳已完成并发送微信提醒' : result.reason ?? '心跳检查完成')
       await Promise.all([onChanged(), loadMemory()])
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
@@ -420,9 +422,9 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
         <Field label="免打扰结束"><input type="number" min={0} max={23} value={automation.heartbeat.quietEndHour} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, quietEndHour: Number(event.target.value) } }))} /></Field>
         <Field label="每日上限"><select value={automation.heartbeat.dailyLimit} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, dailyLimit: Number(event.target.value) } }))}><option value={0}>不限</option><option value={1}>1 次</option><option value={2}>2 次</option><option value={3}>3 次</option><option value={5}>5 次</option><option value={8}>8 次</option></select></Field>
       </div>
-      <ConcernBoard companionId={companion.id} activity={concernActivity} value={newConcern} busy={busy} onValue={setNewConcern} onAdd={() => { void addConcern() }} onAct={(item, action) => { void actConcern(item, action) }} />
+      <ConcernBoard companionId={companion.id} activity={concernActivity} value={newConcern} busy={busy} onValue={setNewConcern} onAdd={() => { void addConcern() }} onCheck={item => { void trigger(item.id) }} onAct={(item, action) => { void actConcern(item, action) }} />
       {heartbeat?.lastError && <p className="dsh-partner-inline-error">{heartbeat.lastError}</p>}
-      <div className="dsh-partner-automation-actions"><button type="button" disabled={busy || sessions.length === 0} onClick={() => { void trigger() }}>立即检查一次</button><button type="button" className="is-primary" disabled={busy} onClick={() => { void save() }}>{busy ? '正在处理…' : '保存设置'}</button></div>
+      <div className="dsh-partner-automation-actions"><button type="button" disabled={busy || sessions.length === 0} onClick={() => { void trigger() }}>检查到期项</button><button type="button" className="is-primary" disabled={busy} onClick={() => { void save() }}>{busy ? '正在处理…' : '保存设置'}</button></div>
     </section></div>
 
     {notice && <p className="dsh-partner-inline-notice"><IconCheckOutline14 size={14} />{notice}</p>}
@@ -435,8 +437,9 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
   </div>
 }
 
-function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onAct }: {
+function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCheck, onAct }: {
   companionId: string; activity: ConcernActivityView; value: string; busy: boolean; onValue(value: string): void; onAdd(): void
+  onCheck(item: ConcernView): void
   onAct(item: ConcernView, action: 'watch' | 'ignore' | 'prioritize' | 'resolve'): void
 }): JSX.Element {
   const visible = activity.concerns.filter(item => item.state !== 'archived')
@@ -507,12 +510,12 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onAc
       {active.length === 0 ? <p className="dsh-partner-concern-empty">最近没有未闭环的事。你也可以直接对伙伴说“这个帮我留意”。</p> : shown.map(item => {
         const observation = latest.get(item.id)
         const expanded = expandedId === item.id
-        const status = observation?.decision === 'notify' || observation?.decision === 'feed' ? '有新变化' : item.state === 'active' ? '正在留意' : '暂时记着'
+        const status = observation ? concernObservationStatus(observation) : item.state === 'active' ? '正在留意' : '暂时记着'
         return <article key={item.id} role="listitem" data-state={item.state} data-expanded={expanded}>
           <button type="button" className="dsh-partner-concern-row" aria-expanded={expanded} onClick={() => setExpandedId(current => current === item.id ? undefined : item.id)}>
             <span className="dsh-partner-concern-state"><i />{status}</span><span className="dsh-partner-concern-copy"><strong>{item.subject}</strong><small>{observation ? observation.event : item.reason}</small></span><span className="dsh-partner-concern-time" title={`计划于 ${new Date(item.nextCheckAt).toLocaleString()} 再次留意`}><small>下次留意</small><strong>{futureTime(item.nextCheckAt)}</strong></span><IconChevronDownOutline14 size={14} />
           </button>
-          {expanded && <div className="dsh-partner-concern-detail"><p>{item.reason}</p>{observation && <blockquote>{observation.event}</blockquote>}{item.resources.length > 0 && <div className="dsh-partner-concern-resources">{item.resources.map(resource => <span key={`${resource.kind}:${resource.locator}`}>{resource.kind === 'file' ? '文件' : '知识'} · {resource.label}</span>)}</div>}<small>{item.origin === 'explicit' ? '你明确交代' : '伙伴从对话中注意到'} · {watchKindLabel(item.watchKind)}</small><div className="dsh-partner-concern-actions" aria-label={`${item.subject} 的操作`}><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>继续留意</button><button type="button" disabled={busy} onClick={() => onAct(item, 'prioritize')}>提高关注</button><button type="button" disabled={busy} onClick={() => onAct(item, 'resolve')}>已经解决</button><button type="button" className="is-danger" disabled={busy} onClick={() => onAct(item, 'ignore')}>别管这个</button></div></div>}
+          {expanded && <div className="dsh-partner-concern-detail"><p>{item.reason}</p>{observation && <><blockquote>{observation.event}</blockquote><div className="dsh-partner-concern-decision" data-decision={observation.decision}><strong>{concernObservationStatus(observation)}</strong><span>{observation.decisionReason || concernObservationExplanation(observation)}</span><small>打扰分数 {Math.round(observation.interruptScore * 100)}{observation.notificationRuleEffect !== 'auto' && observation.notificationRuleReason ? ` · 知识规则：${observation.notificationRuleReason}` : ''}</small></div></>}{item.resources.length > 0 && <div className="dsh-partner-concern-resources">{item.resources.map(resource => <span key={`${resource.kind}:${resource.locator}`}>{resource.kind === 'file' ? '文件' : '知识'} · {resource.label}</span>)}</div>}<small>{item.origin === 'explicit' ? '你明确交代' : '伙伴从对话中注意到'} · {watchKindLabel(item.watchKind)}</small><div className="dsh-partner-concern-actions" aria-label={`${item.subject} 的操作`}><button type="button" disabled={busy} onClick={() => onCheck(item)}>立即检查这条</button><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>继续留意</button><button type="button" disabled={busy} onClick={() => onAct(item, 'prioritize')}>提高关注</button><button type="button" disabled={busy} onClick={() => onAct(item, 'resolve')}>已经解决</button><button type="button" className="is-danger" disabled={busy} onClick={() => onAct(item, 'ignore')}>别管这个</button></div></div>}
         </article>
       })}
     </div>
@@ -624,6 +627,18 @@ function Section({ eyebrow, title, detail }: { eyebrow: string; title: string; d
 function State({ title, detail, action, compact = false }: { title: string; detail?: string; action?: ReactNode; compact?: boolean }): JSX.Element { return <div className={`dsh-partner-state${compact ? ' is-compact' : ''}`}><IconAgentPresetOutline16 size={20} /><strong>{title}</strong>{detail && <p>{detail}</p>}{action}</div> }
 function companionDraft(companion: CompanionView): { name: string; role: string; description: string; instructions: string; presetId: string; provider: string; model: string; capabilities: Capability[] } { return { name: companion.name, role: companion.role, description: companion.description, instructions: companion.instructions, presetId: companion.presetId ?? '', provider: companion.provider ?? '', model: companion.model ?? '', capabilities: [...companion.capabilities] } }
 function relativeTime(value: number): string { const minutes = Math.floor((Date.now() - value) / 60_000); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时前` : `${Math.floor(minutes / 1440)} 天前` }
+function concernObservationStatus(item: ConcernObservationView): string {
+  if (item.decision === 'notify') return item.mentionedAt === undefined ? '待提醒' : '已提醒'
+  if (item.decision === 'feed') return '伙伴动态'
+  if (item.decision === 'defer') return item.mentionedAt === undefined ? '待顺带提' : '已顺带提'
+  return '静默记下'
+}
+function concernObservationExplanation(item: ConcernObservationView): string {
+  if (item.decision === 'notify') return item.mentionedAt === undefined ? '达到主动提醒条件，等待渠道投递' : '已经通过批准的渠道主动提醒'
+  if (item.decision === 'feed') return '只显示在伙伴动态，不会自动转成主动提醒'
+  if (item.decision === 'defer') return item.mentionedAt === undefined ? '下次出现相关对话时顺带提及' : '已经在相关对话中顺带提及'
+  return '仅保留为观察记录，不打扰你'
+}
 function memoryKind(value: MemoryView['kind']): string { return ({ profile: '画像', preference: '偏好', task: '任务', event: '事件', relationship: '关系', emotion: '情绪信号' })[value] }
 function message(reason: unknown): string { return reason instanceof Error ? reason.message : String(reason) }
 function waitForClientSession(ctx: ClientContext, sessionId: string): Promise<void> {

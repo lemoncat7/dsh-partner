@@ -2,6 +2,7 @@ export type ConcernOrigin = 'explicit' | 'implicit'
 export type ConcernState = 'active' | 'watching' | 'snoozed' | 'resolved' | 'archived'
 export type ConcernWatchKind = 'auto' | 'knowledge' | 'workspace' | 'web'
 export type ObservationDecision = 'drop' | 'remember' | 'defer' | 'feed' | 'notify'
+export type NotificationRuleEffect = 'auto' | 'notify' | 'suppress'
 export type ConcernResourceKind = 'file' | 'knowledge'
 
 export interface ConcernResource {
@@ -54,6 +55,8 @@ export interface ConcernObservationCandidate {
   confidence: number
   actionability: number
   nextCheckInMinutes?: number
+  notificationRuleEffect?: NotificationRuleEffect
+  notificationRuleReason?: string
 }
 
 export interface ConcernObservation {
@@ -71,6 +74,9 @@ export interface ConcernObservation {
   actionability: number
   interruptScore: number
   decision: ObservationDecision
+  notificationRuleEffect: NotificationRuleEffect
+  notificationRuleReason: string
+  decisionReason: string
   createdAt: number
   mentionedAt?: number
 }
@@ -121,8 +127,11 @@ export function interruptDecision(input: {
   recentlyMentioned: boolean
   firstObservation: boolean
   userRecentlyActive?: boolean
-}): { score: number; decision: ObservationDecision } {
-  if (input.observationConfidence < .45 || input.relevance < .35) return { score: 0, decision: 'drop' }
+  notificationRuleEffect?: NotificationRuleEffect
+}): { score: number; decision: ObservationDecision; reason: string } {
+  if (input.observationConfidence < .45 || input.relevance < .35) {
+    return { score: 0, decision: 'drop', reason: '证据置信度或相关性不足' }
+  }
   let score = input.priority * .24
     + input.concernConfidence * .13
     + input.observationConfidence * .17
@@ -133,9 +142,20 @@ export function interruptDecision(input: {
   if (input.firstObservation) score -= .18
   if (input.userRecentlyActive) score -= .12
   score = clamp(score)
+  if (input.notificationRuleEffect === 'notify' && input.observationConfidence >= .75 && input.relevance >= .75) {
+    return { score: Math.max(.82, score), decision: 'notify', reason: '命中关联知识文档中的明确提醒条件' }
+  }
+  if (input.notificationRuleEffect === 'suppress' && score >= .82) {
+    return { score: .819, decision: 'feed', reason: '关联知识文档明确要求暂不主动提醒' }
+  }
+  const decision = score >= .82 ? 'notify' : score >= .64 ? 'feed' : score >= .42 ? 'defer' : 'remember'
   return {
     score,
-    decision: score >= .82 ? 'notify' : score >= .64 ? 'feed' : score >= .42 ? 'defer' : 'remember',
+    decision,
+    reason: decision === 'notify' ? '打扰分数达到主动提醒阈值'
+      : decision === 'feed' ? '变化进入伙伴动态，不主动打扰'
+        : decision === 'defer' ? '变化与未来对话相关时顺带提及'
+          : '变化仅静默记录',
   }
 }
 

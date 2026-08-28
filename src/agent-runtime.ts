@@ -738,6 +738,9 @@ export function parseConcernObservations(raw: string, allowedIds: Set<string>): 
     seen.add(concernId)
     const changed = value.changed === true
     const nextCheckInMinutes = boundedConcernCheckMinutes(value.nextCheckInMinutes)
+    const notificationRuleEffect = value.notificationRuleEffect === 'notify' || value.notificationRuleEffect === 'suppress'
+      ? value.notificationRuleEffect
+      : 'auto'
     return [{
       concernId,
       changed,
@@ -748,6 +751,8 @@ export function parseConcernObservations(raw: string, allowedIds: Set<string>): 
       confidence: boundedScore(value.confidence),
       actionability: boundedScore(value.actionability),
       ...(nextCheckInMinutes === undefined ? {} : { nextCheckInMinutes }),
+      notificationRuleEffect,
+      notificationRuleReason: typeof value.notificationRuleReason === 'string' ? value.notificationRuleReason.trim().slice(0, 800) : '',
     }]
   })
 }

@@ -7,6 +7,7 @@ import type { ConcernObservation } from './concern-domain.js'
 import { ChannelManager } from './channels/manager.js'
 
 const TICK_MS = 60_000
+export interface HeartbeatTriggerOptions { manual?: boolean; concernId?: string }
 
 export class HeartbeatScheduler {
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -33,13 +34,13 @@ export class HeartbeatScheduler {
     this.timer = undefined
   }
 
-  async trigger(companionId: string, force = false): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
+  async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
     if (this.running.has(companionId)) return { checked: false, sent: false, reason: '心跳正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (companion === undefined) throw new Error('伙伴不存在')
-    if (!force && !companion.automation.heartbeat.enabled) return { checked: false, sent: false, reason: '心跳未启用' }
+    if (!options.manual && !companion.automation.heartbeat.enabled) return { checked: false, sent: false, reason: '心跳未启用' }
     this.running.add(companionId)
-    try { return await this.run(companion, force) }
+    try { return await this.run(companion, options) }
     finally { this.running.delete(companionId) }
   }
 
@@ -67,17 +68,17 @@ export class HeartbeatScheduler {
     }
   }
 
-  private async run(companion: Companion, force: boolean): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
+  private async run(companion: Companion, options: HeartbeatTriggerOptions): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
     const now = Date.now()
     const policy = companion.automation.heartbeat
     const existing = heartbeatState(this.store.snapshot().heartbeatStates, companion, now, this.timeZone)
     const today = localDay(now, this.timeZone)
     const sentCount = existing.sentDay === today ? existing.sentCount : 0
-    if (!force && quiet(now, policy.quietStartHour, policy.quietEndHour, this.timeZone)) {
+    if (!options.manual && quiet(now, policy.quietStartHour, policy.quietEndHour, this.timeZone)) {
       await this.saveState(companion, { ...existing, nextCheckAt: nextAllowedTime(now, policy.quietEndHour, this.timeZone), sentDay: today, sentCount })
       return { checked: false, sent: false, reason: '静默时段' }
     }
-    if (!force && policy.dailyLimit > 0 && sentCount >= policy.dailyLimit) {
+    if (!options.manual && policy.dailyLimit > 0 && sentCount >= policy.dailyLimit) {
       await this.saveState(companion, { ...existing, nextCheckAt: nextDay(now, policy.quietEndHour, this.timeZone), sentDay: today, sentCount })
       return { checked: false, sent: false, reason: '达到今日主动提醒上限' }
     }
@@ -89,17 +90,22 @@ export class HeartbeatScheduler {
     let route = routes[0]!
     let execution: Awaited<ReturnType<PartnerAgentRuntime['heartbeat']>> | undefined
     try {
-      for (const candidate of routes) {
-        const pending = await this.concerns.pendingNotifications(companion.id, memoryScope(candidate.channelId, candidate.userId))
-        if (pending.length === 0) continue
-        await this.channels.sendProactive(candidate.channelId, candidate.userId, notificationMessage(pending))
-        await this.concerns.markMentioned(companion.id, pending.map(item => item.id))
-        await this.saveState(companion, successState(existing, companion, now, today, sentCount + 1, true))
-        return { checked: false, sent: true, reason: '已补发此前未送达的重要变化' }
+      if (options.concernId === undefined) {
+        for (const candidate of routes) {
+          const pending = await this.concerns.pendingNotifications(companion.id, memoryScope(candidate.channelId, candidate.userId))
+          if (pending.length === 0) continue
+          await this.channels.sendProactive(candidate.channelId, candidate.userId, notificationMessage(pending))
+          await this.concerns.markMentioned(companion.id, pending.map(item => item.id))
+          await this.saveState(companion, successState(existing, companion, now, today, sentCount + 1, true))
+          return { checked: false, sent: true, reason: '已补发此前未送达的重要变化' }
+        }
       }
       let due = [] as Awaited<ReturnType<PartnerConcernStore['due']>>
       for (const candidate of routes) {
-        const candidateDue = await this.concerns.due(companion.id, memoryScope(candidate.channelId, candidate.userId), now, 12, force)
+        const candidateDue = await this.concerns.due(companion.id, memoryScope(candidate.channelId, candidate.userId), {
+          now, limit: options.concernId ? 1 : 12, includeFuture: options.concernId !== undefined,
+          ...(options.concernId === undefined ? {} : { concernId: options.concernId }),
+        })
         if (candidateDue.length === 0) continue
         route = candidate
         due = candidateDue
@@ -112,7 +118,7 @@ export class HeartbeatScheduler {
           sentDay: today,
           sentCount,
         })
-        return { checked: false, sent: false, reason: '当前没有到期的伙伴挂念' }
+        return { checked: false, sent: false, reason: options.concernId ? '这条挂念已不存在或当前无需留意' : '当前没有到期的伙伴挂念' }
       }
       execution = await this.agents.heartbeat(companion, route, due)
       if (execution.error) throw new Error(execution.error)

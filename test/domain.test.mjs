@@ -104,6 +104,8 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /不得执行命令、发布、提交/)
   assert.match(prompt, /只输出一个 JSON 对象/)
   assert.match(prompt, /nextCheckInMinutes/)
+  assert.match(prompt, /notificationRuleEffect/)
+  assert.match(prompt, /不能根据普通关注理由自行创造规则/)
   assert.match(prompt, /最少 30 分钟，最多 43200 分钟/)
   assert.match(prompt, /不要让所有挂念机械地使用相同间隔/)
   assert.match(prompt, /是否提醒由确定性策略另行决定/)
@@ -112,13 +114,15 @@ test('frames heartbeat as bounded concern change observation', () => {
 
 test('parses and bounds AI-selected concern check intervals', () => {
   const parsed = parseConcernObservations(JSON.stringify({ observations: [
-    { concernId: 'a', changed: false, event: '', evidence: '暂无变化', source: 'workspace', relevance: .7, confidence: .8, actionability: .2, nextCheckInMinutes: 5 },
+    { concernId: 'a', changed: false, event: '', evidence: '暂无变化', source: 'workspace', relevance: .7, confidence: .8, actionability: .2, nextCheckInMinutes: 5, notificationRuleEffect: 'notify', notificationRuleReason: '高于知识基线时提醒' },
     { concernId: 'b', changed: false, event: '', evidence: '等待发布', source: 'web', relevance: .8, confidence: .8, actionability: .3, nextCheckInMinutes: 90_000 },
     { concernId: 'c', changed: false, event: '', evidence: '', source: '', relevance: .5, confidence: .5, actionability: .5, nextCheckInMinutes: 'tomorrow' },
   ] }), new Set(['a', 'b', 'c']))
   assert.equal(parsed[0]?.nextCheckInMinutes, 30)
   assert.equal(parsed[1]?.nextCheckInMinutes, 43_200)
   assert.equal(parsed[2]?.nextCheckInMinutes, undefined)
+  assert.equal(parsed[0]?.notificationRuleEffect, 'notify')
+  assert.equal(parsed[0]?.notificationRuleReason, '高于知识基线时提醒')
   assert.equal(boundedConcernCheckMinutes(89.6), 90)
   assert.equal(boundedConcernCheckMinutes(Number.NaN), undefined)
 })
@@ -220,6 +224,8 @@ test('uses deterministic interruption thresholds and explicit decay rules', () =
   assert.equal(interruptDecision({ priority: .2, concernConfidence: .8, observationConfidence: .3, relevance: .9, novelty: 1, actionability: 1, recentlyMentioned: false, firstObservation: false }).decision, 'drop')
   assert.equal(interruptDecision({ priority: 1, concernConfidence: 1, observationConfidence: 1, relevance: 1, novelty: 1, actionability: 1, recentlyMentioned: false, firstObservation: false }).decision, 'notify')
   assert.notEqual(interruptDecision({ priority: 1, concernConfidence: 1, observationConfidence: 1, relevance: 1, novelty: .5, actionability: 1, recentlyMentioned: false, firstObservation: true }).decision, 'notify')
+  assert.equal(interruptDecision({ priority: .7, concernConfidence: .8, observationConfidence: .9, relevance: .9, novelty: .5, actionability: .7, recentlyMentioned: false, firstObservation: true, notificationRuleEffect: 'notify' }).decision, 'notify')
+  assert.equal(interruptDecision({ priority: 1, concernConfidence: 1, observationConfidence: 1, relevance: 1, novelty: 1, actionability: 1, recentlyMentioned: false, firstObservation: false, notificationRuleEffect: 'suppress' }).decision, 'feed')
 })
 
 test('never retries a failed heartbeat sooner than its configured interval', () => {
@@ -240,16 +246,55 @@ test('does not invoke the agent when no concern is due', async () => {
       state.sessions.push({ id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
     })
     let agentCalls = 0
+    let dueOptions
     const scheduler = new HeartbeatScheduler(
       { logger: { warn() {}, error() {} } }, store,
       { heartbeat: async () => { agentCalls += 1; throw new Error('must not run') } },
       { sendProactive: async () => {} },
-      { pendingNotifications: async () => [], due: async () => [] },
+      { pendingNotifications: async () => [], due: async (_companionId, _scopeId, options) => { dueOptions = options; return [] } },
     )
-    const result = await scheduler.trigger(companion.id, true)
+    const result = await scheduler.trigger(companion.id, { manual: true })
     assert.equal(result.checked, false)
     assert.match(result.reason, /没有到期/)
     assert.equal(agentCalls, 0)
+    assert.equal(dueOptions.includeFuture, false)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('checks only the selected concern when manually triggered from its row', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-heartbeat-target-'))
+  try {
+    const store = await PartnerStore.open(join(directory, 'state.json'))
+    const companion = store.snapshot().companions[0]
+    const target = concern({ id: 'concern-target', companionId: companion.id, nextCheckAt: Date.now() + 86_400_000 })
+    await store.update(state => {
+      state.channels.push({ id: 'weixin-1', companionId: companion.id, accountId: 'account', name: '微信', enabled: true, createdAt: 1, updatedAt: 1 })
+      state.pairings.push({ id: 'pairing-1', channelId: 'weixin-1', userId: 'user-1', displayName: '用户', status: 'approved', createdAt: 1, updatedAt: 1 })
+      state.sessions.push({ id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
+    })
+    let dueOptions
+    let agentConcerns
+    const scheduler = new HeartbeatScheduler(
+      { logger: { warn() {}, error() {} } }, store,
+      {
+        heartbeat: async (_companion, _route, concerns) => {
+          agentConcerns = concerns
+          return { concerns, candidates: [], observations: [], startedAt: 1, completedAt: 2, output: '{"observations":[]}', tools: [] }
+        },
+        persistKnowledgeObservations: async () => {}, recordHeartbeatActivity: async () => {},
+      },
+      { sendProactive: async () => {} },
+      {
+        pendingNotifications: async () => { throw new Error('targeted checks must not flush unrelated notifications') },
+        due: async (_companionId, _scopeId, options) => { dueOptions = options; return [target] },
+        recordObservations: async () => ({ observations: [], notifications: [] }),
+      },
+    )
+    const result = await scheduler.trigger(companion.id, { manual: true, concernId: target.id })
+    assert.equal(result.checked, true)
+    assert.equal(result.sent, false)
+    assert.deepEqual(dueOptions, { now: dueOptions.now, limit: 1, includeFuture: true, concernId: target.id })
+    assert.deepEqual(agentConcerns.map(item => item.id), [target.id])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -395,10 +440,11 @@ test('stores concerns by scope, deduplicates observations and defers relevant me
     const store = new PartnerConcernStore(directory)
     const now = Date.now()
     await store.applyCandidates('companion-1', 'weixin:user-a', [{ subject: 'Canvas 拖动稳定性', reason: '仍未解决', operation: 'upsert', priority: .8, confidence: .8, watchKind: 'workspace', watchQuery: 'Canvas 拖动变化' }], 'implicit', now - 10 * 3_600_000)
-    assert.equal((await store.due('companion-1', 'weixin:user-b', now, 12, true)).length, 0)
-    const [target] = await store.due('companion-1', 'weixin:user-a', now, 12, true)
+    assert.equal((await store.due('companion-1', 'weixin:user-b', { now, limit: 12, includeFuture: true })).length, 0)
+    const [target] = await store.due('companion-1', 'weixin:user-a', { now, limit: 12, includeFuture: true })
     const first = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 90 }], now)
     assert.equal(first.observations[0]?.decision, 'defer')
+    assert.equal((await store.activity('companion-1')).observations[0]?.decision, 'defer')
     assert.equal((await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)?.nextCheckAt, now + 90 * 60_000)
     assert.equal((await store.deferred('companion-1', 'weixin:user-a', 'Canvas 拖动怎么了'))[0]?.id, first.observations[0]?.id)
     assert.equal((await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 120 }], now + 1)).observations.length, 0)
@@ -408,6 +454,45 @@ test('stores concerns by scope, deduplicates observations and defers relevant me
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 1)
     await store.markMentioned('companion-1', second.notifications.map(item => item.id), now + 3)
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 0)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('honors explicit notification rules only for knowledge-linked concerns', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-rules-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const now = Date.now()
+    const linked = await store.createExplicit('companion-1', '*', '@知识库[项目长期记忆/nomifun/版本提醒规则]')
+    const baselineCandidate = {
+      concernId: linked.id, changed: true, event: '发现 v0.7.4 新版本', evidence: '版本高于知识库基线 v0.7.3', source: 'GitHub Releases',
+      relevance: 1, confidence: .96, actionability: .9, nextCheckInMinutes: 720,
+    }
+    const initialResult = await store.recordObservations([linked], [baselineCandidate], now)
+    assert.equal(initialResult.observations[0]?.decision, 'feed')
+    const linkedResult = await store.recordObservations([linked], [{
+      ...baselineCandidate,
+      notificationRuleEffect: 'notify', notificationRuleReason: '知识文档规定版本号高于基线时立即提醒',
+    }], now + 1)
+    assert.equal(linkedResult.notifications.length, 1)
+    assert.equal(linkedResult.observations[0]?.notificationRuleEffect, 'notify')
+    assert.match(linkedResult.observations[0]?.decisionReason ?? '', /知识文档/)
+    await store.markMentioned('companion-1', linkedResult.notifications.map(item => item.id), now + 2)
+    const deliveredResult = await store.recordObservations([linked], [{
+      ...baselineCandidate,
+      notificationRuleEffect: 'suppress', notificationRuleReason: '后续核验暂未达到新的提醒条件',
+    }], now + 3)
+    assert.equal(deliveredResult.notifications.length, 0)
+    assert.equal((await store.activity('companion-1')).observations.find(item => item.id === linkedResult.observations[0]?.id)?.decision, 'notify')
+    assert.equal((await store.list('companion-1')).find(item => item.id === linked.id)?.state, 'active')
+
+    const unlinked = await store.createExplicit('companion-1', '*', '普通低优先级变化')
+    const unlinkedResult = await store.recordObservations([{ ...unlinked, priority: .4, confidence: .8 }], [{
+      concernId: unlinked.id, changed: true, event: '发现普通变化', evidence: '普通来源', source: 'workspace',
+      relevance: .8, confidence: .8, actionability: .5,
+      notificationRuleEffect: 'notify', notificationRuleReason: '模型自行建议提醒',
+    }], now + 1)
+    assert.equal(unlinkedResult.notifications.length, 0)
+    assert.equal(unlinkedResult.observations[0]?.notificationRuleEffect, 'auto')
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -433,7 +518,7 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
     const store = new PartnerConcernStore(directory)
     const now = Date.now()
     const explicit = await store.createExplicit('companion-1', '*', '关注 OpenAI 新模型')
-    assert.equal((await store.due('companion-1', 'any-scope', now, 12, true))[0]?.id, explicit.id)
+    assert.equal((await store.due('companion-1', 'any-scope', { now, limit: 12, includeFuture: true }))[0]?.id, explicit.id)
     await store.act('companion-1', explicit.id, 'prioritize', now)
     assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.priority, 1)
     await store.act('companion-1', explicit.id, 'resolve', now + 1)
@@ -441,7 +526,7 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
     await store.act('companion-1', explicit.id, 'watch', now + 2)
     assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.state, 'watching')
     await store.applyCandidates('companion-1', 'weixin:user', [{ subject: '很久以前的临时问题', reason: '旧问题', operation: 'upsert', priority: .6, confidence: .7, watchKind: 'auto', watchQuery: '旧问题' }], 'implicit', now - 100 * 86_400_000)
-    await store.due('companion-1', 'weixin:user', now)
+    await store.due('companion-1', 'weixin:user', { now })
     const archived = (await store.list('companion-1', undefined, true)).find(item => item.subject === '很久以前的临时问题')
     assert.equal(archived?.state, 'archived')
     assert.equal((await store.list('companion-1')).some(item => item.subject === '很久以前的临时问题'), false)

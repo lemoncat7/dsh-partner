@@ -11,6 +11,7 @@ import {
 
 type SqlRow = Record<string, unknown>
 export interface LegacyConcernSeed { scopeId: string; subject: string; reason: string; confidence: number; origin: ConcernOrigin }
+export interface ConcernDueOptions { now?: number; limit?: number; includeFuture?: boolean; concernId?: string }
 
 export class PartnerConcernStore {
   private readonly writes = new Map<string, Promise<void>>()
@@ -91,14 +92,19 @@ export class PartnerConcernStore {
     } finally { database.close() }
   }
 
-  async due(companionId: string, scopeId: string, now = Date.now(), limit = 12, force = false): Promise<PartnerConcern[]> {
+  async due(companionId: string, scopeId: string, options: ConcernDueOptions = {}): Promise<PartnerConcern[]> {
+    const now = options.now ?? Date.now()
+    const limit = options.limit ?? 12
     return this.serialValue(this.path(companionId), async () => {
       const database = await this.open(companionId)
       try {
         database.exec('BEGIN IMMEDIATE')
         const rows = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND scope_id IN (?, '*')
           AND state IN ('active', 'watching') AND (? = 1 OR next_check_at <= ?)
-          ORDER BY priority DESC, next_check_at ASC LIMIT ?`).all(companionId, scopeId, force ? 1 : 0, now, Math.max(limit, 24)) as SqlRow[]
+          AND (? IS NULL OR id = ?)
+          ORDER BY priority DESC, next_check_at ASC LIMIT ?`).all(
+          companionId, scopeId, options.includeFuture ? 1 : 0, now, options.concernId ?? null, options.concernId ?? null, Math.max(limit, 24),
+        ) as SqlRow[]
         const due: PartnerConcern[] = []
         const update = database.prepare('UPDATE concerns SET score = ?, state = ? WHERE id = ?')
         for (const row of rows) {
@@ -135,30 +141,59 @@ export class PartnerConcernStore {
             continue
           }
           const fingerprint = observationFingerprint(candidate)
-          const duplicate = database.prepare('SELECT id FROM concern_observations WHERE concern_id = ? AND fingerprint = ?').get(concern.id, fingerprint)
-          if (duplicate) {
-            database.prepare('UPDATE concerns SET last_checked_at = ?, next_check_at = ?, score = ? WHERE id = ?').run(now, nextCheckAt, concern.score, concern.id)
-            continue
-          }
+          const duplicateRow = database.prepare('SELECT * FROM concern_observations WHERE concern_id = ? AND fingerprint = ?').get(concern.id, fingerprint) as SqlRow | undefined
           const previousCount = number((database.prepare('SELECT COUNT(*) AS count FROM concern_observations WHERE concern_id = ?').get(concern.id) as SqlRow | undefined)?.count)
           const recentlyMentioned = concern.lastMentionedAt !== undefined && now - concern.lastMentionedAt < 72 * 3_600_000
-          const novelty = previousCount === 0 ? .5 : 1
+          const novelty = duplicateRow ? number(duplicateRow.novelty) : previousCount === 0 ? .5 : 1
+          const ruleReason = compact(candidate.notificationRuleReason ?? '', 800)
+          const knowledgeLinked = concern.resources.some(resource => resource.kind === 'knowledge')
+          const notificationRuleEffect = knowledgeLinked && ruleReason
+            ? candidate.notificationRuleEffect ?? 'auto'
+            : 'auto'
           const decision = interruptDecision({
             priority: concern.priority, concernConfidence: concern.confidence,
             observationConfidence: clamp(candidate.confidence), relevance: clamp(candidate.relevance), novelty,
-            actionability: clamp(candidate.actionability), recentlyMentioned, firstObservation: previousCount === 0, userRecentlyActive,
+            actionability: clamp(candidate.actionability), recentlyMentioned,
+            firstObservation: duplicateRow ? novelty < 1 : previousCount === 0, userRecentlyActive,
+            notificationRuleEffect,
           })
           const observation: ConcernObservation = {
-            id: `observation-${randomUUID()}`, concernId: concern.id, companionId: concern.companionId, scopeId: concern.scopeId,
-            fingerprint, event: compact(candidate.event, 800), evidence: compact(candidate.evidence, 2_000), source: compact(candidate.source, 240),
+            id: duplicateRow ? string(duplicateRow.id) : `observation-${randomUUID()}`,
+            concernId: concern.id, companionId: concern.companionId, scopeId: concern.scopeId, fingerprint,
+            event: duplicateRow ? string(duplicateRow.event) : compact(candidate.event, 800),
+            evidence: duplicateRow ? string(duplicateRow.evidence) : compact(candidate.evidence, 2_000),
+            source: duplicateRow ? string(duplicateRow.source) : compact(candidate.source, 240),
             novelty, relevance: clamp(candidate.relevance), confidence: clamp(candidate.confidence), actionability: clamp(candidate.actionability),
-            interruptScore: decision.score, decision: decision.decision, createdAt: now,
+            interruptScore: decision.score, decision: decision.decision, notificationRuleEffect,
+            notificationRuleReason: ruleReason, decisionReason: decision.reason,
+            createdAt: duplicateRow ? number(duplicateRow.created_at) : now,
+            ...(duplicateRow?.mentioned_at === null || duplicateRow?.mentioned_at === undefined ? {} : { mentionedAt: number(duplicateRow.mentioned_at) }),
           }
-          insertObservation(database, observation)
-          observations.push(observation)
-          const nextState: ConcernState = decision.decision === 'notify' || decision.decision === 'feed' ? 'active' : 'watching'
+          if (duplicateRow) {
+            const previousDecision = string(duplicateRow.decision) as ObservationDecision
+            const preserveNotification = previousDecision === 'notify'
+              && (observation.mentionedAt !== undefined || observation.notificationRuleEffect !== 'suppress')
+            if (preserveNotification) {
+              observation.decision = 'notify'
+              observation.interruptScore = number(duplicateRow.interrupt_score)
+              observation.notificationRuleEffect = string(duplicateRow.rule_effect || 'auto') as ConcernObservation['notificationRuleEffect']
+              observation.notificationRuleReason = string(duplicateRow.rule_reason)
+              observation.decisionReason = string(duplicateRow.decision_reason) || '此变化已进入待提醒队列'
+            } else {
+              database.prepare(`UPDATE concern_observations SET relevance = ?, confidence = ?, actionability = ?,
+                interrupt_score = ?, decision = ?, rule_effect = ?, rule_reason = ?, decision_reason = ? WHERE id = ?`).run(
+                observation.relevance, observation.confidence, observation.actionability, observation.interruptScore,
+                observation.decision, observation.notificationRuleEffect, observation.notificationRuleReason, observation.decisionReason, observation.id,
+              )
+            }
+            if (previousDecision !== 'notify' && observation.decision === 'notify' && observation.mentionedAt === undefined) observations.push(observation)
+          } else {
+            insertObservation(database, observation)
+            observations.push(observation)
+          }
+          const nextState: ConcernState = observation.decision === 'notify' || observation.decision === 'feed' ? 'active' : 'watching'
           database.prepare(`UPDATE concerns SET state = ?, last_checked_at = ?, next_check_at = ?, score = ?, updated_at = ? WHERE id = ?`).run(
-            nextState, now, nextCheckAt, Math.max(concern.score, decision.score), now, concern.id,
+            nextState, now, nextCheckAt, Math.max(concern.score, observation.interruptScore), now, concern.id,
           )
         }
         database.exec('COMMIT')
@@ -171,7 +206,7 @@ export class PartnerConcernStore {
     const database = await this.open(companionId)
     try {
       const concerns = (database.prepare("SELECT * FROM concerns WHERE companion_id = ? AND state != 'archived' ORDER BY score DESC, updated_at DESC LIMIT 200").all(companionId) as SqlRow[]).map(concernFromRow)
-      const observations = (database.prepare("SELECT * FROM concern_observations WHERE companion_id = ? AND decision IN ('feed', 'notify') ORDER BY created_at DESC LIMIT ?").all(companionId, limit) as SqlRow[]).map(observationFromRow)
+      const observations = (database.prepare("SELECT * FROM concern_observations WHERE companion_id = ? AND decision IN ('defer', 'feed', 'notify') ORDER BY created_at DESC LIMIT ?").all(companionId, limit) as SqlRow[]).map(observationFromRow)
       return { concerns, observations }
     } finally { database.close() }
   }
@@ -290,13 +325,17 @@ export class PartnerConcernStore {
         id TEXT PRIMARY KEY, concern_id TEXT NOT NULL, companion_id TEXT NOT NULL, scope_id TEXT NOT NULL,
         fingerprint TEXT NOT NULL, event TEXT NOT NULL, evidence TEXT NOT NULL, source TEXT NOT NULL,
         novelty REAL NOT NULL, relevance REAL NOT NULL, confidence REAL NOT NULL, actionability REAL NOT NULL,
-        interrupt_score REAL NOT NULL, decision TEXT NOT NULL, created_at INTEGER NOT NULL, mentioned_at INTEGER,
+        interrupt_score REAL NOT NULL, decision TEXT NOT NULL, rule_effect TEXT NOT NULL DEFAULT 'auto',
+        rule_reason TEXT NOT NULL DEFAULT '', decision_reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, mentioned_at INTEGER,
         UNIQUE(concern_id, fingerprint), FOREIGN KEY(concern_id) REFERENCES concerns(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS observations_feed ON concern_observations(companion_id, decision, created_at DESC);
       CREATE INDEX IF NOT EXISTS observations_deferred ON concern_observations(companion_id, scope_id, decision, mentioned_at, created_at DESC);
-      PRAGMA user_version = 2;`)
+      PRAGMA user_version = 3;`)
     ensureColumn(database, 'concerns', 'resources_json', "TEXT NOT NULL DEFAULT '[]'")
+    ensureColumn(database, 'concern_observations', 'rule_effect', "TEXT NOT NULL DEFAULT 'auto'")
+    ensureColumn(database, 'concern_observations', 'rule_reason', "TEXT NOT NULL DEFAULT ''")
+    ensureColumn(database, 'concern_observations', 'decision_reason', "TEXT NOT NULL DEFAULT ''")
     migrateReferenceOnlyConcerns(database)
     return database
   }
@@ -330,7 +369,9 @@ function observationFromRow(row: SqlRow): ConcernObservation {
     id: string(row.id), concernId: string(row.concern_id), companionId: string(row.companion_id), scopeId: string(row.scope_id),
     fingerprint: string(row.fingerprint), event: string(row.event), evidence: string(row.evidence), source: string(row.source),
     novelty: number(row.novelty), relevance: number(row.relevance), confidence: number(row.confidence), actionability: number(row.actionability),
-    interruptScore: number(row.interrupt_score), decision: string(row.decision) as ObservationDecision, createdAt: number(row.created_at),
+    interruptScore: number(row.interrupt_score), decision: string(row.decision) as ObservationDecision,
+    notificationRuleEffect: string(row.rule_effect || 'auto') as ConcernObservation['notificationRuleEffect'],
+    notificationRuleReason: string(row.rule_reason), decisionReason: string(row.decision_reason), createdAt: number(row.created_at),
     ...(row.mentioned_at === null ? {} : { mentionedAt: number(row.mentioned_at) }),
   }
 }
@@ -338,10 +379,11 @@ function observationFromRow(row: SqlRow): ConcernObservation {
 function insertObservation(database: DatabaseSync, item: ConcernObservation): void {
   database.prepare(`INSERT INTO concern_observations
     (id, concern_id, companion_id, scope_id, fingerprint, event, evidence, source, novelty, relevance, confidence,
-     actionability, interrupt_score, decision, created_at, mentioned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+     actionability, interrupt_score, decision, rule_effect, rule_reason, decision_reason, created_at, mentioned_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     item.id, item.concernId, item.companionId, item.scopeId, item.fingerprint, item.event, item.evidence, item.source,
-    item.novelty, item.relevance, item.confidence, item.actionability, item.interruptScore, item.decision, item.createdAt, item.mentionedAt ?? null,
+    item.novelty, item.relevance, item.confidence, item.actionability, item.interruptScore, item.decision,
+    item.notificationRuleEffect, item.notificationRuleReason, item.decisionReason, item.createdAt, item.mentionedAt ?? null,
   )
 }
 

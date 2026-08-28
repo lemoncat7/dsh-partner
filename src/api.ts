@@ -148,7 +148,9 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     if (id !== undefined && method === 'POST' && segments[2] === 'heartbeat' && segments[3] === 'trigger' && segments.length === 4) {
       mutation(req)
       requiredCompanion(runtime.store, id)
-      return sendJson(res, 200, await runtime.heartbeat.trigger(id, true))
+      const body = await readObject(req)
+      const concernId = typeof body.concernId === 'string' ? body.concernId.trim().slice(0, 160) : undefined
+      return sendJson(res, 200, await runtime.heartbeat.trigger(id, { manual: true, ...(concernId ? { concernId } : {}) }))
     }
     if (id !== undefined && method === 'POST' && segments[2] === 'memory' && segments[3] === 'review' && segments.length === 4) {
       mutation(req); requiredCompanion(runtime.store, id)
