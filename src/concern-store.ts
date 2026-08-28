@@ -3,7 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, interruptDecision, normalizeConcernSubject,
+  boundedConcernCheckMinutes, clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, interruptDecision, normalizeConcernSubject,
   concernLifecycleRequest, selectConcernLifecycleTarget,
   type ConcernActivity, type ConcernCandidate, type ConcernObservation, type ConcernObservationCandidate,
   type AppliedConcernLifecycleDirective, type ConcernOrigin, type ConcernState, type ObservationDecision, type PartnerConcern,
@@ -128,7 +128,8 @@ export class PartnerConcernStore {
         const byConcern = new Map(candidates.map(item => [item.concernId, item]))
         for (const concern of concerns) {
           const candidate = byConcern.get(concern.id)
-          const nextCheckAt = now + concernInterval(concern.priority, concern.origin)
+          const chosenMinutes = boundedConcernCheckMinutes(candidate?.nextCheckInMinutes)
+          const nextCheckAt = now + (chosenMinutes === undefined ? concernInterval(concern.priority, concern.origin) : chosenMinutes * 60_000)
           if (!candidate?.changed || !candidate.event.trim()) {
             database.prepare('UPDATE concerns SET last_checked_at = ?, next_check_at = ?, score = ? WHERE id = ?').run(now, nextCheckAt, concern.score, concern.id)
             continue

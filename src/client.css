@@ -426,7 +426,9 @@
 .dsh-partner-concern-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-partner-concern-copy strong { font-size: var(--partner-font-body); font-weight: 610; }
 .dsh-partner-concern-copy small { color: var(--dsw-alias-label-tertiary); font-size: var(--partner-font-caption); }
-.dsh-partner-concern-time { color: var(--dsw-alias-label-tertiary); font-size: var(--partner-font-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsh-partner-concern-time { display: grid; justify-items: end; gap: 2px; color: var(--dsw-alias-label-tertiary); font-size: var(--partner-font-caption); font-variant-numeric: tabular-nums; line-height: 1.1; white-space: nowrap; }
+.dsh-partner-concern-time small { font: inherit; }
+.dsh-partner-concern-time strong { color: var(--dsw-alias-label-secondary); font: 590 var(--partner-font-caption)/1.1 var(--partner-font-family); }
 .dsh-partner-concern-row > svg { color: var(--dsw-alias-label-tertiary); transition: transform .16s ease, color .16s ease; }
 .dsh-partner-concern-list > article[data-expanded="true"] .dsh-partner-concern-row > svg { color: var(--partner-accent); transform: rotate(180deg); }
 .dsh-partner-concern-detail { display: grid; gap: 7px; padding: 0 34px 11px 97px; animation: dsh-partner-reveal .16s ease-out; }

@@ -15,6 +15,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import cssText from './client.css'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
+import { futureTime } from './time-format.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
@@ -509,7 +510,7 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onAc
         const status = observation?.decision === 'notify' || observation?.decision === 'feed' ? '有新变化' : item.state === 'active' ? '正在留意' : '暂时记着'
         return <article key={item.id} role="listitem" data-state={item.state} data-expanded={expanded}>
           <button type="button" className="dsh-partner-concern-row" aria-expanded={expanded} onClick={() => setExpandedId(current => current === item.id ? undefined : item.id)}>
-            <span className="dsh-partner-concern-state"><i />{status}</span><span className="dsh-partner-concern-copy"><strong>{item.subject}</strong><small>{observation ? observation.event : item.reason}</small></span><span className="dsh-partner-concern-time">{observation ? relativeTime(observation.createdAt) : relativeTime(item.updatedAt)}</span><IconChevronDownOutline14 size={14} />
+            <span className="dsh-partner-concern-state"><i />{status}</span><span className="dsh-partner-concern-copy"><strong>{item.subject}</strong><small>{observation ? observation.event : item.reason}</small></span><span className="dsh-partner-concern-time" title={`计划于 ${new Date(item.nextCheckAt).toLocaleString()} 再次留意`}><small>下次留意</small><strong>{futureTime(item.nextCheckAt)}</strong></span><IconChevronDownOutline14 size={14} />
           </button>
           {expanded && <div className="dsh-partner-concern-detail"><p>{item.reason}</p>{observation && <blockquote>{observation.event}</blockquote>}{item.resources.length > 0 && <div className="dsh-partner-concern-resources">{item.resources.map(resource => <span key={`${resource.kind}:${resource.locator}`}>{resource.kind === 'file' ? '文件' : '知识'} · {resource.label}</span>)}</div>}<small>{item.origin === 'explicit' ? '你明确交代' : '伙伴从对话中注意到'} · {watchKindLabel(item.watchKind)}</small><div className="dsh-partner-concern-actions" aria-label={`${item.subject} 的操作`}><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>继续留意</button><button type="button" disabled={busy} onClick={() => onAct(item, 'prioritize')}>提高关注</button><button type="button" disabled={busy} onClick={() => onAct(item, 'resolve')}>已经解决</button><button type="button" className="is-danger" disabled={busy} onClick={() => onAct(item, 'ignore')}>别管这个</button></div></div>}
         </article>

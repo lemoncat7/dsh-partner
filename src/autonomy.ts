@@ -2,6 +2,7 @@ import { focusedConcernQuery, type PartnerConcern } from './concern-domain.js'
 import { resolve } from 'node:path'
 
 export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRoot?: string): string {
+  const observedAt = new Date().toISOString()
   const targets = concerns.map(item => ({
     id: item.id,
     subject: item.subject,
@@ -18,6 +19,7 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
         : { ...resource, knowledgeBase: resource.locator.slice(0, slash), document: resource.locator.slice(slash + 1), searchQuery: focusedConcernQuery(resource.locator.slice(slash + 1)) }
     }),
     lastCheckedAt: item.lastCheckedAt ?? null,
+    currentNextCheckAt: new Date(item.nextCheckAt).toISOString(),
   }))
   return [
     '执行一次独立的伙伴变化观察。目标不是找话说，而是判断这些尚未闭环的事情自上次观察后是否出现了真实、相关、可验证的新变化。',
@@ -32,8 +34,9 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
     '在缺少可靠的新证据时，选择与挂念直接相关的工具核验；工具可自由组合，已有结果足够时停止，不做无关或重复搜索。不得读取伙伴记忆、会话归档、日记或 concerns 数据库，不得执行命令、发布、提交或操作其他外部系统。',
     '若挂念明确关联了 @文件，且调查发现可靠的新变化，你可以把结论、依据、时间或后续状态整理回该关联文件。resources.path 是该文件可供工具使用的绝对路径。更新前先读取现有内容，优先使用 edit 做最小修改；只能更新 resources 中明确列出的现存文件，不能创建、删除或修改其他文件，也不能改伙伴私有存储。文件更新后，在 event、evidence 和 source 中如实说明更新了什么。',
     '只有相对既有状态真正新增的事实、进展、风险、等待条件变化或可执行机会，changed 才是 true。旧信息、普通关键词命中、无关资料和无法核实的猜测都必须是 false。',
+    `本轮观察时间：${observedAt}。你还要为每个挂念独立决定下一次检查间隔 nextCheckInMinutes。根据对象的变化速度、明确等待条件、信息源成本、当前证据与最近是否有变化来安排；即使 changed=false 也必须给出。最少 30 分钟，最多 43200 分钟（30 天）。临近事件或高频变化通常可用 30～180 分钟，普通项目变化可用 360～1440 分钟，低频等待可用 4320～43200 分钟。不要让所有挂念机械地使用相同间隔。`,
     '最后只输出一个 JSON 对象，不要 Markdown、寒暄或通知文案。格式：',
-    '{"observations":[{"concernId":"必须来自本轮挂念 id","changed":false,"event":"新变化的简洁结论；无变化时留空","evidence":"支持判断的关键证据；无变化时可简述检查结果","source":"来源名称或位置","relevance":0.0,"confidence":0.0,"actionability":0.0}]}',
-    '每个挂念恰好返回一项。评分范围 0 到 1；你只负责语义判断，是否提醒由确定性策略另行决定。',
+    '{"observations":[{"concernId":"必须来自本轮挂念 id","changed":false,"event":"新变化的简洁结论；无变化时留空","evidence":"支持判断的关键证据；无变化时可简述检查结果","source":"来源名称或位置","relevance":0.0,"confidence":0.0,"actionability":0.0,"nextCheckInMinutes":360}]}',
+    '每个挂念恰好返回一项。评分范围 0 到 1；nextCheckInMinutes 使用整数分钟。你只负责语义判断与下次检查节奏，是否提醒由确定性策略另行决定。',
   ].join('\n')
 }

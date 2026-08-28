@@ -53,6 +53,7 @@ export interface ConcernObservationCandidate {
   relevance: number
   confidence: number
   actionability: number
+  nextCheckInMinutes?: number
 }
 
 export interface ConcernObservation {
@@ -94,6 +95,14 @@ export interface AppliedConcernLifecycleDirective extends ConcernLifecycleReques
 export function concernInterval(priority: number, origin: ConcernOrigin): number {
   const hours = priority >= .85 ? 3 : priority >= .65 ? 8 : priority >= .4 ? 24 : 72
   return hours * 3_600_000 * (origin === 'explicit' ? .75 : 1)
+}
+
+export const MIN_CONCERN_CHECK_MINUTES = 30
+export const MAX_CONCERN_CHECK_MINUTES = 30 * 24 * 60
+
+export function boundedConcernCheckMinutes(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return Math.min(MAX_CONCERN_CHECK_MINUTES, Math.max(MIN_CONCERN_CHECK_MINUTES, Math.round(value)))
 }
 
 export function concernDecay(score: number, lastActivityAt: number, now: number, origin: ConcernOrigin): number {

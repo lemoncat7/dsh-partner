@@ -6,14 +6,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
-import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, partnerCwd, renewedSession, renderHeartbeatActivity, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
+import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, parseConcernObservations, partnerCwd, renewedSession, renderHeartbeatActivity, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { PartnerConcernStore } from '../lib/concern-store.js'
-import { concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
+import { boundedConcernCheckMinutes, concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
 import { explicitConcernDirective, parseDailyReview, parseReflection, protectConcernDirective } from '../lib/memory-reflection.js'
 import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
 import { concernObservationPrompt } from '../lib/autonomy.js'
+import { futureTime } from '../lib/time-format.js'
 
 const concern = (overrides = {}) => ({
   id: 'concern-1', companionId: 'companion-1', scopeId: 'weixin:user', subject: 'Canvas 拖动稳定性', reason: '修改后仍然不稳定',
@@ -102,8 +103,32 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /\/home\/node\/partners\/companion-1\/docs\/status\.md/)
   assert.match(prompt, /不得执行命令、发布、提交/)
   assert.match(prompt, /只输出一个 JSON 对象/)
+  assert.match(prompt, /nextCheckInMinutes/)
+  assert.match(prompt, /最少 30 分钟，最多 43200 分钟/)
+  assert.match(prompt, /不要让所有挂念机械地使用相同间隔/)
   assert.match(prompt, /是否提醒由确定性策略另行决定/)
   assert.doesNotMatch(prompt, /NO_ACTION|当前会话上下文/)
+})
+
+test('parses and bounds AI-selected concern check intervals', () => {
+  const parsed = parseConcernObservations(JSON.stringify({ observations: [
+    { concernId: 'a', changed: false, event: '', evidence: '暂无变化', source: 'workspace', relevance: .7, confidence: .8, actionability: .2, nextCheckInMinutes: 5 },
+    { concernId: 'b', changed: false, event: '', evidence: '等待发布', source: 'web', relevance: .8, confidence: .8, actionability: .3, nextCheckInMinutes: 90_000 },
+    { concernId: 'c', changed: false, event: '', evidence: '', source: '', relevance: .5, confidence: .5, actionability: .5, nextCheckInMinutes: 'tomorrow' },
+  ] }), new Set(['a', 'b', 'c']))
+  assert.equal(parsed[0]?.nextCheckInMinutes, 30)
+  assert.equal(parsed[1]?.nextCheckInMinutes, 43_200)
+  assert.equal(parsed[2]?.nextCheckInMinutes, undefined)
+  assert.equal(boundedConcernCheckMinutes(89.6), 90)
+  assert.equal(boundedConcernCheckMinutes(Number.NaN), undefined)
+})
+
+test('formats upcoming concern checks without expanding the concern row', () => {
+  const now = Date.parse('2026-08-28T00:00:00Z')
+  assert.equal(futureTime(now - 1, now), '即将检查')
+  assert.equal(futureTime(now + 30 * 60_000, now), '30 分钟后')
+  assert.equal(futureTime(now + 3 * 3_600_000, now), '3 小时后')
+  assert.equal(futureTime(now + 2 * 86_400_000, now), '2 天后')
 })
 
 test('keeps heartbeat filesystem discovery out of partner private stores', () => {
@@ -372,15 +397,33 @@ test('stores concerns by scope, deduplicates observations and defers relevant me
     await store.applyCandidates('companion-1', 'weixin:user-a', [{ subject: 'Canvas 拖动稳定性', reason: '仍未解决', operation: 'upsert', priority: .8, confidence: .8, watchKind: 'workspace', watchQuery: 'Canvas 拖动变化' }], 'implicit', now - 10 * 3_600_000)
     assert.equal((await store.due('companion-1', 'weixin:user-b', now, 12, true)).length, 0)
     const [target] = await store.due('companion-1', 'weixin:user-a', now, 12, true)
-    const first = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6 }], now)
+    const first = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 90 }], now)
     assert.equal(first.observations[0]?.decision, 'defer')
+    assert.equal((await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)?.nextCheckAt, now + 90 * 60_000)
     assert.equal((await store.deferred('companion-1', 'weixin:user-a', 'Canvas 拖动怎么了'))[0]?.id, first.observations[0]?.id)
-    assert.equal((await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6 }], now + 1)).observations.length, 0)
+    assert.equal((await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 120 }], now + 1)).observations.length, 0)
+    assert.equal((await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)?.nextCheckAt, now + 1 + 120 * 60_000)
     const second = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '新版明确修复拖动丢帧', evidence: '测试与发行说明均已确认', source: 'workspace', relevance: 1, confidence: 1, actionability: 1 }], now + 2)
     assert.equal(second.notifications.length, 1)
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 1)
     await store.markMentioned('companion-1', second.notifications.map(item => item.id), now + 3)
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 0)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('reschedules unchanged concerns using the interval selected by the model', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-schedule-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const now = Date.now()
+    const target = await store.createExplicit('companion-1', '*', '关注低频版本发布')
+    await store.recordObservations([target], [{
+      concernId: target.id, changed: false, event: '', evidence: '尚无发布', source: 'release feed',
+      relevance: .8, confidence: .9, actionability: .2, nextCheckInMinutes: 4_320,
+    }], now)
+    const scheduled = (await store.list('companion-1')).find(item => item.id === target.id)
+    assert.equal(scheduled?.lastCheckedAt, now)
+    assert.equal(scheduled?.nextCheckAt, now + 4_320 * 60_000)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 

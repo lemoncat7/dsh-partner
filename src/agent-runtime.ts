@@ -18,7 +18,7 @@ import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
 import { concernObservationPrompt } from './autonomy.js'
-import type { ConcernObservation, ConcernObservationCandidate, PartnerConcern } from './concern-domain.js'
+import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
@@ -43,8 +43,6 @@ const HEARTBEAT_TIMEOUT_MS = 115_000
 const HEARTBEAT_DISCOVERY_BUDGET_MS = 72_000
 const HEARTBEAT_TOOL_TIMEOUT_MS = 18_000
 const HEARTBEAT_WEB_TOOL_TIMEOUT_MS = 30_000
-const HEARTBEAT_BASE_TOOL_CALL_LIMIT = 8
-const HEARTBEAT_MAX_TOOL_CALL_LIMIT = 20
 const HEARTBEAT_TOOL_RESULT_LIMIT = 5_000
 const HEARTBEAT_KNOWLEDGE_RESULT_LIMIT = 8_000
 const HEARTBEAT_WEB_FETCH_RESULT_LIMIT = 40_000
@@ -664,7 +662,6 @@ async function runHeartbeatInference(
   const startedAt = Date.now()
   const traces: HeartbeatToolTrace[] = []
   const discoveryDeadline = startedAt + HEARTBEAT_DISCOVERY_BUDGET_MS
-  const toolCallLimit = Math.min(HEARTBEAT_MAX_TOOL_CALL_LIMIT, Math.max(HEARTBEAT_BASE_TOOL_CALL_LIMIT, concerns.length * 2 + 2))
   try {
     const selection = resolveAgentOptions(ctx.agentDefaultModel, companion)
     if (!selection.provider || !selection.model) throw new Error('伙伴心跳没有可用的模型路由')
@@ -674,9 +671,8 @@ async function runHeartbeatInference(
       content: [{ type: 'text', text: concernObservationPrompt(concerns, agent.session.header.cwd) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴观察挂念变化' },
     })]
-    let toolCalls = 0
-    for (let step = 0; step < 10; step += 1) {
-      const discoveryOpen = Date.now() < discoveryDeadline && toolCalls < toolCallLimit
+    for (;;) {
+      const discoveryOpen = Date.now() < discoveryDeadline
       const prepared = await ctx.llm.prepareCall(selection, signal)
       const assembler = new BlockAssembler()
       for await (const chunk of prepared.stream({
@@ -705,15 +701,12 @@ async function runHeartbeatInference(
         }
       }
       for (const call of pending) {
-        toolCalls += 1
         const argumentsValue = boundHeartbeatToolArguments(call.name, parseHeartbeatToolArguments(call))
         const toolStartedAt = Date.now()
-        const budgetExpired = Date.now() >= discoveryDeadline
-        const result = toolCalls > toolCallLimit || budgetExpired
-          ? { isError: true as const, content: [{ type: 'text' as const, text: budgetExpired
-              ? '本轮发现阶段的时间预算已用完，请根据已有结果立即输出最终 Observation JSON。'
-              : `本轮已达到 ${toolCallLimit} 次工具调用上限，请根据已有结果立即收束。` }] }
-          : await executeHeartbeatTool(ctx, agent, call, argumentsValue, signal)
+        const remainingDiscoveryMs = discoveryDeadline - toolStartedAt
+        const result = remainingDiscoveryMs <= 0
+          ? { isError: true as const, content: [{ type: 'text' as const, text: '本轮发现阶段的时间预算已用完，请根据已有结果立即输出最终 Observation JSON。' }] }
+          : await executeHeartbeatTool(ctx, agent, call, argumentsValue, signal, remainingDiscoveryMs)
         const toolCompletedAt = Date.now()
         const visibleContent = heartbeatToolContent(call.name, result.content)
         traces.push({
@@ -727,13 +720,12 @@ async function runHeartbeatInference(
         messages.push(createToolResultMessage({ callId: call.id, content: visibleContent, isError: result.isError }))
       }
     }
-    throw new Error('伙伴心跳未能在有限步骤内收束')
   } catch (error) {
     return { concerns, candidates: [], startedAt, completedAt: Date.now(), tools: traces, error: errorMessage(error) }
   }
 }
 
-function parseConcernObservations(raw: string, allowedIds: Set<string>): ConcernObservationCandidate[] {
+export function parseConcernObservations(raw: string, allowedIds: Set<string>): ConcernObservationCandidate[] {
   const match = raw.trim().match(/\{[\s\S]*\}/)
   if (!match) throw new Error('伙伴心跳没有返回 Observation JSON')
   const parsed = JSON.parse(match[0]) as { observations?: unknown }
@@ -745,6 +737,7 @@ function parseConcernObservations(raw: string, allowedIds: Set<string>): Concern
     if (!allowedIds.has(concernId) || seen.has(concernId)) return []
     seen.add(concernId)
     const changed = value.changed === true
+    const nextCheckInMinutes = boundedConcernCheckMinutes(value.nextCheckInMinutes)
     return [{
       concernId,
       changed,
@@ -754,6 +747,7 @@ function parseConcernObservations(raw: string, allowedIds: Set<string>): Concern
       relevance: boundedScore(value.relevance),
       confidence: boundedScore(value.confidence),
       actionability: boundedScore(value.actionability),
+      ...(nextCheckInMinutes === undefined ? {} : { nextCheckInMinutes }),
     }]
   })
 }
@@ -813,8 +807,10 @@ async function executeHeartbeatTool(
   call: ToolCallBlock,
   argumentsValue: unknown,
   signal: AbortSignal,
+  remainingDiscoveryMs: number,
 ): Promise<{ isError: boolean; content: ContentBlock[] }> {
-  const timeoutMs = call.name === 'web_fetch' || call.name === 'web_source' ? HEARTBEAT_WEB_TOOL_TIMEOUT_MS : HEARTBEAT_TOOL_TIMEOUT_MS
+  const configuredTimeoutMs = call.name === 'web_fetch' || call.name === 'web_source' ? HEARTBEAT_WEB_TOOL_TIMEOUT_MS : HEARTBEAT_TOOL_TIMEOUT_MS
+  const timeoutMs = Math.max(1, Math.min(configuredTimeoutMs, remainingDiscoveryMs))
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const toolSignal = AbortSignal.any([signal, timeoutSignal])
   try {

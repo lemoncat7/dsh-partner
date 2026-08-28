@@ -34,7 +34,7 @@ export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRela
 export interface DailyReflectionView { date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }
 export interface ConcernView {
   id: string; subject: string; reason: string; origin: 'explicit' | 'implicit'; state: 'active' | 'watching' | 'snoozed' | 'resolved' | 'archived'
-  priority: number; confidence: number; score: number; watchKind: 'auto' | 'knowledge' | 'workspace' | 'web'; updatedAt: number; lastCheckedAt?: number
+  priority: number; confidence: number; score: number; watchKind: 'auto' | 'knowledge' | 'workspace' | 'web'; updatedAt: number; nextCheckAt: number; lastCheckedAt?: number
   resources: Array<{ kind: 'file' | 'knowledge'; locator: string; label: string }>
 }
 export interface ConcernObservationView {
