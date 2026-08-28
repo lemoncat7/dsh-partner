@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { createDefaultCompanion, DEFAULT_AUTOMATION, type PartnerState } from './domain.js'
+import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFocus, type PartnerState } from './domain.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -73,7 +73,7 @@ export class PartnerStore {
 }
 
 function emptyState(): PartnerState {
-  return { schemaVersion: 7, companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }
+  return { schemaVersion: 10, companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }
 }
 
 function parseState(value: unknown): PartnerState {
@@ -151,6 +151,42 @@ function parseState(value: unknown): PartnerState {
       }) : legacy.companions,
     }
   }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 7) {
+    const legacy = value as Record<string, unknown>
+    value = {
+      ...legacy, schemaVersion: 8,
+      companions: Array.isArray(legacy.companions) ? legacy.companions.map(item => {
+        const companion = item as Record<string, unknown>
+        const automation = companion.automation as Record<string, unknown>
+        const heartbeat = automation.heartbeat as Record<string, unknown>
+        return { ...companion, automation: { ...automation, heartbeat: { ...heartbeat, focus: normalizeLegacyHeartbeatFocus(heartbeat.focus) } } }
+      }) : legacy.companions,
+    }
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 8) {
+    const legacy = value as Record<string, unknown>
+    value = {
+      ...legacy, schemaVersion: 9,
+      heartbeatStates: Array.isArray(legacy.heartbeatStates) ? legacy.heartbeatStates.map(item => {
+        const { focusCursor: _focusCursor, ...state } = item as Record<string, unknown>
+        return state
+      }) : legacy.heartbeatStates,
+    }
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 9) {
+    const legacy = value as Record<string, unknown>
+    value = {
+      ...legacy, schemaVersion: 10,
+      companions: Array.isArray(legacy.companions) ? legacy.companions.map(item => {
+        const companion = item as Record<string, unknown>
+        const automation = companion.automation as Record<string, unknown>
+        const heartbeat = automation.heartbeat as Record<string, unknown>
+        const { focus, ...rest } = heartbeat
+        const legacyFocus = normalizeLegacyHeartbeatFocus(focus)
+        return { ...companion, automation: { ...automation, heartbeat: { ...rest, ...(legacyFocus ? { legacyFocus } : {}) } } }
+      }) : legacy.companions,
+    }
+  }
   validateState(value)
   return value
 }
@@ -158,7 +194,7 @@ function parseState(value: unknown): PartnerState {
 function validateState(value: unknown): asserts value is PartnerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('partner state must be an object')
   const state = value as Partial<PartnerState>
-  if (state.schemaVersion !== 7) throw new Error('unsupported partner state schema')
+  if (state.schemaVersion !== 10) throw new Error('unsupported partner state schema')
   for (const key of ['companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates'] as const) {
     if (!Array.isArray(state[key])) throw new Error(`partner state ${key} must be an array`)
   }

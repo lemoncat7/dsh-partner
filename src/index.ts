@@ -15,6 +15,7 @@ import { HeartbeatScheduler } from './heartbeat.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { MemoryReflectionService } from './memory-reflection.js'
 import { DailyReviewScheduler } from './daily-review.js'
+import { PartnerConcernStore, type LegacyConcernSeed } from './concern-store.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -39,19 +40,32 @@ export function apply(context: Context, config: PartnerConfig): void {
     const store = await PartnerStore.open(resolved.statePath)
     const credentials = new PartnerCredentialVault(ctx.credentials)
     const memory = new PartnerMemoryStore(resolved.defaultCwd, resolved.timeZone)
+    const concerns = new PartnerConcernStore(resolved.defaultCwd)
     for (const companion of store.snapshot().companions) {
       const migrated = await memory.migrateLegacy(companion.id)
       if (migrated > 0) ctx.logger.info(`dsh-partner: migrated ${migrated} legacy memory records for ${companion.id}`)
+      const legacyRows = await memory.legacyHeartbeatFocuses(companion.id)
+      const seeds: LegacyConcernSeed[] = [
+        ...legacyTopics(companion.automation.heartbeat.legacyFocus).map(subject => ({
+          scopeId: '*', subject, reason: '用户在旧版心跳中明确要求留意', confidence: 1, origin: 'explicit' as const,
+        })),
+        ...legacyRows.map(item => ({ ...item, origin: 'implicit' as const })),
+      ]
+      await concerns.migrateLegacy(companion.id, seeds)
+      await memory.dropLegacyHeartbeatFocuses(companion.id)
     }
-    const reflection = new MemoryReflectionService(ctx, memory)
-    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection)
+    if (store.snapshot().companions.some(item => item.automation.heartbeat.legacyFocus)) await store.update(state => {
+      for (const companion of state.companions) delete companion.automation.heartbeat.legacyFocus
+    })
+    const reflection = new MemoryReflectionService(ctx, memory, concerns)
+    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns)
     const channels = new ChannelManager(ctx, store, credentials, agents)
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
     channels.startInteractionBridge()
-    const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, resolved.timeZone)
+    const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, concerns, resolved.timeZone)
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, resolved.timeZone)
     const login = new WeixinLoginManager()
     let disposeApi: (() => void) | undefined
@@ -59,7 +73,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, heartbeat, dailyReview })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -77,4 +91,15 @@ export function apply(context: Context, config: PartnerConfig): void {
       await agents.close()
     }
   }, 'dsh-partner.runtime')
+}
+
+function legacyTopics(value: string | undefined): string[] {
+  if (!value) return []
+  const seen = new Set<string>()
+  return value.split(/[\r\n;；]+/).map(item => item.replace(/\s+/g, ' ').trim()).filter(item => {
+    const key = item.toLocaleLowerCase().replace(/\s+/g, '')
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }

@@ -1,3 +1,5 @@
+import type { ConcernCandidate } from './concern-domain.js'
+
 export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
 
@@ -60,6 +62,7 @@ export interface MemoryCandidate {
 export interface ReflectionResult {
   daily: Pick<DailyReflection, 'summary' | 'events' | 'openTasks' | 'completedTasks' | 'learnings'>
   memories: MemoryCandidate[]
+  concerns: ConcernCandidate[]
 }
 
 export type MemoryRelationKind = 'supports' | 'depends_on' | 'about' | 'conflicts_with' | 'follows'

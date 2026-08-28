@@ -27,6 +27,8 @@ export interface CompanionAutomation {
   }
   heartbeat: {
     enabled: boolean
+    /** One-shot migration source. Cleared after the Concern store accepts it. */
+    legacyFocus?: string
     intervalMinutes: number
     quietStartHour: number
     quietEndHour: number
@@ -77,7 +79,7 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
-  schemaVersion: 7
+  schemaVersion: 10
   companions: Companion[]
   channels: WeixinChannel[]
   pairings: PairingRequest[]
@@ -116,12 +118,33 @@ export function normalizeAutomation(value: unknown): CompanionAutomation {
     },
     heartbeat: {
       enabled: boolean(heartbeat.enabled, 'heartbeat.enabled'),
+      ...(typeof heartbeat.legacyFocus === 'string' && normalizeLegacyHeartbeatFocus(heartbeat.legacyFocus)
+        ? { legacyFocus: normalizeLegacyHeartbeatFocus(heartbeat.legacyFocus) }
+        : {}),
       intervalMinutes: integer(heartbeat.intervalMinutes, 'heartbeat.intervalMinutes', 30, 1440),
       quietStartHour: integer(heartbeat.quietStartHour, 'heartbeat.quietStartHour', 0, 23),
       quietEndHour: integer(heartbeat.quietEndHour, 'heartbeat.quietEndHour', 0, 23),
       dailyLimit: integer(heartbeat.dailyLimit, 'heartbeat.dailyLimit', 0, 24),
     },
   }
+}
+
+export function normalizeLegacyHeartbeatFocus(value: unknown): string {
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value !== 'string') throw new Error('legacy heartbeat focus must be a string')
+  return uniqueLegacyTopics(value.split(/[\r\n;；]+/)).join('\n')
+}
+
+function uniqueLegacyTopics(values: unknown[]): string[] {
+  const seen = new Set<string>()
+  return values.flatMap(value => {
+    if (typeof value !== 'string') return []
+    const focus = value.replace(/\s+/g, ' ').trim()
+    const key = focus.toLocaleLowerCase()
+    if (!focus || seen.has(key)) return []
+    seen.add(key)
+    return [focus]
+  })
 }
 
 function optionalRoute(value: Record<string, unknown>): { provider?: string; model?: string } {

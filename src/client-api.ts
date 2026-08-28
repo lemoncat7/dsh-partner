@@ -32,6 +32,17 @@ export interface MemoryView { id: string; kind: MemoryKindView; subject: string;
 export interface MemoryRelationView { id: string; sourceMemoryId: string; targetMemoryId: string; kind: 'supports' | 'depends_on' | 'about' | 'conflicts_with' | 'follows'; label: string; confidence: number; updatedAt: number }
 export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRelationView[] }
 export interface DailyReflectionView { date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }
+export interface ConcernView {
+  id: string; subject: string; reason: string; origin: 'explicit' | 'implicit'; state: 'active' | 'watching' | 'snoozed' | 'resolved' | 'archived'
+  priority: number; confidence: number; score: number; watchKind: 'auto' | 'knowledge' | 'workspace' | 'web'; updatedAt: number; lastCheckedAt?: number
+  resources: Array<{ kind: 'file' | 'knowledge'; locator: string; label: string }>
+}
+export interface ConcernObservationView {
+  id: string; concernId: string; event: string; evidence: string; source: string; interruptScore: number
+  decision: 'drop' | 'remember' | 'defer' | 'feed' | 'notify'; createdAt: number; mentionedAt?: number
+}
+export interface ConcernActivityView { concerns: ConcernView[]; observations: ConcernObservationView[] }
+export interface ConcernSourceView { kind: 'file' | 'knowledge'; label: string; detail: string; token: string }
 export interface PresetView { id: string; name: string; broken?: string }
 export interface ModelCatalogView { providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>; defaultSelection: { provider: string; model: string } }
 export interface PartnerSnapshot {

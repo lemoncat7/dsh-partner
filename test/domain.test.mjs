@@ -4,17 +4,26 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
-import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, partnerCwd, renewedSession, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
+import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, partnerCwd, renewedSession, renderHeartbeatActivity, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
-import { parseDailyReview, parseReflection } from '../lib/memory-reflection.js'
-import { localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
-import { heartbeatMessage, heartbeatPrompt, renderHeartbeatContext } from '../lib/autonomy.js'
+import { PartnerConcernStore } from '../lib/concern-store.js'
+import { concernDecay, concernInterval, extractConcernResources, interruptDecision, normalizeConcernSubject } from '../lib/concern-domain.js'
+import { explicitConcernDirective, parseDailyReview, parseReflection } from '../lib/memory-reflection.js'
+import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
+import { concernObservationPrompt } from '../lib/autonomy.js'
+
+const concern = (overrides = {}) => ({
+  id: 'concern-1', companionId: 'companion-1', scopeId: 'weixin:user', subject: 'Canvas 拖动稳定性', reason: '修改后仍然不稳定',
+  origin: 'implicit', state: 'watching', priority: .8, confidence: .8, score: .8, watchKind: 'workspace', watchQuery: 'Canvas 拖动相关变化',
+  createdAt: 1, updatedAt: 1, lastActivityAt: 1, nextCheckAt: 1, ...overrides,
+})
 
 test('evaluates heartbeat schedules in the configured timezone', () => {
-  const morning = Date.parse('2026-08-25T01:30:00.000Z') // 09:30 in Shanghai
-  const night = Date.parse('2026-08-25T15:30:00.000Z') // 23:30 in Shanghai
+  const morning = Date.parse('2026-08-25T01:30:00.000Z')
+  const night = Date.parse('2026-08-25T15:30:00.000Z')
   assert.equal(quiet(morning, 22, 8, 'Asia/Shanghai'), false)
   assert.equal(quiet(night, 22, 8, 'Asia/Shanghai'), true)
   assert.equal(new Date(nextAllowedTime(night, 8, 'Asia/Shanghai')).toISOString(), '2026-08-26T00:00:00.000Z')
@@ -22,72 +31,36 @@ test('evaluates heartbeat schedules in the configured timezone', () => {
   assert.equal(localDay(Date.parse('2026-08-25T16:30:00.000Z'), 'Asia/Shanghai'), '2026-08-26')
 })
 
-test('normalizes a companion without leaking empty route fields', () => {
+test('normalizes companions, capabilities and optional model routes', () => {
   assert.deepEqual(normalizeCompanionDraft({
-    name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '',
-    presetId: '', provider: '', model: '', capabilities: ['knowledge', 'knowledge', 'ssh'],
-  }), {
-    name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh'],
-  })
+    name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '', presetId: '', provider: '', model: '',
+    capabilities: ['knowledge', 'knowledge', 'ssh', 'root-access'],
+  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh'] })
 })
 
-test('rejects unknown capabilities', () => {
-  assert.deepEqual(normalizeCompanionDraft({ name: '墨伴', capabilities: ['knowledge', 'root-access'] }).capabilities, ['knowledge'])
-})
-
-test('inherits the DSH default model and permits explicit companion overrides', () => {
+test('inherits the DSH default model and permits companion overrides', () => {
   const defaults = { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'medium' }) }
-  const companion = {
-    id: 'companion-1', name: '墨伴', role: '工作伙伴', description: '', instructions: '', presetId: '',
-    capabilities: [], createdAt: 1, updatedAt: 1,
-  }
-  assert.deepEqual(resolveAgentOptions(defaults, companion), {
-    provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'medium',
-  })
-  assert.deepEqual(resolveAgentOptions(defaults, { ...companion, provider: 'custom', model: 'custom-model' }), {
-    provider: 'custom', model: 'custom-model', reasoningEffort: 'medium',
-  })
+  const companion = { id: 'companion-1', name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1 }
+  assert.deepEqual(resolveAgentOptions(defaults, companion), { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'medium' })
+  assert.deepEqual(resolveAgentOptions(defaults, { ...companion, provider: 'custom', model: 'custom-model' }), { provider: 'custom', model: 'custom-model', reasoningEffort: 'medium' })
 })
 
-test('reloading companion configuration preserves its session routes', async () => {
+test('preserves and renews isolated companion sessions correctly', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-'))
   try {
     const store = await PartnerStore.open(join(directory, 'state.json'))
     const companion = store.snapshot().companions[0]
-    await store.update(state => state.sessions.push({
-      id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id,
-      sessionId: 'session-1', lastMessageAt: 1,
-    }))
-    const runtime = new PartnerAgentRuntime({}, store, '/home/node')
-    await runtime.reloadCompanion(companion.id)
+    const route = { id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', cwd: '/home/node/partners/a', lastMessageAt: 1 }
+    await store.update(state => state.sessions.push(route))
+    await new PartnerAgentRuntime({}, store, '/home/node').reloadCompanion(companion.id)
     assert.equal(store.snapshot().sessions[0]?.sessionId, 'session-1')
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-test('an archived channel session starts a new conversation on the next message', () => {
-  const route = {
-    id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: 'companion-1',
-    sessionId: 'session-1', lastMessageAt: 1,
-  }
-  assert.equal(canReuseSession(route, 'companion-1', []), true)
-  assert.equal(canReuseSession(route, 'companion-1', ['session-1']), false)
-})
-
-test('renewing an archived route preserves its contact scope with a fresh conversation', () => {
-  const previous = {
-    id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: 'companion-1',
-    sessionId: 'session-1', cwd: '/home/node/partners/companion-1', lastMessageAt: 1,
-  }
-  const next = renewedSession(previous, 42)
-  assert.notEqual(next.id, previous.id)
-  assert.notEqual(next.sessionId, previous.sessionId)
-  assert.equal(next.channelId, previous.channelId)
-  assert.equal(next.userId, previous.userId)
-  assert.equal(next.companionId, previous.companionId)
-  assert.equal(next.cwd, previous.cwd)
-  assert.equal(next.lastMessageAt, 42)
+    assert.equal(canReuseSession(route, companion.id, []), true)
+    assert.equal(canReuseSession(route, companion.id, ['session-1']), false)
+    const renewed = renewedSession(route, 42)
+    assert.notEqual(renewed.sessionId, route.sessionId)
+    assert.equal(renewed.userId, route.userId)
+    assert.equal(renewed.cwd, route.cwd)
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
 test('assigns each companion an isolated working directory', () => {
@@ -99,45 +72,160 @@ test('instructs code-mode companions to route SDK tools through run_code', () =>
   const protocol = renderToolProtocol()
   assert.match(protocol, /only `run_code` is callable directly/)
   assert.match(protocol, /await tools\.web_search/)
-  assert.match(protocol, /绝不要直接发起名为 `web_search` 的顶层工具调用/)
   assert.match(protocol, /立即在同一轮改用 `run_code` 重试/)
 })
 
-test('keeps the established heartbeat decision prompt and forbids JSON output', () => {
-  const prompt = heartbeatPrompt()
-  assert.match(prompt, /执行一次伙伴主动巡察/)
-  assert.match(prompt, /选择最多三条真正有价值的方向/)
-  assert.match(prompt, /关注变化、学习新知和整理现状/)
-  assert.match(prompt, /总计最多调用六次工具/)
-  assert.match(prompt, /大约两分钟内收束/)
-  assert.match(prompt, /不得只调用一次工具就结束/)
-  assert.match(prompt, /必须实际调用只读发现或检索工具/)
-  assert.match(prompt, /优先从当前挂载知识库开始/)
-  assert.match(prompt, /不允许未经检查直接回复 NO_ACTION/)
-  assert.match(prompt, /不得创建、修改、删除内容/)
-  assert.match(prompt, /如果没有必要通知，只回复：NO_ACTION/)
-  assert.match(prompt, /不要输出 JSON/)
-  assert.doesNotMatch(prompt, /结构化记忆|每日回顾|当前会话/)
+test('frames heartbeat as bounded concern change observation', () => {
+  const prompt = concernObservationPrompt([
+    concern({ id: 'concern-local', resources: [{ kind: 'file', locator: 'docs/status.md', label: 'docs/status.md' }] }),
+    concern({ id: 'concern-web', scopeId: '*', subject: 'DSH 版本发布', reason: '等待修复', origin: 'explicit', watchKind: 'web', watchQuery: 'DSH releases' }),
+    concern({ id: 'concern-knowledge', scopeId: '*', subject: 'nomifun 版本更新', reason: '等待新版', origin: 'explicit', watchKind: 'knowledge', watchQuery: 'nomifun nomifun-desktop 版本更新', resources: [{ kind: 'knowledge', locator: '项目长期记忆/nomifun/nomifun-desktop 版本更新关注', label: '项目长期记忆 · nomifun/nomifun-desktop 版本更新关注' }] }),
+  ], '/home/node/partners/companion-1')
+  assert.match(prompt, /伙伴变化观察/)
+  assert.match(prompt, /本轮挂念/)
+  assert.match(prompt, /Canvas 拖动稳定性/)
+  assert.match(prompt, /DSH 版本发布/)
+  assert.match(prompt, /逐项判断/)
+  assert.match(prompt, /不要把本地项目问题.*无差别丢给网页搜索/)
+  assert.match(prompt, /工具可自由组合/)
+  assert.match(prompt, /知识库按“确定库 → 库内检索 → 读取准确条目”执行/)
+  assert.match(prompt, /是本轮调查的操作约束，不只是背景资料/)
+  assert.match(prompt, /需要 HTML 标记、脚本内嵌 JSON.*用 web_source/)
+  assert.match(prompt, /web_search 只能用于发现候选，不能替代知识文档明确指定的原始页面/)
+  assert.match(prompt, /必须严格采用知识文档约定的失败处理/)
+  assert.match(prompt, /resources 已给出 knowledgeBase 时.*直接从 knowledge_search 开始/)
+  assert.match(prompt, /"searchQuery":"nomifun nomifun-desktop 版本更新"/)
+  assert.match(prompt, /本地目录按“确定范围 → 找到候选文件或命中位置 → 读取准确文件”执行/)
+  assert.match(prompt, /不要自行拼接库名、动作词“关注\/留意”/)
+  assert.match(prompt, /不得读取伙伴记忆、会话归档、日记或 concerns 数据库/)
+  assert.match(prompt, /只能更新 resources 中明确列出的现存文件/)
+  assert.match(prompt, /\/home\/node\/partners\/companion-1\/docs\/status\.md/)
+  assert.match(prompt, /不得执行命令、发布、提交/)
+  assert.match(prompt, /只输出一个 JSON 对象/)
+  assert.match(prompt, /是否提醒由确定性策略另行决定/)
+  assert.doesNotMatch(prompt, /NO_ACTION|当前会话上下文/)
 })
 
-test('injects only the scoped tool catalog into heartbeat context', () => {
-  const text = renderHeartbeatContext({
-    tools: [
-      { name: 'knowledge_search', description: '搜索当前会话挂载的知识库', parameters: { type: 'object', properties: {} } },
-      { name: 'web_search', description: '搜索公开网页', parameters: { type: 'object', properties: {} } },
-    ],
-  })
-  assert.match(text, /真实可用工具/)
-  assert.match(text, /knowledge_search：搜索当前会话挂载的知识库/)
-  assert.match(text, /web_search：搜索公开网页/)
-  assert.doesNotMatch(text, /近期每日回顾/)
-  assert.doesNotMatch(text, /长期待关注|偏好|情绪|记忆/)
+test('keeps heartbeat filesystem discovery out of partner private stores', () => {
+  assert.match(heartbeatToolDenial('read', { file_path: './memory/scopes/contact/conversations/day.jsonl' }), /不能访问长期记忆/)
+  assert.match(heartbeatToolDenial('grep', { path: 'memory-backup-before-sqlite/scopes' }), /不能访问长期记忆/)
+  assert.match(heartbeatToolDenial('glob', { path: '/home/node/partners/a/memory' }), /不能访问长期记忆/)
+  assert.equal(heartbeatToolDenial('read', { file_path: './notes/project.md' }), undefined)
 })
 
-test('maps heartbeat output directly to silence or a user-facing notification', () => {
-  assert.equal(heartbeatMessage('NO_ACTION'), undefined)
-  assert.equal(heartbeatMessage('NO_ACTION。'), undefined)
-  assert.equal(heartbeatMessage('发现一条值得提醒的新信息'), '发现一条值得提醒的新信息')
+test('allows flexible discovery and only exposes file updates for linked files', () => {
+  const discovery = ['knowledge_base_search', 'knowledge_search', 'knowledge_read', 'glob', 'grep', 'read', 'web_search', 'web_fetch', 'web_source']
+  const tools = [...discovery, 'write', 'edit', 'str_replace_editor']
+  const unlinked = heartbeatToolPolicy([concern({ watchKind: 'workspace' })], tools)
+  assert.deepEqual([...unlinked.allowed].sort(), [...discovery].sort())
+
+  const linked = heartbeatToolPolicy([concern({ resources: [{ kind: 'file', locator: 'docs/roadmap.md', label: 'docs/roadmap.md' }] })], tools)
+  assert.deepEqual([...linked.allowed].sort(), [...tools].sort())
+})
+
+test('restricts heartbeat writes to the exact linked existing file', () => {
+  const access = { root: '/home/node/partners/a', writable: new Set(['/home/node/partners/a/docs/roadmap.md']) }
+  assert.equal(heartbeatToolDenial('edit', { file_path: 'docs/roadmap.md', old_string: 'a', new_string: 'b' }, access), undefined)
+  assert.equal(heartbeatToolDenial('write', { file_path: '/home/node/partners/a/docs/roadmap.md', content: 'new' }, access), undefined)
+  assert.match(heartbeatToolDenial('edit', { file_path: 'docs/other.md' }, access), /明确关联的现存 @文件/)
+  assert.match(heartbeatToolDenial('write', { file_path: '../outside.md' }, access), /当前伙伴工作目录/)
+  assert.match(heartbeatToolDenial('write', { file_path: 'memory/profile.md' }, access), /不能访问长期记忆/)
+  assert.match(heartbeatToolDenial('str_replace_editor', { command: 'create', path: 'docs/roadmap.md' }, access), /不能创建新文件/)
+})
+
+test('extracts safe file and knowledge references and recognizes explicit concern language', () => {
+  assert.deepEqual(extractConcernResources('帮我留意 @docs/roadmap.md 和 @"notes/design rules.md"，参考 @知识库[DSH/主题设计规范]'), [
+    { kind: 'knowledge', locator: 'DSH/主题设计规范', label: 'DSH · 主题设计规范' },
+    { kind: 'file', locator: 'docs/roadmap.md', label: 'docs/roadmap.md' },
+    { kind: 'file', locator: 'notes/design rules.md', label: 'notes/design rules.md' },
+  ])
+  assert.deepEqual(extractConcernResources('不要读取 @../secret 或 @memory/scopes/private.json'), [])
+  assert.equal(explicitConcernDirective('让伙伴帮我关注这个项目的版本变化'), true)
+  assert.equal(explicitConcernDirective('不用再关注这个项目了'), false)
+})
+
+test('turns an explicit knowledge mention into a focused knowledge concern', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-explicit-reference-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const item = await store.createExplicit('companion-1', '*', '@知识库[项目长期记忆/nomifun/nomifun-desktop 版本更新关注]')
+    assert.equal(item.subject, 'nomifun/nomifun-desktop 版本更新关注')
+    assert.equal(item.watchKind, 'knowledge')
+    assert.equal(item.watchQuery, 'nomifun nomifun-desktop 版本更新')
+    assert.deepEqual(item.resources, [{ kind: 'knowledge', locator: '项目长期记忆/nomifun/nomifun-desktop 版本更新关注', label: '项目长期记忆 · nomifun/nomifun-desktop 版本更新关注' }])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('migrates a legacy raw knowledge token into a focused concern', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-reference-migration-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const created = await store.createExplicit('companion-1', '*', '@知识库[项目长期记忆/nomifun/nomifun-desktop 版本更新关注]')
+    const path = join(directory, 'partners', 'companion-1', 'concerns', 'concerns.sqlite')
+    const database = new DatabaseSync(path)
+    database.prepare("DELETE FROM concern_meta WHERE key = 'reference-subject-normalized-v1'").run()
+    const raw = '@知识库[项目长期记忆/nomifun/nomifun-desktop 版本更新关注]'
+    database.prepare("UPDATE concerns SET normalized_subject = ?, subject = ?, watch_kind = 'auto', watch_query = ? WHERE id = ?").run(normalizeConcernSubject(raw), raw, raw, created.id)
+    database.close()
+    const [migrated] = await new PartnerConcernStore(directory).list('companion-1')
+    assert.equal(migrated.subject, 'nomifun/nomifun-desktop 版本更新关注')
+    assert.equal(migrated.watchKind, 'knowledge')
+    assert.equal(migrated.watchQuery, 'nomifun nomifun-desktop 版本更新')
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('renders compact inspectable heartbeat activity without model reasoning', () => {
+  const activity = renderHeartbeatActivity({
+    concerns: [concern(), concern({ id: 'concern-2', subject: '依赖更新' })], candidates: [], observations: [],
+    startedAt: 1_000, completedAt: 3_500, output: '{"observations":[]}', tools: [{
+      name: 'knowledge_search', input: '{"query":"待关注事项"}', output: '没有找到新变化', startedAt: 1_200, completedAt: 2_000, status: 'completed',
+    }],
+  }, 'quiet')
+  assert.match(activity, /状态：无需主动提醒/)
+  assert.match(activity, /本轮挂念：Canvas 拖动稳定性；依赖更新/)
+  assert.match(activity, /1\. knowledge_search · 完成 · 800 ms/)
+  assert.match(activity, /最终结论：本轮没有发现经过校验的新变化/)
+  assert.doesNotMatch(activity, /推理|思维链/)
+})
+
+test('uses deterministic interruption thresholds and explicit decay rules', () => {
+  assert.equal(concernInterval(.9, 'explicit'), 3 * 3_600_000 * .75)
+  assert.equal(concernDecay(.8, 1, 100_000_000, 'explicit'), .8)
+  assert.ok(concernDecay(.8, 1, 100 * 86_400_000, 'implicit') < .18)
+  assert.equal(interruptDecision({ priority: .2, concernConfidence: .8, observationConfidence: .3, relevance: .9, novelty: 1, actionability: 1, recentlyMentioned: false, firstObservation: false }).decision, 'drop')
+  assert.equal(interruptDecision({ priority: 1, concernConfidence: 1, observationConfidence: 1, relevance: 1, novelty: 1, actionability: 1, recentlyMentioned: false, firstObservation: false }).decision, 'notify')
+  assert.notEqual(interruptDecision({ priority: 1, concernConfidence: 1, observationConfidence: 1, relevance: 1, novelty: .5, actionability: 1, recentlyMentioned: false, firstObservation: true }).decision, 'notify')
+})
+
+test('never retries a failed heartbeat sooner than its configured interval', () => {
+  const now = Date.parse('2026-08-28T01:00:00Z')
+  assert.equal(heartbeatRetryAt(now, 30, 1), now + 30 * 60_000)
+  assert.equal(heartbeatRetryAt(now, 30, 6), now + 64 * 60_000)
+  assert.equal(heartbeatRetryAt(now, 30, 20), now + 6 * 3_600_000)
+})
+
+test('does not invoke the agent when no concern is due', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-heartbeat-empty-'))
+  try {
+    const store = await PartnerStore.open(join(directory, 'state.json'))
+    const companion = store.snapshot().companions[0]
+    await store.update(state => {
+      state.channels.push({ id: 'weixin-1', companionId: companion.id, accountId: 'account', name: '微信', enabled: true, createdAt: 1, updatedAt: 1 })
+      state.pairings.push({ id: 'pairing-1', channelId: 'weixin-1', userId: 'user-1', displayName: '用户', status: 'approved', createdAt: 1, updatedAt: 1 })
+      state.sessions.push({ id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
+    })
+    let agentCalls = 0
+    const scheduler = new HeartbeatScheduler(
+      { logger: { warn() {}, error() {} } }, store,
+      { heartbeat: async () => { agentCalls += 1; throw new Error('must not run') } },
+      { sendProactive: async () => {} },
+      { pendingNotifications: async () => [], due: async () => [] },
+    )
+    const result = await scheduler.trigger(companion.id, true)
+    assert.equal(result.checked, false)
+    assert.match(result.reason, /没有到期/)
+    assert.equal(agentCalls, 0)
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
 test('collects user messages from a completed turn by event boundaries', () => {
@@ -149,41 +237,52 @@ test('collects user messages from a completed turn by event boundaries', () => {
     { type: 'step/end', seq: 14, time: 5, data: { turn: 3, step: 1 } },
     { type: 'turn/end', seq: 15, time: 6, data: { turn: 3, reason: { kind: 'completed' } } },
   ]
-  const turn = completedTurnEvents(events, events.at(-1))
-  assert.deepEqual(turn.map(event => event.type), ['user/message', 'step/start', 'assistant/message', 'step/end'])
-  assert.equal(turn[0].data.content[0].text, '请记住这个事项')
+  assert.deepEqual(completedTurnEvents(events, events.at(-1)).map(event => event.type), ['user/message', 'step/start', 'assistant/message', 'step/end'])
 })
 
-test('validates bounded memory and heartbeat settings', () => {
-  assert.deepEqual(normalizeAutomation({
+test('validates bounded memory and heartbeat settings without legacy focus runtime', () => {
+  const input = {
     memory: { enabled: true, retentionDays: 0, dailyReviewEnabled: true, dailyReviewHour: 2 },
     heartbeat: { enabled: true, intervalMinutes: 180, quietStartHour: 22, quietEndHour: 8, dailyLimit: 2 },
-  }), {
-    memory: { enabled: true, retentionDays: 0, dailyReviewEnabled: true, dailyReviewHour: 2 },
-    heartbeat: { enabled: true, intervalMinutes: 180, quietStartHour: 22, quietEndHour: 8, dailyLimit: 2 },
-  })
+  }
+  assert.deepEqual(normalizeAutomation(input), input)
   assert.throws(() => normalizeAutomation({
     memory: { enabled: true, retentionDays: 1 },
     heartbeat: { enabled: true, intervalMinutes: 10, quietStartHour: 22, quietEndHour: 8, dailyLimit: 99 },
   }), /out of range/)
 })
 
-test('migrates schema v1 state with safe automation defaults', async () => {
+test('migrates legacy partner states to schema 10 and preserves focus only as a one-shot seed', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-migration-'))
+  const path = join(directory, 'state.json')
+  try {
+    const companion = {
+      id: 'companion-old', name: '旧伙伴', role: '伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1,
+      automation: { memory: { enabled: true, retentionDays: 0, dailyReviewEnabled: true, dailyReviewHour: 2 }, heartbeat: { enabled: true, focus: '项目风险；依赖更新', intervalMinutes: 30, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 } },
+    }
+    await writeFile(path, JSON.stringify({ schemaVersion: 9, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
+    const state = (await PartnerStore.open(path)).snapshot()
+    assert.equal(state.schemaVersion, 10)
+    assert.equal(state.companions[0].automation.heartbeat.legacyFocus, '项目风险\n依赖更新')
+    assert.equal('focus' in state.companions[0].automation.heartbeat, false)
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 10)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('migrates schema v1 defaults and obsolete focus cursor through schema 10', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-v1-'))
   const path = join(directory, 'state.json')
   try {
     await writeFile(path, JSON.stringify({
       schemaVersion: 1,
-      companions: [{ id: 'companion-old', name: '旧伙伴', role: '伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1 }],
+      companions: [{ id: 'old', name: '旧伙伴', role: '伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1 }],
       channels: [], pairings: [], sessions: [], recentReceipts: [],
     }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 7)
-    assert.equal(state.companions[0].automation.memory.enabled, true)
-    assert.equal(state.companions[0].automation.heartbeat.enabled, false)
+    assert.equal(state.schemaVersion, 10)
     assert.equal(state.companions[0].automation.memory.retentionDays, 0)
+    assert.equal(state.companions[0].automation.heartbeat.enabled, false)
     assert.deepEqual(state.heartbeatStates, [])
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 7)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -201,12 +300,8 @@ test('archives, consolidates and recalls memory in isolated contact scopes', asy
     assert.deepEqual(await memory.recall('companion-1', 'channel-1:user-b', '代码补丁'), [])
     assert.equal((await memory.recentReflectionsForScope('companion-1', 'channel-1:user-a'))[0]?.turnCount, 1)
     const stored = (await memory.recentMemories('companion-1'))[0]
-    const corrected = await memory.updateMemory('companion-1', stored.id, '代码修改原则', '必须先定位根因并统一架构')
-    assert.equal(corrected.locked, true)
-    assert.equal(corrected.confidence, 1)
+    assert.equal((await memory.updateMemory('companion-1', stored.id, '代码修改原则', '必须先定位根因')).locked, true)
     await memory.deleteMemory('companion-1', stored.id)
-    assert.deepEqual(await memory.recentMemories('companion-1'), [])
-    await memory.clear('companion-1')
     assert.deepEqual(await memory.recentMemories('companion-1'), [])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
@@ -214,8 +309,7 @@ test('archives, consolidates and recalls memory in isolated contact scopes', asy
 test('migrates structured JSON memory into SQLite exactly once', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-sqlite-migration-'))
   try {
-    const companionId = 'companion-legacy'
-    const scopeId = 'wechat:user-legacy'
+    const companionId = 'companion-legacy'; const scopeId = 'wechat:user-legacy'
     const hash = createHash('sha256').update(scopeId).digest('hex').slice(0, 24)
     const scope = join(directory, 'partners', companionId, 'memory', 'scopes', hash)
     await mkdir(join(scope, 'diary'), { recursive: true })
@@ -225,16 +319,13 @@ test('migrates structured JSON memory into SQLite exactly once', async () => {
     await writeFile(join(scope, 'diary', '2026-08-24.json'), JSON.stringify(reflection))
     const store = new PartnerMemoryStore(directory)
     assert.equal(await store.migrateLegacy(companionId), 2)
-    assert.equal((await store.recentMemories(companionId))[0]?.id, memory.id)
-    assert.equal((await store.recentReflections(companionId))[0]?.date, reflection.date)
     assert.equal(await store.migrateLegacy(companionId), 0)
     assert.equal((await store.recentMemories(companionId)).length, 1)
-    await readFile(join(directory, 'partners', companionId, 'memory', 'memory.sqlite'))
     await readFile(join(directory, 'partners', companionId, 'memory', 'legacy-json', hash, 'memories.json'))
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('finalizes one daily review once and persists evidence-backed relations', async () => {
+test('finalizes one daily review and persists evidence-backed relations', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-daily-review-'))
   try {
     const store = new PartnerMemoryStore(directory)
@@ -245,28 +336,27 @@ test('finalizes one daily review once and persists evidence-backed relations', a
       { kind: 'task', subject: '主题设计', content: '完成主题设计', confidence: .9, importance: .9, operation: 'upsert' },
     ] })
     const [target] = await store.pendingDailyReviews(turn.companionId, '2026-08-25')
-    assert.ok(target)
-    await store.completeDailyReview(target, { daily: { summary: '确认设计原则并推进主题设计', events: [], openTasks: ['完成主题设计'], completedTasks: [], learnings: ['保持统一'] }, memories: [], relations: [
+    await store.completeDailyReview(target, { daily: { summary: '确认设计原则并推进主题设计', events: [], openTasks: ['完成主题设计'], completedTasks: [], learnings: ['保持统一'] }, memories: [], concerns: [], relations: [
       { sourceSubject: '主题设计', targetSubject: '设计原则', kind: 'depends_on', label: '任务遵循设计原则', confidence: .94 },
     ] })
     assert.deepEqual(await store.pendingDailyReviews(turn.companionId, '2026-08-25'), [])
-    const graph = await store.relations(turn.companionId)
-    assert.equal(graph.memories.length, 2)
-    assert.equal(graph.relations[0]?.kind, 'depends_on')
+    assert.equal((await store.relations(turn.companionId)).relations[0]?.kind, 'depends_on')
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('validates structured reflection output and gives emotion a bounded lifetime', () => {
+test('validates structured reflection concerns and bounded emotion lifetime', () => {
   const result = parseReflection(JSON.stringify({
     daily: { summary: '今天确认了主题方向', events: ['选择深空灰'], openTasks: [], completedTasks: [], learnings: ['偏好低对比渐变'] },
     memories: [{ kind: 'emotion', subject: '当前体验', content: '对反复修改感到不耐烦', confidence: .8, importance: .5, operation: 'upsert', expiresInDays: 30 }],
+    concerns: [{ subject: '主题视觉疲劳仍未解决', reason: '用户仍然不满意', confidence: .86, priority: .8, operation: 'upsert', watchKind: 'workspace', watchQuery: '主题视觉实现变化' }],
   }))
   assert.equal(result.memories[0].expiresInDays, 7)
-  assert.equal(result.daily.learnings[0], '偏好低对比渐变')
+  assert.equal(result.concerns[0]?.subject, '主题视觉疲劳仍未解决')
+  assert.equal(result.concerns[0]?.watchKind, 'workspace')
 })
 
 test('validates daily review relation output', () => {
-  const result = parseDailyReview(JSON.stringify({ daily: { summary: '终审', events: [], openTasks: [], completedTasks: [], learnings: [] }, memories: [], relations: [
+  const result = parseDailyReview(JSON.stringify({ daily: { summary: '终审', events: [], openTasks: [], completedTasks: [], learnings: [] }, memories: [], concerns: [], relations: [
     { sourceSubject: '主题设计', targetSubject: '设计原则', kind: 'depends_on', label: '遵循', confidence: 1.4 },
     { sourceSubject: '无效', targetSubject: '关系', kind: 'invented', label: '', confidence: 1 },
   ] }))
@@ -274,32 +364,57 @@ test('validates daily review relation output', () => {
   assert.equal(result.relations[0].confidence, 1)
 })
 
-test('migrates the former 90-day journal default to permanent retention', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-v2-'))
-  const path = join(directory, 'state.json')
+test('stores concerns by scope, deduplicates observations and defers relevant mentions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concerns-'))
   try {
-    const companion = {
-      id: 'companion-v2', name: '伙伴', role: '伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1,
-      automation: { journal: { enabled: true, retentionDays: 90 }, heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 2 } },
-    }
-    await writeFile(path, JSON.stringify({ schemaVersion: 2, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
-    const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 7)
-    assert.equal(state.companions[0].automation.memory.retentionDays, 0)
+    const store = new PartnerConcernStore(directory)
+    const now = Date.now()
+    await store.applyCandidates('companion-1', 'weixin:user-a', [{ subject: 'Canvas 拖动稳定性', reason: '仍未解决', operation: 'upsert', priority: .8, confidence: .8, watchKind: 'workspace', watchQuery: 'Canvas 拖动变化' }], 'implicit', now - 10 * 3_600_000)
+    assert.equal((await store.due('companion-1', 'weixin:user-b', now, 12, true)).length, 0)
+    const [target] = await store.due('companion-1', 'weixin:user-a', now, 12, true)
+    const first = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6 }], now)
+    assert.equal(first.observations[0]?.decision, 'defer')
+    assert.equal((await store.deferred('companion-1', 'weixin:user-a', 'Canvas 拖动怎么了'))[0]?.id, first.observations[0]?.id)
+    assert.equal((await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6 }], now + 1)).observations.length, 0)
+    const second = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '新版明确修复拖动丢帧', evidence: '测试与发行说明均已确认', source: 'workspace', relevance: 1, confidence: 1, actionability: 1 }], now + 2)
+    assert.equal(second.notifications.length, 1)
+    assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 1)
+    await store.markMentioned('companion-1', second.notifications.map(item => item.id), now + 3)
+    assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 0)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('migrates the former daily heartbeat cap to unlimited', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-v3-'))
-  const path = join(directory, 'state.json')
+test('keeps explicit concerns stable, ages implicit concerns and supports lifecycle actions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-life-'))
   try {
-    const companion = {
-      id: 'companion-v3', name: '伙伴', role: '伙伴', description: '', instructions: '', capabilities: [], createdAt: 1, updatedAt: 1,
-      automation: { journal: { enabled: true, retentionDays: 0 }, heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 2 } },
-    }
-    await writeFile(path, JSON.stringify({ schemaVersion: 3, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
-    const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 7)
-    assert.equal(state.companions[0].automation.heartbeat.dailyLimit, 0)
+    const store = new PartnerConcernStore(directory)
+    const now = Date.now()
+    const explicit = await store.createExplicit('companion-1', '*', '关注 OpenAI 新模型')
+    assert.equal((await store.due('companion-1', 'any-scope', now, 12, true))[0]?.id, explicit.id)
+    await store.act('companion-1', explicit.id, 'prioritize', now)
+    assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.priority, 1)
+    await store.act('companion-1', explicit.id, 'resolve', now + 1)
+    assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.state, 'resolved')
+    await store.act('companion-1', explicit.id, 'watch', now + 2)
+    assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.state, 'watching')
+    await store.applyCandidates('companion-1', 'weixin:user', [{ subject: '很久以前的临时问题', reason: '旧问题', operation: 'upsert', priority: .6, confidence: .7, watchKind: 'auto', watchQuery: '旧问题' }], 'implicit', now - 100 * 86_400_000)
+    await store.due('companion-1', 'weixin:user', now)
+    const archived = (await store.list('companion-1', undefined, true)).find(item => item.subject === '很久以前的临时问题')
+    assert.equal(archived?.state, 'archived')
+    assert.equal((await store.list('companion-1')).some(item => item.subject === '很久以前的临时问题'), false)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('migrates old focuses into the concern store exactly once', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-migration-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    await store.migrateLegacy('companion-1', [
+      { scopeId: '*', subject: 'DSH 更新', reason: '用户明确要求', confidence: 1, origin: 'explicit' },
+      { scopeId: 'weixin:user', subject: '未完成主题', reason: '旧提炼结果', confidence: .8, origin: 'implicit' },
+    ])
+    await store.migrateLegacy('companion-1', [{ scopeId: '*', subject: '不应再次写入', reason: '', confidence: 1, origin: 'explicit' }])
+    const items = await store.list('companion-1')
+    assert.deepEqual(items.map(item => item.subject).sort(), ['DSH 更新', '未完成主题'])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

@@ -6,6 +6,7 @@ import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewT
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[] }
+export interface LegacyHeartbeatFocus { scopeId: string; subject: string; reason: string; confidence: number }
 type SqlRow = Record<string, unknown>
 
 export class PartnerMemoryStore {
@@ -66,6 +67,24 @@ export class PartnerMemoryStore {
     const database = await this.open(companionId)
     try { return (database.prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?').all(limit) as SqlRow[]).map(memoryFromRow) }
     finally { database.close() }
+  }
+
+  async legacyHeartbeatFocuses(companionId: string): Promise<LegacyHeartbeatFocus[]> {
+    const database = await this.open(companionId)
+    try {
+      if (!tableExists(database, 'heartbeat_focuses')) return []
+      return (database.prepare('SELECT scope_id, topic, reason, confidence FROM heartbeat_focuses WHERE companion_id = ?').all(companionId) as SqlRow[]).map(row => ({
+        scopeId: string(row.scope_id), subject: string(row.topic), reason: string(row.reason), confidence: bounded(number(row.confidence)),
+      }))
+    } finally { database.close() }
+  }
+
+  async dropLegacyHeartbeatFocuses(companionId: string): Promise<void> {
+    await this.serial(this.databasePath(companionId), async () => {
+      const database = await this.open(companionId)
+      try { database.exec('DROP TABLE IF EXISTS heartbeat_focus_dismissals; DROP TABLE IF EXISTS heartbeat_focuses;') }
+      finally { database.close() }
+    })
   }
 
   async updateMemory(companionId: string, memoryId: string, subject: string, content: string): Promise<PartnerMemory> {
@@ -409,6 +428,9 @@ function rollback(database: DatabaseSync): void { try { database.exec('ROLLBACK'
 function ensureColumn(database: DatabaseSync, table: string, column: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[]
   if (!columns.some(item => item.name === column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+function tableExists(database: DatabaseSync, table: string): boolean {
+  return database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined
 }
 function tokenize(value: string): string[] { return [...new Set(normalize(value).match(/[\p{L}\p{N}]{2,}/gu) ?? [])].slice(0, 40) }
 function normalize(value: string): string { return value.toLocaleLowerCase().replace(/\s+/g, '') }

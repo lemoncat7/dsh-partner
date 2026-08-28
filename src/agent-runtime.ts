@@ -1,24 +1,28 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, join, relative, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message, ToolCallBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Workspace, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
-import { heartbeatMessage, heartbeatPrompt, renderHeartbeatContext } from './autonomy.js'
+import { concernObservationPrompt } from './autonomy.js'
+import type { ConcernObservation, ConcernObservationCandidate, PartnerConcern } from './concern-domain.js'
+import type { PartnerConcernStore } from './concern-store.js'
 import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
+import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
 
 type RuntimeContext = Context & {
   agents: Context['agents']
@@ -28,12 +32,65 @@ type RuntimeContext = Context & {
   tools: ToolRuntime
 }
 
-const HEARTBEAT_TIMEOUT_MS = 120_000
+interface KnowledgeTrackingService {
+  record(agent: Agent, input: {
+    id: string; subject: string; event: string; evidence: string; source: string; reference?: string; at: number
+  }, signal?: AbortSignal): Promise<{ storage: 'knowledge' | 'local'; outcome: string; knowledgeBaseId?: string }>
+  list?(agent: { session: { id: string; header: { cwd?: string }; events: readonly [] } }, query?: string, limit?: number, signal?: AbortSignal): Promise<ConcernSource[]>
+}
+
+const HEARTBEAT_TIMEOUT_MS = 115_000
+const HEARTBEAT_DISCOVERY_BUDGET_MS = 72_000
+const HEARTBEAT_TOOL_TIMEOUT_MS = 18_000
+const HEARTBEAT_WEB_TOOL_TIMEOUT_MS = 30_000
+const HEARTBEAT_BASE_TOOL_CALL_LIMIT = 8
+const HEARTBEAT_MAX_TOOL_CALL_LIMIT = 20
+const HEARTBEAT_TOOL_RESULT_LIMIT = 5_000
+const HEARTBEAT_KNOWLEDGE_RESULT_LIMIT = 8_000
+const HEARTBEAT_WEB_FETCH_RESULT_LIMIT = 40_000
+const HEARTBEAT_WEB_SOURCE_RESULT_LIMIT = 125_000
+const HEARTBEAT_AUDIT_INPUT_LIMIT = 320
+const HEARTBEAT_AUDIT_OUTPUT_LIMIT = 520
+const HEARTBEAT_READ_ONLY_TOOLS = new Set([
+  'knowledge_base_search',
+  'knowledge_search',
+  'knowledge_read',
+  'web_search',
+  'web_fetch',
+  'web_source',
+  'glob',
+  'grep',
+  'read',
+])
+const HEARTBEAT_FILE_UPDATE_TOOLS = new Set(['write', 'edit', 'str_replace_editor'])
+const HEARTBEAT_TOOLS = new Set([...HEARTBEAT_READ_ONLY_TOOLS, ...HEARTBEAT_FILE_UPDATE_TOOLS])
+
+export interface HeartbeatToolTrace {
+  name: string
+  input: string
+  output: string
+  startedAt: number
+  completedAt: number
+  status: 'completed' | 'failed'
+}
+
+export interface HeartbeatExecution {
+  concerns: PartnerConcern[]
+  candidates: ConcernObservationCandidate[]
+  observations?: ConcernObservation[]
+  startedAt: number
+  completedAt: number
+  output?: string
+  error?: string
+  tools: HeartbeatToolTrace[]
+}
+
+export type HeartbeatOutcome = 'notified' | 'quiet' | 'failed'
 
 export class PartnerAgentRuntime {
   private readonly handles = new Map<string, AgentHandle>()
   private readonly queues = new Map<string, Promise<void>>()
-  private readonly heartbeatQueues = new Map<string, Promise<string | undefined>>()
+  private readonly heartbeatQueues = new Map<string, Promise<HeartbeatExecution>>()
   private readonly steeringQueues = new Map<string, Promise<void>>()
   private readonly workspaces = new Map<string, Promise<Workspace>>()
 
@@ -43,6 +100,7 @@ export class PartnerAgentRuntime {
     private readonly defaultCwd: string,
     private readonly memory?: PartnerMemoryStore,
     private readonly reflection?: MemoryReflectionService,
+    private readonly concerns?: PartnerConcernStore,
   ) {}
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
@@ -74,6 +132,14 @@ export class PartnerAgentRuntime {
       content: [{ type: 'text', text: renderMemory(recalled) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴为插话召回了相关长期记忆' },
     }))
+    const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
+    if (deferred && deferred.length > 0) {
+      agent.inject(createUserMessage({
+        content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
+        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
+      }))
+      await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
+    }
     agent.steer(createUserMessage({ content: inbound.content, source: { kind: 'user' } }))
     return true
   }
@@ -102,24 +168,83 @@ export class PartnerAgentRuntime {
     return next
   }
 
-  async heartbeat(companion: Companion, route: ChannelSession): Promise<string | undefined> {
+  async heartbeat(companion: Companion, route: ChannelSession, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     const key = `${route.channelId}:${route.userId}`
     const queued = this.heartbeatQueues.get(key)
     if (queued !== undefined) return queued
-    const current = this.runHeartbeatWhenIdle(key, companion, route)
+    const current = this.runHeartbeatWhenIdle(key, companion, route, concerns)
     this.heartbeatQueues.set(key, current)
     try { return await current } finally { if (this.heartbeatQueues.get(key) === current) this.heartbeatQueues.delete(key) }
   }
 
-  private async runHeartbeatWhenIdle(key: string, companion: Companion, route: ChannelSession): Promise<string | undefined> {
+  async persistKnowledgeObservations(
+    companion: Companion,
+    route: ChannelSession,
+    concerns: PartnerConcern[],
+    observations: ConcernObservation[],
+  ): Promise<void> {
+    const service = this.ctx.get('dshKnowledgeTracking') as KnowledgeTrackingService | undefined
+    if (service === undefined || observations.length === 0) return
+    const agent = await this.ensureAgent(companion, route)
+    const byId = new Map(concerns.map(item => [item.id, item]))
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(new Error('知识库观察记录超时')), 30_000)
+    timeout.unref?.()
+    try {
+      for (const observation of observations) {
+        if (observation.decision === 'drop') continue
+        const concern = byId.get(observation.concernId)
+        if (concern === undefined) continue
+        const references = concern.resources.filter(item => item.kind === 'knowledge').map(item => item.locator).slice(0, 4)
+        if (references.length === 0 && concern.watchKind !== 'knowledge') continue
+        for (const reference of references.length > 0 ? references : [undefined]) {
+          await service.record(agent, {
+            id: observation.id,
+            subject: concern.subject,
+            event: observation.event,
+            evidence: observation.evidence,
+            source: observation.source,
+            ...(reference === undefined ? {} : { reference }),
+            at: observation.createdAt,
+          }, controller.signal).catch(error => {
+            this.ctx.logger.warn(`dsh-partner: knowledge observation fell back to local storage: ${errorMessage(error)}`)
+          })
+        }
+      }
+    } finally { clearTimeout(timeout) }
+  }
+
+  async concernSources(companion: Companion, query = ''): Promise<ConcernSource[]> {
+    const routes = this.store.snapshot().sessions
+      .filter(item => item.companionId === companion.id)
+      .sort((left, right) => right.lastMessageAt - left.lastMessageAt)
+    const root = routes[0]?.cwd ?? partnerCwd(this.defaultCwd, companion.id)
+    const files = await listConcernFileSources(root, query, 24)
+    const service = this.ctx.get('dshKnowledgeTracking') as KnowledgeTrackingService | undefined
+    if (service?.list === undefined || routes[0] === undefined) return files
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(new Error('知识文档候选查询超时')), 8_000)
+    timeout.unref?.()
+    try {
+      const route = routes[0]
+      const knowledge = await service.list({ session: { id: route.sessionId, header: { cwd: root }, events: [] } }, query, 16, controller.signal).catch(error => {
+        this.ctx.logger.warn(`dsh-partner: knowledge concern sources unavailable: ${errorMessage(error)}`)
+        return []
+      })
+      return [...files, ...knowledge].slice(0, 40)
+    } finally { clearTimeout(timeout) }
+  }
+
+  private async runHeartbeatWhenIdle(key: string, companion: Companion, route: ChannelSession, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     for (;;) {
       await this.queues.get(key)?.catch(() => {})
-      const agent = await this.ensureAgent(companion, route)
-      if (agent.status !== 'idle') await agent.whenIdle()
-      const stableSeq = agent.session.seq
+      const conversation = await this.ensureAgent(companion, route)
+      if (conversation.status !== 'idle') await conversation.whenIdle()
+      const stableSeq = conversation.session.seq
       await delay(2_000)
-      if (this.queues.has(key) || agent.status !== 'idle' || agent.session.seq !== stableSeq) continue
-      return this.driveHeartbeat(agent)
+      if (this.queues.has(key)) continue
+      if (conversation.status !== 'idle' || conversation.session.seq !== stableSeq) continue
+      return this.driveScopedHeartbeat(conversation, companion, concerns)
     }
   }
 
@@ -145,27 +270,52 @@ export class PartnerAgentRuntime {
     })
   }
 
-  private async driveHeartbeat(agent: Agent): Promise<string | undefined> {
-    const tools = this.ctx.tools.schemas(agent)
-    agent.inject(createUserMessage({
-      content: [{ type: 'text', text: renderHeartbeatContext({ tools }) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: `心跳已注入 ${tools.length} 项可用工具` },
-    }))
-    const startSeq = agent.session.seq
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: heartbeatPrompt() }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' },
-    }))
-    let timedOut = false
-    const timeout = setTimeout(() => {
-      timedOut = true
-      agent.cancel({ kind: 'hook', reason: 'dsh-partner heartbeat exceeded its two-minute budget' }, { keepInbox: true })
-    }, HEARTBEAT_TIMEOUT_MS)
+  private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
+    const scope = await createHeartbeatScope(this.ctx, conversation, concerns)
+    try { return await this.driveEphemeralHeartbeat(scope.agent, companion, concerns) }
+    finally { await scope.dispose() }
+  }
+
+  private async driveEphemeralHeartbeat(agent: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(new Error('伙伴心跳超过安全时限')), HEARTBEAT_TIMEOUT_MS)
     timeout.unref?.()
-    try { await agent.whenIdle() }
-    finally { clearTimeout(timeout) }
-    if (timedOut) throw new Error('伙伴心跳超过两分钟，已安全终止')
-    return heartbeatMessage(extractAssistantText(agent, startSeq))
+    try {
+      const execution = await runHeartbeatInference(this.ctx, agent, companion, concerns, controller.signal)
+      return controller.signal.aborted
+        ? { ...execution, error: '伙伴心跳超过安全时限，已收束并终止' }
+        : execution
+    } catch (error) {
+      const now = Date.now()
+      return {
+        concerns,
+        candidates: [],
+        startedAt: now,
+        completedAt: now,
+        tools: [],
+        error: controller.signal.aborted ? '伙伴心跳超过安全时限，已收束并终止' : errorMessage(error),
+      }
+    } finally { clearTimeout(timeout) }
+  }
+
+  async recordHeartbeatActivity(
+    companion: Companion,
+    route: ChannelSession,
+    execution: HeartbeatExecution,
+    outcome: HeartbeatOutcome,
+    deliveryError?: string,
+  ): Promise<void> {
+    const conversation = await this.ensureAgent(companion, route)
+    if (conversation.status !== 'idle') await conversation.whenIdle()
+    conversation.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: renderHeartbeatActivity(execution, outcome, deliveryError) }],
+      source: {
+        kind: 'plugin',
+        plugin: '@lemoncat7/dsh-partner',
+        form: 'notice',
+        summary: '伙伴正在进行低打扰心跳检查',
+      },
+    }), { surfaceOp: 'append' })
   }
 
   async resetCompanion(companionId: string): Promise<void> {
@@ -213,6 +363,11 @@ export class PartnerAgentRuntime {
       content: [{ type: 'text', text: renderMemory(recalled) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴回忆了与当前消息相关的长期记忆' },
     }))
+    const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
+    if (deferred && deferred.length > 0) agent.inject(createUserMessage({
+      content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
+    }))
     const startSeq = agent.session.seq
     agent.followup(createUserMessage({
       content: inbound.content,
@@ -225,6 +380,7 @@ export class PartnerAgentRuntime {
       if (target) target.lastMessageAt = Date.now()
     })
     if (!response) throw new Error('伙伴没有生成可发送的文本回复')
+    if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     return { text: response, attachments: await extractOutboundAttachments(response, session.cwd ?? this.defaultCwd) }
   }
 
@@ -413,6 +569,13 @@ function renderMemory(entries: NonNullable<Awaited<ReturnType<PartnerMemoryStore
   ].join('\n')
 }
 
+function renderDeferredMentions(entries: ConcernObservation[]): string {
+  return [
+    '伙伴之前发现了与用户当前消息相关的新变化。若自然且确实有帮助，可以在本次回答末尾顺手提一句；不要抢占当前问题，也不要声称刚刚搜索。',
+    ...entries.map(item => `- ${item.event}${item.evidence ? `（依据：${item.evidence}）` : ''}`),
+  ].join('\n')
+}
+
 export function resolveAgentOptions(defaultModel: AgentDefaultModelConfig, companion: Companion) {
   return {
     ...defaultModel.currentSelection(),
@@ -438,7 +601,335 @@ export function partnerCwd(root: string, companionId: string): string {
   return join(root, 'partners', companionId)
 }
 
-function renderPersona(companion: Companion): string {
+async function createHeartbeatScope(ctx: RuntimeContext, conversation: Agent, concerns: PartnerConcern[]): Promise<{ agent: Agent; dispose(): Promise<void> }> {
+  const parent = scopeOf(conversation.ctx)
+  if (parent === undefined) throw new Error('伙伴心跳无法解析当前 Agent 作用域')
+  const availableTools = [...HEARTBEAT_TOOLS].filter(name => ctx.tools.get(name, conversation) !== undefined)
+  const policy = heartbeatToolPolicy(concerns, availableTools)
+  const allowedTools = [...policy.allowed]
+  if (allowedTools.length === 0) throw new Error('伙伴心跳没有可用的只读发现工具')
+  const cwd = conversation.session.header.cwd
+  if (!cwd) throw new Error('伙伴心跳缺少当前伙伴工作目录')
+  const fileAccess = await resolveHeartbeatFileAccess(cwd, concerns)
+  const agent = {} as Agent
+  const scope = createScope(ctx, agent, { parent })
+  const agentCtx = scope.ctx.extend({ agent })
+  Object.assign(agent, {
+    id: conversation.id,
+    options: conversation.options,
+    session: conversation.session,
+    inbox: conversation.inbox,
+    status: 'idle',
+    ctx: agentCtx,
+    cancel: () => {},
+    whenIdle: async () => {},
+    runMaintenance: async <T>(job: (signal: AbortSignal) => Promise<T>) => job(new AbortController().signal),
+    send: () => { throw new Error('心跳作用域不接受会话消息') },
+    followup: () => { throw new Error('心跳作用域不接受会话消息') },
+    steer: () => { throw new Error('心跳作用域不接受会话消息') },
+    inject: () => { throw new Error('心跳作用域不接受会话消息') },
+  } satisfies Partial<Agent>)
+  agentCtx.tools.presentAs('native')
+  agentCtx.tools.restrict({ allow: allowedTools })
+  agentCtx.tools.guard(exec => {
+    if (!policy.allowed.has(exec.name)) return `当前挂念的来源策略不允许调用 ${exec.name}`
+    return heartbeatToolDenial(exec.name, exec.arguments, fileAccess)
+  })
+  return { agent, dispose: () => scope.dispose() }
+}
+
+interface HeartbeatToolPolicy {
+  allowed: Set<string>
+}
+
+export function heartbeatToolPolicy(concerns: PartnerConcern[], available: Iterable<string>): HeartbeatToolPolicy {
+  const installed = new Set(available)
+  const hasLinkedFile = concerns.some(item => item.resources?.some(resource => resource.kind === 'file') === true)
+  return {
+    allowed: new Set([...installed].filter(name => HEARTBEAT_READ_ONLY_TOOLS.has(name) || (hasLinkedFile && HEARTBEAT_FILE_UPDATE_TOOLS.has(name)))),
+  }
+}
+
+async function runHeartbeatInference(
+  ctx: RuntimeContext,
+  agent: Agent,
+  companion: Companion,
+  concerns: PartnerConcern[],
+  signal: AbortSignal,
+): Promise<HeartbeatExecution> {
+  const startedAt = Date.now()
+  const traces: HeartbeatToolTrace[] = []
+  const discoveryDeadline = startedAt + HEARTBEAT_DISCOVERY_BUDGET_MS
+  const toolCallLimit = Math.min(HEARTBEAT_MAX_TOOL_CALL_LIMIT, Math.max(HEARTBEAT_BASE_TOOL_CALL_LIMIT, concerns.length * 2 + 2))
+  try {
+    const selection = resolveAgentOptions(ctx.agentDefaultModel, companion)
+    if (!selection.provider || !selection.model) throw new Error('伙伴心跳没有可用的模型路由')
+    const tools = ctx.tools.schemas(agent).filter(tool => HEARTBEAT_TOOLS.has(tool.name))
+    if (tools.length === 0) throw new Error('伙伴心跳没有可用的只读发现工具')
+    const messages: Message[] = [createUserMessage({
+      content: [{ type: 'text', text: concernObservationPrompt(concerns, agent.session.header.cwd) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴观察挂念变化' },
+    })]
+    let toolCalls = 0
+    for (let step = 0; step < 10; step += 1) {
+      const discoveryOpen = Date.now() < discoveryDeadline && toolCalls < toolCallLimit
+      const prepared = await ctx.llm.prepareCall(selection, signal)
+      const assembler = new BlockAssembler()
+      for await (const chunk of prepared.stream({
+        ...prepared.config,
+        messages,
+        system: renderPersona(companion, 'heartbeat'),
+        tools: discoveryOpen ? tools : [],
+        signal,
+      })) assembler.push(chunk)
+      const finish = assembler.finish
+      if (finish.kind === 'error' || finish.kind === 'aborted') {
+        throw new Error(`伙伴心跳模型调用失败：${finish.failure.message}`)
+      }
+      const response = assembler.message({ kind: 'model', provider: prepared.config.provider, model: prepared.config.model })
+      messages.push(response)
+      const pending = response.content.filter((block): block is ToolCallBlock => block.type === 'tool-call')
+      if (pending.length === 0) {
+        const output = textContent(response.content)
+        return {
+          concerns,
+          candidates: parseConcernObservations(output, new Set(concerns.map(item => item.id))),
+          startedAt,
+          completedAt: Date.now(),
+          output,
+          tools: traces,
+        }
+      }
+      for (const call of pending) {
+        toolCalls += 1
+        const argumentsValue = boundHeartbeatToolArguments(call.name, parseHeartbeatToolArguments(call))
+        const toolStartedAt = Date.now()
+        const budgetExpired = Date.now() >= discoveryDeadline
+        const result = toolCalls > toolCallLimit || budgetExpired
+          ? { isError: true as const, content: [{ type: 'text' as const, text: budgetExpired
+              ? '本轮发现阶段的时间预算已用完，请根据已有结果立即输出最终 Observation JSON。'
+              : `本轮已达到 ${toolCallLimit} 次工具调用上限，请根据已有结果立即收束。` }] }
+          : await executeHeartbeatTool(ctx, agent, call, argumentsValue, signal)
+        const toolCompletedAt = Date.now()
+        const visibleContent = heartbeatToolContent(call.name, result.content)
+        traces.push({
+          name: call.name,
+          input: auditValue(argumentsValue, HEARTBEAT_AUDIT_INPUT_LIMIT),
+          output: auditText(textContent(visibleContent) || '工具返回了非文本结果', HEARTBEAT_AUDIT_OUTPUT_LIMIT),
+          startedAt: toolStartedAt,
+          completedAt: toolCompletedAt,
+          status: result.isError ? 'failed' : 'completed',
+        })
+        messages.push(createToolResultMessage({ callId: call.id, content: visibleContent, isError: result.isError }))
+      }
+    }
+    throw new Error('伙伴心跳未能在有限步骤内收束')
+  } catch (error) {
+    return { concerns, candidates: [], startedAt, completedAt: Date.now(), tools: traces, error: errorMessage(error) }
+  }
+}
+
+function parseConcernObservations(raw: string, allowedIds: Set<string>): ConcernObservationCandidate[] {
+  const match = raw.trim().match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('伙伴心跳没有返回 Observation JSON')
+  const parsed = JSON.parse(match[0]) as { observations?: unknown }
+  if (!Array.isArray(parsed.observations)) throw new Error('伙伴心跳 Observation 格式无效')
+  const seen = new Set<string>()
+  return parsed.observations.flatMap(value => {
+    if (!isRecord(value)) return []
+    const concernId = typeof value.concernId === 'string' ? value.concernId : ''
+    if (!allowedIds.has(concernId) || seen.has(concernId)) return []
+    seen.add(concernId)
+    const changed = value.changed === true
+    return [{
+      concernId,
+      changed,
+      event: changed && typeof value.event === 'string' ? value.event.trim().slice(0, 800) : '',
+      evidence: typeof value.evidence === 'string' ? value.evidence.trim().slice(0, 2_000) : '',
+      source: typeof value.source === 'string' ? value.source.trim().slice(0, 240) : '',
+      relevance: boundedScore(value.relevance),
+      confidence: boundedScore(value.confidence),
+      actionability: boundedScore(value.actionability),
+    }]
+  })
+}
+
+function boundedScore(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : .5
+}
+
+function parseHeartbeatToolArguments(call: ToolCallBlock): unknown {
+  try { return JSON.parse(call.arguments) }
+  catch { return { __invalidArguments: call.arguments } }
+}
+
+interface HeartbeatFileAccess {
+  root: string
+  writable: Set<string>
+}
+
+async function resolveHeartbeatFileAccess(cwd: string, concerns: PartnerConcern[]): Promise<HeartbeatFileAccess> {
+  const root = await realpath(cwd)
+  const writable = new Set<string>()
+  const locators = concerns.flatMap(item => item.resources ?? []).filter(item => item.kind === 'file').map(item => item.locator)
+  for (const locator of new Set(locators)) {
+    const lexical = resolve(root, locator)
+    if (!pathInside(root, lexical) || isPartnerMemoryPath(relative(root, lexical))) continue
+    try {
+      const actual = await realpath(lexical)
+      const info = await stat(actual)
+      if (!info.isFile() || !pathInside(root, actual) || isPartnerMemoryPath(relative(root, actual))) continue
+      writable.add(lexical)
+      writable.add(actual)
+    } catch { /* References may become stale; stale files remain read-only and cannot be recreated. */ }
+  }
+  return { root, writable }
+}
+
+export function heartbeatToolDenial(name: string, argumentsValue: unknown, access?: HeartbeatFileAccess): string | undefined {
+  if (!isRecord(argumentsValue)) return undefined
+  const isRead = ['glob', 'grep', 'read'].includes(name)
+  const isUpdate = HEARTBEAT_FILE_UPDATE_TOOLS.has(name)
+  if (!isRead && !isUpdate) return undefined
+  const paths = [argumentsValue.path, argumentsValue.file_path].filter((value): value is string => typeof value === 'string')
+  if (paths.some(isPartnerMemoryPath)) return '伙伴心跳不能访问长期记忆、挂念数据库、会话归档或其备份目录；请改查普通工作文件或其他安全来源。'
+  if (access && paths.some(value => !pathInside(access.root, resolve(access.root, value)))) return '伙伴心跳只能访问当前伙伴工作目录内的文件。'
+  if (!isUpdate) return undefined
+  if (name === 'str_replace_editor' && argumentsValue.command === 'create') return '心跳只能更新已经关联且现存的 @文件，不能创建新文件。'
+  const target = paths[0]
+  if (paths.length !== 1 || target === undefined || !access || !access.writable.has(resolve(access.root, target))) {
+    return '心跳只能更新当前挂念明确关联的现存 @文件，不能修改其他文件。'
+  }
+  return undefined
+}
+
+async function executeHeartbeatTool(
+  ctx: RuntimeContext,
+  agent: Agent,
+  call: ToolCallBlock,
+  argumentsValue: unknown,
+  signal: AbortSignal,
+): Promise<{ isError: boolean; content: ContentBlock[] }> {
+  const timeoutMs = call.name === 'web_fetch' || call.name === 'web_source' ? HEARTBEAT_WEB_TOOL_TIMEOUT_MS : HEARTBEAT_TOOL_TIMEOUT_MS
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const toolSignal = AbortSignal.any([signal, timeoutSignal])
+  try {
+    return await ctx.tools.execute({ callId: call.id, name: call.name, arguments: argumentsValue, agent, signal: toolSignal })
+  } catch (error) {
+    const message = timeoutSignal.aborted && !signal.aborted
+      ? `工具 ${call.name} 超过 ${timeoutMs / 1_000} 秒，已跳过；请按既有规则判断来源不可用，或根据已有结果收束。`
+      : `工具 ${call.name} 调用失败：${errorMessage(error)}`
+    return { isError: true, content: [{ type: 'text', text: message }] }
+  }
+}
+
+function pathInside(root: string, target: string): boolean {
+  const value = relative(root, target)
+  return value === '' || (value !== '..' && !value.startsWith(`..${sep}`) && !isAbsolute(value))
+}
+
+function boundHeartbeatToolArguments(name: string, value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const bounded = { ...value }
+  if (name === 'knowledge_base_search' || name === 'knowledge_search') bounded.limit = boundedInteger(value.limit, 4)
+  if (name === 'knowledge_read') bounded.maxChars = boundedInteger(value.maxChars, HEARTBEAT_KNOWLEDGE_RESULT_LIMIT)
+  if (name === 'web_source') bounded.max_chars = boundedInteger(value.max_chars, 120_000)
+  if (name === 'read') bounded.limit = boundedInteger(value.limit, 80)
+  return bounded
+}
+
+function heartbeatToolContent(name: string, content: readonly ContentBlock[]): ContentBlock[] {
+  let remaining = heartbeatToolResultLimit(name)
+  const bounded: ContentBlock[] = []
+  for (const block of content) {
+    if (remaining <= 0) break
+    if (block.type !== 'text') {
+      bounded.push(block)
+      continue
+    }
+    const sanitized = name === 'glob'
+      ? block.text.split('\n').filter(line => !isPartnerMemoryPath(line.trim())).join('\n')
+      : block.text
+    const text = sanitized.length <= remaining ? sanitized : `${sanitized.slice(0, Math.max(0, remaining - 1))}…`
+    if (text) bounded.push({ ...block, text })
+    remaining -= text.length
+  }
+  if (bounded.length === 0 && name === 'glob') return [{ type: 'text', text: '未发现可供心跳检查的普通工作文件；伙伴记忆与会话归档已从结果中排除。' }]
+  return bounded
+}
+
+function heartbeatToolResultLimit(name: string): number {
+  if (name === 'knowledge_read') return HEARTBEAT_KNOWLEDGE_RESULT_LIMIT
+  if (name === 'web_fetch') return HEARTBEAT_WEB_FETCH_RESULT_LIMIT
+  if (name === 'web_source') return HEARTBEAT_WEB_SOURCE_RESULT_LIMIT
+  return HEARTBEAT_TOOL_RESULT_LIMIT
+}
+
+function isPartnerMemoryPath(value: string): boolean {
+  const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '/')
+  return /(?:^|\/)(?:memory(?:\/|-backup(?:-|\/)|$)|concerns(?:\/|$))/i.test(normalized)
+}
+
+function boundedInteger(value: unknown, maximum: number): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? Math.min(value, maximum) : maximum
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function renderHeartbeatActivity(
+  execution: HeartbeatExecution,
+  outcome: HeartbeatOutcome,
+  deliveryError?: string,
+): string {
+  const status = outcome === 'notified' ? '已通过微信提醒' : outcome === 'quiet' ? '无需主动提醒' : '执行失败'
+  const lines = [
+    `状态：${status}`,
+    `本轮挂念：${execution.concerns.map(item => item.subject).join('；')}`,
+    `用时：${formatDuration(execution.completedAt - execution.startedAt)}`,
+    `工具：${execution.tools.length > 0 ? `${execution.tools.length} 次调用` : '未调用'}`,
+  ]
+  execution.tools.forEach((trace, index) => {
+    lines.push(
+      '',
+      `${index + 1}. ${trace.name} · ${trace.status === 'completed' ? '完成' : '失败'} · ${formatDuration(trace.completedAt - trace.startedAt)}`,
+      `输入：${trace.input}`,
+      `结果：${trace.output}`,
+    )
+  })
+  const changed = execution.observations ?? []
+  const conclusion = execution.error || deliveryError
+    ? `失败原因：${deliveryError ?? execution.error}`
+    : changed.length > 0
+      ? `新变化：\n${changed.map(item => `- ${item.event}（${decisionLabel(item.decision)} · ${Math.round(item.interruptScore * 100)}）`).join('\n')}`
+      : '最终结论：本轮没有发现经过校验的新变化。'
+  lines.push('', conclusion)
+  return lines.join('\n')
+}
+
+function decisionLabel(value: ConcernObservation['decision']): string {
+  return value === 'notify' ? '已提醒' : value === 'feed' ? '伙伴动态' : value === 'defer' ? '顺手一提' : value === 'remember' ? '静默记下' : '忽略'
+}
+
+function auditValue(value: unknown, limit: number): string {
+  try { return auditText(JSON.stringify(value), limit) }
+  catch { return auditText(String(value), limit) }
+}
+
+function auditText(value: string, limit: number): string {
+  const text = value.trim().replace(/\n{3,}/g, '\n\n')
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`
+}
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1_000) return `${Math.max(0, milliseconds)} ms`
+  return `${(milliseconds / 1_000).toFixed(milliseconds < 10_000 ? 1 : 0)} 秒`
+}
+
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+function renderPersona(companion: Companion, surface: 'conversation' | 'heartbeat' = 'conversation'): string {
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [
     `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
@@ -446,7 +937,9 @@ function renderPersona(companion: Companion): string {
     companion.description ? `定位：${companion.description}` : '',
     companion.instructions ? `长期行为准则：\n${companion.instructions}` : '',
     `用户为此伙伴启用的能力范围：${capabilities}。能力标识不等于授权；只能调用当前会话实际提供且已经通过权限校验的工具。`,
-    '这个会话由 DSH 网页与微信私聊渠道共同使用。保持同一上下文，不要假定每条消息都来自微信；渠道回传由适配器负责。回答兼顾网页与移动端阅读，执行外部操作前继续遵守工具自身的授权与审批边界。',
+    surface === 'heartbeat'
+      ? '这是一轮独立的伙伴心跳，不是用户聊天的延续。只根据本轮真实可读信息行动，最终结果由渠道适配器决定是否发送。'
+      : '这个会话由 DSH 网页与微信私聊渠道共同使用。保持同一上下文，不要假定每条消息都来自微信；渠道回传由适配器负责。回答兼顾网页与移动端阅读，执行外部操作前继续遵守工具自身的授权与审批边界。',
   ].filter(Boolean).join('\n\n')
 }
 

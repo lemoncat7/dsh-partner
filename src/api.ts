@@ -11,6 +11,7 @@ import { PartnerAgentRuntime } from './agent-runtime.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { HeartbeatScheduler } from './heartbeat.js'
 import { DailyReviewScheduler } from './daily-review.js'
+import { PartnerConcernStore } from './concern-store.js'
 
 const MAX_BODY_BYTES = 1_048_576
 
@@ -26,6 +27,7 @@ interface ApiRuntime {
   agents: PartnerAgentRuntime
   login: WeixinLoginManager
   memory: PartnerMemoryStore
+  concerns: PartnerConcernStore
   heartbeat: HeartbeatScheduler
   dailyReview: DailyReviewScheduler
 }
@@ -47,7 +49,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
-  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 7 })
+  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 10 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({
       id: provider.id, name: provider.name,
@@ -85,6 +87,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       await runtime.agents.resetCompanion(id)
       await runtime.store.update(state => { state.companions = state.companions.filter(item => item.id !== id) })
       await runtime.memory.clear(id)
+      await runtime.concerns.clear(id)
       return sendJson(res, 204, undefined)
     }
     if (id !== undefined && method === 'PUT' && segments[2] === 'automation' && segments.length === 3) {
@@ -119,6 +122,28 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
         await runtime.memory.deleteMemory(id, memoryId)
         return sendJson(res, 204, undefined)
       }
+    }
+    if (id !== undefined && segments[2] === 'concerns') {
+      requiredCompanion(runtime.store, id)
+      if (method === 'GET' && segments.length === 3) return sendJson(res, 200, await runtime.concerns.activity(id))
+      if (method === 'POST' && segments.length === 3) {
+        mutation(req)
+        const body = await readObject(req)
+        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 800) : ''
+        return sendJson(res, 201, await runtime.concerns.createExplicit(id, '*', text(body.subject, 'subject', 300), reason))
+      }
+      if (method === 'POST' && segments[3] !== undefined && segments[4] === 'action' && segments.length === 5) {
+        mutation(req)
+        const action = text((await readObject(req)).action, 'action', 20)
+        if (action !== 'watch' && action !== 'ignore' && action !== 'prioritize' && action !== 'resolve') throw httpError(400, 'concern action is invalid')
+        await runtime.concerns.act(id, segments[3], action)
+        return sendJson(res, 200, { ok: true })
+      }
+    }
+    if (id !== undefined && method === 'GET' && segments[2] === 'concern-sources' && segments.length === 3) {
+      const companion = requiredCompanion(runtime.store, id)
+      const query = (url.searchParams.get('q') ?? '').trim().slice(0, 160)
+      return sendJson(res, 200, { items: await runtime.agents.concernSources(companion, query) })
     }
     if (id !== undefined && method === 'POST' && segments[2] === 'heartbeat' && segments[3] === 'trigger' && segments.length === 4) {
       mutation(req)
