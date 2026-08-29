@@ -100,11 +100,13 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
       <button type="button" className="dsh-partner-sidebar-title" aria-expanded={open} onClick={() => setOpen(value => !value)}><span data-open={open}><IconChevronDownOutline14 size={14} /></span>伙伴</button>
       <button type="button" className="dsh-partner-sidebar-open" onClick={() => launch()} aria-label="打开伙伴面板"><IconPlusOutline16 size={16} /></button>
     </div>
-    {open && <div className="dsh-partner-sidebar-list">
-      <button type="button" className={`dsh-partner-sidebar-row${props.controller.isOpen() ? ' is-active' : ''}`} onClick={() => launch()}>
-        <span className="dsh-partner-sidebar-symbol"><IconAgentPresetOutline16 size={16} /></span><span><strong>伙伴面板</strong><small>{snapshot ? `${snapshot.companions.length} 位伙伴 · ${snapshot.channels.filter(item => item.runtimeStatus === 'running').length} 个微信在线` : '身份、能力与渠道'}</small></span><i className={snapshot?.channels.some(item => item.runtimeStatus === 'running') ? 'is-online' : ''} />
-      </button>
-    </div>}
+    <div className={`dsh-partner-sidebar-list${open ? ' is-open' : ''}`} aria-hidden={!open}>
+      <div className="dsh-partner-sidebar-list-inner">
+        <button type="button" tabIndex={open ? 0 : -1} className={`dsh-partner-sidebar-row${props.controller.isOpen() ? ' is-active' : ''}`} onClick={() => launch()}>
+          <span className="dsh-partner-sidebar-symbol"><IconAgentPresetOutline16 size={16} /></span><span><strong>伙伴面板</strong><small>{snapshot ? `${snapshot.companions.length} 位伙伴 · ${snapshot.channels.filter(item => item.runtimeStatus === 'running').length} 个微信在线` : '身份、能力与渠道'}</small></span><i className={snapshot?.channels.some(item => item.runtimeStatus === 'running') ? 'is-online' : ''} />
+        </button>
+      </div>
+    </div>
   </section>
 }
 
