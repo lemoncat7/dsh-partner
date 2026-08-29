@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Companion } from './domain.js'
-import { concernSubjectSimilarity, extractConcernResources, type ConcernCandidate, type ConcernWatchKind } from './concern-domain.js'
+import { concernSubjectSimilarity, extractConcernResources, type ConcernCandidate, type ConcernWatchKind, type PartnerConcern } from './concern-domain.js'
 import type { ConversationTurn, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryKind, MemoryRelationKind, ReflectionResult } from './memory-domain.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
@@ -10,18 +10,18 @@ import type { PartnerConcernStore } from './concern-store.js'
 type ReflectionContext = Context & { llm: Context['llm']; agentDefaultModel: AgentDefaultModelConfig }
 
 export class MemoryReflectionService {
-  private readonly queues = new Map<string, Promise<void>>()
+  private readonly queues = new Map<string, Promise<PartnerConcern[]>>()
   constructor(private readonly ctx: ReflectionContext, private readonly store: PartnerMemoryStore, private readonly concerns: PartnerConcernStore) {}
 
-  async reflect(companion: Companion, turn: ConversationTurn): Promise<void> {
+  async reflect(companion: Companion, turn: ConversationTurn): Promise<PartnerConcern[]> {
     const key = `${companion.id}:${turn.scopeId}`
-    const previous = this.queues.get(key) ?? Promise.resolve()
+    const previous = this.queues.get(key) ?? Promise.resolve([])
     const current = previous.catch(() => {}).then(() => this.run(companion, turn))
     this.queues.set(key, current)
-    try { await current } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
+    try { return await current } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
   }
 
-  async reviewDay(companion: Companion, target: DailyReviewTarget): Promise<void> {
+  async reviewDay(companion: Companion, target: DailyReviewTarget): Promise<PartnerConcern[]> {
     const context = await this.store.dailyReviewContext(target)
     const concerns = (await this.concerns.list(companion.id, target.scopeId, false, 40)).map(concernContext)
     const selection = modelSelection(this.ctx, companion)
@@ -40,10 +40,10 @@ export class MemoryReflectionService {
     } finally { clearTimeout(timeout) }
     const result = parseDailyReview(output)
     await this.store.completeDailyReview(target, result)
-    await this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit')
+    return this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit')
   }
 
-  private async run(companion: Companion, turn: ConversationTurn): Promise<void> {
+  private async run(companion: Companion, turn: ConversationTurn): Promise<PartnerConcern[]> {
     await this.store.archive(turn)
     const existing = await this.store.recall(companion.id, turn.scopeId, turn.user, 16)
     const diaries = await this.store.recentReflectionsForScope(companion.id, turn.scopeId, 1)
@@ -70,9 +70,11 @@ export class MemoryReflectionService {
     const resources = extractConcernResources(turn.user)
     const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
     const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
-    await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, explicitConcernDirective(turn.user) ? 'explicit' : 'implicit', turn.at)
+    const origin = explicitConcernDirective(turn.user) ? 'explicit' : 'implicit'
+    const created = await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, origin, turn.at)
     if (turn.concernDirective !== undefined) await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
     await this.store.prune(companion.id, companion.automation.memory.retentionDays)
+    return origin === 'implicit' ? created : []
   }
 }
 

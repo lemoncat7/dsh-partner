@@ -3,6 +3,7 @@ import type { Companion } from './domain.js'
 import { PartnerStore } from './store.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { MemoryReflectionService } from './memory-reflection.js'
+import { PartnerAgentRuntime } from './agent-runtime.js'
 
 const TICK_MS = 60_000
 
@@ -12,7 +13,7 @@ export class DailyReviewScheduler {
   private readonly running = new Set<string>()
 
   constructor(private readonly ctx: Context, private readonly store: PartnerStore, private readonly memory: PartnerMemoryStore,
-    private readonly reflection: MemoryReflectionService, private readonly timeZone = 'Asia/Shanghai') {}
+    private readonly reflection: MemoryReflectionService, private readonly agents: PartnerAgentRuntime, private readonly timeZone = 'Asia/Shanghai') {}
 
   start(): void { if (!this.closed && this.timer === undefined) this.schedule(5_000) }
   async close(): Promise<void> { this.closed = true; if (this.timer) clearTimeout(this.timer); this.timer = undefined }
@@ -50,7 +51,13 @@ export class DailyReviewScheduler {
     if (targets.length === 0) return { reviewed: 0, failed: 0, reason: '没有待终审的日期' }
     let reviewed = 0; let failed = 0
     for (const target of targets) {
-      try { await this.reflection.reviewDay(companion, target); reviewed += 1 }
+      try {
+        const created = await this.reflection.reviewDay(companion, target)
+        if (created.length > 0) await this.agents.recordConcernCreatedNotice(companion, target.scopeId, created).catch(error => {
+          this.ctx.logger.warn(`dsh-partner daily review concern notice failed: ${message(error)}`)
+        })
+        reviewed += 1
+      }
       catch (error) { failed += 1; await this.memory.failDailyReview(target, message(error)); this.ctx.logger.warn(`dsh-partner daily review ${target.date} failed: ${message(error)}`) }
     }
     return { reviewed, failed }

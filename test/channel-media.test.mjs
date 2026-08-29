@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
 import { answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
 import { extractOutboundAttachments } from '../lib/agent-runtime.js'
+import { CONCERN_CREATED_NOTICE, concernCreatedNoticeFromEvent } from '../lib/concern-notification.js'
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
@@ -18,6 +19,18 @@ test('routes completed autonomous goals without mirroring ordinary plugin notice
   const heartbeat = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' } } }
   assert.equal(isAutonomousDeliveryTurn([goal]), true)
   assert.equal(isAutonomousDeliveryTurn([heartbeat]), false)
+})
+
+test('recognizes automatic concern creation notices for the current channel', () => {
+  const event = {
+    type: 'user/message', seq: 12, time: 100,
+    data: {
+      content: [{ type: 'text', text: '伙伴刚刚自动新增了 1 条关注' }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: CONCERN_CREATED_NOTICE },
+    },
+  }
+  assert.equal(concernCreatedNoticeFromEvent(event), '伙伴刚刚自动新增了 1 条关注')
+  assert.equal(concernCreatedNoticeFromEvent({ ...event, data: { ...event.data, source: { ...event.data.source, summary: '其他通知' } } }), undefined)
 })
 
 async function withFetch(handler, run) {

@@ -15,6 +15,7 @@ import { explicitConcernDirective, parseDailyReview, parseReflection, protectCon
 import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
 import { concernObservationPrompt } from '../lib/autonomy.js'
 import { futureTime } from '../lib/time-format.js'
+import { renderConcernCreatedNotice } from '../lib/concern-notification.js'
 
 const concern = (overrides = {}) => ({
   id: 'concern-1', companionId: 'companion-1', scopeId: 'weixin:user', subject: 'Canvas 拖动稳定性', reason: '修改后仍然不稳定',
@@ -454,6 +455,19 @@ test('stores concerns by scope, deduplicates observations and defers relevant me
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 1)
     await store.markMentioned('companion-1', second.notifications.map(item => item.id), now + 3)
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 0)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('returns only newly created concerns for automatic creation notices', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-created-concerns-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const candidate = { subject: '窄窗口遮挡', reason: '问题仍未闭环', operation: 'upsert', priority: .7, confidence: .8, watchKind: 'workspace', watchQuery: '窄窗口遮挡' }
+    const created = await store.applyCandidates('companion-1', 'weixin:user', [candidate], 'implicit', 100)
+    assert.equal(created.length, 1)
+    assert.equal((await store.applyCandidates('companion-1', 'weixin:user', [candidate], 'implicit', 101)).length, 0)
+    assert.match(renderConcernCreatedNotice(created), /伙伴刚刚自动新增了 1 条关注/)
+    assert.match(renderConcernCreatedNotice(created), /窄窗口遮挡/)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 

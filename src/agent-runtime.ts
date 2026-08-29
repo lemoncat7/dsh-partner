@@ -23,6 +23,7 @@ import type { PartnerConcernStore } from './concern-store.js'
 import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
+import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 
 type RuntimeContext = Context & {
   agents: Context['agents']
@@ -261,15 +262,33 @@ export class PartnerAgentRuntime {
     const scopeId = memoryScope(route.channelId, route.userId)
     const concernDirective = await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)
     if (!companion.automation.memory.enabled || this.reflection === undefined) return
-    await this.reflection.reflect(companion, {
+    const created = await this.reflection.reflect(companion, {
       id: `turn-${randomUUID()}`, companionId: companion.id, scopeId,
       sessionId: session.id, at: event.time, user: userText, assistant: assistantText,
       ...(concernDirective === undefined ? {} : { concernDirective }),
+    })
+    if (created.length > 0) await this.recordConcernCreatedNotice(companion, scopeId, created).catch(error => {
+      this.ctx.logger.warn(`dsh-partner: automatic concern creation notice failed: ${errorMessage(error)}`)
     })
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === route.id)
       if (target) target.lastMessageAt = Date.now()
     })
+  }
+
+  async recordConcernCreatedNotice(companion: Companion, scopeId: string, concerns: PartnerConcern[]): Promise<boolean> {
+    if (concerns.length === 0) return false
+    const route = this.store.snapshot().sessions
+      .filter(item => item.companionId === companion.id && memoryScope(item.channelId, item.userId) === scopeId)
+      .sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
+    if (route === undefined) return false
+    const conversation = await this.ensureAgent(companion, route)
+    if (conversation.status !== 'idle') await conversation.whenIdle()
+    conversation.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: renderConcernCreatedNotice(concerns) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: CONCERN_CREATED_NOTICE },
+    }), { surfaceOp: 'append' })
+    return true
   }
 
   private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {

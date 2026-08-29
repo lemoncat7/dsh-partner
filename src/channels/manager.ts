@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
-import type { ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
+import type { ChannelSession, ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
 import { PartnerStore } from '../store.js'
 import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
@@ -16,6 +16,7 @@ import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments } from '../agent-runtime.js'
 import type { PartnerReply } from '../channel-message.js'
+import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 
 type ChannelContext = Context & { apiProxy: ApiProxy; settings: SettingsProvider }
 
@@ -133,9 +134,14 @@ export class ChannelManager {
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
-    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
     if (route === undefined) return
+    const concernNotice = concernCreatedNoticeFromEvent(event)
+    if (concernNotice !== undefined) {
+      await this.queueProactive(route, `concern-created:${session.id}:${event.seq}`, { text: concernNotice, attachments: [] })
+      return
+    }
+    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const events = completedTurnEvents(session.events, event)
     if (!isAutonomousDeliveryTurn(events)) return
     const text = events
@@ -145,12 +151,15 @@ export class ChannelManager {
       .filter(Boolean).join('\n\n').trim()
     if (!text) return
     const receipt = `outbound:${session.id}:${event.data.turn}`
+    await this.queueProactive(route, receipt, { text, attachments: route.cwd ? await extractOutboundAttachments(text, route.cwd) : [] })
+  }
+
+  private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply): Promise<void> {
     if (this.store.snapshot().recentReceipts.includes(receipt)) return
     const key = `${route.channelId}:${route.userId}`
     const previous = this.outboundQueues.get(key) ?? Promise.resolve()
     const current = previous.catch(() => {}).then(async () => {
       if (this.store.snapshot().recentReceipts.includes(receipt)) return
-      const reply = { text, attachments: route.cwd ? await extractOutboundAttachments(text, route.cwd) : [] }
       await this.sendProactiveReply(route.channelId, route.userId, reply)
       await this.rememberReceipt(receipt)
     })

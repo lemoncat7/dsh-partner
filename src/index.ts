@@ -66,7 +66,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     })
     channels.startInteractionBridge()
     const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, concerns, resolved.timeZone)
-    const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, resolved.timeZone)
+    const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, agents, resolved.timeZone)
     const login = new WeixinLoginManager()
     let disposeApi: (() => void) | undefined
     const mountApi = (runtime: RuntimeContext): void => {

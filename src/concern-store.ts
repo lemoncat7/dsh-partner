@@ -36,15 +36,20 @@ export class PartnerConcernStore {
     return true
   }
 
-  async applyCandidates(companionId: string, scopeId: string, candidates: ConcernCandidate[], origin: ConcernOrigin, at = Date.now()): Promise<void> {
-    if (candidates.length === 0) return
-    await this.serial(this.path(companionId), async () => {
+  async applyCandidates(companionId: string, scopeId: string, candidates: ConcernCandidate[], origin: ConcernOrigin, at = Date.now()): Promise<PartnerConcern[]> {
+    if (candidates.length === 0) return []
+    return this.serialValue(this.path(companionId), async () => {
       const database = await this.open(companionId)
+      const created: PartnerConcern[] = []
       try {
         database.exec('BEGIN IMMEDIATE')
-        for (const candidate of candidates) this.upsert(database, companionId, scopeId, candidate, origin, at)
+        for (const candidate of candidates) {
+          const concern = this.upsert(database, companionId, scopeId, candidate, origin, at)
+          if (concern !== undefined) created.push(concern)
+        }
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
+      return created
     })
   }
 
@@ -262,17 +267,17 @@ export class PartnerConcernStore {
     await this.serial(this.path(companionId), () => rm(join(this.root, 'partners', companionId, 'concerns'), { recursive: true, force: true }))
   }
 
-  private upsert(database: DatabaseSync, companionId: string, scopeId: string, candidate: ConcernCandidate, origin: ConcernOrigin, at: number): void {
+  private upsert(database: DatabaseSync, companionId: string, scopeId: string, candidate: ConcernCandidate, origin: ConcernOrigin, at: number): PartnerConcern | undefined {
     const subject = compact(candidate.subject, 300)
     const normalized = normalizeConcernSubject(subject)
-    if (!normalized) return
+    if (!normalized) return undefined
     const existing = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND normalized_subject = ? AND scope_id IN (?, '*')
       ORDER BY CASE WHEN origin = 'explicit' THEN 0 ELSE 1 END LIMIT 1`).get(companionId, normalized, scopeId) as SqlRow | undefined
     if (candidate.operation === 'resolve' || candidate.operation === 'dismiss') {
-      if (!existing) return
+      if (!existing) return undefined
       const state = candidate.operation === 'resolve' ? 'resolved' : 'archived'
       database.prepare('UPDATE concerns SET state = ?, resolved_at = ?, updated_at = ? WHERE id = ?').run(state, state === 'resolved' ? at : null, at, string(existing.id))
-      return
+      return undefined
     }
     const priority = clamp(candidate.priority)
     const confidence = clamp(candidate.confidence)
@@ -287,8 +292,9 @@ export class PartnerConcernStore {
         subject, compact(candidate.reason, 800), priority, confidence, score, candidate.watchKind,
         compact(candidate.watchQuery || subject, 500), resources, resources, at, at, nextCheckAt, string(existing.id),
       )
-      return
+      return undefined
     }
+    const id = `concern-${randomUUID()}`
     database.prepare(`INSERT INTO concerns
       (id, companion_id, scope_id, normalized_subject, subject, reason, origin, state, priority, confidence, score,
        watch_kind, watch_query, resources_json, created_at, updated_at, last_activity_at, next_check_at)
@@ -299,9 +305,11 @@ export class PartnerConcernStore {
       score=MAX(concerns.score, excluded.score), watch_kind=excluded.watch_kind, watch_query=excluded.watch_query,
       resources_json=CASE WHEN excluded.resources_json='[]' THEN concerns.resources_json ELSE excluded.resources_json END,
       updated_at=excluded.updated_at, last_activity_at=excluded.last_activity_at, next_check_at=MIN(concerns.next_check_at, excluded.next_check_at), resolved_at=NULL`).run(
-      `concern-${randomUUID()}`, companionId, scopeId, normalized, subject, compact(candidate.reason, 800), origin,
+      id, companionId, scopeId, normalized, subject, compact(candidate.reason, 800), origin,
       priority, confidence, score, candidate.watchKind, compact(candidate.watchQuery || subject, 500), resourcesJson(candidate.resources), at, at, at, nextCheckAt,
     )
+    const created = database.prepare('SELECT * FROM concerns WHERE id = ?').get(id) as SqlRow | undefined
+    return created === undefined ? undefined : concernFromRow(created)
   }
 
   private async open(companionId: string): Promise<DatabaseSync> {
