@@ -7,6 +7,7 @@ import type { ConversationTurn, DailyReviewResult, DailyReviewTarget, MemoryCand
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import { canonicalProfileSubject } from './profile-domain.js'
+import { dailyReviewPromptInput, reflectionPromptInput } from './memory-prompt-context.js'
 
 type ReflectionContext = Context & { llm: Context['llm']; agentDefaultModel: AgentDefaultModelConfig }
 
@@ -24,7 +25,7 @@ export class MemoryReflectionService {
 
   async reviewDay(companion: Companion, target: DailyReviewTarget): Promise<PartnerConcern[]> {
     const context = await this.store.dailyReviewContext(target)
-    const concerns = (await this.concerns.list(companion.id, target.scopeId, false, 40)).map(concernContext)
+    const concerns = await this.concerns.list(companion.id, target.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 90_000)
@@ -32,7 +33,7 @@ export class MemoryReflectionService {
     try {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
-        messages: [createUserMessage({ content: [{ type: 'text', text: JSON.stringify({ date: target.date, ...context, existingConcerns: concerns }) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
+        messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
         system: DAILY_REVIEW_SYSTEM, temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
@@ -48,7 +49,7 @@ export class MemoryReflectionService {
     await this.store.archive(turn)
     const existing = await this.store.recall(companion.id, turn.scopeId, turn.user, 16)
     const diaries = await this.store.recentReflectionsForScope(companion.id, turn.scopeId, 1)
-    const concerns = (await this.concerns.list(companion.id, turn.scopeId, false, 40)).map(concernContext)
+    const concerns = await this.concerns.list(companion.id, turn.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 60_000)
@@ -56,7 +57,7 @@ export class MemoryReflectionService {
     try {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
-        messages: [createUserMessage({ content: [{ type: 'text', text: reflectionInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
+        messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
         system: REFLECTION_SYSTEM,
         temperature: 0.1,
         maxTokens: 1800,
@@ -119,17 +120,9 @@ const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答�
 8. 用户说“继续留意、很重要、已经解决、不用管了”时，应对同一 subject 分别 upsert、提高 priority、resolve 或 dismiss。watchKind 按变化来源选择，不能把本地项目问题默认标为 web。
 9. daily 应综合已有当日日记与新对话，不能只复述最后一句。数组每类最多 20 条，记忆候选最多 12 条。`
 
-const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天完整对话、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
+const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天每一轮对话的双向代表片段、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
 只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","sourceKind":"profile|preference|task|event|relationship|emotion","targetSubject":"必须等于已有或候选记忆主题","targetKind":"同上","kind":"supports|depends_on|about|conflicts_with|follows","label":"有证据的简短关系说明","confidence":0.0,"operation":"upsert|remove"}]}
-要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；以完整对话纠正逐轮偏差；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
-
-function reflectionInput(date: string, turn: ConversationTurn, memories: unknown[], diary: unknown, concerns: unknown[]): string {
-  return JSON.stringify({ date, existingDailyReflection: diary ?? null, existingRelevantMemories: memories, existingConcerns: concerns, newTurn: { id: turn.id, user: turn.user, assistant: turn.assistant } })
-}
-
-function concernContext(item: Awaited<ReturnType<PartnerConcernStore['list']>>[number]): Record<string, unknown> {
-  return { id: item.id, subject: item.subject, reason: item.reason, origin: item.origin, state: item.state, priority: item.priority, watchKind: item.watchKind, updatedAt: item.updatedAt }
-}
+要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；结合所有轮次片段纠正逐轮偏差，对被压缩而证据不足的细节保持原状而非猜测；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
 
 export function parseReflection(raw: string): ReflectionResult {
   const match = raw.trim().match(/\{[\s\S]*\}/)

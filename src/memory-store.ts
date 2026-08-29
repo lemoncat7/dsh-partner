@@ -187,7 +187,7 @@ export class PartnerMemoryStore {
       reflection = reflectionFromRow(row)
       memories = this.memoriesForScope(database, target.companionId, target.scopeId).filter(item => item.status === 'active')
       const byId = new Map(memories.map(memory => [memory.id, memory]))
-      existingRelations = (database.prepare('SELECT * FROM memory_relations WHERE companion_id = ? AND scope_id = ? ORDER BY confidence DESC, updated_at DESC')
+      existingRelations = (database.prepare('SELECT * FROM memory_relations WHERE companion_id = ? AND scope_id = ? ORDER BY updated_at DESC, confidence DESC')
         .all(target.companionId, target.scopeId) as SqlRow[]).map(relationFromRow).flatMap(relation => {
           const source = byId.get(relation.sourceMemoryId); const destination = byId.get(relation.targetMemoryId)
           return source && destination ? [{ ...relation, sourceSubject: source.subject, sourceKind: source.kind, targetSubject: destination.subject, targetKind: destination.kind }] : []
