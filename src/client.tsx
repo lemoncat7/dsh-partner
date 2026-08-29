@@ -16,6 +16,7 @@ import cssText from './client.css'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot, type UserProfileSnapshotView } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
+import { GlassSurface } from './glass-surface.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
@@ -143,7 +144,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
     try { setError(undefined); await controller.renewSession(routeId) }
     catch (reason) { setError(message(reason)) }
   }
-  return <main className="dsh-partner-workspace" data-xiaohei-surface="plugin-workspace">
+  return <main className="dsh-partner-workspace">
     <header className="dsh-partner-topbar"><div><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div></header>
     <div className="dsh-partner-grid">
       <aside className="dsh-partner-roster">
@@ -194,7 +195,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
       <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份已经就绪，连接微信后即可开始持续工作。'}</p>
     </header>
 
-    <section className={`dsh-partner-home-channel${online ? ' is-online' : ''}`}>
+    <GlassSurface as="section" className={`dsh-partner-home-channel${online ? ' is-online' : ''}`} borderRadius={20} distortionScale={-16} saturation={1.08}>
       <div className="dsh-partner-home-route" aria-hidden="true">
         <Avatar name={companion.name} />
         <span className="dsh-partner-route-line"><i /></span>
@@ -209,7 +210,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
           <span>{!channel ? '扫码完成，无需粘贴 Token' : `${approved} 位联系人 · ${sessions.length} 个独立会话`}</span>
         </div>
       </div>
-    </section>
+    </GlassSurface>
 
     <div className="dsh-partner-home-details">
       <section className="dsh-partner-home-profile">
