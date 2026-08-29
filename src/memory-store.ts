@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryEvidence, MemoryKind, MemoryRelation, MemoryRelationKind, MemoryStatus, PartnerMemory } from './memory-domain.js'
+import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
+import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[] }
@@ -60,6 +61,50 @@ export class PartnerMemoryStore {
       return rows.map(memoryFromRow).map(item => ({ item, score: recallScore(item, terms, now) }))
         .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
         .slice(0, limit).map(entry => entry.item)
+    } finally { database.close() }
+  }
+
+  async recallContext(companionId: string, scopeId: string, query: string, limit = 12): Promise<MemoryRecallContext> {
+    const database = await this.open(companionId)
+    try {
+      const now = Date.now()
+      const memories = (database.prepare(`SELECT * FROM memories
+        WHERE companion_id = ? AND scope_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
+        ORDER BY updated_at DESC`).all(companionId, scopeId, now) as SqlRow[]).map(memoryFromRow)
+      const profile = buildProfileSnapshot(companionId, scopeId, memories)
+      const baselineIds = new Set(profile.entries.map(entry => entry.id))
+      const terms = tokenize(query)
+      const relevant = memories
+        .filter(item => !baselineIds.has(item.id) && (item.kind !== 'profile' || isProfileBaselineEntry(item)))
+        .map(item => ({ item, score: recallScore(item, terms, now) }))
+        .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
+        .slice(0, limit)
+        .map(entry => entry.item)
+      return { profile, relevant }
+    } finally { database.close() }
+  }
+
+  async profileSnapshot(companionId: string, scopeId: string): Promise<UserProfileSnapshot> {
+    const database = await this.open(companionId)
+    try {
+      const rows = database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND scope_id = ?
+        AND kind = 'profile' AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
+        ORDER BY updated_at DESC`).all(companionId, scopeId, Date.now()) as SqlRow[]
+      return buildProfileSnapshot(companionId, scopeId, rows.map(memoryFromRow))
+    } finally { database.close() }
+  }
+
+  async profileSnapshots(companionId: string, knownScopeIds: string[] = []): Promise<UserProfileSnapshot[]> {
+    const database = await this.open(companionId)
+    try {
+      const rows = (database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND kind = 'profile'
+        AND status = 'active' AND (expires_at IS NULL OR expires_at > ?) ORDER BY updated_at DESC`)
+        .all(companionId, Date.now()) as SqlRow[]).map(memoryFromRow)
+      const grouped = new Map<string, PartnerMemory[]>()
+      for (const memory of rows) grouped.set(memory.scopeId, [...(grouped.get(memory.scopeId) ?? []), memory])
+      for (const scopeId of knownScopeIds) if (!grouped.has(scopeId)) grouped.set(scopeId, [])
+      return [...grouped].map(([scopeId, memories]) => buildProfileSnapshot(companionId, scopeId, memories))
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     } finally { database.close() }
   }
 
@@ -371,7 +416,9 @@ export class PartnerMemoryStore {
 function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[], turn: ConversationTurn): PartnerMemory[] {
   const memories = existing.map(item => ({ ...item, evidence: [...item.evidence] }))
   for (const candidate of candidates.slice(0, 12)) {
-    const match = memories.find(item => item.kind === candidate.kind && normalize(item.subject) === normalize(candidate.subject) && item.status !== 'superseded')
+    const subject = candidate.kind === 'profile' ? canonicalProfileSubject(candidate.subject) ?? candidate.subject : candidate.subject
+    const match = memories.find(item => item.kind === candidate.kind && sameMemorySubject(item, candidate.kind, subject) && item.status !== 'superseded')
+    if (match?.locked) continue
     if (candidate.operation === 'remove') { if (match) { match.status = 'superseded'; match.updatedAt = turn.at }; continue }
     if (candidate.operation === 'complete') { if (match) { match.status = 'completed'; match.updatedAt = turn.at }; continue }
     const evidence = { turnId: turn.id, at: turn.at, excerpt: compact(turn.user, 300) }
@@ -382,12 +429,19 @@ function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[],
       if (candidate.expiresInDays) match.expiresAt = turn.at + candidate.expiresInDays * 86_400_000
     } else memories.push({
       id: `memory-${randomUUID()}`, companionId: turn.companionId, scopeId: turn.scopeId, kind: candidate.kind,
-      subject: compact(candidate.subject, 120), content: compact(candidate.content, 800), status: 'active',
+      subject: compact(subject, 120), content: compact(candidate.content, 800), status: 'active',
       confidence: bounded(candidate.confidence), importance: bounded(candidate.importance), createdAt: turn.at, updatedAt: turn.at,
       ...(candidate.expiresInDays ? { expiresAt: turn.at + candidate.expiresInDays * 86_400_000 } : {}), evidence: [evidence],
     })
   }
   return memories
+}
+
+function sameMemorySubject(memory: PartnerMemory, kind: MemoryKind, subject: string): boolean {
+  if (kind !== 'profile') return normalize(memory.subject) === normalize(subject)
+  const existing = canonicalProfileSubject(memory.subject)
+  const candidate = canonicalProfileSubject(subject)
+  return existing !== undefined && candidate !== undefined ? existing === candidate : normalize(memory.subject) === normalize(subject)
 }
 
 function memoryFromRow(row: SqlRow): PartnerMemory {

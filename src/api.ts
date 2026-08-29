@@ -7,7 +7,7 @@ import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { ChannelManager, requiredCompanion } from './channels/manager.js'
 import { WeixinLoginManager } from './channels/weixin/login.js'
-import { PartnerAgentRuntime } from './agent-runtime.js'
+import { memoryScope, PartnerAgentRuntime } from './agent-runtime.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { HeartbeatScheduler } from './heartbeat.js'
 import { DailyReviewScheduler } from './daily-review.js'
@@ -108,9 +108,22 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && segments[2] === 'memory') {
       requiredCompanion(runtime.store, id)
-      if (method === 'GET' && segments.length === 3) return sendJson(res, 200, {
-        memories: await runtime.memory.recentMemories(id, 100), reflections: await runtime.memory.recentReflections(id, 30),
-      })
+      if (method === 'GET' && segments.length === 3) {
+        const state = runtime.store.snapshot()
+        const routes = state.sessions.filter(item => item.companionId === id)
+        const scopes = routes.map(item => memoryScope(item.channelId, item.userId))
+        const [memories, reflections, profiles] = await Promise.all([
+          runtime.memory.recentMemories(id, 100), runtime.memory.recentReflections(id, 30), runtime.memory.profileSnapshots(id, scopes),
+        ])
+        return sendJson(res, 200, {
+          memories, reflections,
+          profiles: profiles.map(profile => {
+            const route = routes.find(item => memoryScope(item.channelId, item.userId) === profile.scopeId)
+            const pairing = route && state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
+            return { ...profile, label: pairing?.displayName || route?.userId || '历史联系人' }
+          }),
+        })
+      }
       const memoryId = segments[3]
       if (method === 'PUT' && memoryId !== undefined && segments.length === 4) {
         mutation(req)

@@ -28,7 +28,9 @@ export interface HeartbeatStateView {
   sentDay: string; sentCount: number; consecutiveFailures: number; lastError?: string
 }
 export type MemoryKindView = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
-export interface MemoryView { id: string; kind: MemoryKindView; subject: string; content: string; status: 'active' | 'completed' | 'superseded' | 'expired'; confidence: number; importance: number; updatedAt: number; locked?: boolean }
+export interface MemoryEvidenceView { turnId: string; at: number; excerpt: string }
+export interface MemoryView { id: string; scopeId: string; kind: MemoryKindView; subject: string; content: string; status: 'active' | 'completed' | 'superseded' | 'expired'; confidence: number; importance: number; updatedAt: number; locked?: boolean; evidence: MemoryEvidenceView[] }
+export interface UserProfileSnapshotView { scopeId: string; label: string; version: string; updatedAt?: number; entries: MemoryView[]; evidenceCount: number; lockedCount: number }
 export interface MemoryRelationView { id: string; sourceMemoryId: string; targetMemoryId: string; kind: 'supports' | 'depends_on' | 'about' | 'conflicts_with' | 'follows'; label: string; confidence: number; updatedAt: number }
 export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRelationView[] }
 export interface DailyReflectionView { date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }

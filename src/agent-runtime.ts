@@ -16,6 +16,7 @@ import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
+import type { UserProfileSnapshot } from './memory-domain.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
 import { concernObservationPrompt } from './autonomy.js'
 import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
@@ -92,6 +93,7 @@ export class PartnerAgentRuntime {
   private readonly heartbeatQueues = new Map<string, Promise<HeartbeatExecution>>()
   private readonly steeringQueues = new Map<string, Promise<void>>()
   private readonly workspaces = new Map<string, Promise<Workspace>>()
+  private readonly profileVersions = new Map<string, string>()
 
   constructor(
     private readonly ctx: RuntimeContext,
@@ -126,7 +128,9 @@ export class PartnerAgentRuntime {
     const agent = this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId)
     if (agent === undefined || agent.status !== 'running') return false
     const inbound = await this.persistInbound(route, message)
-    const recalled = await this.memory?.recall(companion.id, memoryScope(channelId, userId), inbound.query, 12).catch(() => [])
+    const context = await this.memory?.recallContext(companion.id, memoryScope(channelId, userId), inbound.query, 12).catch(() => undefined)
+    if (context) this.injectProfileUpdate(agent, route.sessionId, context.profile)
+    const recalled = context?.relevant ?? []
     if (recalled && recalled.length > 0) agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderMemory(recalled) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴为插话召回了相关长期记忆' },
@@ -353,6 +357,7 @@ export class PartnerAgentRuntime {
     await Promise.all(sessions.map(async item => {
       const handle = this.handles.get(item.sessionId)
       this.handles.delete(item.sessionId)
+      this.profileVersions.delete(item.sessionId)
       await handle?.dispose().catch(() => {})
     }))
   }
@@ -362,6 +367,7 @@ export class PartnerAgentRuntime {
     await Promise.all(sessions.map(async item => {
       const handle = this.handles.get(item.sessionId)
       this.handles.delete(item.sessionId)
+      this.profileVersions.delete(item.sessionId)
       await handle?.dispose().catch(() => {})
     }))
     await this.store.update(state => { state.sessions = state.sessions.filter(item => item.channelId !== channelId) })
@@ -370,6 +376,7 @@ export class PartnerAgentRuntime {
   async close(): Promise<void> {
     await Promise.all([...this.handles.values()].map(handle => handle.dispose().catch(() => {})))
     this.handles.clear()
+    this.profileVersions.clear()
     this.heartbeatQueues.clear()
     this.steeringQueues.clear()
   }
@@ -379,7 +386,9 @@ export class PartnerAgentRuntime {
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
     const inbound = await this.persistInbound(session, message)
-    const recalled = await this.memory?.recall(companion.id, memoryScope(channelId, userId), inbound.query, 12).catch(() => [])
+    const context = await this.memory?.recallContext(companion.id, memoryScope(channelId, userId), inbound.query, 12).catch(() => undefined)
+    if (context) this.injectProfileUpdate(agent, session.sessionId, context.profile)
+    const recalled = context?.relevant ?? []
     if (recalled && recalled.length > 0) agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderMemory(recalled) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴回忆了与当前消息相关的长期记忆' },
@@ -452,14 +461,17 @@ export class PartnerAgentRuntime {
   private async ensureAgent(companion: Companion, route: ChannelSession): Promise<Agent> {
     const cwd = route.cwd ?? this.defaultCwd
     await mkdir(cwd, { recursive: true, mode: 0o700 })
+    const profile = await this.memory?.profileSnapshot(companion.id, memoryScope(route.channelId, route.userId)).catch(() => undefined)
     const held = this.handles.get(route.sessionId)
     if (held !== undefined) {
       await this.attachSession(companion, route)
+      if (profile) this.injectProfileUpdate(held.agent, route.sessionId, profile)
       return held.agent
     }
     const live = this.ctx.agents.get(route.sessionId as SessionId)
     if (live !== undefined) {
       await this.attachSession(companion, route)
+      if (profile) this.injectProfileUpdate(live, route.sessionId, profile)
       return live
     }
     const options = resolveAgentOptions(this.ctx.agentDefaultModel, companion)
@@ -467,7 +479,6 @@ export class PartnerAgentRuntime {
       const presets = agentCtx.get('agentPresets') as AgentPresets | undefined
       if (presets === undefined) throw new Error('伙伴会话缺少 Agent Presets 服务')
       await presets.mount(agentCtx, companion.presetId)
-      const memory = await this.memory?.recall(companion.id, memoryScope(route.channelId, route.userId), '', 12).catch(() => [])
       agentCtx.systemPrompt.section({
         name: 'partner-identity',
         order: -10,
@@ -478,10 +489,10 @@ export class PartnerAgentRuntime {
         order: -9,
         text: renderToolProtocol(),
       })
-      if (memory && memory.length > 0) agentCtx.systemPrompt.section({
-        name: 'partner-long-term-memory',
+      if (profile && profile.entries.length > 0) agentCtx.systemPrompt.section({
+        name: 'partner-user-profile',
         order: -8,
-        text: renderMemory(memory),
+        text: renderProfile(profile),
       })
     }
     let handle: AgentHandle
@@ -503,8 +514,20 @@ export class PartnerAgentRuntime {
       })
     }
     this.handles.set(route.sessionId, handle)
+    if (profile) this.profileVersions.set(route.sessionId, profile.version)
     await this.attachSession(companion, route)
     return handle.agent
+  }
+
+  private injectProfileUpdate(agent: Agent, sessionId: string, profile: UserProfileSnapshot): void {
+    const previous = this.profileVersions.get(sessionId)
+    if (previous === profile.version) return
+    this.profileVersions.set(sessionId, profile.version)
+    if (previous === undefined && profile.entries.length === 0) return
+    agent.inject(createUserMessage({
+      content: [{ type: 'text', text: renderProfile(profile, previous !== undefined) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: previous === undefined ? '伙伴载入了联系人画像' : '伙伴的人物画像已更新' },
+    }))
   }
 
   private async attachSession(companion: Companion, route: ChannelSession): Promise<void> {
@@ -587,6 +610,18 @@ function renderMemory(entries: NonNullable<Awaited<ReturnType<PartnerMemoryStore
   return [
     '以下是系统按当前话题召回的结构化长期记忆。仅在相关时使用；不得扩写成记忆中没有的事实。',
     ...entries.map(entry => `- [${entry.kind}｜置信度 ${entry.confidence.toFixed(2)}] ${entry.subject}：${entry.content}`),
+  ].join('\n')
+}
+
+function renderProfile(profile: UserProfileSnapshot, update = false): string {
+  const heading = update
+    ? '联系人画像已发生变化。以下快照替代本会话中更早的人物画像；被删除或纠正的旧理解不得继续使用。'
+    : '以下是伙伴依据长期对话形成的联系人画像基线。它用于理解用户背景和保持交流连续性，不是需要逐条复述给用户的资料。'
+  if (profile.entries.length === 0) return `${heading}\n当前没有达到可靠标准的人物画像；不要沿用旧画像或自行推断。`
+  return [
+    heading,
+    '仅把明确内容作为事实；当前消息与画像冲突时以用户最新陈述为准。不得据此推断未写出的性格、隐私或敏感属性。',
+    ...profile.entries.map(entry => `- ${entry.subject}：${auditText(entry.content, 240)}${entry.locked ? '（用户已确认）' : ''}`),
   ].join('\n')
 }
 

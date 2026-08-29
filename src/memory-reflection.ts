@@ -6,6 +6,7 @@ import { concernSubjectSimilarity, extractConcernResources, type ConcernCandidat
 import type { ConversationTurn, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryKind, MemoryRelationKind, ReflectionResult } from './memory-domain.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
+import { canonicalProfileSubject } from './profile-domain.js'
 
 type ReflectionContext = Context & { llm: Context['llm']; agentDefaultModel: AgentDefaultModelConfig }
 
@@ -111,14 +112,16 @@ const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答�
 1. 不把寒暄、模型猜测、助手自述当成用户事实；没有长期价值时 memories 返回空数组。
 2. 偏好必须保留适用场景和例外；任务只记录用户明确提出或双方明确承诺的事项。
 3. emotion 只是短期信号，必须设置 1-7 天过期，不做心理诊断。
-4. 与已有记忆同主题时沿用 subject；用户纠正旧理解时用 upsert 更新，撤销时 remove，任务完成时 complete。
-5. concerns 只表示尚未闭环且值得伙伴继续惦记的具体事情，例如持续未解决、临时方案、等待外部结果、反复不满意或用户明确要求留意；长期身份、普通偏好、宽泛兴趣和已经完成的事项不能成为挂念。
-6. 用户说“继续留意、很重要、已经解决、不用管了”时，应对同一 subject 分别 upsert、提高 priority、resolve 或 dismiss。watchKind 按变化来源选择，不能把本地项目问题默认标为 web。
-7. daily 应综合已有当日日记与新对话，不能只复述最后一句。数组每类最多 20 条，记忆候选最多 12 条。`
+4. profile 表示伙伴从用户明确陈述中形成的长期人物理解，只能使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个 subject。普通喜好归 preference，临时任务、情绪和事件不得写入画像。
+5. 不根据语气或单次行为推断职业、性格、健康、财务、政治、宗教、亲密关系等敏感或隐私事实。profile 必须有明确用户证据；不确定时不要输出。建议 confidence 至少 0.72、importance 至少 0.55。
+6. 与已有记忆同主题时沿用 subject；用户纠正旧理解时用 upsert 替换，撤销时 remove，任务完成时 complete。不得用相近措辞创建第二条同槽位画像。
+7. concerns 只表示尚未闭环且值得伙伴继续惦记的具体事情，例如持续未解决、临时方案、等待外部结果、反复不满意或用户明确要求留意；长期身份、普通偏好、宽泛兴趣和已经完成的事项不能成为挂念。
+8. 用户说“继续留意、很重要、已经解决、不用管了”时，应对同一 subject 分别 upsert、提高 priority、resolve 或 dismiss。watchKind 按变化来源选择，不能把本地项目问题默认标为 web。
+9. daily 应综合已有当日日记与新对话，不能只复述最后一句。数组每类最多 20 条，记忆候选最多 12 条。`
 
 const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天完整对话、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
 只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","targetSubject":"必须等于已有或候选记忆主题","kind":"supports|depends_on|about|conflicts_with|follows","label":"简短关系说明","confidence":0.0}]}
-要求：合并重复理解；以完整对话纠正逐轮偏差；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；关系必须有证据且最多 80 条；无可靠内容时对应数组返回空数组。`
+要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；以完整对话纠正逐轮偏差；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；关系必须有证据且最多 80 条；无可靠内容时对应数组返回空数组。`
 
 function reflectionInput(date: string, turn: ConversationTurn, memories: unknown[], diary: unknown, concerns: unknown[]): string {
   return JSON.stringify({ date, existingDailyReflection: diary ?? null, existingRelevantMemories: memories, existingConcerns: concerns, newTurn: { id: turn.id, user: turn.user, assistant: turn.assistant } })
@@ -183,7 +186,8 @@ function parseCandidate(value: unknown): MemoryCandidate | undefined {
   const kind = item.kind
   const operation = item.operation
   if (!isKind(kind) || (operation !== 'upsert' && operation !== 'complete' && operation !== 'remove')) return undefined
-  const subject = string(item.subject, 120)
+  const rawSubject = string(item.subject, 120)
+  const subject = kind === 'profile' ? canonicalProfileSubject(rawSubject) : rawSubject
   const content = string(item.content, 800)
   if (!subject || (operation === 'upsert' && !content)) return undefined
   const candidate: MemoryCandidate = {

@@ -37,6 +37,21 @@ export interface PartnerMemory {
   evidence: MemoryEvidence[]
 }
 
+export interface UserProfileSnapshot {
+  companionId: string
+  scopeId: string
+  version: string
+  updatedAt?: number
+  entries: PartnerMemory[]
+  evidenceCount: number
+  lockedCount: number
+}
+
+export interface MemoryRecallContext {
+  profile: UserProfileSnapshot
+  relevant: PartnerMemory[]
+}
+
 export interface DailyReflection {
   date: string
   companionId: string
