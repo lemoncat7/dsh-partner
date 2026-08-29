@@ -120,8 +120,8 @@ const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答�
 9. daily 应综合已有当日日记与新对话，不能只复述最后一句。数组每类最多 20 条，记忆候选最多 12 条。`
 
 const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天完整对话、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
-只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","targetSubject":"必须等于已有或候选记忆主题","kind":"supports|depends_on|about|conflicts_with|follows","label":"简短关系说明","confidence":0.0}]}
-要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；以完整对话纠正逐轮偏差；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；关系必须有证据且最多 80 条；无可靠内容时对应数组返回空数组。`
+只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","sourceKind":"profile|preference|task|event|relationship|emotion","targetSubject":"必须等于已有或候选记忆主题","targetKind":"同上","kind":"supports|depends_on|about|conflicts_with|follows","label":"有证据的简短关系说明","confidence":0.0,"operation":"upsert|remove"}]}
+要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；以完整对话纠正逐轮偏差；明确任务完成状态；复核并关闭已经完成或失效的挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
 
 function reflectionInput(date: string, turn: ConversationTurn, memories: unknown[], diary: unknown, concerns: unknown[]): string {
   return JSON.stringify({ date, existingDailyReflection: diary ?? null, existingRelevantMemories: memories, existingConcerns: concerns, newTurn: { id: turn.id, user: turn.user, assistant: turn.assistant } })
@@ -172,9 +172,12 @@ export function parseDailyReview(raw: string): DailyReviewResult {
   const relations = Array.isArray(value.relations) ? value.relations.flatMap(item => {
     const relation = record(item); const kind = relation.kind
     if (!isRelationKind(kind)) return []
-    const sourceSubject = string(relation.sourceSubject, 120); const targetSubject = string(relation.targetSubject, 120)
-    if (!sourceSubject || !targetSubject) return []
-    return [{ sourceSubject, targetSubject, kind, label: string(relation.label, 120), confidence: number(relation.confidence) }]
+    const sourceSubject = string(relation.sourceSubject, 120); const targetSubject = string(relation.targetSubject, 120); const label = string(relation.label, 120)
+    const operation: 'upsert' | 'remove' = relation.operation === 'remove' ? 'remove' : 'upsert'
+    if (!sourceSubject || !targetSubject || (operation === 'upsert' && !label)) return []
+    const sourceKind = isKind(relation.sourceKind) ? relation.sourceKind : undefined
+    const targetKind = isKind(relation.targetKind) ? relation.targetKind : undefined
+    return [{ sourceSubject, ...(sourceKind ? { sourceKind } : {}), targetSubject, ...(targetKind ? { targetKind } : {}), kind, label, confidence: number(relation.confidence), operation }]
   }).slice(0, 80) : []
   return { ...base, relations }
 }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
+import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryContextConnection, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryRelationReviewContext, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
 import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
@@ -74,13 +74,12 @@ export class PartnerMemoryStore {
       const profile = buildProfileSnapshot(companionId, scopeId, memories)
       const baselineIds = new Set(profile.entries.map(entry => entry.id))
       const terms = tokenize(query)
-      const relevant = memories
+      const scored = memories
         .filter(item => !baselineIds.has(item.id) && (item.kind !== 'profile' || isProfileBaselineEntry(item)))
         .map(item => ({ item, score: recallScore(item, terms, now) }))
         .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
-        .slice(0, limit)
-        .map(entry => entry.item)
-      return { profile, relevant }
+      const recall = expandRecallWithRelations(database, companionId, scopeId, memories, scored.map(entry => entry.item), baselineIds, limit)
+      return { profile, ...recall }
     } finally { database.close() }
   }
 
@@ -177,21 +176,28 @@ export class PartnerMemoryStore {
     } finally { database.close() }
   }
 
-  async dailyReviewContext(target: DailyReviewTarget): Promise<{ reflection: DailyReflection; memories: PartnerMemory[]; turns: ConversationTurn[] }> {
+  async dailyReviewContext(target: DailyReviewTarget): Promise<{ reflection: DailyReflection; memories: PartnerMemory[]; existingRelations: MemoryRelationReviewContext[]; turns: ConversationTurn[] }> {
     const database = await this.open(target.companionId)
     let reflection: DailyReflection
     let memories: PartnerMemory[]
+    let existingRelations: MemoryRelationReviewContext[]
     try {
       const row = database.prepare('SELECT * FROM daily_reflections WHERE scope_id = ? AND date = ?').get(target.scopeId, target.date) as SqlRow | undefined
       if (!row) throw new Error('daily reflection was not found')
       reflection = reflectionFromRow(row)
       memories = this.memoriesForScope(database, target.companionId, target.scopeId).filter(item => item.status === 'active')
+      const byId = new Map(memories.map(memory => [memory.id, memory]))
+      existingRelations = (database.prepare('SELECT * FROM memory_relations WHERE companion_id = ? AND scope_id = ? ORDER BY confidence DESC, updated_at DESC')
+        .all(target.companionId, target.scopeId) as SqlRow[]).map(relationFromRow).flatMap(relation => {
+          const source = byId.get(relation.sourceMemoryId); const destination = byId.get(relation.targetMemoryId)
+          return source && destination ? [{ ...relation, sourceSubject: source.subject, sourceKind: source.kind, targetSubject: destination.subject, targetKind: destination.kind }] : []
+        })
     } finally { database.close() }
     const path = join(this.scopeDirectory(target.companionId, target.scopeId), 'conversations', `${target.date}.jsonl`)
     const turns = (await readFile(path, 'utf8').catch(error => missing(error) ? '' : Promise.reject(error))).split('\n').filter(Boolean).flatMap(line => {
       try { return [JSON.parse(line) as ConversationTurn] } catch { return [] }
     })
-    return { reflection, memories, turns }
+    return { reflection, memories, existingRelations, turns }
   }
 
   async completeDailyReview(target: DailyReviewTarget, result: DailyReviewResult): Promise<void> {
@@ -209,16 +215,39 @@ export class PartnerMemoryStore {
           WHERE scope_id=? AND date=?`).run(compact(result.daily.summary, 1200), json(strings(result.daily.events, 20, 240)),
           json(strings(result.daily.openTasks, 20, 240)), json(strings(result.daily.completedTasks, 20, 240)),
           json(strings(result.daily.learnings, 20, 240)), at, at, target.scopeId, target.date)
-        const bySubject = new Map(merged.filter(item => item.status === 'active').map(item => [normalize(item.subject), item]))
-        database.prepare('DELETE FROM memory_relations WHERE companion_id=? AND scope_id=?').run(target.companionId, target.scopeId)
+        const active = merged.filter(item => item.status === 'active')
+        const activeIds = new Set(active.map(memory => memory.id))
+        const existingRelations = (database.prepare('SELECT * FROM memory_relations WHERE companion_id=? AND scope_id=?')
+          .all(target.companionId, target.scopeId) as SqlRow[]).map(relationFromRow)
+        const removeRelation = database.prepare('DELETE FROM memory_relations WHERE id = ?')
+        const byKey = new Map<string, MemoryRelation>()
+        for (const relation of existingRelations) {
+          if (!activeIds.has(relation.sourceMemoryId) || !activeIds.has(relation.targetMemoryId)) { removeRelation.run(relation.id); continue }
+          byKey.set(memoryRelationKey(relation.kind, relation.sourceMemoryId, relation.targetMemoryId), relation)
+        }
         const insert = database.prepare(`INSERT INTO memory_relations
           (id, companion_id, scope_id, source_memory_id, target_memory_id, kind, label, confidence, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        const update = database.prepare('UPDATE memory_relations SET label = ?, confidence = ?, updated_at = ? WHERE id = ?')
         for (const relation of result.relations.slice(0, 80)) {
-          const source = bySubject.get(normalize(relation.sourceSubject)); const destination = bySubject.get(normalize(relation.targetSubject))
+          const source = relationEndpoint(active, relation.sourceSubject, relation.sourceKind)
+          const destination = relationEndpoint(active, relation.targetSubject, relation.targetKind)
           if (!source || !destination || source.id === destination.id) continue
-          insert.run(`relation-${randomUUID()}`, target.companionId, target.scopeId, source.id, destination.id,
-            relation.kind, compact(relation.label, 120), bounded(relation.confidence), at)
+          const key = memoryRelationKey(relation.kind, source.id, destination.id)
+          const current = byKey.get(key)
+          if (relation.operation === 'remove') {
+            if (current) { removeRelation.run(current.id); byKey.delete(key) }
+            continue
+          }
+          if (relation.confidence < .62) continue
+          if (current) update.run(compact(relation.label, 120), bounded(relation.confidence), at, current.id)
+          else {
+            const id = `relation-${randomUUID()}`
+            insert.run(id, target.companionId, target.scopeId, source.id, destination.id,
+              relation.kind, compact(relation.label, 120), bounded(relation.confidence), at)
+            byKey.set(key, { id, companionId: target.companionId, scopeId: target.scopeId, sourceMemoryId: source.id,
+              targetMemoryId: destination.id, kind: relation.kind, label: relation.label, confidence: bounded(relation.confidence), updatedAt: at })
+          }
         }
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
@@ -442,6 +471,58 @@ function sameMemorySubject(memory: PartnerMemory, kind: MemoryKind, subject: str
   const existing = canonicalProfileSubject(memory.subject)
   const candidate = canonicalProfileSubject(subject)
   return existing !== undefined && candidate !== undefined ? existing === candidate : normalize(memory.subject) === normalize(subject)
+}
+
+function relationEndpoint(memories: PartnerMemory[], subject: string, kind?: MemoryKind): PartnerMemory | undefined {
+  const matches = memories.filter(memory => normalize(memory.subject) === normalize(subject) && (kind === undefined || memory.kind === kind))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function memoryRelationKey(kind: MemoryRelationKind, sourceId: string, targetId: string): string {
+  const endpoints = kind === 'conflicts_with' ? [sourceId, targetId].sort() : [sourceId, targetId]
+  return `${kind}:${endpoints.join(':')}`
+}
+
+function expandRecallWithRelations(
+  database: DatabaseSync,
+  companionId: string,
+  scopeId: string,
+  memories: PartnerMemory[],
+  scored: PartnerMemory[],
+  baselineIds: Set<string>,
+  limit: number,
+): Pick<MemoryRecallContext, 'relevant' | 'connections'> {
+  const seeds = scored.slice(0, Math.min(limit, 8))
+  const selected = new Map(seeds.map(memory => [memory.id, memory]))
+  const seedIds = new Set(selected.keys())
+  const connections: MemoryContextConnection[] = []
+  if (seedIds.size > 0) {
+    const placeholders = [...seedIds].map(() => '?').join(',')
+    const byId = new Map(memories.map(memory => [memory.id, memory]))
+    const relations = (database.prepare(`SELECT * FROM memory_relations
+      WHERE companion_id = ? AND scope_id = ? AND confidence >= .68
+        AND (source_memory_id IN (${placeholders}) OR target_memory_id IN (${placeholders}))
+      ORDER BY confidence DESC, updated_at DESC LIMIT 24`).all(
+        companionId, scopeId, ...seedIds, ...seedIds,
+      ) as SqlRow[]).map(relationFromRow)
+    for (const relation of relations) {
+      const source = byId.get(relation.sourceMemoryId); const target = byId.get(relation.targetMemoryId)
+      if (!source || !target) continue
+      const sourceIsSeed = seedIds.has(source.id); const targetIsSeed = seedIds.has(target.id)
+      if (!sourceIsSeed && !targetIsSeed) continue
+      const neighbor = sourceIsSeed ? target : source
+      if (!baselineIds.has(neighbor.id) && !selected.has(neighbor.id) && selected.size < limit
+        && (neighbor.kind !== 'profile' || isProfileBaselineEntry(neighbor))) selected.set(neighbor.id, neighbor)
+      const sourceVisible = baselineIds.has(source.id) || selected.has(source.id)
+      const targetVisible = baselineIds.has(target.id) || selected.has(target.id)
+      if (sourceVisible && targetVisible) connections.push({ relation, source, target })
+    }
+  }
+  for (const memory of scored) {
+    if (selected.size >= limit) break
+    selected.set(memory.id, memory)
+  }
+  return { relevant: [...selected.values()], connections }
 }
 
 function memoryFromRow(row: SqlRow): PartnerMemory {

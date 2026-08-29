@@ -64,3 +64,56 @@ test('normalizes automatic profile slots and rejects free-form profile labels', 
   }))
   assert.deepEqual(parsed.memories.map(item => item.subject), ['工作背景'])
 })
+
+test('expands topic recall through a strong one-hop memory relation', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-partner-relation-recall-'))
+  t.after(async () => rm(root, { recursive: true, force: true }))
+  const store = new PartnerMemoryStore(root)
+  const at = Date.parse('2026-08-27T08:00:00Z')
+  const relationTurn = turn('turn-relation', at, '继续部署关系召回')
+  relationTurn.companionId = 'companion-relation'
+  relationTurn.scopeId = 'weixin:contact-a'
+  await store.consolidate(relationTurn, { daily, memories: [
+    memory('task', '部署关系召回', '需要验证关系召回的部署结果。', .96, .92),
+    memory('preference', '发布约束', '正式发布前必须先让用户确认预览。', .7, .08),
+    ...Array.from({ length: 10 }, (_, index) => memory('event', `无关事件 ${index + 1}`, `这是与当前查询无关的高权重记录 ${index + 1}。`, .99, .99)),
+  ] })
+  const [target] = await store.pendingDailyReviews(relationTurn.companionId, '2026-08-27')
+  await store.completeDailyReview(target, { daily, memories: [], concerns: [], relations: [{
+    sourceSubject: '部署关系召回', sourceKind: 'task', targetSubject: '发布约束', targetKind: 'preference',
+    kind: 'depends_on', label: '部署必须遵守发布约束', confidence: .94, operation: 'upsert',
+  }] })
+
+  const context = await store.recallContext(relationTurn.companionId, relationTurn.scopeId, '部署关系召回', 9)
+  assert.equal(context.relevant.some(item => item.subject === '发布约束'), true)
+  assert.equal(context.connections.length, 1)
+  assert.equal(context.connections[0]?.relation.kind, 'depends_on')
+  assert.deepEqual([context.connections[0]?.source.scopeId, context.connections[0]?.target.scopeId], [relationTurn.scopeId, relationTurn.scopeId])
+})
+
+test('keeps conflict connections isolated to their contact scope', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-partner-relation-scope-'))
+  t.after(async () => rm(root, { recursive: true, force: true }))
+  const store = new PartnerMemoryStore(root)
+  const at = Date.parse('2026-08-28T08:00:00Z')
+  const contactA = { ...turn('turn-contact-a', at), companionId: 'companion-scope', scopeId: 'weixin:contact-a' }
+  const contactB = { ...turn('turn-contact-b', at + 1), companionId: 'companion-scope', scopeId: 'weixin:contact-b' }
+  const candidates = [
+    memory('preference', '发布方式', '用户要求先预览再发布。', .9, .8),
+    memory('event', '发布指令', '用户要求直接发布。', .86, .75),
+  ]
+  await store.consolidate(contactA, { daily, memories: candidates })
+  await store.consolidate(contactB, { daily, memories: candidates })
+  const targets = await store.pendingDailyReviews(contactA.companionId, '2026-08-28')
+  const targetA = targets.find(item => item.scopeId === contactA.scopeId)
+  assert.ok(targetA)
+  await store.completeDailyReview(targetA, { daily, memories: [], concerns: [], relations: [{
+    sourceSubject: '发布方式', sourceKind: 'preference', targetSubject: '发布指令', targetKind: 'event',
+    kind: 'conflicts_with', label: '发布时机尚未确认', confidence: .91, operation: 'upsert',
+  }] })
+
+  const contextA = await store.recallContext(contactA.companionId, contactA.scopeId, '发布方式', 8)
+  const contextB = await store.recallContext(contactB.companionId, contactB.scopeId, '发布方式', 8)
+  assert.equal(contextA.connections.some(item => item.relation.kind === 'conflicts_with'), true)
+  assert.deepEqual(contextB.connections, [])
+})

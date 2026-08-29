@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
-import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, parseConcernObservations, partnerCwd, renewedSession, renderHeartbeatActivity, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
+import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, parseConcernObservations, partnerCwd, renewedSession, renderHeartbeatActivity, renderMemory, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { PartnerConcernStore } from '../lib/concern-store.js'
@@ -75,6 +75,16 @@ test('instructs code-mode companions to route SDK tools through run_code', () =>
   assert.match(protocol, /only `run_code` is callable directly/)
   assert.match(protocol, /await tools\.web_search/)
   assert.match(protocol, /立即在同一轮改用 `run_code` 重试/)
+})
+
+test('renders relation evidence and guards conflicting memories from silent merging', () => {
+  const source = { id: 'memory-a', companionId: 'companion-1', scopeId: 'weixin:user', kind: 'preference', subject: '发布方式', content: '先预览再发布', status: 'active', confidence: .9, importance: .8, createdAt: 1, updatedAt: 1, evidence: [] }
+  const target = { ...source, id: 'memory-b', kind: 'event', subject: '发布指令', content: '直接发布' }
+  const relation = { id: 'relation-1', companionId: 'companion-1', scopeId: 'weixin:user', sourceMemoryId: source.id, targetMemoryId: target.id, kind: 'conflicts_with', label: '发布时机尚未确认', confidence: .91, updatedAt: 2 }
+  const prompt = renderMemory([source, target], [{ relation, source, target }])
+  assert.match(prompt, /发布方式 冲突 发布指令/)
+  assert.match(prompt, /不得自行选择一方/)
+  assert.match(prompt, /请用户确认/)
 })
 
 test('frames heartbeat as bounded concern change observation', () => {
@@ -396,7 +406,7 @@ test('migrates structured JSON memory into SQLite exactly once', async () => {
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('finalizes one daily review and persists evidence-backed relations', async () => {
+test('maintains evidence-backed relations incrementally until explicitly removed', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-daily-review-'))
   try {
     const store = new PartnerMemoryStore(directory)
@@ -408,10 +418,21 @@ test('finalizes one daily review and persists evidence-backed relations', async 
     ] })
     const [target] = await store.pendingDailyReviews(turn.companionId, '2026-08-25')
     await store.completeDailyReview(target, { daily: { summary: '确认设计原则并推进主题设计', events: [], openTasks: ['完成主题设计'], completedTasks: [], learnings: ['保持统一'] }, memories: [], concerns: [], relations: [
-      { sourceSubject: '主题设计', targetSubject: '设计原则', kind: 'depends_on', label: '任务遵循设计原则', confidence: .94 },
+      { sourceSubject: '主题设计', sourceKind: 'task', targetSubject: '设计原则', targetKind: 'preference', kind: 'depends_on', label: '任务遵循设计原则', confidence: .94, operation: 'upsert' },
+      { sourceSubject: '主题设计', sourceKind: 'task', targetSubject: '设计原则', targetKind: 'preference', kind: 'depends_on', label: '重复关系', confidence: .93, operation: 'upsert' },
+      { sourceSubject: '设计原则', sourceKind: 'preference', targetSubject: '主题设计', targetKind: 'task', kind: 'supports', label: '置信度不足', confidence: .61, operation: 'upsert' },
     ] })
     assert.deepEqual(await store.pendingDailyReviews(turn.companionId, '2026-08-25'), [])
-    assert.equal((await store.relations(turn.companionId)).relations[0]?.kind, 'depends_on')
+    const relations = (await store.relations(turn.companionId)).relations
+    assert.equal(relations.length, 1)
+    assert.equal(relations[0]?.kind, 'depends_on')
+    assert.equal((await store.dailyReviewContext(target)).existingRelations.length, 1)
+    await store.completeDailyReview(target, { daily: { summary: '关系没有变化', events: [], openTasks: [], completedTasks: [], learnings: [] }, memories: [], concerns: [], relations: [] })
+    assert.equal((await store.relations(turn.companionId)).relations.length, 1)
+    await store.completeDailyReview(target, { daily: { summary: '关系已经失效', events: [], openTasks: [], completedTasks: [], learnings: [] }, memories: [], concerns: [], relations: [
+      { sourceSubject: '主题设计', sourceKind: 'task', targetSubject: '设计原则', targetKind: 'preference', kind: 'depends_on', label: '', confidence: 1, operation: 'remove' },
+    ] })
+    assert.equal((await store.relations(turn.companionId)).relations.length, 0)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -428,11 +449,17 @@ test('validates structured reflection concerns and bounded emotion lifetime', ()
 
 test('validates daily review relation output', () => {
   const result = parseDailyReview(JSON.stringify({ daily: { summary: '终审', events: [], openTasks: [], completedTasks: [], learnings: [] }, memories: [], concerns: [], relations: [
-    { sourceSubject: '主题设计', targetSubject: '设计原则', kind: 'depends_on', label: '遵循', confidence: 1.4 },
+    { sourceSubject: '主题设计', sourceKind: 'task', targetSubject: '设计原则', targetKind: 'preference', kind: 'depends_on', label: '遵循', confidence: 1.4 },
+    { sourceSubject: '旧任务', sourceKind: 'task', targetSubject: '旧约束', targetKind: 'preference', kind: 'depends_on', label: '', confidence: .5, operation: 'remove' },
+    { sourceSubject: '主题设计', targetSubject: '设计原则', kind: 'depends_on', label: '', confidence: .9 },
     { sourceSubject: '无效', targetSubject: '关系', kind: 'invented', label: '', confidence: 1 },
   ] }))
-  assert.equal(result.relations.length, 1)
+  assert.equal(result.relations.length, 2)
   assert.equal(result.relations[0].confidence, 1)
+  assert.equal(result.relations[0].sourceKind, 'task')
+  assert.equal(result.relations[0].targetKind, 'preference')
+  assert.equal(result.relations[0].operation, 'upsert')
+  assert.equal(result.relations[1].operation, 'remove')
 })
 
 test('stores concerns by scope, deduplicates observations and defers relevant mentions', async () => {

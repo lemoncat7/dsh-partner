@@ -50,6 +50,7 @@ export interface UserProfileSnapshot {
 export interface MemoryRecallContext {
   profile: UserProfileSnapshot
   relevant: PartnerMemory[]
+  connections: MemoryContextConnection[]
 }
 
 export interface DailyReflection {
@@ -94,7 +95,29 @@ export interface MemoryRelation {
   updatedAt: number
 }
 
+export interface MemoryContextConnection {
+  relation: MemoryRelation
+  source: PartnerMemory
+  target: PartnerMemory
+}
+
 export interface DailyReviewTarget { companionId: string; scopeId: string; date: string; attempts: number }
+export interface MemoryRelationCandidate {
+  sourceSubject: string
+  sourceKind?: MemoryKind
+  targetSubject: string
+  targetKind?: MemoryKind
+  kind: MemoryRelationKind
+  label: string
+  confidence: number
+  operation: 'upsert' | 'remove'
+}
+export interface MemoryRelationReviewContext extends MemoryRelation {
+  sourceSubject: string
+  sourceKind: MemoryKind
+  targetSubject: string
+  targetKind: MemoryKind
+}
 export interface DailyReviewResult extends ReflectionResult {
-  relations: Array<{ sourceSubject: string; targetSubject: string; kind: MemoryRelationKind; label: string; confidence: number }>
+  relations: MemoryRelationCandidate[]
 }

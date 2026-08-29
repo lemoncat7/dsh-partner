@@ -16,7 +16,7 @@ import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
-import type { UserProfileSnapshot } from './memory-domain.js'
+import type { MemoryContextConnection, MemoryRelationKind, UserProfileSnapshot } from './memory-domain.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
 import { concernObservationPrompt } from './autonomy.js'
 import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
@@ -132,7 +132,7 @@ export class PartnerAgentRuntime {
     if (context) this.injectProfileUpdate(agent, route.sessionId, context.profile)
     const recalled = context?.relevant ?? []
     if (recalled && recalled.length > 0) agent.inject(createUserMessage({
-      content: [{ type: 'text', text: renderMemory(recalled) }],
+      content: [{ type: 'text', text: renderMemory(recalled, context?.connections) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴为插话召回了相关长期记忆' },
     }))
     const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
@@ -390,7 +390,7 @@ export class PartnerAgentRuntime {
     if (context) this.injectProfileUpdate(agent, session.sessionId, context.profile)
     const recalled = context?.relevant ?? []
     if (recalled && recalled.length > 0) agent.inject(createUserMessage({
-      content: [{ type: 'text', text: renderMemory(recalled) }],
+      content: [{ type: 'text', text: renderMemory(recalled, context?.connections) }],
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴回忆了与当前消息相关的长期记忆' },
     }))
     const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
@@ -606,11 +606,24 @@ export function completedTurnEvents(events: readonly SessionEvent[], end: Extrac
 
 export function memoryScope(channelId: string, userId: string): string { return `${channelId}:${userId}` }
 
-function renderMemory(entries: NonNullable<Awaited<ReturnType<PartnerMemoryStore['recall']>>>): string {
-  return [
+export function renderMemory(entries: NonNullable<Awaited<ReturnType<PartnerMemoryStore['recall']>>>, connections: MemoryContextConnection[] = []): string {
+  const lines = [
     '以下是系统按当前话题召回的结构化长期记忆。仅在相关时使用；不得扩写成记忆中没有的事实。',
     ...entries.map(entry => `- [${entry.kind}｜置信度 ${entry.confidence.toFixed(2)}] ${entry.subject}：${entry.content}`),
-  ].join('\n')
+  ]
+  if (connections.length > 0) lines.push(
+    '',
+    '以下是一跳记忆关系，用于理解依赖、依据和上下文，不代表可以创造新的事实：',
+    ...connections.map(({ relation, source, target }) => `- ${source.subject} ${memoryRelationLabel(relation.kind)} ${target.subject}：${relation.label}（关系置信度 ${relation.confidence.toFixed(2)}）`),
+  )
+  if (connections.some(item => item.relation.kind === 'conflicts_with')) lines.push(
+    '其中存在尚未确认的冲突：不得自行选择一方或把两条合并成事实；仅在与当前问题相关时指出不一致并请用户确认。',
+  )
+  return lines.join('\n')
+}
+
+function memoryRelationLabel(kind: MemoryRelationKind): string {
+  return ({ supports: '支持', depends_on: '依赖', about: '关于', conflicts_with: '冲突', follows: '后续' })[kind]
 }
 
 function renderProfile(profile: UserProfileSnapshot, update = false): string {
