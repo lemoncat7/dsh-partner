@@ -271,9 +271,19 @@ export class PartnerAgentRuntime {
       sessionId: session.id, at: event.time, user: userText, assistant: assistantText,
       ...(concernDirective === undefined ? {} : { concernDirective }),
     })
-    if (created.length > 0) await this.recordConcernCreatedNotice(companion, scopeId, created).catch(error => {
-      this.ctx.logger.warn(`dsh-partner: automatic concern creation notice failed: ${errorMessage(error)}`)
-    })
+    const pendingToolNotices = await this.concerns?.pendingToolCreationNotices(companion.id, scopeId, session.id).catch(() => ({ auditIds: [], concerns: [] }))
+    const notices = uniqueConcerns([...(pendingToolNotices?.concerns ?? []), ...created])
+    if (notices.length > 0) {
+      const delivered = await this.recordConcernCreatedNotice(companion, scopeId, notices).catch(error => {
+        this.ctx.logger.warn(`dsh-partner: automatic concern creation notice failed: ${errorMessage(error)}`)
+        return false
+      })
+      if (delivered && pendingToolNotices && pendingToolNotices.auditIds.length > 0) {
+        await this.concerns?.markCreationAuditsNotified(companion.id, pendingToolNotices.auditIds).catch(error => {
+          this.ctx.logger.warn(`dsh-partner: concern tool notice audit failed: ${errorMessage(error)}`)
+        })
+      }
+    }
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === route.id)
       if (target) target.lastMessageAt = Date.now()
@@ -605,6 +615,15 @@ export function completedTurnEvents(events: readonly SessionEvent[], end: Extrac
 }
 
 export function memoryScope(channelId: string, userId: string): string { return `${channelId}:${userId}` }
+
+function uniqueConcerns(items: PartnerConcern[]): PartnerConcern[] {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  }).slice(0, 4)
+}
 
 export function renderMemory(entries: NonNullable<Awaited<ReturnType<PartnerMemoryStore['recall']>>>, connections: MemoryContextConnection[] = []): string {
   const lines = [

@@ -4,12 +4,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type HTMLAttributes,
   type ReactNode,
 } from 'react'
 
-type GlassElement = 'header' | 'aside' | 'section'
+type GlassElement = 'header' | 'aside' | 'section' | 'article' | 'div' | 'button'
 
-interface GlassSurfaceProps {
+interface GlassSurfaceProps extends Omit<HTMLAttributes<HTMLElement>, 'children' | 'className'> {
   as: GlassElement
   children: ReactNode
   className: string
@@ -18,13 +19,18 @@ interface GlassSurfaceProps {
   brightness?: number
   blur?: number
   distortionScale?: number
+  interactive?: boolean
   opacity?: number
   saturation?: number
+  type?: 'button' | 'submit' | 'reset'
+  disabled?: boolean
 }
 
 interface GlassStyle extends CSSProperties {
   '--partner-glass-filter-id': string
   '--partner-glass-saturation': number
+  '--partner-glare-x': string
+  '--partner-glare-y': string
 }
 
 function supportsSvgBackdropFilter(filterId: string): boolean {
@@ -73,8 +79,10 @@ export function GlassSurface({
   brightness = 50,
   blur = 11,
   distortionScale = -26,
+  interactive = false,
   opacity = .93,
   saturation = 1.16,
+  ...elementProps
 }: GlassSurfaceProps): JSX.Element {
   const uniqueId = useId().replace(/:/g, '-')
   const filterId = `partner-glass-filter-${uniqueId}`
@@ -85,6 +93,8 @@ export function GlassSurface({
   const redRef = useRef<SVGFEDisplacementMapElement>(null)
   const greenRef = useRef<SVGFEDisplacementMapElement>(null)
   const blueRef = useRef<SVGFEDisplacementMapElement>(null)
+  const glareFrameRef = useRef(0)
+  const glarePositionRef = useRef({ x: 50, y: 50 })
   const [svgSupported, setSvgSupported] = useState(false)
 
   useEffect(() => {
@@ -131,15 +141,50 @@ export function GlassSurface({
     channels.forEach((channel, index) => channel?.setAttribute('scale', String(distortionScale + (offsets[index] ?? 0))))
   }, [distortionScale])
 
+  useEffect(() => () => {
+    if (glareFrameRef.current !== 0) cancelAnimationFrame(glareFrameRef.current)
+  }, [])
+
+  const renderGlare = (): void => {
+    glareFrameRef.current = 0
+    const element = containerRef.current
+    if (element === null) return
+    element.style.setProperty('--partner-glare-x', `${glarePositionRef.current.x}%`)
+    element.style.setProperty('--partner-glare-y', `${glarePositionRef.current.y}%`)
+  }
+  const scheduleGlare = (): void => {
+    if (glareFrameRef.current === 0) glareFrameRef.current = requestAnimationFrame(renderGlare)
+  }
+  const moveGlare = (clientX: number, clientY: number): void => {
+    const element = containerRef.current
+    if (!interactive || element === null) return
+    const rect = element.getBoundingClientRect()
+    glarePositionRef.current = {
+      x: Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100)),
+      y: Math.max(0, Math.min(100, (clientY - rect.top) / rect.height * 100)),
+    }
+    scheduleGlare()
+  }
+  const resetGlare = (): void => {
+    if (!interactive) return
+    glarePositionRef.current = { x: 50, y: 50 }
+    scheduleGlare()
+  }
+
   const style: GlassStyle = {
     '--partner-glass-filter-id': `url(#${filterId})`,
     '--partner-glass-saturation': saturation,
+    '--partner-glare-x': '50%',
+    '--partner-glare-y': '50%',
   }
 
   return <Element
+    {...elementProps}
     ref={containerRef as never}
-    className={`dsh-partner-glass-surface ${svgSupported ? 'is-svg' : 'is-fallback'} ${className}`}
+    className={`dsh-partner-glass-surface ${svgSupported ? 'is-svg' : 'is-fallback'}${interactive ? ' is-interactive' : ''} ${className}`}
     style={style}
+    onPointerMove={interactive ? event => moveGlare(event.clientX, event.clientY) : undefined}
+    onPointerLeave={interactive ? resetGlare : undefined}
   >
     <svg className="dsh-partner-glass-filter" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
       <defs>

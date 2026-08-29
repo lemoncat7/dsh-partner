@@ -45,6 +45,31 @@ export interface ConcernCandidate {
   resources?: ConcernResource[]
 }
 
+export const IMPLICIT_CONCERN_MIN_PRIORITY = .55
+export const IMPLICIT_CONCERN_MIN_CONFIDENCE = .72
+export const IMPLICIT_CONCERN_MIN_SCORE = .64
+export const MAX_IMPLICIT_CONCERNS_PER_BATCH = 2
+
+/**
+ * Deterministic admission gate shared by reflection and AI tool suggestions.
+ * The model proposes; this policy decides whether an implicit concern may be
+ * persisted. Lifecycle operations remain available so stale concerns can be
+ * closed even when a later model response has lower confidence.
+ */
+export function implicitConcernRejection(candidate: ConcernCandidate): string | undefined {
+  if (candidate.operation !== 'upsert') return undefined
+  const subjectLength = [...normalizeConcernSubject(candidate.subject)].length
+  if (subjectLength < 4) return '关注主题过于宽泛'
+  if ([...candidate.reason.trim()].length < 4) return '缺少继续关注的具体原因'
+  if ([...candidate.watchQuery.trim()].length < 2) return '缺少可执行的观察目标'
+  const priority = clamp(candidate.priority)
+  const confidence = clamp(candidate.confidence)
+  if (priority < IMPLICIT_CONCERN_MIN_PRIORITY) return '优先级不足'
+  if (confidence < IMPLICIT_CONCERN_MIN_CONFIDENCE) return '证据置信度不足'
+  if (priority * .55 + confidence * .45 < IMPLICIT_CONCERN_MIN_SCORE) return '综合关注分数不足'
+  return undefined
+}
+
 export interface ConcernObservationCandidate {
   concernId: string
   changed: boolean

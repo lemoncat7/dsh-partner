@@ -3,7 +3,8 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  boundedConcernCheckMinutes, clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, interruptDecision, normalizeConcernSubject,
+  boundedConcernCheckMinutes, clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, implicitConcernRejection,
+  interruptDecision, MAX_IMPLICIT_CONCERNS_PER_BATCH, normalizeConcernSubject,
   concernLifecycleRequest, selectConcernLifecycleTarget,
   type ConcernActivity, type ConcernCandidate, type ConcernObservation, type ConcernObservationCandidate,
   type AppliedConcernLifecycleDirective, type ConcernOrigin, type ConcernState, type ObservationDecision, type PartnerConcern,
@@ -12,6 +13,28 @@ import {
 type SqlRow = Record<string, unknown>
 export interface LegacyConcernSeed { scopeId: string; subject: string; reason: string; confidence: number; origin: ConcernOrigin }
 export interface ConcernDueOptions { now?: number; limit?: number; includeFuture?: boolean; concernId?: string }
+export type ConcernCandidateSource = 'reflection' | 'daily_review' | 'tool' | 'ui'
+export type ConcernAuditDecision = 'created' | 'updated' | 'resolved' | 'dismissed' | 'rejected' | 'ignored'
+export interface ConcernApplyOptions {
+  source?: ConcernCandidateSource
+  sessionId?: string
+  evidence?: string
+  maxImplicitCreates?: number
+}
+export interface ConcernApplyEntry {
+  subject: string
+  decision: ConcernAuditDecision
+  reason: string
+  concern?: PartnerConcern
+}
+export interface ConcernApplyResult {
+  created: PartnerConcern[]
+  entries: ConcernApplyEntry[]
+}
+export interface PendingConcernNotice {
+  auditIds: string[]
+  concerns: PartnerConcern[]
+}
 
 export class PartnerConcernStore {
   private readonly writes = new Map<string, Promise<void>>()
@@ -36,20 +59,69 @@ export class PartnerConcernStore {
     return true
   }
 
-  async applyCandidates(companionId: string, scopeId: string, candidates: ConcernCandidate[], origin: ConcernOrigin, at = Date.now()): Promise<PartnerConcern[]> {
-    if (candidates.length === 0) return []
+  async applyCandidates(
+    companionId: string,
+    scopeId: string,
+    candidates: ConcernCandidate[],
+    origin: ConcernOrigin,
+    at = Date.now(),
+    options: ConcernApplyOptions = {},
+  ): Promise<PartnerConcern[]> {
+    return (await this.ingestCandidates(companionId, scopeId, candidates, origin, at, options)).created
+  }
+
+  async ingestCandidates(
+    companionId: string,
+    scopeId: string,
+    candidates: ConcernCandidate[],
+    origin: ConcernOrigin,
+    at = Date.now(),
+    options: ConcernApplyOptions = {},
+  ): Promise<ConcernApplyResult> {
+    if (candidates.length === 0) return { created: [], entries: [] }
     return this.serialValue(this.path(companionId), async () => {
       const database = await this.open(companionId)
       const created: PartnerConcern[] = []
+      const entries: ConcernApplyEntry[] = []
+      const source = options.source ?? (origin === 'explicit' ? 'ui' : 'reflection')
+      const maxImplicitCreates = Math.min(
+        MAX_IMPLICIT_CONCERNS_PER_BATCH,
+        Math.max(0, options.maxImplicitCreates ?? MAX_IMPLICIT_CONCERNS_PER_BATCH),
+      )
       try {
         database.exec('BEGIN IMMEDIATE')
-        for (const candidate of candidates) {
+        for (const candidate of candidates.slice(0, 12)) {
+          const normalized = normalizeConcernSubject(compact(candidate.subject, 300))
+          const existing = normalized ? this.existing(database, companionId, scopeId, normalized) : undefined
+          const rejection = origin === 'implicit' ? implicitConcernRejection(candidate) : undefined
+          if (rejection !== undefined || (origin === 'implicit' && candidate.operation === 'upsert' && existing === undefined && created.length >= maxImplicitCreates)) {
+            const reason = rejection ?? `每批最多新增 ${maxImplicitCreates} 条隐式关注`
+            const entry: ConcernApplyEntry = { subject: compact(candidate.subject, 300), decision: 'rejected', reason }
+            entries.push(entry)
+            this.audit(database, companionId, scopeId, origin, candidate, entry, at, options)
+            continue
+          }
           const concern = this.upsert(database, companionId, scopeId, candidate, origin, at)
           if (concern !== undefined) created.push(concern)
+          const current = concern ?? existing
+          const decision: ConcernAuditDecision = candidate.operation === 'resolve'
+            ? existing === undefined ? 'ignored' : 'resolved'
+            : candidate.operation === 'dismiss'
+              ? existing === undefined ? 'ignored' : 'dismissed'
+              : existing === undefined ? 'created' : 'updated'
+          const reason = decision === 'created' ? origin === 'implicit' ? '通过隐式关注策略并创建' : '根据用户明确要求创建'
+            : decision === 'updated' ? '与已有关注同主题，已合并更新'
+              : decision === 'ignored' ? '没有找到可关闭的同主题关注'
+                : decision === 'resolved' ? '已有关注已闭环'
+                  : '已有关注已归档'
+          const entry: ConcernApplyEntry = { subject: compact(candidate.subject, 300), decision, reason, ...(current === undefined ? {} : { concern: current }) }
+          entries.push(entry)
+          this.audit(database, companionId, scopeId, origin, candidate, entry, at, options)
         }
+        database.prepare('DELETE FROM concern_audit WHERE companion_id = ? AND created_at < ?').run(companionId, at - 90 * 86_400_000)
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
-      return created
+      return { created, entries }
     })
   }
 
@@ -58,7 +130,7 @@ export class PartnerConcernStore {
     await this.applyCandidates(companionId, scopeId, [{
       subject: descriptor.subject, reason: reason || '用户明确要求伙伴留意', operation: 'upsert', priority: .9,
       confidence: 1, watchKind: descriptor.watchKind, watchQuery: descriptor.watchQuery, resources: descriptor.resources,
-    }], 'explicit')
+    }], 'explicit', Date.now(), { source: 'ui' })
     const concern = (await this.list(companionId, scopeId)).find(item => normalizeConcernSubject(item.subject) === normalizeConcernSubject(descriptor.subject))
     if (!concern) throw new Error('concern could not be created')
     return concern
@@ -216,6 +288,32 @@ export class PartnerConcernStore {
     } finally { database.close() }
   }
 
+  async pendingToolCreationNotices(companionId: string, scopeId: string, sessionId: string, limit = 4): Promise<PendingConcernNotice> {
+    const database = await this.open(companionId)
+    try {
+      const rows = database.prepare(`SELECT audit.id AS audit_id, concerns.* FROM concern_audit AS audit
+        JOIN concerns ON concerns.id = audit.concern_id
+        WHERE audit.companion_id = ? AND audit.scope_id = ? AND audit.session_id = ?
+          AND audit.source = 'tool' AND audit.origin = 'implicit' AND audit.decision = 'created' AND audit.notified_at IS NULL
+          AND concerns.state NOT IN ('resolved', 'archived')
+        ORDER BY audit.created_at ASC LIMIT ?`).all(companionId, scopeId, sessionId, Math.max(1, Math.min(12, limit))) as SqlRow[]
+      return { auditIds: rows.map(row => string(row.audit_id)), concerns: rows.map(concernFromRow) }
+    } finally { database.close() }
+  }
+
+  async markCreationAuditsNotified(companionId: string, auditIds: string[], at = Date.now()): Promise<void> {
+    if (auditIds.length === 0) return
+    await this.serial(this.path(companionId), async () => {
+      const database = await this.open(companionId)
+      try {
+        database.exec('BEGIN IMMEDIATE')
+        const update = database.prepare('UPDATE concern_audit SET notified_at = ? WHERE companion_id = ? AND id = ? AND notified_at IS NULL')
+        for (const id of [...new Set(auditIds)].slice(0, 20)) update.run(at, companionId, id)
+        database.exec('COMMIT')
+      } catch (error) { rollback(database); throw error } finally { database.close() }
+    })
+  }
+
   async deferred(companionId: string, scopeId: string, query: string, limit = 3): Promise<ConcernObservation[]> {
     const database = await this.open(companionId)
     try {
@@ -312,6 +410,33 @@ export class PartnerConcernStore {
     return created === undefined ? undefined : concernFromRow(created)
   }
 
+  private existing(database: DatabaseSync, companionId: string, scopeId: string, normalized: string): PartnerConcern | undefined {
+    const row = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND normalized_subject = ? AND scope_id IN (?, '*')
+      ORDER BY CASE WHEN origin = 'explicit' THEN 0 ELSE 1 END LIMIT 1`).get(companionId, normalized, scopeId) as SqlRow | undefined
+    return row === undefined ? undefined : concernFromRow(row)
+  }
+
+  private audit(
+    database: DatabaseSync,
+    companionId: string,
+    scopeId: string,
+    origin: ConcernOrigin,
+    candidate: ConcernCandidate,
+    entry: ConcernApplyEntry,
+    at: number,
+    options: ConcernApplyOptions,
+  ): void {
+    database.prepare(`INSERT INTO concern_audit
+      (id, concern_id, companion_id, scope_id, session_id, source, origin, operation, subject, reason, evidence,
+       decision, decision_reason, created_at, notified_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(
+      `concern-audit-${randomUUID()}`, entry.concern?.id ?? null, companionId, scopeId, options.sessionId ?? null,
+      options.source ?? (origin === 'explicit' ? 'ui' : 'reflection'), origin, candidate.operation,
+      compact(candidate.subject, 300), compact(candidate.reason, 800), compact(options.evidence ?? '', 1_200),
+      entry.decision, compact(entry.reason, 400), at,
+    )
+  }
+
   private async open(companionId: string): Promise<DatabaseSync> {
     const directory = join(this.root, 'partners', companionId, 'concerns')
     await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -339,7 +464,13 @@ export class PartnerConcernStore {
       );
       CREATE INDEX IF NOT EXISTS observations_feed ON concern_observations(companion_id, decision, created_at DESC);
       CREATE INDEX IF NOT EXISTS observations_deferred ON concern_observations(companion_id, scope_id, decision, mentioned_at, created_at DESC);
-      PRAGMA user_version = 3;`)
+      CREATE TABLE IF NOT EXISTS concern_audit (
+        id TEXT PRIMARY KEY, concern_id TEXT, companion_id TEXT NOT NULL, scope_id TEXT NOT NULL, session_id TEXT,
+        source TEXT NOT NULL, origin TEXT NOT NULL, operation TEXT NOT NULL, subject TEXT NOT NULL, reason TEXT NOT NULL,
+        evidence TEXT NOT NULL, decision TEXT NOT NULL, decision_reason TEXT NOT NULL, created_at INTEGER NOT NULL, notified_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS concern_audit_session ON concern_audit(companion_id, scope_id, session_id, source, decision, notified_at, created_at);
+      PRAGMA user_version = 4;`)
     ensureColumn(database, 'concerns', 'resources_json', "TEXT NOT NULL DEFAULT '[]'")
     ensureColumn(database, 'concern_observations', 'rule_effect', "TEXT NOT NULL DEFAULT 'auto'")
     ensureColumn(database, 'concern_observations', 'rule_reason', "TEXT NOT NULL DEFAULT ''")

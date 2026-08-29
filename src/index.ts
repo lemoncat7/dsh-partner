@@ -16,6 +16,7 @@ import { PartnerMemoryStore } from './memory-store.js'
 import { MemoryReflectionService } from './memory-reflection.js'
 import { DailyReviewScheduler } from './daily-review.js'
 import { PartnerConcernStore, type LegacyConcernSeed } from './concern-store.js'
+import { registerPartnerConcernTool } from './concern-tool.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -59,6 +60,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     })
     const reflection = new MemoryReflectionService(ctx, memory, concerns)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns)
+    const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
     const channels = new ChannelManager(ctx, store, credentials, agents)
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
@@ -85,6 +87,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     return async () => {
       disposeApi?.()
       disposeSessionObserver()
+      disposeConcernTool()
       await heartbeat.close()
       await dailyReview.close()
       await channels.close()

@@ -195,7 +195,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
       <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份已经就绪，连接微信后即可开始持续工作。'}</p>
     </header>
 
-    <GlassSurface as="section" className={`dsh-partner-home-channel${online ? ' is-online' : ''}`} borderRadius={20} distortionScale={-16} saturation={1.08}>
+    <GlassSurface as="section" interactive className={`dsh-partner-home-channel${online ? ' is-online' : ''}`} borderRadius={20} distortionScale={-16} saturation={1.08}>
       <div className="dsh-partner-home-route" aria-hidden="true">
         <Avatar name={companion.name} />
         <span className="dsh-partner-route-line"><i /></span>
@@ -213,18 +213,18 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
     </GlassSurface>
 
     <div className="dsh-partner-home-details">
-      <section className="dsh-partner-home-profile">
+      <GlassSurface as="section" interactive className="dsh-partner-home-profile" borderRadius={15} distortionScale={-11} saturation={1.06}>
         <header><span><IconUserOutline16 size={16} /></span><div><small>伙伴底稿</small><strong>{companion.role}</strong></div><button type="button" onClick={() => navigate('identity')}>编辑</button></header>
         <blockquote>{companion.instructions || companion.description || '尚未设置长期行为准则。'}</blockquote>
-      </section>
-      <section className="dsh-partner-home-runtime">
+      </GlassSurface>
+      <GlassSurface as="section" interactive className="dsh-partner-home-runtime" borderRadius={15} distortionScale={-11} saturation={1.06}>
         <header><span><IconAgentPresetOutline16 size={16} /></span><div><small>运行能力</small><strong>{companion.presetId || 'DSH 默认 Preset'}</strong></div><button type="button" onClick={() => navigate('capabilities')}>调整</button></header>
         <div className="dsh-partner-home-capability-list">{capabilities.length ? capabilities.map(item => <em key={item}>{item}</em>) : <small>尚未声明能力范围</small>}</div>
-      </section>
-      <section className="dsh-partner-home-continuity">
+      </GlassSurface>
+      <GlassSurface as="section" interactive className="dsh-partner-home-continuity" borderRadius={15} distortionScale={-11} saturation={1.06}>
         <header><span><IconDataOutline16 size={16} /></span><div><small>会话连续性</small><strong>{sessions.length ? `${sessions.length} 个共享会话` : '等待第一条消息'}</strong></div><button type="button" onClick={() => latestSession === undefined ? navigate('memory') : latestSession.archived ? void renewSession(latestSession.id) : void openSession(latestSession.id, latestSession.sessionId)}>{latestSession === undefined ? '查看' : latestSession.archived ? '开始新会话' : '打开会话'}</button></header>
         <p>{sessions.length ? `最近活动于 ${relativeTime(Math.max(...sessions.map(item => item.lastMessageAt)))}` : '微信联系人通过配对后，将在这里建立独立上下文。'}</p>
-      </section>
+      </GlassSurface>
     </div>
   </div>
 }
@@ -279,7 +279,7 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
   const currentModelMissing = Boolean(form.model) && !modelOptions.some(item => item.id === form.model)
   return <div className="dsh-partner-form is-capabilities"><Section eyebrow="COMPOSITION" title="能力组合" detail="伙伴声明意图范围；真正可调用的工具仍来自所选 Agent Preset，并继续执行各插件权限。" />
     <Field label="Agent Preset" hint="决定这个伙伴实际加载哪些工具、技能和系统提示。"><select value={form.presetId} onChange={event => setForm({ ...form, presetId: event.target.value })}><option value="">跟随 DSH 默认 Preset</option>{presets.filter(item => !item.broken).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
-    <div className="dsh-partner-capabilities">{choices.map(choice => <button type="button" key={choice.id} className={form.capabilities.includes(choice.id) ? 'is-active' : ''} onClick={() => toggle(choice.id)}><span>{form.capabilities.includes(choice.id) && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></button>)}</div>
+    <div className="dsh-partner-capabilities">{choices.map(choice => <GlassSurface as="button" interactive type="button" key={choice.id} className={form.capabilities.includes(choice.id) ? 'is-active' : ''} borderRadius={12} distortionScale={-9} saturation={1.05} aria-pressed={form.capabilities.includes(choice.id)} onClick={() => toggle(choice.id)}><span>{form.capabilities.includes(choice.id) && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></GlassSurface>)}</div>
     <div className="dsh-partner-fields two"><Field label="模型提供方" hint="模型目录来自当前客户端"><select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value, model: '' })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.provider || '正在读取'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="模型" hint="随提供方联动"><select value={form.model} onChange={event => setForm({ ...form, model: event.target.value })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.model || '正在读取'}</option>{currentModelMissing && <option value={form.model}>当前配置 · {form.model}</option>}{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
     {error && <p className="dsh-partner-inline-error">{error}</p>}<div className="dsh-partner-form-actions"><span /><button type="button" disabled={saving} onClick={() => { void save() }}>{saving ? '正在应用…' : '应用能力组合'}</button></div>
   </div>
@@ -316,10 +316,10 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
     try { await api(`/pairings/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); await onChanged() } catch (reason) { setError(message(reason)) }
   }
   return <div className="dsh-partner-form is-channel"><Section eyebrow="PRIMARY CHANNEL" title="微信渠道" detail="使用微信 iLink Bot 扫码接入。每个机器人只绑定一个伙伴，每位联系人保持独立 DSH 会话。" />
-    {!channel && !login && <div className="dsh-partner-weixin-connect"><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><strong>把 {companion.name} 带到微信</strong><p>扫码后，机器人凭据直接保存进 DSH 凭据库，不会显示在浏览器或普通配置文件中。</p><ul><li>私聊首次联系必须审批</li><li>联系人之间上下文完全隔离</li><li>工具权限不会因微信身份自动扩大</li></ul></span><button type="button" disabled={busy} onClick={() => { void begin() }}>{busy ? '正在申请二维码…' : '扫码连接微信'}</button></div>}
-    {login && <div className="dsh-partner-qr"><div className="dsh-partner-qr-code">{login.qrContent && <QRCodeSVG value={login.qrContent} size={176} level="M" />}</div><span><small>WECHAT ILINK BOT</small><strong>{login.phase === 'scanned' ? '已扫码，请在微信确认' : login.phase === 'expired' ? '二维码已过期' : login.phase === 'error' ? '连接失败' : '使用微信扫码'}</strong><p>{login.error || (login.phase === 'scanned' ? '确认后会自动启动渠道，不需要复制 Token。' : '二维码约 5 分钟有效。此页面可以安全地保持打开。')}</p>{(login.phase === 'expired' || login.phase === 'error') && <button type="button" onClick={() => { setLogin(undefined); void begin() }}><IconRefreshOutline16 size={16} />重新生成</button>}</span></div>}
+    {!channel && !login && <GlassSurface as="div" interactive className="dsh-partner-weixin-connect" borderRadius={15} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><strong>把 {companion.name} 带到微信</strong><p>扫码后，机器人凭据直接保存进 DSH 凭据库，不会显示在浏览器或普通配置文件中。</p><ul><li>私聊首次联系必须审批</li><li>联系人之间上下文完全隔离</li><li>工具权限不会因微信身份自动扩大</li></ul></span><button type="button" disabled={busy} onClick={() => { void begin() }}>{busy ? '正在申请二维码…' : '扫码连接微信'}</button></GlassSurface>}
+    {login && <GlassSurface as="div" interactive className="dsh-partner-qr" borderRadius={16} distortionScale={-10} saturation={1.06}><div className="dsh-partner-qr-code">{login.qrContent && <QRCodeSVG value={login.qrContent} size={176} level="M" />}</div><span><small>WECHAT ILINK BOT</small><strong>{login.phase === 'scanned' ? '已扫码，请在微信确认' : login.phase === 'expired' ? '二维码已过期' : login.phase === 'error' ? '连接失败' : '使用微信扫码'}</strong><p>{login.error || (login.phase === 'scanned' ? '确认后会自动启动渠道，不需要复制 Token。' : '二维码约 5 分钟有效。此页面可以安全地保持打开。')}</p>{(login.phase === 'expired' || login.phase === 'error') && <button type="button" onClick={() => { setLogin(undefined); void begin() }}><IconRefreshOutline16 size={16} />重新生成</button>}</span></GlassSurface>}
     {channel && <>
-      <div className="dsh-partner-channel-card"><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><small>WECHAT CHANNEL</small><strong>{channel.name}</strong><p>{channel.accountId}</p></span><Status channel={channel} /><button type="button" className="dsh-partner-switch" data-on={channel.enabled} disabled={busy} aria-label={channel.enabled ? '停用微信渠道' : '启用微信渠道'} onClick={() => { void toggle() }}><i /></button></div>
+      <GlassSurface as="div" interactive className="dsh-partner-channel-card" borderRadius={14} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><small>WECHAT CHANNEL</small><strong>{channel.name}</strong><p>{channel.accountId}</p></span><Status channel={channel} /><button type="button" className="dsh-partner-switch" data-on={channel.enabled} disabled={busy} aria-label={channel.enabled ? '停用微信渠道' : '启用微信渠道'} onClick={() => { void toggle() }}><i /></button></GlassSurface>
       {channel.lastError && <p className="dsh-partner-inline-error">{channel.lastError}</p>}
       <div className="dsh-partner-pairing-heading"><span><small>ACCESS</small><strong>私聊配对</strong></span><em>{pairings.filter(item => item.status === 'pending').length} 个待处理</em></div>
       <div className="dsh-partner-pairings">{pairings.length === 0 ? <State title="还没有联系人" detail="有人首次向机器人发消息后，配对请求会出现在这里。" compact /> : pairings.map(pairing => <article key={pairing.id}><span className={`is-${pairing.status}`}><IconUserOutline16 size={16} /></span><div><strong>{pairing.displayName}</strong><small>{pairing.status === 'pending' ? '等待审批' : pairing.status === 'approved' ? '已授权独立会话' : '已阻止'} · {new Date(pairing.updatedAt).toLocaleString()}</small></div>{pairing.status === 'pending' && <><button onClick={() => { void actPairing(pairing.id, 'blocked') }}>拒绝</button><button className="is-primary" onClick={() => { void actPairing(pairing.id, 'approved') }}>批准</button></>}{pairing.status === 'approved' && <button onClick={() => { void actPairing(pairing.id, 'blocked') }}>撤销</button>}{pairing.status === 'blocked' && <button onClick={() => { void actPairing(pairing.id, 'approved') }}>重新批准</button>}</article>)}</div>
@@ -410,15 +410,15 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
   return <div className="dsh-partner-form is-memory"><Section eyebrow="CONTINUITY" title="会话记忆" detail="这里展示渠道会话边界。知识库仍由知识库插件管理，伙伴不会把不同微信联系人的原始上下文混在一起。" />
-    <div className="dsh-partner-metrics"><article><small>渠道会话</small><strong>{sessions.length}</strong><p>每位联系人独立</p></article><article><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></article><article><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></article></div>
+    <div className="dsh-partner-metrics"><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>渠道会话</small><strong>{sessions.length}</strong><p>每位联系人独立</p></GlassSurface><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></GlassSurface><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></GlassSurface></div>
 
-    <div className="dsh-partner-automation-grid"><section className="dsh-partner-automation">
+    <div className="dsh-partner-automation-grid"><GlassSurface as="section" interactive className="dsh-partner-automation" borderRadius={14} distortionScale={-9} saturation={1.05}>
       <header><span><strong>学习与长期记忆</strong><small>按联系人归档完整对话，提炼每日回顾和结构化记忆，并在相关话题出现时召回。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.memory.enabled} aria-label="启用伙伴学习" onClick={() => setAutomation(current => ({ ...current, memory: { ...current.memory, enabled: !current.memory.enabled } }))}><i /></button></header>
       <div className="dsh-partner-automation-fields is-memory-model"><Field label="保留期限"><select value={automation.memory.retentionDays} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, retentionDays: Number(event.target.value) } }))}><option value={0}>永久保留</option><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={365}>1 年</option><option value={1095}>3 年</option></select></Field><Field label="提炼 Provider" hint="默认继承伙伴"><select value={automation.memory.provider ?? ''} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, provider: event.target.value, model: '' } }))}><option value="">跟随伙伴 · {inheritedProvider || 'DSH 默认'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="提炼模型" hint="默认继承伙伴"><select value={automation.memory.model ?? ''} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, model: event.target.value } }))}><option value="">跟随伙伴 · {companion.model || modelCatalog?.defaultSelection.model || 'DSH 默认'}</option>{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
       <div className="dsh-partner-review-policy"><button type="button" className="dsh-partner-switch" data-on={automation.memory.dailyReviewEnabled} aria-label="启用每日终审" onClick={() => setAutomation(current => ({ ...current, memory: { ...current.memory, dailyReviewEnabled: !current.memory.dailyReviewEnabled } }))}><i /></button><span><strong>每日终审</strong><small>次日自动合并重复、纠正偏差并建立记忆关系</small></span><label><select aria-label="每日终审时间" value={automation.memory.dailyReviewHour} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, dailyReviewHour: Number(event.target.value) } }))}>{Array.from({ length: 24 }, (_, hour) => <option value={hour} key={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label><button type="button" disabled={busy || reflections.length === 0} onClick={() => { void review() }}>立即终审</button></div>
-    </section>
+    </GlassSurface>
 
-    <section className="dsh-partner-automation">
+    <GlassSurface as="section" interactive className="dsh-partner-automation" borderRadius={14} distortionScale={-9} saturation={1.05}>
       <header><span><strong>持续感知</strong><small>伙伴只观察尚未闭环的事情是否出现新变化，并由克制的打扰策略决定何时告诉你。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.heartbeat.enabled} aria-label="启用伙伴心跳" onClick={() => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, enabled: !current.heartbeat.enabled } }))}><i /></button></header>
       <div className="dsh-partner-automation-fields is-heartbeat">
         <Field label="检查间隔"><select value={automation.heartbeat.intervalMinutes} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, intervalMinutes: Number(event.target.value) } }))}><option value={30}>30 分钟</option><option value={60}>1 小时</option><option value={180}>3 小时</option><option value={360}>6 小时</option><option value={720}>12 小时</option><option value={1440}>24 小时</option></select></Field>
@@ -429,7 +429,7 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
       <ConcernBoard companionId={companion.id} activity={concernActivity} value={newConcern} busy={busy} onValue={setNewConcern} onAdd={() => { void addConcern() }} onCheck={item => { void trigger(item.id) }} onAct={(item, action) => { void actConcern(item, action) }} />
       {heartbeat?.lastError && <p className="dsh-partner-inline-error">{heartbeat.lastError}</p>}
       <div className="dsh-partner-automation-actions"><button type="button" disabled={busy || sessions.length === 0} onClick={() => { void trigger() }}>检查到期项</button><button type="button" className="is-primary" disabled={busy} onClick={() => { void save() }}>{busy ? '正在处理…' : '保存设置'}</button></div>
-    </section></div>
+    </GlassSurface></div>
 
     {notice && <p className="dsh-partner-inline-notice"><IconCheckOutline14 size={14} />{notice}</p>}
     {error && <p className="dsh-partner-inline-error">{error}</p>}
@@ -486,7 +486,7 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCh
     onValue(next); setMention(undefined); setSources([])
     window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(cursor, cursor) })
   }
-  return <section className="dsh-partner-concern-board" aria-labelledby="partner-concerns-title">
+  return <GlassSurface as="section" interactive className="dsh-partner-concern-board" borderRadius={11} distortionScale={-8} saturation={1.04} aria-labelledby="partner-concerns-title">
     <header><span><strong id="partner-concerns-title">伙伴在意的事 <b>{active.length}</b></strong><p>尚未闭环、值得继续留意的事情</p></span><button type="button" aria-expanded={composing} onClick={() => setComposing(current => !current)}><IconPlusOutline16 size={14} />交代一件事</button></header>
     {composing && <form className="dsh-partner-concern-compose" onSubmit={submit}><label><span>需要留意的事</span><div className="dsh-partner-concern-input-wrap"><input
       ref={inputRef} autoFocus value={value} maxLength={300} placeholder="输入 @ 选择文件或知识文档"
@@ -525,7 +525,7 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCh
     </div>
     {(active.length > shown.length || visibleCount > 5) && <div className="dsh-partner-concern-more">{active.length > shown.length ? <button type="button" onClick={() => setVisibleCount(count => Math.min(active.length, count + 20))}>再显示 {Math.min(20, active.length - shown.length)} 条</button> : <button type="button" onClick={() => setVisibleCount(5)}>收起列表</button>}</div>}
     {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong>{item.subject}</strong><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button></article>)}</div></details>}
-  </section>
+  </GlassSurface>
 }
 
 function activeMention(value: string, cursor: number): { start: number; end: number; query: string } | undefined {
@@ -573,7 +573,7 @@ function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, 
   const selectedMemory = filteredMemories.find(item => item.id === selectedMemoryId) ?? filteredMemories[0]
   const selectedReflection = filteredReflections.find(item => item.date === selectedDate) ?? filteredReflections[0]
 
-  return <section className="dsh-partner-memory-library">
+  return <GlassSurface as="section" interactive className="dsh-partner-memory-library" borderRadius={17} distortionScale={-7} saturation={1.04}>
     <header className="dsh-partner-library-header"><span><small>MEMORY LIBRARY</small><strong>伙伴记忆库</strong><p>查看伙伴如何从长期对话中认识你，以及这些理解怎样随证据变化。</p></span><nav aria-label="记忆内容"><button type="button" className={mode === 'profile' ? 'is-active' : ''} onClick={() => setMode('profile')}>人物画像 <b>{profiles.length}</b></button><button type="button" className={mode === 'memory' ? 'is-active' : ''} onClick={() => setMode('memory')}>话题记忆 <b>{activeMemories.length}</b></button><button type="button" className={mode === 'reflection' ? 'is-active' : ''} onClick={() => setMode('reflection')}>每日回顾 <b>{reflections.length}</b></button><button type="button" className={mode === 'graph' ? 'is-active' : ''} onClick={() => setMode('graph')}>关系图谱 <b>{graph.relations.length}</b></button></nav></header>
     {mode !== 'profile' && <div className="dsh-partner-library-tools"><label><span className="sr-only">搜索记忆</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={mode === 'memory' ? '搜索主题或记忆内容' : '搜索日期、总结或待办'} /></label>{mode === 'memory' && <div className="dsh-partner-memory-kinds">{MEMORY_KINDS.map(value => <button type="button" key={value} className={kind === value ? 'is-active' : ''} onClick={() => setKind(value)}>{value === 'all' ? '全部' : memoryKind(value)}</button>)}</div>}</div>}
     {mode === 'profile' ? <ProfileLibrary profiles={profiles} memories={profileMemories} editing={editing} busy={busy} setEditing={setEditing} save={save} remove={remove} /> : mode === 'memory' ? <div className="dsh-partner-library-browser">
@@ -583,7 +583,7 @@ function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, 
       <div className="dsh-partner-library-list is-diary" role="list">{filteredReflections.length === 0 ? <State title={reflections.length === 0 ? '还没有每日回顾' : '没有匹配的回顾'} detail={reflections.length === 0 ? '每日回顾会在每轮完整对话后持续更新。' : '换个关键词或日期试试。'} compact /> : filteredReflections.map(entry => <button type="button" role="listitem" key={entry.date} className={selectedReflection?.date === entry.date ? 'is-active' : ''} onClick={() => setSelectedDate(entry.date)}><time>{entry.date}</time><strong>{entry.turnCount} 轮交流</strong><p>{entry.summary}</p><small>{entry.openTasks.length} 项待跟进 · {entry.learnings.length} 项理解</small></button>)}</div>
       <div className="dsh-partner-library-detail">{selectedReflection ? <DailyReflectionDetail entry={selectedReflection} /> : <State title="选择一天" detail="当天的总结与待办会显示在这里。" compact />}</div>
     </div> : <MemoryGraph graph={graph} profiles={profiles} query={normalized} inspect={item => { setEditing(undefined); if (item.kind === 'profile') setMode('profile'); else { setSelectedMemoryId(item.id); setMode('memory') } }} />}
-  </section>
+  </GlassSurface>
 }
 
 function ProfileLibrary({ profiles, memories, editing, busy, setEditing, save, remove }: {
@@ -644,7 +644,7 @@ function MemoryGraph({ graph, profiles, query, inspect }: { graph: MemoryGraphVi
 }
 
 function GraphMemory({ item, side, inspect }: { item: MemoryView; side: string; inspect(item: MemoryView): void }): JSX.Element {
-  return <section><header><small>{side} · {memoryKind(item.kind)}</small><strong>{item.subject}</strong></header><p>{item.content}</p><button type="button" onClick={() => inspect(item)}>查看并修正</button></section>
+  return <GlassSurface as="section" interactive className="" borderRadius={13} distortionScale={-8} saturation={1.04}><header><small>{side} · {memoryKind(item.kind)}</small><strong>{item.subject}</strong></header><p>{item.content}</p><button type="button" onClick={() => inspect(item)}>查看并修正</button></GlassSurface>
 }
 
 function relationLabel(kind: MemoryRelationView['kind']): string { return ({ supports: '支持', depends_on: '依赖', about: '关于', conflicts_with: '冲突', follows: '后续' })[kind] }

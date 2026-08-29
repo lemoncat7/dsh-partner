@@ -10,7 +10,8 @@ import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToo
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { PartnerConcernStore } from '../lib/concern-store.js'
-import { boundedConcernCheckMinutes, concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
+import { boundedConcernCheckMinutes, concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, implicitConcernRejection, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
+import { applyConcernToolVisibility, validateConcernSuggestion } from '../lib/concern-tool.js'
 import { explicitConcernDirective, parseDailyReview, parseReflection, protectConcernDirective } from '../lib/memory-reflection.js'
 import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
 import { concernObservationPrompt } from '../lib/autonomy.js'
@@ -498,6 +499,57 @@ test('returns only newly created concerns for automatic creation notices', async
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('gates, bounds and audits implicit concern candidates through one policy', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-policy-'))
+  try {
+    const store = new PartnerConcernStore(directory)
+    const weak = { subject: '以后看看', reason: '可能有事', operation: 'upsert', priority: .4, confidence: .6, watchKind: 'auto', watchQuery: '看看' }
+    assert.match(implicitConcernRejection(weak) ?? '', /优先级|置信度|综合/)
+    const rejected = await store.ingestCandidates('companion-1', 'weixin:user', [weak], 'implicit', 100, {
+      source: 'tool', sessionId: 'session-1', evidence: '以后看看', maxImplicitCreates: 1,
+    })
+    assert.equal(rejected.created.length, 0)
+    assert.equal(rejected.entries[0]?.decision, 'rejected')
+    assert.equal((await store.list('companion-1')).length, 0)
+
+    const candidates = ['终端输入持续延迟', 'SFTP 目录无法进入', '平板布局仍然越界'].map(subject => ({
+      subject, reason: '当前问题尚未闭环', operation: 'upsert', priority: .78, confidence: .86,
+      watchKind: 'workspace', watchQuery: `${subject}后续变化`,
+    }))
+    const accepted = await store.ingestCandidates('companion-1', 'weixin:user', candidates, 'implicit', 101, {
+      source: 'reflection', sessionId: 'session-1', evidence: '本轮对话',
+    })
+    assert.equal(accepted.created.length, 2)
+    assert.equal(accepted.entries[2]?.decision, 'rejected')
+    assert.match(accepted.entries[2]?.reason ?? '', /最多新增 2 条/)
+
+    const toolResult = await store.ingestCandidates('companion-1', 'weixin:user', [{
+      subject: '文件传输偶发丢失目录', reason: '目录传输仍有失败记录', operation: 'upsert', priority: .8, confidence: .9,
+      watchKind: 'workspace', watchQuery: '目录传输失败是否复现',
+    }], 'implicit', 102, { source: 'tool', sessionId: 'session-1', evidence: '传目录时偶尔失败', maxImplicitCreates: 1 })
+    assert.equal(toolResult.created.length, 1)
+    const pending = await store.pendingToolCreationNotices('companion-1', 'weixin:user', 'session-1')
+    assert.deepEqual(pending.concerns.map(item => item.subject), ['文件传输偶发丢失目录'])
+    await store.markCreationAuditsNotified('companion-1', pending.auditIds, 103)
+    assert.equal((await store.pendingToolCreationNotices('companion-1', 'weixin:user', 'session-1')).concerns.length, 0)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('keeps the implicit concern tool scoped and evidence-backed', () => {
+  const suggestion = validateConcernSuggestion({
+    subject: 'FTP 目录仍无法进入', reason: '用户再次报告目录导航失败', evidence: 'ftp 还是不能 点击进入目录',
+    watchKind: 'workspace', watchQuery: 'FTP 目录导航修复', priority: .8, confidence: .9,
+  }, '我发现 ftp 还是不能 点击进入目录，麻烦再看看')
+  assert.equal(suggestion.watchKind, 'workspace')
+  assert.throws(() => validateConcernSuggestion({ ...suggestion, evidence: '用户没有说过的内容' }, 'ftp 还是不能 点击进入目录'), /exact excerpt/)
+  const hidden = { tools: [{ name: 'read' }, { name: 'partner_concern_suggest' }] }
+  applyConcernToolVisibility(hidden, false)
+  assert.deepEqual(hidden.tools.map(item => item.name), ['read'])
+  const visible = { tools: [{ name: 'partner_concern_suggest' }] }
+  applyConcernToolVisibility(visible, true)
+  assert.deepEqual(visible.tools.map(item => item.name), ['partner_concern_suggest'])
+})
+
 test('honors explicit notification rules only for knowledge-linked concerns', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-rules-'))
   try {
@@ -566,7 +618,7 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
     assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.state, 'resolved')
     await store.act('companion-1', explicit.id, 'watch', now + 2)
     assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.state, 'watching')
-    await store.applyCandidates('companion-1', 'weixin:user', [{ subject: '很久以前的临时问题', reason: '旧问题', operation: 'upsert', priority: .6, confidence: .7, watchKind: 'auto', watchQuery: '旧问题' }], 'implicit', now - 100 * 86_400_000)
+    await store.applyCandidates('companion-1', 'weixin:user', [{ subject: '很久以前的临时问题', reason: '问题长期没有变化', operation: 'upsert', priority: .6, confidence: .76, watchKind: 'auto', watchQuery: '旧问题' }], 'implicit', now - 100 * 86_400_000)
     await store.due('companion-1', 'weixin:user', { now })
     const archived = (await store.list('companion-1', undefined, true)).find(item => item.subject === '很久以前的临时问题')
     assert.equal(archived?.state, 'archived')

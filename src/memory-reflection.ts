@@ -42,7 +42,10 @@ export class MemoryReflectionService {
     } finally { clearTimeout(timeout) }
     const result = parseDailyReview(output)
     await this.store.completeDailyReview(target, result)
-    return this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit')
+    return this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit', Date.now(), {
+      source: 'daily_review',
+      evidence: `每日终审 ${target.date}`,
+    })
   }
 
   private async run(companion: Companion, turn: ConversationTurn): Promise<PartnerConcern[]> {
@@ -73,7 +76,9 @@ export class MemoryReflectionService {
     const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
     const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
     const origin = explicitConcernDirective(turn.user) ? 'explicit' : 'implicit'
-    const created = await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, origin, turn.at)
+    const created = await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, origin, turn.at, {
+      source: 'reflection', sessionId: turn.sessionId, evidence: turn.user,
+    })
     if (turn.concernDirective !== undefined) await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
     await this.store.prune(companion.id, companion.automation.memory.retentionDays)
     return origin === 'implicit' ? created : []
