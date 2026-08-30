@@ -94,7 +94,7 @@ export function GlassSurface({
   const greenRef = useRef<SVGFEDisplacementMapElement>(null)
   const blueRef = useRef<SVGFEDisplacementMapElement>(null)
   const glareFrameRef = useRef(0)
-  const glarePositionRef = useRef({ x: 50, y: 50 })
+  const glarePointerRef = useRef<{ clientX: number; clientY: number }>()
   const [svgSupported, setSvgSupported] = useState(false)
 
   useEffect(() => {
@@ -102,15 +102,21 @@ export function GlassSurface({
   }, [filterId])
 
   useEffect(() => {
+    if (!svgSupported) return
     const element = containerRef.current
     const image = imageRef.current
     if (element === null || image === null) return
     let frame = 0
+    let previousWidth = 0
+    let previousHeight = 0
     const update = (): void => {
       frame = 0
       const rect = element.getBoundingClientRect()
       const width = Math.max(1, Math.round(rect.width))
       const height = Math.max(1, Math.round(rect.height))
+      if (width === previousWidth && height === previousHeight) return
+      previousWidth = width
+      previousHeight = height
       image.setAttribute('href', displacementMap(
         width,
         height,
@@ -133,13 +139,14 @@ export function GlassSurface({
       if (frame !== 0) cancelAnimationFrame(frame)
       observer?.disconnect()
     }
-  }, [blueGradientId, blur, borderRadius, borderWidth, brightness, opacity, redGradientId])
+  }, [blueGradientId, blur, borderRadius, borderWidth, brightness, opacity, redGradientId, svgSupported])
 
   useEffect(() => {
+    if (!svgSupported) return
     const channels = [redRef.current, greenRef.current, blueRef.current]
     const offsets = [0, 5, 10]
     channels.forEach((channel, index) => channel?.setAttribute('scale', String(distortionScale + (offsets[index] ?? 0))))
-  }, [distortionScale])
+  }, [distortionScale, svgSupported])
 
   useEffect(() => () => {
     if (glareFrameRef.current !== 0) cancelAnimationFrame(glareFrameRef.current)
@@ -149,25 +156,30 @@ export function GlassSurface({
     glareFrameRef.current = 0
     const element = containerRef.current
     if (element === null) return
-    element.style.setProperty('--partner-glare-x', `${glarePositionRef.current.x}%`)
-    element.style.setProperty('--partner-glare-y', `${glarePositionRef.current.y}%`)
+    const pointer = glarePointerRef.current
+    if (pointer === undefined) {
+      element.style.setProperty('--partner-glare-x', '50%')
+      element.style.setProperty('--partner-glare-y', '50%')
+      return
+    }
+    const rect = element.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return
+    const x = Math.max(0, Math.min(100, (pointer.clientX - rect.left) / rect.width * 100))
+    const y = Math.max(0, Math.min(100, (pointer.clientY - rect.top) / rect.height * 100))
+    element.style.setProperty('--partner-glare-x', `${x}%`)
+    element.style.setProperty('--partner-glare-y', `${y}%`)
   }
   const scheduleGlare = (): void => {
     if (glareFrameRef.current === 0) glareFrameRef.current = requestAnimationFrame(renderGlare)
   }
   const moveGlare = (clientX: number, clientY: number): void => {
-    const element = containerRef.current
-    if (!interactive || element === null) return
-    const rect = element.getBoundingClientRect()
-    glarePositionRef.current = {
-      x: Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100)),
-      y: Math.max(0, Math.min(100, (clientY - rect.top) / rect.height * 100)),
-    }
+    if (!interactive) return
+    glarePointerRef.current = { clientX, clientY }
     scheduleGlare()
   }
   const resetGlare = (): void => {
     if (!interactive) return
-    glarePositionRef.current = { x: 50, y: 50 }
+    glarePointerRef.current = undefined
     scheduleGlare()
   }
 
@@ -186,7 +198,7 @@ export function GlassSurface({
     onPointerMove={interactive ? event => moveGlare(event.clientX, event.clientY) : undefined}
     onPointerLeave={interactive ? resetGlare : undefined}
   >
-    <svg className="dsh-partner-glass-filter" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    {svgSupported && <svg className="dsh-partner-glass-filter" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
       <defs>
         <filter id={filterId} colorInterpolationFilters="sRGB" x="0%" y="0%" width="100%" height="100%">
           <feImage ref={imageRef} x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="map" />
@@ -201,7 +213,7 @@ export function GlassSurface({
           <feGaussianBlur in="output" stdDeviation=".45" />
         </filter>
       </defs>
-    </svg>
+    </svg>}
     {children}
   </Element>
 }

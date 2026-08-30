@@ -337,15 +337,15 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
   const [profiles, setProfiles] = useState<UserProfileSnapshotView[]>([])
   const [concernActivity, setConcernActivity] = useState<ConcernActivityView>({ concerns: [], observations: [] })
   const [newConcern, setNewConcern] = useState('')
-  const [graph, setGraph] = useState<MemoryGraphView>({ memories: [], relations: [] })
+  const [memoryRevision, setMemoryRevision] = useState(0)
   const [editing, setEditing] = useState<MemoryView>()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogView>()
   const loadMemory = useCallback(async () => {
-    const [result, relations, activity] = await Promise.all([api<{ memories: MemoryView[]; reflections: DailyReflectionView[]; profiles: UserProfileSnapshotView[] }>(`/companions/${companion.id}/memory`), api<MemoryGraphView>(`/companions/${companion.id}/memory/graph`), api<ConcernActivityView>(`/companions/${companion.id}/concerns`)])
-    setMemories(result.memories); setReflections(result.reflections); setProfiles(result.profiles); setGraph(relations); setConcernActivity(activity)
+    const [result, activity] = await Promise.all([api<{ memories: MemoryView[]; reflections: DailyReflectionView[]; profiles: UserProfileSnapshotView[] }>(`/companions/${companion.id}/memory`), api<ConcernActivityView>(`/companions/${companion.id}/concerns`)])
+    setMemories(result.memories); setReflections(result.reflections); setProfiles(result.profiles); setConcernActivity(activity); setMemoryRevision(value => value + 1)
   }, [companion.id])
   useEffect(() => { setAutomation(structuredClone(companion.automation)); void loadMemory().catch(reason => setError(message(reason))) }, [companion.id, companion.updatedAt, loadMemory])
   useEffect(() => { void api<ModelCatalogView>('/models').then(setModelCatalog).catch(reason => setError(message(reason))) }, [])
@@ -410,15 +410,15 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
   return <div className="dsh-partner-form is-memory"><Section eyebrow="CONTINUITY" title="会话记忆" detail="这里展示渠道会话边界。知识库仍由知识库插件管理，伙伴不会把不同微信联系人的原始上下文混在一起。" />
-    <div className="dsh-partner-metrics"><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>渠道会话</small><strong>{sessions.length}</strong><p>每位联系人独立</p></GlassSurface><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></GlassSurface><GlassSurface as="article" interactive className="" borderRadius={12} distortionScale={-9} saturation={1.05}><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></GlassSurface></div>
+    <div className="dsh-partner-metrics"><article><small>渠道会话</small><strong>{sessions.length}</strong><p>每位联系人独立</p></article><article><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></article><article><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></article></div>
 
-    <div className="dsh-partner-automation-grid"><GlassSurface as="section" interactive className="dsh-partner-automation" borderRadius={14} distortionScale={-9} saturation={1.05}>
+    <div className="dsh-partner-automation-grid"><section className="dsh-partner-automation">
       <header><span><strong>学习与长期记忆</strong><small>按联系人归档完整对话，提炼每日回顾和结构化记忆，并在相关话题出现时召回。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.memory.enabled} aria-label="启用伙伴学习" onClick={() => setAutomation(current => ({ ...current, memory: { ...current.memory, enabled: !current.memory.enabled } }))}><i /></button></header>
       <div className="dsh-partner-automation-fields is-memory-model"><Field label="保留期限"><select value={automation.memory.retentionDays} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, retentionDays: Number(event.target.value) } }))}><option value={0}>永久保留</option><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={365}>1 年</option><option value={1095}>3 年</option></select></Field><Field label="提炼 Provider" hint="默认继承伙伴"><select value={automation.memory.provider ?? ''} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, provider: event.target.value, model: '' } }))}><option value="">跟随伙伴 · {inheritedProvider || 'DSH 默认'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="提炼模型" hint="默认继承伙伴"><select value={automation.memory.model ?? ''} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, model: event.target.value } }))}><option value="">跟随伙伴 · {companion.model || modelCatalog?.defaultSelection.model || 'DSH 默认'}</option>{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
       <div className="dsh-partner-review-policy"><button type="button" className="dsh-partner-switch" data-on={automation.memory.dailyReviewEnabled} aria-label="启用每日终审" onClick={() => setAutomation(current => ({ ...current, memory: { ...current.memory, dailyReviewEnabled: !current.memory.dailyReviewEnabled } }))}><i /></button><span><strong>每日终审</strong><small>次日自动合并重复、纠正偏差并建立记忆关系</small></span><label><select aria-label="每日终审时间" value={automation.memory.dailyReviewHour} onChange={event => setAutomation(current => ({ ...current, memory: { ...current.memory, dailyReviewHour: Number(event.target.value) } }))}>{Array.from({ length: 24 }, (_, hour) => <option value={hour} key={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label><button type="button" disabled={busy || reflections.length === 0} onClick={() => { void review() }}>立即终审</button></div>
-    </GlassSurface>
+    </section>
 
-    <GlassSurface as="section" interactive className="dsh-partner-automation" borderRadius={14} distortionScale={-9} saturation={1.05}>
+    <section className="dsh-partner-automation">
       <header><span><strong>持续感知</strong><small>伙伴只观察尚未闭环的事情是否出现新变化，并由克制的打扰策略决定何时告诉你。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.heartbeat.enabled} aria-label="启用伙伴心跳" onClick={() => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, enabled: !current.heartbeat.enabled } }))}><i /></button></header>
       <div className="dsh-partner-automation-fields is-heartbeat">
         <Field label="检查间隔"><select value={automation.heartbeat.intervalMinutes} onChange={event => setAutomation(current => ({ ...current, heartbeat: { ...current.heartbeat, intervalMinutes: Number(event.target.value) } }))}><option value={30}>30 分钟</option><option value={60}>1 小时</option><option value={180}>3 小时</option><option value={360}>6 小时</option><option value={720}>12 小时</option><option value={1440}>24 小时</option></select></Field>
@@ -429,12 +429,12 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
       <ConcernBoard companionId={companion.id} activity={concernActivity} value={newConcern} busy={busy} onValue={setNewConcern} onAdd={() => { void addConcern() }} onCheck={item => { void trigger(item.id) }} onAct={(item, action) => { void actConcern(item, action) }} />
       {heartbeat?.lastError && <p className="dsh-partner-inline-error">{heartbeat.lastError}</p>}
       <div className="dsh-partner-automation-actions"><button type="button" disabled={busy || sessions.length === 0} onClick={() => { void trigger() }}>检查到期项</button><button type="button" className="is-primary" disabled={busy} onClick={() => { void save() }}>{busy ? '正在处理…' : '保存设置'}</button></div>
-    </GlassSurface></div>
+    </section></div>
 
     {notice && <p className="dsh-partner-inline-notice"><IconCheckOutline14 size={14} />{notice}</p>}
     {error && <p className="dsh-partner-inline-error">{error}</p>}
 
-    <MemoryLibrary profiles={profiles} memories={memories} reflections={reflections} graph={graph} editing={editing} busy={busy} setEditing={setEditing} save={() => { void saveMemory() }} remove={item => { void deleteMemory(item) }} />
+    <MemoryLibrary companionId={companion.id} revision={memoryRevision} profiles={profiles} memories={memories} reflections={reflections} editing={editing} busy={busy} setEditing={setEditing} save={() => { void saveMemory() }} remove={item => { void deleteMemory(item) }} />
 
     <div className="dsh-partner-section-heading"><span><small>SESSIONS</small><strong>共享会话</strong></span></div>
     <div className="dsh-partner-session-list">{sessions.map(item => <article key={item.id} data-archived={item.archived}><span><IconDataOutline16 size={16} /></span><div><strong>微信联系人 · {item.userId.slice(-6)}</strong><small>{item.archived ? '已归档 · 长期记忆保留' : `${item.sessionId} · ${new Date(item.lastMessageAt).toLocaleString()}`}</small></div><button type="button" className={item.archived ? 'is-primary' : undefined} onClick={() => { if (item.archived) void renewSession(item.id); else void openSession(item.id, item.sessionId) }}>{item.archived ? '开始新会话' : '打开会话'}</button></article>)}{sessions.length === 0 && <State title="还没有共享会话" detail="联系人完成配对并发来第一条消息后，伙伴会创建网页与微信共用的会话。" compact />}</div>
@@ -486,7 +486,7 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCh
     onValue(next); setMention(undefined); setSources([])
     window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(cursor, cursor) })
   }
-  return <GlassSurface as="section" interactive className="dsh-partner-concern-board" borderRadius={11} distortionScale={-8} saturation={1.04} aria-labelledby="partner-concerns-title">
+  return <section className="dsh-partner-concern-board" aria-labelledby="partner-concerns-title">
     <header><span><strong id="partner-concerns-title">伙伴在意的事 <b>{active.length}</b></strong><p>尚未闭环、值得继续留意的事情</p></span><button type="button" aria-expanded={composing} onClick={() => setComposing(current => !current)}><IconPlusOutline16 size={14} />交代一件事</button></header>
     {composing && <form className="dsh-partner-concern-compose" onSubmit={submit}><label><span>需要留意的事</span><div className="dsh-partner-concern-input-wrap"><input
       ref={inputRef} autoFocus value={value} maxLength={300} placeholder="输入 @ 选择文件或知识文档"
@@ -525,7 +525,7 @@ function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCh
     </div>
     {(active.length > shown.length || visibleCount > 5) && <div className="dsh-partner-concern-more">{active.length > shown.length ? <button type="button" onClick={() => setVisibleCount(count => Math.min(active.length, count + 20))}>再显示 {Math.min(20, active.length - shown.length)} 条</button> : <button type="button" onClick={() => setVisibleCount(5)}>收起列表</button>}</div>}
     {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong>{item.subject}</strong><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button></article>)}</div></details>}
-  </GlassSurface>
+  </section>
 }
 
 function activeMention(value: string, cursor: number): { start: number; end: number; query: string } | undefined {
@@ -552,8 +552,8 @@ function watchKindLabel(value: ConcernView['watchKind']): string {
 type MemoryLibraryMode = 'profile' | 'memory' | 'reflection' | 'graph'
 const MEMORY_KINDS: Array<MemoryView['kind'] | 'all'> = ['all', 'preference', 'task', 'event', 'relationship', 'emotion']
 
-function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, setEditing, save, remove }: {
-  profiles: UserProfileSnapshotView[]; memories: MemoryView[]; reflections: DailyReflectionView[]; graph: MemoryGraphView; editing: MemoryView | undefined; busy: boolean
+function MemoryLibrary({ companionId, revision, profiles, memories, reflections, editing, busy, setEditing, save, remove }: {
+  companionId: string; revision: number; profiles: UserProfileSnapshotView[]; memories: MemoryView[]; reflections: DailyReflectionView[]; editing: MemoryView | undefined; busy: boolean
   setEditing(value?: MemoryView): void; save(): void; remove(item: MemoryView): void
 }): JSX.Element {
   const activeMemories = useMemo(() => memories.filter(item => item.status === 'active' && item.kind !== 'profile'), [memories])
@@ -563,6 +563,23 @@ function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, 
   const [query, setQuery] = useState('')
   const [selectedMemoryId, setSelectedMemoryId] = useState<string>()
   const [selectedDate, setSelectedDate] = useState<string>()
+  const [graph, setGraph] = useState<MemoryGraphView>()
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [graphError, setGraphError] = useState<string>()
+  const [graphRequest, setGraphRequest] = useState(0)
+  useEffect(() => {
+    setGraph(undefined); setGraphError(undefined); setGraphLoading(false)
+  }, [companionId, revision])
+  useEffect(() => {
+    if (mode !== 'graph' || graph !== undefined) return
+    const controller = new AbortController()
+    setGraphLoading(true); setGraphError(undefined)
+    void api<MemoryGraphView>(`/companions/${companionId}/memory/graph`, { signal: controller.signal })
+      .then(result => { if (!controller.signal.aborted) setGraph(result) })
+      .catch(reason => { if (!controller.signal.aborted) setGraphError(message(reason)) })
+      .finally(() => { if (!controller.signal.aborted) setGraphLoading(false) })
+    return () => controller.abort()
+  }, [companionId, graph, graphRequest, mode, revision])
   const normalized = query.trim().toLocaleLowerCase()
   const filteredMemories = useMemo(() => activeMemories.filter(item =>
     (kind === 'all' || item.kind === kind) && (!normalized || `${item.subject} ${item.content}`.toLocaleLowerCase().includes(normalized)),
@@ -573,8 +590,8 @@ function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, 
   const selectedMemory = filteredMemories.find(item => item.id === selectedMemoryId) ?? filteredMemories[0]
   const selectedReflection = filteredReflections.find(item => item.date === selectedDate) ?? filteredReflections[0]
 
-  return <GlassSurface as="section" interactive className="dsh-partner-memory-library" borderRadius={17} distortionScale={-7} saturation={1.04}>
-    <header className="dsh-partner-library-header"><span><small>MEMORY LIBRARY</small><strong>伙伴记忆库</strong><p>查看伙伴如何从长期对话中认识你，以及这些理解怎样随证据变化。</p></span><nav aria-label="记忆内容"><button type="button" className={mode === 'profile' ? 'is-active' : ''} onClick={() => setMode('profile')}>人物画像 <b>{profiles.length}</b></button><button type="button" className={mode === 'memory' ? 'is-active' : ''} onClick={() => setMode('memory')}>话题记忆 <b>{activeMemories.length}</b></button><button type="button" className={mode === 'reflection' ? 'is-active' : ''} onClick={() => setMode('reflection')}>每日回顾 <b>{reflections.length}</b></button><button type="button" className={mode === 'graph' ? 'is-active' : ''} onClick={() => setMode('graph')}>关系图谱 <b>{graph.relations.length}</b></button></nav></header>
+  return <section className="dsh-partner-memory-library">
+    <header className="dsh-partner-library-header"><span><small>MEMORY LIBRARY</small><strong>伙伴记忆库</strong><p>查看伙伴如何从长期对话中认识你，以及这些理解怎样随证据变化。</p></span><nav aria-label="记忆内容"><button type="button" className={mode === 'profile' ? 'is-active' : ''} onClick={() => setMode('profile')}>人物画像 <b>{profiles.length}</b></button><button type="button" className={mode === 'memory' ? 'is-active' : ''} onClick={() => setMode('memory')}>话题记忆 <b>{activeMemories.length}</b></button><button type="button" className={mode === 'reflection' ? 'is-active' : ''} onClick={() => setMode('reflection')}>每日回顾 <b>{reflections.length}</b></button><button type="button" className={mode === 'graph' ? 'is-active' : ''} onClick={() => setMode('graph')}>关系图谱 <b>{graph?.relations.length ?? '—'}</b></button></nav></header>
     {mode !== 'profile' && <div className="dsh-partner-library-tools"><label><span className="sr-only">搜索记忆</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={mode === 'memory' ? '搜索主题或记忆内容' : '搜索日期、总结或待办'} /></label>{mode === 'memory' && <div className="dsh-partner-memory-kinds">{MEMORY_KINDS.map(value => <button type="button" key={value} className={kind === value ? 'is-active' : ''} onClick={() => setKind(value)}>{value === 'all' ? '全部' : memoryKind(value)}</button>)}</div>}</div>}
     {mode === 'profile' ? <ProfileLibrary profiles={profiles} memories={profileMemories} editing={editing} busy={busy} setEditing={setEditing} save={save} remove={remove} /> : mode === 'memory' ? <div className="dsh-partner-library-browser">
       <div className="dsh-partner-library-list" role="list">{filteredMemories.length === 0 ? <State title={activeMemories.length === 0 ? '还没有长期记忆' : '没有匹配的记忆'} detail={activeMemories.length === 0 ? '伙伴完成对话后会自动提炼值得长期保留的信息。' : '换个关键词或类型试试。'} compact /> : filteredMemories.map(item => <button type="button" role="listitem" key={item.id} className={selectedMemory?.id === item.id ? 'is-active' : ''} onClick={() => { setSelectedMemoryId(item.id); setEditing(undefined) }}><span data-kind={item.kind}>{memoryKind(item.kind)}</span><strong>{item.subject}</strong><p>{item.content}</p><small>{relativeTime(item.updatedAt)}</small></button>)}</div>
@@ -582,8 +599,8 @@ function MemoryLibrary({ profiles, memories, reflections, graph, editing, busy, 
     </div> : mode === 'reflection' ? <div className="dsh-partner-library-browser">
       <div className="dsh-partner-library-list is-diary" role="list">{filteredReflections.length === 0 ? <State title={reflections.length === 0 ? '还没有每日回顾' : '没有匹配的回顾'} detail={reflections.length === 0 ? '每日回顾会在每轮完整对话后持续更新。' : '换个关键词或日期试试。'} compact /> : filteredReflections.map(entry => <button type="button" role="listitem" key={entry.date} className={selectedReflection?.date === entry.date ? 'is-active' : ''} onClick={() => setSelectedDate(entry.date)}><time>{entry.date}</time><strong>{entry.turnCount} 轮交流</strong><p>{entry.summary}</p><small>{entry.openTasks.length} 项待跟进 · {entry.learnings.length} 项理解</small></button>)}</div>
       <div className="dsh-partner-library-detail">{selectedReflection ? <DailyReflectionDetail entry={selectedReflection} /> : <State title="选择一天" detail="当天的总结与待办会显示在这里。" compact />}</div>
-    </div> : <MemoryGraph graph={graph} profiles={profiles} query={normalized} inspect={item => { setEditing(undefined); if (item.kind === 'profile') setMode('profile'); else { setSelectedMemoryId(item.id); setMode('memory') } }} />}
-  </GlassSurface>
+    </div> : graphError ? <State title="关系图谱加载失败" detail={graphError} action={<button type="button" onClick={() => setGraphRequest(value => value + 1)}>重新加载</button>} /> : graphLoading || graph === undefined ? <State title="正在加载关系图谱" detail="只在需要查看关系时读取审计数据。" /> : <MemoryGraph graph={graph} profiles={profiles} query={normalized} inspect={item => { setEditing(undefined); if (item.kind === 'profile') setMode('profile'); else { setSelectedMemoryId(item.id); setMode('memory') } }} />}
+  </section>
 }
 
 function ProfileLibrary({ profiles, memories, editing, busy, setEditing, save, remove }: {
@@ -644,7 +661,7 @@ function MemoryGraph({ graph, profiles, query, inspect }: { graph: MemoryGraphVi
 }
 
 function GraphMemory({ item, side, inspect }: { item: MemoryView; side: string; inspect(item: MemoryView): void }): JSX.Element {
-  return <GlassSurface as="section" interactive className="" borderRadius={13} distortionScale={-8} saturation={1.04}><header><small>{side} · {memoryKind(item.kind)}</small><strong>{item.subject}</strong></header><p>{item.content}</p><button type="button" onClick={() => inspect(item)}>查看并修正</button></GlassSurface>
+  return <section><header><small>{side} · {memoryKind(item.kind)}</small><strong>{item.subject}</strong></header><p>{item.content}</p><button type="button" onClick={() => inspect(item)}>查看并修正</button></section>
 }
 
 function relationLabel(kind: MemoryRelationView['kind']): string { return ({ supports: '支持', depends_on: '依赖', about: '关于', conflicts_with: '冲突', follows: '后续' })[kind] }
