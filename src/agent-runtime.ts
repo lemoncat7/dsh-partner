@@ -25,6 +25,7 @@ import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } f
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
+import { HEARTBEAT_LOCAL_COMMAND, heartbeatLocalCommandTool } from './heartbeat-command.js'
 
 type RuntimeContext = Context & {
   agents: Context['agents']
@@ -64,6 +65,7 @@ const HEARTBEAT_READ_ONLY_TOOLS = new Set([
 ])
 const HEARTBEAT_FILE_UPDATE_TOOLS = new Set(['write', 'edit', 'str_replace_editor'])
 const HEARTBEAT_TOOLS = new Set([...HEARTBEAT_READ_ONLY_TOOLS, ...HEARTBEAT_FILE_UPDATE_TOOLS])
+HEARTBEAT_TOOLS.add(HEARTBEAT_LOCAL_COMMAND)
 
 export interface HeartbeatToolTrace {
   name: string
@@ -695,7 +697,6 @@ async function createHeartbeatScope(ctx: RuntimeContext, conversation: Agent, co
   const availableTools = [...HEARTBEAT_TOOLS].filter(name => ctx.tools.get(name, conversation) !== undefined)
   const policy = heartbeatToolPolicy(concerns, availableTools)
   const allowedTools = [...policy.allowed]
-  if (allowedTools.length === 0) throw new Error('伙伴心跳没有可用的只读发现工具')
   const cwd = conversation.session.header.cwd
   if (!cwd) throw new Error('伙伴心跳缺少当前伙伴工作目录')
   const fileAccess = await resolveHeartbeatFileAccess(cwd, concerns)
@@ -718,9 +719,10 @@ async function createHeartbeatScope(ctx: RuntimeContext, conversation: Agent, co
     inject: () => { throw new Error('心跳作用域不接受会话消息') },
   } satisfies Partial<Agent>)
   agentCtx.tools.presentAs('native')
-  agentCtx.tools.restrict({ allow: allowedTools })
+  agentCtx.tools.register(heartbeatLocalCommandTool(cwd))
+  if (allowedTools.length > 0) agentCtx.tools.restrict({ allow: allowedTools })
   agentCtx.tools.guard(exec => {
-    if (!policy.allowed.has(exec.name)) return `当前挂念的来源策略不允许调用 ${exec.name}`
+    if (exec.name !== HEARTBEAT_LOCAL_COMMAND && !policy.allowed.has(exec.name)) return `当前挂念的来源策略不允许调用 ${exec.name}`
     return heartbeatToolDenial(exec.name, exec.arguments, fileAccess)
   })
   return { agent, dispose: () => scope.dispose() }

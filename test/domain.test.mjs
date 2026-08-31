@@ -17,6 +17,7 @@ import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDa
 import { concernObservationPrompt } from '../lib/autonomy.js'
 import { futureTime } from '../lib/time-format.js'
 import { renderConcernCreatedNotice } from '../lib/concern-notification.js'
+import { authorizeHeartbeatCommand } from '../lib/heartbeat-command.js'
 
 const concern = (overrides = {}) => ({
   id: 'concern-1', companionId: 'companion-1', scopeId: 'weixin:user', subject: 'Canvas 拖动稳定性', reason: '修改后仍然不稳定',
@@ -113,7 +114,9 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /不得读取伙伴记忆、会话归档、日记或 concerns 数据库/)
   assert.match(prompt, /只能更新 resources 中明确列出的现存文件/)
   assert.match(prompt, /\/home\/node\/partners\/companion-1\/docs\/status\.md/)
-  assert.match(prompt, /不得执行命令、发布、提交/)
+  assert.match(prompt, /必须调用 heartbeat_local_command/)
+  assert.match(prompt, /不要改成 glob、grep 或 read 去猜结果/)
+  assert.match(prompt, /不得执行其他命令、发布、提交/)
   assert.match(prompt, /只输出一个 JSON 对象/)
   assert.match(prompt, /nextCheckInMinutes/)
   assert.match(prompt, /notificationRuleEffect/)
@@ -122,6 +125,21 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /不要让所有挂念机械地使用相同间隔/)
   assert.match(prompt, /是否提醒由确定性策略另行决定/)
   assert.doesNotMatch(prompt, /NO_ACTION|当前会话上下文/)
+})
+
+test('authorizes only structured read-only heartbeat commands without a shell', () => {
+  assert.deepEqual(authorizeHeartbeatCommand('dsh -V'), { file: 'dsh', args: ['-V'], command: 'dsh -V' })
+  assert.deepEqual(authorizeHeartbeatCommand('npm view @deepseek-ai/dsh version'), {
+    file: 'npm', args: ['view', '@deepseek-ai/dsh', 'version'], command: 'npm view @deepseek-ai/dsh version',
+  })
+  assert.deepEqual(authorizeHeartbeatCommand('git status --short --branch'), {
+    file: 'git', args: ['status', '--short', '--branch'], command: 'git status --short --branch',
+  })
+  assert.throws(() => authorizeHeartbeatCommand('dsh -V。'), /allowlist/)
+  assert.throws(() => authorizeHeartbeatCommand('dsh -V; rm -rf /'), /metacharacter/)
+  assert.throws(() => authorizeHeartbeatCommand('bash -lc "dsh -V"'), /allowlist/)
+  assert.throws(() => authorizeHeartbeatCommand('npm exec anything'), /allowlist/)
+  assert.throws(() => authorizeHeartbeatCommand('git config --get user.name'), /allowlist/)
 })
 
 test('parses and bounds AI-selected concern check intervals', () => {
