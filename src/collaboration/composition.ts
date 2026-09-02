@@ -6,12 +6,15 @@ import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
 import { renderEnabledSkills } from '../skills/service.js'
+import type { LoadedSkill } from '../skills/domain.js'
 import type { TaskBoardService } from '../tasks/service.js'
 import type { PartnerSchedulerService } from '../scheduler/service.js'
 import type { PartnerCollaborationService } from './service.js'
 import type { CompanionService } from '../companions/service.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
+const MAX_INLINE_SKILLS = 8
+const MAX_INLINE_SKILL_CHARS = 32_000
 
 /** Composes partner-only tools into one agent scope. No global tool is registered. */
 export class PartnerAgentComposition {
@@ -25,9 +28,12 @@ export class PartnerAgentComposition {
     private readonly companions: CompanionService,
   ) {}
 
-  compose(ctx: AgentCompositionContext, companion: Companion): void {
-    const enabledSkills = this.skills.bindings(companion.id)
-    if (companion.capabilities.includes('skills')) ctx.tools.register(skillTool(companion, this.skills, this.executor))
+  async compose(ctx: AgentCompositionContext, companion: Companion): Promise<void> {
+    const skillsEnabled = companion.capabilities.includes('skills')
+    const enabledSkills = skillsEnabled ? this.skills.bindings(companion.id) : []
+    const inlineSkills = await loadInlineSkills(this.skills, enabledSkills)
+    const injectedSkillIds = new Set(inlineSkills.map(skill => skill.id))
+    if (skillsEnabled) ctx.tools.register(skillTool(companion, this.skills, this.executor))
     if (companion.capabilities.includes('companions')) ctx.tools.register(companionTool(this.companions))
     ctx.tools.register(taskTool(companion, this.tasks, this.collaboration))
     ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
@@ -36,7 +42,7 @@ export class PartnerAgentComposition {
     ctx.systemPrompt.section({
       name: 'partner-collaboration', order: -7,
       text: [
-        renderEnabledSkills(companion, enabledSkills),
+        renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
         companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限，需要用户随后在管理台单独授权。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '是否拆成看板任务由工作形态决定：只有工作跨多步、需要并行、需要等待外部条件、存在明确前置依赖、需要其他伙伴专长，或必须跨会话持续跟踪时才建任务。一次回答内可直接完成的简单事项不要制造看板负担。拆解后每个子任务必须有可验收产出；存在先后关系时写入 dependencyTaskIds，前置任务完成前不得启动后续任务。执行者提交结果后进入 review；指定验收伙伴时由其给出核验意见，最终通过或打回后再推进后续任务。完成全部拆解与委派后，立即向用户返回任务、负责人、依赖和验收安排的看板摘要；不要轮询状态或等待被委派任务执行结束，终态进度会反向通知你。',
@@ -44,7 +50,27 @@ export class PartnerAgentComposition {
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
       ].filter(Boolean).join('\n\n'),
     })
+    if (inlineSkills.length > 0) ctx.systemPrompt.section({
+      name: 'partner-inline-skills', order: -6,
+      text: [
+        '以下是已启用且经校验的可信 inline Skill 指令。当当前需求符合 Skill 的用途时直接遵循，无需再调用 partner_skill load；不匹配时不要强行套用。',
+        ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
+      ].join('\n\n'),
+    })
   }
+}
+
+async function loadInlineSkills(service: SkillService, enabled: ReturnType<SkillService['bindings']>): Promise<LoadedSkill[]> {
+  const loaded: LoadedSkill[] = []
+  let characters = 0
+  for (const metadata of enabled) {
+    if (!metadata.trusted || metadata.executionContext !== 'inline' || loaded.length >= MAX_INLINE_SKILLS) continue
+    const skill = await service.load(metadata.id).catch(() => undefined)
+    if (!skill || characters + skill.body.length > MAX_INLINE_SKILL_CHARS) continue
+    loaded.push(skill)
+    characters += skill.body.length
+  }
+  return loaded
 }
 
 function companionTool(companions: CompanionService): ToolDefinition {

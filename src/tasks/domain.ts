@@ -17,7 +17,10 @@ export interface BoardTask {
   skillIds: string[]
   /** Tasks that must reach done before this task can start. */
   dependencyTaskIds: string[]
+  resultAbstract?: string
   resultSummary?: string
+  /** Internal execution notes for the reviewer; never included in user-facing result delivery. */
+  reviewHandoff?: string
   reviewSummary?: string
   dueAt?: number
   revision: number

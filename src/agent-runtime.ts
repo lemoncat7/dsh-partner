@@ -46,7 +46,7 @@ interface KnowledgeTrackingService {
 }
 
 export interface PartnerAgentComposer {
-  compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): void
+  compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): void | Promise<void>
 }
 
 const HEARTBEAT_TIMEOUT_MS = 115_000
@@ -216,13 +216,16 @@ export class PartnerAgentRuntime {
       ? '这是你创建并分配的看板任务，执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务。'
       : task.status === 'review'
         ? '这是你创建并分配的看板任务进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，请向用户简要说明当前进度。'
-        : '这是你创建并分配的看板任务进度事件。不要重新执行已经完成的工作。请检查依赖它的后续任务是否已经解锁；需要时继续在看板上分配，然后向用户简要汇报当前进展。'
+        : task.status === 'done'
+          ? '这是你创建并分配的看板任务终态事件。不要重新执行已完成的工作。请检查依赖它的后续任务是否解锁，需要时继续在看板上分配。对用户的终态结果由系统直接投递，不要只改写成“已完成”或进度摘要。'
+          : '这是你创建并分配的看板任务受阻事件。请保留已有产出、检查是否能调整分工或解锁依赖；需要用户介入时，明确说明阻塞原因与所需动作。'
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: [
         instruction,
         `任务：${task.title}`,
         `状态：${previousStatus} → ${task.status}`,
         task.resultSummary ? `结果：\n${task.resultSummary.slice(0, 3000)}` : '',
+        task.status === 'review' && task.reviewHandoff ? `验收交接：\n${task.reviewHandoff.slice(0, 2000)}` : '',
         task.reviewSummary ? `验收：\n${task.reviewSummary.slice(0, 2000)}` : '',
         downstream.length > 0 ? `后续任务：\n${downstream.map(item => `- ${item.title}（${item.status}）`).join('\n')}` : '没有依赖此任务的后续任务。',
       ].filter(Boolean).join('\n\n') }],
@@ -616,7 +619,7 @@ export class PartnerAgentRuntime {
         order: -8,
         text: renderProfile(profile),
       })
-      this.composer?.compose(agentCtx as Context & { tools: ToolRuntime }, companion)
+      await this.composer?.compose(agentCtx as Context & { tools: ToolRuntime }, companion)
     }
     let handle: AgentHandle
     try {
@@ -670,10 +673,6 @@ function taskProgressNoticeSummary(status: BoardTask['status']): typeof TASK_PRO
   if (status === 'review') return '看板任务待验收'
   if (status === 'done') return '看板任务已完成'
   return '看板任务受阻'
-}
-
-export function isTaskProgressNoticeSummary(value: string | undefined): boolean {
-  return TASK_PROGRESS_NOTICE_SUMMARIES.some(item => item === value)
 }
 
 export function selectTaskNotificationRoute(

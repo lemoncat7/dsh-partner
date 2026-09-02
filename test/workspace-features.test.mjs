@@ -368,9 +368,12 @@ test('cross-partner delegation uses directed grants while user delegation bypass
   assert.equal(userDelegation.fromCompanionId, undefined)
 })
 
-test('partner collaboration tools are always available but their directory remains grant-scoped', async t => {
+test('partner collaboration tools are always available, grant-scoped, and inject trusted inline Skills', async t => {
   const item = await fixture(); t.after(item.close)
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  await skills.initialize()
+  const planning = await skills.installMarket('builtin', 'task-planning')
+  await skills.setBinding('companion-default', planning.id, true)
   const board = new TaskBoardService(item.store)
   const collaboration = new PartnerCollaborationService(item.store, skills, board, {})
   const companions = new CompanionService(item.store)
@@ -381,21 +384,33 @@ test('partner collaboration tools are always available but their directory remai
     }))
   })
   const composition = new PartnerAgentComposition(item.store, skills, board, collaboration, {}, {}, companions)
-  const compose = companion => {
+  const compose = async companion => {
     const tools = []
-    composition.compose({ tools: { register: tool => tools.push(tool) }, systemPrompt: { section() {} } }, companion)
-    return tools
+    const sections = []
+    await composition.compose({
+      tools: { register: tool => tools.push(tool) },
+      systemPrompt: { section: section => sections.push(section) },
+    }, companion)
+    return { tools, sections }
   }
   const companion = item.store.snapshot().companions[0]
-  const defaultNames = compose(companion).map(tool => tool.name)
+  const defaultComposition = await compose(companion)
+  const defaultNames = defaultComposition.tools.map(tool => tool.name)
   assert.ok(defaultNames.includes('partner_task_board'))
   assert.ok(defaultNames.includes('partner_collaborate'))
   assert.equal(defaultNames.includes('partner_skill'), false)
   assert.equal(defaultNames.includes('partner_companions'), false)
-  const authorizedTools = compose({ ...companion, capabilities: ['skills', 'companions'] })
+  assert.equal(defaultComposition.sections.some(section => section.name === 'partner-inline-skills'), false)
+  const authorizedComposition = await compose({ ...companion, capabilities: ['skills', 'companions'] })
+  const authorizedTools = authorizedComposition.tools
   const authorizedNames = authorizedTools.map(tool => tool.name)
   assert.ok(authorizedNames.includes('partner_skill'))
   assert.ok(authorizedNames.includes('partner_companions'))
+  const inlineSkills = authorizedComposition.sections.find(section => section.name === 'partner-inline-skills')
+  assert.ok(inlineSkills)
+  assert.match(inlineSkills.text, /<partner-inline-skill id="task-planning"/)
+  assert.match(inlineSkills.text, /多来源收集 \+ 真实性核验 \+ 结论整理/)
+  assert.match(authorizedComposition.sections.find(section => section.name === 'partner-collaboration').text, /已注入当前会话/)
   const created = JSON.parse(await authorizedTools.find(tool => tool.name === 'partner_companions').execute({
     action: 'create', name: '资料伙伴', role: '资料研究', description: '负责持续研究与核验', instructions: '引用证据，明确不确定性。',
   }, {}))

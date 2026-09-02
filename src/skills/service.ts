@@ -23,7 +23,20 @@ export class SkillService {
 
   constructor(private readonly store: PartnerStore, readonly repository: SkillRepository) {}
 
-  async initialize(): Promise<void> { await this.repository.initialize() }
+  async initialize(): Promise<void> {
+    await this.repository.initialize()
+    const replacements: PartnerSkill[] = []
+    for (const skill of this.store.snapshot().skills) {
+      if (skill.source !== 'builtin') continue
+      const builtin = BUILTIN_SKILLS.get(skill.id)
+      if (!builtin || skill.checksum === sha256(builtin.document)) continue
+      replacements.push(await this.repository.install({ id: skill.id, document: builtin.document, source: 'builtin', sourceId: BUILTIN_SKILL_SOURCE, trusted: true }))
+    }
+    if (replacements.length > 0) await this.store.update(state => {
+      const byId = new Map(replacements.map(skill => [skill.id, skill]))
+      state.skills = state.skills.map(skill => byId.get(skill.id) ?? skill)
+    })
+  }
 
   bindings(companionId: string, state: Pick<PartnerState, 'skills' | 'skillBindings'> = this.store.snapshot()): PartnerSkill[] {
     const enabled = new Set(state.skillBindings.filter(item => item.companionId === companionId && item.enabled).map(item => item.skillId))
@@ -190,11 +203,11 @@ export class SkillService {
   }
 }
 
-export function renderEnabledSkills(companion: Companion, skills: PartnerSkill[]): string {
+export function renderEnabledSkills(companion: Companion, skills: PartnerSkill[], injectedIds: ReadonlySet<string> = new Set()): string {
   if (!companion.capabilities.includes('skills') || skills.length === 0) return ''
   return [
-    '以下 Skill 已绑定到当前伙伴。需要执行时调用 partner_skill；不要假装已经执行。市场 Skill 默认在隔离临时会话中运行，且只能缩小既有工具权限。',
-    ...skills.map(skill => `- ${skill.id}｜${skill.displayName}｜${skill.description}｜上下文 ${skill.executionContext}`),
+    '以下 Skill 已绑定到当前伙伴。已注入的可信 inline Skill 可直接遵循；其他 Skill 必须通过 partner_skill 加载或运行，不要假装已经执行。隔离 Skill 只能缩小既有工具权限。',
+    ...skills.map(skill => `- ${skill.id}｜${skill.displayName}｜${skill.description}｜${injectedIds.has(skill.id) ? '已注入当前会话' : skill.executionContext === 'fork' ? '按需隔离运行' : '按需加载'}`),
   ].join('\n')
 }
 

@@ -72,7 +72,7 @@ export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'do
 export interface BoardTaskView {
   id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'
   assigneeCompanionId?: string; reviewerCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
-  skillIds: string[]; dependencyTaskIds: string[]; resultSummary?: string; reviewSummary?: string; dueAt?: number
+  skillIds: string[]; dependencyTaskIds: string[]; resultAbstract?: string; resultSummary?: string; reviewHandoff?: string; reviewSummary?: string; dueAt?: number
 }
 export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
 export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }

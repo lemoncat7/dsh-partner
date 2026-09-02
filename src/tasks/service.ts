@@ -3,6 +3,7 @@ import { appendBounded } from '../core/collections.js'
 import { oneOf, optionalText, record, requiredText, stringList } from '../core/validation.js'
 import type { PartnerStore } from '../store.js'
 import { TASK_PRIORITIES, TASK_STATUSES, type BoardTask, type TaskActivity } from './domain.js'
+import type { TaskExecutionOutput } from './result.js'
 
 const MAX_TASKS = 500
 const MAX_ACTIVITIES = 2000
@@ -93,7 +94,12 @@ export class TaskBoardService {
       task.updatedAt = Date.now()
       if (task.status === 'done' && previousStatus !== 'done') task.completedAt = task.updatedAt
       if (task.status !== 'done') delete task.completedAt
-      if (task.status === 'doing' && previousStatus !== 'doing') { delete task.resultSummary; delete task.reviewSummary }
+      if (task.status === 'doing' && previousStatus !== 'doing') {
+        delete task.resultAbstract
+        delete task.resultSummary
+        delete task.reviewHandoff
+        delete task.reviewSummary
+      }
       const kind: TaskActivity['kind'] = task.status !== previousStatus ? (task.status === 'done' ? 'completed' : previousStatus === 'done' ? 'reopened' : 'moved') : 'updated'
       appendActivity(state.taskActivities, task.id, actor, kind, task.status !== previousStatus ? `${previousStatus} → ${task.status}` : '更新任务', task.updatedAt)
       output = structuredClone(task)
@@ -127,7 +133,7 @@ export class TaskBoardService {
     return task
   }
 
-  async completeExecution(taskId: string, result: string, actor: TaskActor): Promise<BoardTask> {
+  async completeExecution(taskId: string, result: string | TaskExecutionOutput, actor: TaskActor): Promise<BoardTask> {
     let output!: BoardTask
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
@@ -136,7 +142,12 @@ export class TaskBoardService {
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
-      task.resultSummary = boundedText(result, 'result', 12_000)
+      const execution = typeof result === 'string' ? { deliverable: result } : result
+      task.resultSummary = boundedText(execution.deliverable, 'result', 12_000)
+      if (execution.summary?.trim()) task.resultAbstract = execution.summary.trim().slice(0, 600)
+      else delete task.resultAbstract
+      if (execution.reviewHandoff?.trim()) task.reviewHandoff = execution.reviewHandoff.trim().slice(0, 4_000)
+      else delete task.reviewHandoff
       delete task.reviewSummary
       const movedToReview = task.status === 'doing'
       if (movedToReview) task.status = 'review'
@@ -173,6 +184,8 @@ export class TaskBoardService {
       if (!task) throw new Error('Task does not exist')
       previousStatus = task.status
       task.resultSummary = `执行受阻：${boundedText(error, 'error', 4000)}`
+      delete task.resultAbstract
+      delete task.reviewHandoff
       task.status = 'blocked'
       task.revision += 1
       task.updatedAt = Date.now()

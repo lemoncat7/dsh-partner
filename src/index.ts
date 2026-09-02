@@ -82,12 +82,17 @@ export function apply(context: Context, config: PartnerConfig): void {
     companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
     for (const companion of store.snapshot().companions) await agents.ensureLocalSessionRecord(companion.id)
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })
-    tasks.setProgressNotifier((task, previousStatus) => agents.notifyTaskProgress(task, previousStatus).catch(error => {
-      ctx.logger.warn(`dsh-partner task progress notification failed: ${error instanceof Error ? error.message : String(error)}`)
-    }))
     await collaboration.start()
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
-    const channels = new ChannelManager(ctx, store, credentials, agents)
+    const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    tasks.setProgressNotifier(async (task, previousStatus) => {
+      await agents.notifyTaskProgress(task, previousStatus).catch(error => {
+        ctx.logger.warn(`dsh-partner task progress notification failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      await channels.notifyTaskResult(task).catch(error => {
+        ctx.logger.warn(`dsh-partner task result delivery failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    })
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))

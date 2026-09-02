@@ -14,9 +14,11 @@ import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/ds
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { completedTurnEvents, extractOutboundAttachments, isTaskProgressNoticeSummary } from '../agent-runtime.js'
+import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
 import type { PartnerReply } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
+import type { BoardTask } from '../tasks/domain.js'
+import { prepareTaskResultDelivery } from '../tasks/result.js'
 
 type ChannelContext = Context & { apiProxy: ApiProxy; settings: SettingsProvider }
 
@@ -46,6 +48,7 @@ export class ChannelManager {
     private readonly store: PartnerStore,
     private readonly credentials: PartnerCredentialVault,
     private readonly agents: PartnerAgentRuntime,
+    private readonly defaultCwd: string,
   ) {}
 
   startInteractionBridge(): void {
@@ -131,6 +134,19 @@ export class ChannelManager {
 
   async sendProactive(channelId: string, userId: string, text: string): Promise<void> {
     await this.sendProactiveReply(channelId, userId, { text, attachments: [] })
+  }
+
+  async notifyTaskResult(task: BoardTask): Promise<void> {
+    if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
+    const routes = this.store.snapshot().sessions.filter(item => item.companionId === task.creatorCompanionId)
+    const route = selectTaskNotificationRoute(routes, task.creatorSessionId, () => false)
+    if (!route || route.kind === 'local') return
+    const cwd = route.cwd ?? partnerCwd(this.defaultCwd, task.creatorCompanionId)
+    const delivery = await prepareTaskResultDelivery(task, cwd)
+    await this.queueProactive(route, `task-result:${task.id}:${task.revision}:${task.status}`, {
+      text: delivery.text,
+      attachments: await extractOutboundAttachments(delivery.text, cwd),
+    })
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
@@ -332,9 +348,9 @@ export class ChannelManager {
 export function isAutonomousDeliveryTurn(events: readonly SessionEvent[]): boolean {
   return events.some(event => event.type === 'user/message'
     && event.data.source.kind === 'plugin'
+    && event.data.source.plugin === 'tool-goal'
     && event.data.source.form === 'notice'
-    && (event.data.source.plugin === 'tool-goal' && event.data.source.summary?.startsWith('complete:')
-      || event.data.source.plugin === '@lemoncat7/dsh-partner' && isTaskProgressNoticeSummary(event.data.source.summary)))
+    && event.data.source.summary?.startsWith('complete:'))
 }
 
 export function requiredChannel(store: PartnerStore, id: string): WeixinChannel {

@@ -6,6 +6,7 @@ import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
 import type { TaskBoardService } from '../tasks/service.js'
+import { parseTaskExecutionOutput } from '../tasks/result.js'
 import { delegationKind, delegationPending, type PartnerDelegation, type PartnerDirectoryEntry } from './domain.js'
 import { canRetryDelegation, delegationRetryDelay, retryDelayLabel } from './retry-policy.js'
 
@@ -250,7 +251,7 @@ export class PartnerCollaborationService {
         await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id })
       } else {
         if (latest.status !== 'doing' && latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
-        await this.tasks.completeExecution(task.id, result.output, { kind: 'companion', companionId: to.id })
+        await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(result.output), { kind: 'companion', companionId: to.id })
       }
       await this.complete(delegation.id, result.run.id, result.output)
     } catch (error) {
@@ -328,7 +329,7 @@ function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: P
     task.description ? `任务说明：${task.description}` : '',
     `委派要求：${delegation.request}`,
     recovery,
-    `当前执行伙伴：${to.name}。请真正完成能够完成的工作，并清楚说明产出、证据、未完成项和需要验收的内容。不要访问其他伙伴的私有会话或记忆。`,
+    `当前执行伙伴：${to.name}。请真正完成能够完成的工作。最终回复必须用下面三个标签分离渠道摘要、完整交付物和内部验收交接：\n<partner-summary>\n一至三句可直接发给用户的短结论\n</partner-summary>\n<partner-deliverable>\n只写用户最终需要的产出、证据、来源和必要限制\n</partner-deliverable>\n<partner-review-handoff>\n只写给验收者的核验点、待确认项与风险\n</partner-review-handoff>\n不要访问其他伙伴的私有会话或记忆。`,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -338,6 +339,7 @@ function reviewPrompt(task: ReturnType<TaskBoardService['require']>): string {
     `任务：${task.title}`,
     task.description ? `任务说明：${task.description}` : '',
     task.resultSummary ? `执行结果：\n${task.resultSummary}` : '执行者没有提交可见结果，请明确指出。',
+    task.reviewHandoff ? `执行者验收交接：\n${task.reviewHandoff}` : '',
     '请输出：验收结论建议（通过或打回）、核验证据、缺失项，以及若打回应如何修正。你只提供核验意见，最终通过或打回由用户决定。',
   ].filter(Boolean).join('\n\n')
 }

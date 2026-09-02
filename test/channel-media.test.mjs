@@ -1,13 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createCipheriv, randomBytes } from 'node:crypto'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
 import { answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
 import { extractOutboundAttachments, selectTaskNotificationRoute } from '../lib/agent-runtime.js'
 import { CONCERN_CREATED_NOTICE, concernCreatedNoticeFromEvent } from '../lib/concern-notification.js'
+import { parseTaskExecutionOutput, prepareTaskResultDelivery } from '../lib/tasks/result.js'
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
@@ -19,10 +20,50 @@ test('routes completed autonomous goals without mirroring ordinary plugin notice
   const heartbeat = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' } } }
   const taskReview = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务待验收' } } }
   const taskDone = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务已完成' } } }
+  const taskBlocked = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务受阻' } } }
   assert.equal(isAutonomousDeliveryTurn([goal]), true)
-  assert.equal(isAutonomousDeliveryTurn([taskReview]), true)
-  assert.equal(isAutonomousDeliveryTurn([taskDone]), true)
+  assert.equal(isAutonomousDeliveryTurn([taskReview]), false)
+  assert.equal(isAutonomousDeliveryTurn([taskDone]), false)
+  assert.equal(isAutonomousDeliveryTurn([taskBlocked]), false)
   assert.equal(isAutonomousDeliveryTurn([heartbeat]), false)
+})
+
+test('renders short terminal results directly without internal review handoff', async () => {
+  const base = {
+    id: 'task-1', title: '调研方案', description: '', priority: 'normal', assigneeCompanionId: 'worker', createdBy: 'companion',
+    creatorCompanionId: 'creator', skillIds: [], dependencyTaskIds: [], revision: 4, createdAt: 1, updatedAt: 2,
+  }
+  const done = await prepareTaskResultDelivery({ ...base, status: 'done', resultSummary: '结论与来源都在这里', reviewHandoff: '只给验收者', reviewSummary: '证据完整，验收通过' }, '/tmp')
+  assert.match(done.text, /执行结果：\n结论与来源都在这里/)
+  assert.match(done.text, /验收结论：证据完整，验收通过/)
+  assert.doesNotMatch(done.text, /只给验收者/)
+  const blocked = await prepareTaskResultDelivery({ ...base, status: 'blocked', resultSummary: '缺少访问权限' }, '/tmp')
+  assert.match(blocked.text, /阻塞说明：\n缺少访问权限/)
+})
+
+test('separates review handoff and writes long deliverables to a private Markdown file', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-partner-result-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const parsed = parseTaskExecutionOutput('<partner-summary>\n短结论\n</partner-summary>\n<partner-deliverable>\n完整交付\n</partner-deliverable>\n<partner-review-handoff>\n请核对来源 A\n</partner-review-handoff>')
+  assert.deepEqual(parsed, { summary: '短结论', deliverable: '完整交付', reviewHandoff: '请核对来源 A' })
+  const legacy = parseTaskExecutionOutput('## 产出\n最终内容\n\n## 需要验收的内容\n请检查格式')
+  assert.deepEqual(legacy, { deliverable: '## 产出\n最终内容', reviewHandoff: '请检查格式' })
+  const long = '这是完整交付内容。'.repeat(300)
+  const delivery = await prepareTaskResultDelivery({
+    id: 'task-long-result', title: '超长调研', description: '', status: 'done', priority: 'normal', createdBy: 'companion',
+    creatorCompanionId: 'creator', skillIds: [], dependencyTaskIds: [], resultAbstract: '调研已完成，详见附件。', resultSummary: long,
+    reviewHandoff: '内部核验清单', revision: 2, createdAt: 1, updatedAt: 2,
+  }, root)
+  assert.match(delivery.text, /结论：调研已完成，详见附件/)
+  assert.match(delivery.text, /完整交付文档/)
+  assert.doesNotMatch(delivery.text, /内部核验清单/)
+  assert.ok(delivery.documentPath)
+  const document = await readFile(delivery.documentPath, 'utf8')
+  assert.match(document, /这是完整交付内容/)
+  assert.doesNotMatch(document, /内部核验清单/)
+  const attachments = await extractOutboundAttachments(delivery.text, root)
+  assert.deepEqual(attachments.map(item => ({ name: item.name, kind: item.kind, mediaType: item.mediaType })), [{
+    name: delivery.documentPath.split('/').at(-1), kind: 'file', mediaType: 'text/markdown',
+  }])
 })
 
 test('task notifications preserve their original channel and prefer another channel over local fallback', () => {
