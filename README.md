@@ -7,6 +7,7 @@
 ## 当前能力
 
 - 伙伴创建、编辑与删除
+- 新伙伴只建立身份和本地会话；能力、长期记忆、每日回顾、心跳、渠道与伙伴间授权默认全部关闭
 - Agent scoped 身份提示，仅影响该伙伴创建的 Agent
 - 为伙伴选择 Agent Preset、提供方与模型
 - 微信 iLink Bot 扫码连接
@@ -45,7 +46,7 @@
 - 内置精选 Skill，以及与 nomifun 当前一致的 ClawHub、LoopHub、SkillHub 三个公开 Skill 榜单；支持统一 HTTP 代理、连接测试、受限 ZIP 安装与兼容 JSON 索引的团队源，非可信市场强制使用隔离临时会话
 - 人与伙伴共享的任务看板：收集箱、待开始、进行中、待验收、受阻、已完成六个状态，带优先级、负责人、乐观并发 revision 与有界活动记录
 - 有向伙伴授权和真实委派：在 A 的能力页勾选 B 后，A 才能查看 B 的公开能力并通过 `@B` 委派；用户本人可从全局看板直接指派任意伙伴，只共享任务信封、公开能力和结果摘要
-- 伙伴会话内提供 `partner_skill`、`partner_task_board`、`partner_collaborate` 和 `partner_schedule` 四组作用域工具，不污染普通 DSH 会话的工具表
+- 伙伴会话内提供 `partner_skill`、`partner_task_board`、`partner_collaborate`、`partner_schedule`，以及按能力显式授权的 `partner_companions` 作用域工具，不污染普通 DSH 会话的工具表；“创建伙伴”工具只填写身份，新伙伴权限仍由用户在管理台单独授予
 - 伙伴定时任务支持间隔与每日时间、跳过或排队重叠、手动执行和重启恢复；每次使用新临时会话，完成后默认销毁，也可选择保留以便审计
 - Skill fork、伙伴委派和定时任务共用同一个有界临时执行器，统一处理模型/预设组合、并发上限、超时、工具权限、运行记录与会话回收
 

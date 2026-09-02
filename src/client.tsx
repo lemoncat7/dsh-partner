@@ -99,7 +99,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const create = async (draft: NewCompanionDraft): Promise<void> => {
     try {
       const companion = await api<CompanionView>('/companions', { method: 'POST', body: JSON.stringify({ companion: {
-        ...draft, capabilities: ['knowledge', 'skills'],
+        ...draft, capabilities: [],
       } }) })
       await refresh(); setSelectedId(companion.id); setView('identity'); setCreatingCompanion(false)
     } catch (reason) { setError(message(reason)); throw reason }
@@ -171,7 +171,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
   const localSession = sessions.find(item => item.kind === 'local')
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
-  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git' })[item])
+  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git', companions: '创建伙伴' })[item])
   const online = channel?.runtimeStatus === 'running'
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
@@ -257,6 +257,7 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
     { id: 'skills', title: 'Skill', detail: '使用为当前伙伴单独启用的 Skill 能力与工作流程。' },
     { id: 'ssh', title: 'SSH', detail: '通过 SSH 插件授权的主机与命令边界工作。' },
     { id: 'git', title: 'Git', detail: '预留 Git 工具能力，仍需对应插件实际安装。' },
+    { id: 'companions', title: '创建伙伴', detail: '允许伙伴按明确需求创建独立身份；新伙伴默认没有任何能力与记忆。' },
   ]
   const selectedProvider = form.provider || modelCatalog?.defaultSelection.provider || ''
   const modelOptions = modelCatalog?.providers.find(item => item.id === selectedProvider)?.models ?? []

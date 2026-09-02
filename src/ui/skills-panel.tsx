@@ -15,6 +15,7 @@ export function SkillsPanel(): JSX.Element {
   const [addingSource, setAddingSource] = useState(false)
   const [creatingSkill, setCreatingSkill] = useState(false)
   const [editingNetwork, setEditingNetwork] = useState(false)
+  const [showAllInstalled, setShowAllInstalled] = useState(false)
   const [network, setNetwork] = useState<SkillMarketNetworkView>({})
   const load = useCallback(async (refresh = false) => {
     try {
@@ -26,6 +27,7 @@ export function SkillsPanel(): JSX.Element {
   }, [])
   useEffect(() => { void load() }, [load])
   const installed = new Map(catalog.installed.map(item => [item.id, item]))
+  const visibleInstalled = showAllInstalled ? catalog.installed : catalog.installed.slice(0, 4)
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     return market.entries.filter(item => (item.sourceId === activeSource) && (!normalized || `${item.name} ${item.description} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(normalized)))
@@ -50,11 +52,11 @@ export function SkillsPanel(): JSX.Element {
     {editingNetwork && <WorkspaceDialog title="市场网络设置" detail="配置 Skill 索引和安装包下载共用的 HTTP 代理，并在保存前测试连通性。" close={() => setEditingNetwork(false)}><NetworkSettingsForm value={network} close={() => setEditingNetwork(false)} changed={async next => { setNetwork(next); await load(true) }} /></WorkspaceDialog>}
     {addingSource && <WorkspaceDialog title="添加市场来源" detail="接入团队或个人维护的 Skill 索引。自定义来源默认按不可信来源隔离执行。" close={() => setAddingSource(false)}><MarketSourceForm close={() => setAddingSource(false)} changed={() => load(true)} /></WorkspaceDialog>}
     <WorkspaceBlock title="已安装" detail={`${catalog.installed.length} 个可供伙伴使用`} actions={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建 Skill</button>}>
-      {loading ? <CollectionSkeleton rows={2} /> : catalog.installed.length === 0 ? <CollectionEmpty title="还没有安装 Skill" detail="可以创建自己的 Skill，或从下方市场选择。" action={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建第一个 Skill</button>} /> : <div className="dsh-partner-skill-installed is-market">{catalog.installed.map(skill => <article key={skill.id}>
+      {loading ? <CollectionSkeleton rows={2} /> : catalog.installed.length === 0 ? <CollectionEmpty title="还没有安装 Skill" detail="可以创建自己的 Skill，或从下方市场选择。" action={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建第一个 Skill</button>} /> : <><div className="dsh-partner-skill-installed is-market">{visibleInstalled.map(skill => <article key={skill.id}>
         <span className="dsh-partner-skill-mark"><IconCheckOutline16 size={16} /></span><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.version} · {skill.executionContext === 'fork' ? '临时会话' : '当前会话'} · {skill.source}</small></span>
         <button type="button" className="is-icon" disabled={busy === skill.id} aria-label={`卸载 ${skill.displayName}`} onClick={() => { void uninstall(skill.id) }}><IconTrashOutline16 size={15} /></button>
         {actionError?.kind === 'uninstall' && actionError.id === skill.id && <p className="dsh-partner-skill-action-error" role="alert">卸载失败：{actionError.message}</p>}
-      </article>)}</div>}
+      </article>)}</div>{catalog.installed.length > 4 && <button type="button" className="dsh-partner-skill-disclosure" aria-expanded={showAllInstalled} onClick={() => setShowAllInstalled(value => !value)}>{showAllInstalled ? '收起已安装 Skill' : `查看全部 ${catalog.installed.length} 个已安装 Skill`}</button>}</>}
     </WorkspaceBlock>
     <WorkspaceBlock title="市场目录" detail="内置 ClawHub、LoopHub、SkillHub，与 nomifun 当前 Skill 榜单一致" actions={<><button type="button" onClick={() => setEditingNetwork(true)}>代理设置{network.proxyUrl ? ' · 已启用' : ''}</button><button type="button" onClick={() => setAddingSource(true)}><IconPlusOutline16 size={14} />自定义源</button></>}>
       <nav className="dsh-partner-market-sources" aria-label="Skill 市场来源">{sources.map(source => <button type="button" key={source.id} className={activeSource === source.id ? 'is-active' : ''} aria-pressed={activeSource === source.id} onClick={() => setActiveSource(source.id)}>{source.name}<small>{market.entries.filter(entry => entry.sourceId === source.id).length}</small></button>)}</nav>

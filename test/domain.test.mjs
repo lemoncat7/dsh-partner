@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
+import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
 import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, parseConcernObservations, partnerCwd, renewedSession, renderHeartbeatActivity, renderMemory, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
@@ -38,8 +38,18 @@ test('evaluates heartbeat schedules in the configured timezone', () => {
 test('normalizes companions, capabilities and optional model routes', () => {
   assert.deepEqual(normalizeCompanionDraft({
     name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '', presetId: '', provider: '', model: '',
-    capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'root-access'],
-  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh'] })
+    capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'companions', 'root-access'],
+  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh', 'companions'] })
+})
+
+test('new companion defaults keep memory, review, heartbeat and capabilities disabled', () => {
+  assert.deepEqual(DEFAULT_AUTOMATION, {
+    memory: { enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
+    heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 },
+  })
+  const companion = createDefaultCompanion(42)
+  assert.deepEqual(companion.capabilities, [])
+  assert.deepEqual(companion.automation, DEFAULT_AUTOMATION)
 })
 
 test('inherits the DSH default model and permits companion overrides', () => {

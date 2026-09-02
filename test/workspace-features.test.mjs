@@ -13,6 +13,7 @@ import { TaskBoardService, TaskConflictError } from '../lib/tasks/service.js'
 import { nextOccurrence } from '../lib/scheduler/service.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
+import { CompanionService } from '../lib/companions/service.js'
 import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
 import { parseMarketResponse } from '../lib/skills/markets/adapters.js'
 import { builtinMarketSources } from '../lib/skills/markets/builtin.js'
@@ -234,17 +235,74 @@ test('partner collaboration tools are always available but their directory remai
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   const board = new TaskBoardService(item.store)
   const collaboration = new PartnerCollaborationService(item.store, skills, board, {})
-  const composition = new PartnerAgentComposition(item.store, skills, board, collaboration, {}, {})
+  const companions = new CompanionService(item.store)
+  companions.setSessionProvisioner(async companionId => {
+    await item.store.update(state => state.sessions.push({
+      id: `route-${companionId}`, kind: 'local', channelId: '@local', userId: `owner:${companionId}`,
+      companionId, sessionId: `session-${companionId}`, lastMessageAt: 1,
+    }))
+  })
+  const composition = new PartnerAgentComposition(item.store, skills, board, collaboration, {}, {}, companions)
   const compose = companion => {
-    const names = []
-    composition.compose({ tools: { register: tool => names.push(tool.name) }, systemPrompt: { section() {} } }, companion)
-    return names
+    const tools = []
+    composition.compose({ tools: { register: tool => tools.push(tool) }, systemPrompt: { section() {} } }, companion)
+    return tools
   }
   const companion = item.store.snapshot().companions[0]
-  assert.ok(compose(companion).includes('partner_task_board'))
-  assert.ok(compose(companion).includes('partner_collaborate'))
-  assert.ok(compose(companion).includes('partner_skill'))
+  const defaultNames = compose(companion).map(tool => tool.name)
+  assert.ok(defaultNames.includes('partner_task_board'))
+  assert.ok(defaultNames.includes('partner_collaborate'))
+  assert.equal(defaultNames.includes('partner_skill'), false)
+  assert.equal(defaultNames.includes('partner_companions'), false)
+  const authorizedTools = compose({ ...companion, capabilities: ['skills', 'companions'] })
+  const authorizedNames = authorizedTools.map(tool => tool.name)
+  assert.ok(authorizedNames.includes('partner_skill'))
+  assert.ok(authorizedNames.includes('partner_companions'))
+  const created = JSON.parse(await authorizedTools.find(tool => tool.name === 'partner_companions').execute({
+    action: 'create', name: '资料伙伴', role: '资料研究', description: '负责持续研究与核验', instructions: '引用证据，明确不确定性。',
+  }, {}))
+  assert.equal(created.name, '资料伙伴')
+  assert.deepEqual(created.capabilities, [])
+  assert.equal(created.memoryEnabled, false)
+  assert.equal(item.store.snapshot().sessions.some(session => session.companionId === created.id), true)
   assert.deepEqual(collaboration.directoryFor(companion.id), [])
+})
+
+test('companion creation is atomic and starts with identity-only permissions', async t => {
+  const item = await fixture(); t.after(item.close)
+  const service = new CompanionService(item.store)
+  service.setSessionProvisioner(async companionId => {
+    await item.store.update(state => state.sessions.push({
+      id: `route-${companionId}`, kind: 'local', channelId: '@local', userId: `owner:${companionId}`,
+      companionId, sessionId: `session-${companionId}`, lastMessageAt: 1,
+    }))
+  })
+  const created = await service.create({
+    name: ' 架构伙伴 ', role: '架构审阅', description: '负责边界与稳定性', instructions: '先核验事实，再给结论。',
+    capabilities: ['knowledge', 'companions'],
+  })
+  assert.equal(created.name, '架构伙伴')
+  assert.equal(created.role, '架构审阅')
+  assert.equal(created.instructions, '先核验事实，再给结论。')
+  assert.deepEqual(created.capabilities, [])
+  assert.equal(created.automation.memory.enabled, false)
+  assert.equal(created.automation.memory.dailyReviewEnabled, false)
+  assert.equal(created.automation.heartbeat.enabled, false)
+  assert.equal(item.store.snapshot().sessions.some(session => session.companionId === created.id), true)
+
+  const failing = new CompanionService(item.store)
+  failing.setSessionProvisioner(async companionId => {
+    await item.store.update(state => state.sessions.push({
+      id: `route-${companionId}`, kind: 'local', channelId: '@local', userId: `owner:${companionId}`,
+      companionId, sessionId: `session-${companionId}`, lastMessageAt: 1,
+    }))
+    throw new Error('session failed')
+  })
+  const before = item.store.snapshot().companions.length
+  const sessionsBefore = item.store.snapshot().sessions.length
+  await assert.rejects(() => failing.create({ name: '失败伙伴', role: '测试', description: '', instructions: '' }), /session failed/)
+  assert.equal(item.store.snapshot().companions.length, before)
+  assert.equal(item.store.snapshot().sessions.length, sessionsBefore)
 })
 
 test('Skill binding reload observes the committed binding state', async t => {

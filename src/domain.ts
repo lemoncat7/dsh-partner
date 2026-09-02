@@ -4,7 +4,7 @@ import type { PartnerDelegation } from './collaboration/domain.js'
 import type { ExecutionRun } from './execution/domain.js'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
 
-export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git'
+export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git' | 'companions'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
@@ -129,7 +129,7 @@ export interface CompanionDraft {
 }
 
 export const DEFAULT_AUTOMATION: CompanionAutomation = {
-  memory: { enabled: true, retentionDays: 0, dailyReviewEnabled: true, dailyReviewHour: 2 },
+  memory: { enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
   heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 },
 }
 
@@ -216,7 +216,7 @@ export function createDefaultCompanion(now = Date.now()): Companion {
     role: '长期 AI 工作伙伴',
     description: '在桌面和微信之间保持同一工作身份与独立上下文。',
     instructions: '你是用户长期信任的工作伙伴。保持清晰、可靠、克制；需要使用工具时先核对目标和权限，不要猜测执行结果。',
-    capabilities: ['knowledge', 'skills'],
+    capabilities: [],
     automation: structuredClone(DEFAULT_AUTOMATION),
     createdAt: now,
     updatedAt: now,
@@ -256,5 +256,5 @@ function optionalText(value: unknown, label: string, max: number): string | unde
 }
 
 function isCapability(value: string): value is CompanionCapability {
-  return value === 'knowledge' || value === 'skills' || value === 'ssh' || value === 'git'
+  return value === 'knowledge' || value === 'skills' || value === 'ssh' || value === 'git' || value === 'companions'
 }

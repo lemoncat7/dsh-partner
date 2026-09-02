@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8')
-const [entry, controller, shared, skills, board, schedules, companionCreate] = await Promise.all([
+const [entry, controller, shared, skills, board, schedules, companionCreate, workspaceStyles] = await Promise.all([
   read('../src/client.tsx'),
   read('../src/client-controller.tsx'),
   read('../src/ui/workspace-components.tsx'),
@@ -11,6 +11,7 @@ const [entry, controller, shared, skills, board, schedules, companionCreate] = a
   read('../src/ui/task-board-panel.tsx'),
   read('../src/ui/schedule-panel.tsx'),
   read('../src/ui/companion-create.tsx'),
+  read('../src/ui/workspace-ui.css'),
 ])
 
 test('client composition root delegates session orchestration to one controller', () => {
@@ -20,6 +21,21 @@ test('client composition root delegates session orchestration to one controller'
   assert.match(controller, /function waitForClientSession/)
   assert.match(controller, /async openSession/)
   assert.match(controller, /async renewSession/)
+})
+
+test('dropdowns and installed Skill disclosure follow the shared workspace contract', () => {
+  assert.match(workspaceStyles, /\.dsh-partner-workspace select:not\(\[multiple\]\)/)
+  assert.match(workspaceStyles, /appearance: none/)
+  assert.match(workspaceStyles, /background-image: linear-gradient/)
+  const market = skills.slice(skills.indexOf('export function SkillsPanel'), skills.indexOf('export function CompanionSkillSettings'))
+  assert.match(market, /catalog\.installed\.slice\(0, 4\)/)
+  assert.match(market, /visibleInstalled\.map/)
+  assert.match(market, /aria-expanded=\{showAllInstalled\}/)
+})
+
+test('new companions start empty and creation is exposed as an explicit capability', () => {
+  assert.match(entry, /draft, capabilities: \[\]/)
+  assert.match(entry, /id: 'companions', title: '创建伙伴'/)
 })
 
 test('global feature pages share one template and one create-dialog contract', () => {

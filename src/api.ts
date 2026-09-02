@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
-import { DEFAULT_AUTOMATION, normalizeAutomation, normalizeCompanionDraft, text, type ChannelView, type Companion } from './domain.js'
+import { normalizeAutomation, normalizeCompanionDraft, text, type ChannelView, type Companion } from './domain.js'
 import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { ChannelManager, requiredCompanion } from './channels/manager.js'
@@ -16,6 +16,7 @@ import type { SkillService } from './skills/service.js'
 import type { TaskBoardService } from './tasks/service.js'
 import type { PartnerCollaborationService } from './collaboration/service.js'
 import type { PartnerSchedulerService } from './scheduler/service.js'
+import type { CompanionService } from './companions/service.js'
 import { dispatchPartnerWorkspaceApi } from './api/features/workspace-api.js'
 import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson } from './api/http.js'
 
@@ -38,6 +39,7 @@ interface ApiRuntime {
   tasks: TaskBoardService
   collaboration: PartnerCollaborationService
   scheduler: PartnerSchedulerService
+  companions: CompanionService
 }
 
 export function registerPartnerApi(webServer: WebServerLike, prefix: string, runtime: ApiRuntime): () => void {
@@ -71,16 +73,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   if (segments[0] === 'companions') {
     if (method === 'POST' && segments.length === 1) {
       mutation(req)
-      const body = await readObject(req)
-      const draft = normalizeCompanionDraft(body.companion)
-      const now = Date.now()
-      const companion: Companion = { ...draft, automation: structuredClone(DEFAULT_AUTOMATION), id: createId('companion'), createdAt: now, updatedAt: now }
-      await runtime.store.update(state => { state.companions.push(companion) })
-      try { await runtime.agents.ensureLocalSessionRecord(companion.id) }
-      catch (error) {
-        await runtime.store.update(state => { state.companions = state.companions.filter(item => item.id !== companion.id) }).catch(() => {})
-        throw error
-      }
+      const companion = await runtime.companions.create((await readObject(req)).companion)
       return sendJson(res, 201, companion)
     }
     const id = segments[1]
@@ -299,5 +292,5 @@ async function snapshot(runtime: ApiRuntime): Promise<{
   return { companions: state.companions, channels: await runtime.channels.views(), pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
 }
 
-function createId(prefix: string): string { return `${prefix}-${randomBytes(10).toString('hex')}` }
 function localDay(now: number): string { const date = new Date(now); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
+function createId(prefix: string): string { return `${prefix}-${randomBytes(10).toString('hex')}` }

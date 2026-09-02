@@ -25,6 +25,7 @@ import { EphemeralExecutionService } from './execution/service.js'
 import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
 import { PartnerAgentComposition } from './collaboration/composition.js'
+import { CompanionService } from './companions/service.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -73,8 +74,10 @@ export function apply(context: Context, config: PartnerConfig): void {
     const executor = new EphemeralExecutionService(ctx, store, resolved.defaultCwd)
     const collaboration = new PartnerCollaborationService(store, skills, tasks, executor)
     const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone)
-    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor)
+    const companions = new CompanionService(store)
+    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
+    companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
     for (const companion of store.snapshot().companions) await agents.ensureLocalSessionRecord(companion.id)
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })
     tasks.setProgressNotifier((task, previousStatus) => agents.notifyTaskProgress(task, previousStatus).catch(error => {
@@ -95,7 +98,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler, companions })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

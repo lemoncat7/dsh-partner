@@ -16,6 +16,9 @@ client -> HTTP feature routers -> application services -> repositories/store
   no partner feature policy.
 - `execution/`: the only owner of short-lived DSH agent sessions. Skill forks,
   delegations and schedules use this service instead of recreating agent setup.
+- `companions/`: the only owner of companion identity creation and its initial
+  local-session transaction. API and model tools share this boundary; failed
+  session provisioning rolls the new identity back.
 - `skills/`: Skill metadata, filesystem loader, atomic installer, market cache,
   bounded proxy-aware network transport, companion bindings and model-facing
   tools. Skill bodies stay on disk; the JSON state only stores indexes,
@@ -80,6 +83,10 @@ client -> HTTP feature routers -> application services -> repositories/store
 
 - A Skill may only narrow inherited tool access. It never grants a tool that the
   companion did not already have.
+- New companions start with no declared capabilities, memory, daily review,
+  heartbeat, channels or collaboration grants. The `partner_companions` tool is
+  only composed for a companion explicitly granted the `companions` capability,
+  and it may create identity fields only; later permissions remain a user action.
 - Market Skills execute in a forked temporary session by default.
 - Companion collaboration exposes identity, declared capabilities, enabled
   Skill names, availability and the assigned task envelope only.

@@ -9,6 +9,7 @@ import { renderEnabledSkills } from '../skills/service.js'
 import type { TaskBoardService } from '../tasks/service.js'
 import type { PartnerSchedulerService } from '../scheduler/service.js'
 import type { PartnerCollaborationService } from './service.js'
+import type { CompanionService } from '../companions/service.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
 
@@ -21,11 +22,13 @@ export class PartnerAgentComposition {
     private readonly collaboration: PartnerCollaborationService,
     private readonly scheduler: PartnerSchedulerService,
     private readonly executor: EphemeralExecutionService,
+    private readonly companions: CompanionService,
   ) {}
 
   compose(ctx: AgentCompositionContext, companion: Companion): void {
     const enabledSkills = this.skills.bindings(companion.id)
     if (companion.capabilities.includes('skills')) ctx.tools.register(skillTool(companion, this.skills, this.executor))
+    if (companion.capabilities.includes('companions')) ctx.tools.register(companionTool(this.companions))
     ctx.tools.register(taskTool(companion, this.tasks, this.collaboration))
     ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
     ctx.tools.register(scheduleTool(companion, this.scheduler))
@@ -34,6 +37,7 @@ export class PartnerAgentComposition {
       name: 'partner-collaboration', order: -7,
       text: [
         renderEnabledSkills(companion, enabledSkills),
+        companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限，需要用户随后在管理台单独授权。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '是否拆成看板任务由工作形态决定：只有工作跨多步、需要并行、需要等待外部条件、存在明确前置依赖、需要其他伙伴专长，或必须跨会话持续跟踪时才建任务。一次回答内可直接完成的简单事项不要制造看板负担。拆解后每个子任务必须有可验收产出；存在先后关系时写入 dependencyTaskIds，前置任务完成前不得启动后续任务。执行者提交结果后进入 review；指定验收伙伴时由其给出核验意见，最终通过或打回后再推进后续任务。完成全部拆解与委派后，立即向用户返回任务、负责人、依赖和验收安排的看板摘要；不要轮询状态或等待被委派任务执行结束，终态进度会反向通知你。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
@@ -41,6 +45,40 @@ export class PartnerAgentComposition {
       ].filter(Boolean).join('\n\n'),
     })
   }
+}
+
+function companionTool(companions: CompanionService): ToolDefinition {
+  return textTool({
+    name: 'partner_companions',
+    description: 'Create a new long-lived companion identity only when the user explicitly requests one. The new companion starts with no capabilities, memory, heartbeat, channel, or collaboration grants.',
+    parameters: actionParameters(['create'], {
+      name: { type: 'string', description: 'Companion display name.' },
+      role: { type: 'string', description: 'The companion\'s durable role.' },
+      description: { type: 'string', description: 'A concise identity and responsibility summary.' },
+      instructions: { type: 'string', description: 'Durable behavior, boundaries, work style, and delivery expectations.' },
+    }, ['name', 'role', 'description', 'instructions']),
+    presentCall: () => ({ card: 'generic', title: '创建伙伴' }),
+    async execute(raw) {
+      const input = record(raw, 'arguments')
+      if (requiredText(input.action, 'action', 20) !== 'create') throw new Error('Companion action is invalid')
+      const companion = await companions.create({
+        name: requiredText(input.name, 'name', 60),
+        role: requiredText(input.role, 'role', 120),
+        description: requiredText(input.description, 'description', 500),
+        instructions: requiredText(input.instructions, 'instructions', 12_000),
+      })
+      return JSON.stringify({
+        id: companion.id,
+        name: companion.name,
+        role: companion.role,
+        description: companion.description,
+        instructions: companion.instructions,
+        capabilities: companion.capabilities,
+        memoryEnabled: companion.automation.memory.enabled,
+        heartbeatEnabled: companion.automation.heartbeat.enabled,
+      })
+    },
+  })
 }
 
 function skillTool(companion: Companion, skills: SkillService, executor: EphemeralExecutionService): ToolDefinition {
@@ -193,10 +231,10 @@ function textTool(definition: Omit<ToolDefinition, 'output'>): ToolDefinition {
   }
 }
 
-function actionParameters(actions: string[], properties: Record<string, unknown>) {
+function actionParameters(actions: string[], properties: Record<string, unknown>, required: string[] = []) {
   return {
     type: 'object' as const, additionalProperties: false,
-    properties: { action: { type: 'string', enum: actions }, ...properties }, required: ['action'],
+    properties: { action: { type: 'string', enum: actions }, ...properties }, required: ['action', ...required],
   }
 }
 

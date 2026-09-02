@@ -3,7 +3,7 @@ import { IconCheckOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type CompanionAccessView } from '../client-api.js'
 import { CollectionEmpty, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
-const CAPABILITY_LABELS: Record<string, string> = { knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git' }
+const CAPABILITY_LABELS: Record<string, string> = { knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git', companions: '创建伙伴' }
 
 export function CompanionAccessPanel({ companionId }: { companionId: string }): JSX.Element {
   const [access, setAccess] = useState<CompanionAccessView>({ targetIds: [], companions: [] })
