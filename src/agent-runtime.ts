@@ -59,6 +59,7 @@ const HEARTBEAT_WEB_FETCH_RESULT_LIMIT = 40_000
 const HEARTBEAT_WEB_SOURCE_RESULT_LIMIT = 125_000
 const HEARTBEAT_AUDIT_INPUT_LIMIT = 320
 const HEARTBEAT_AUDIT_OUTPUT_LIMIT = 520
+const PARTNER_TASK_TIMEOUT_MS = 30 * 60_000
 const HEARTBEAT_READ_ONLY_TOOLS = new Set([
   'knowledge_base_search',
   'knowledge_search',
@@ -238,7 +239,14 @@ export class PartnerAgentRuntime {
         content: [{ type: 'text', text: input.prompt }],
         source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
       }))
-      await agent.whenIdle()
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        agent.cancel({ kind: 'hook', reason: 'partner task execution timed out' })
+      }, PARTNER_TASK_TIMEOUT_MS)
+      timer.unref?.()
+      try { await agent.whenIdle() } finally { clearTimeout(timer) }
+      if (timedOut) throw new Error('伙伴看板任务执行超时')
       output = assistantTextAfter(agent, startSeq).trim()
       if (!output) throw new Error('伙伴会话没有产生任务结果')
     })
