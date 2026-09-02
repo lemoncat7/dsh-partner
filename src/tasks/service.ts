@@ -25,10 +25,10 @@ export class TaskBoardService {
     const input = record(value, 'task')
     const now = Date.now()
     const assigneeCompanionId = optionalText(input.assigneeCompanionId, 'assigneeCompanionId', 120)
-    const reviewerCompanionId = optionalText(input.reviewerCompanionId, 'reviewerCompanionId', 120)
+    const requestedReviewerCompanionId = optionalText(input.reviewerCompanionId, 'reviewerCompanionId', 120)
+    const reviewerCompanionId = requestedReviewerCompanionId ?? actor.companionId
     this.assertCompanion(assigneeCompanionId)
     this.assertCompanion(reviewerCompanionId)
-    if (assigneeCompanionId && reviewerCompanionId === assigneeCompanionId) throw new Error('验收伙伴不能与任务负责人相同')
     const dependencyTaskIds = stringList(input.dependencyTaskIds, 'dependencyTaskIds', 20, 120)
     this.assertDependencies(undefined, dependencyTaskIds)
     const task: BoardTask = {
@@ -77,7 +77,9 @@ export class TaskBoardService {
         if (reviewer) task.reviewerCompanionId = reviewer
         else delete task.reviewerCompanionId
       }
-      if (task.assigneeCompanionId && task.reviewerCompanionId === task.assigneeCompanionId) throw new Error('验收伙伴不能与任务负责人相同')
+      if (!task.reviewerCompanionId && task.creatorCompanionId && (task.status === 'review' || task.status === 'done')) {
+        task.reviewerCompanionId = task.creatorCompanionId
+      }
       if (input.skillIds !== undefined) task.skillIds = stringList(input.skillIds, 'skillIds', 20, 120)
       if (input.dependencyTaskIds !== undefined) {
         const dependencies = stringList(input.dependencyTaskIds, 'dependencyTaskIds', 20, 120)
@@ -127,10 +129,13 @@ export class TaskBoardService {
 
   async completeExecution(taskId: string, result: string, actor: TaskActor): Promise<BoardTask> {
     let output!: BoardTask
+    let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new Error('Task does not exist')
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
+      previousStatus = task.status
+      if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
       task.resultSummary = boundedText(result, 'result', 12_000)
       delete task.reviewSummary
       const movedToReview = task.status === 'doing'
@@ -140,6 +145,7 @@ export class TaskBoardService {
       appendActivity(state.taskActivities, task.id, actor, 'result', movedToReview ? '执行结果已提交，等待验收' : '执行结果已补充到待验收任务', task.updatedAt)
       output = structuredClone(task)
     })
+    await this.notifyProgress(output, previousStatus, true)
     return output
   }
 
@@ -247,8 +253,11 @@ export class TaskBoardService {
     if (pending.length > 0) throw new Error(`前置任务尚未完成：${pending.map(item => item?.title ?? '已删除任务').join('、')}`)
   }
 
-  private async notifyProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
-    if (task.status === previousStatus || (task.status !== 'done' && task.status !== 'blocked') || !task.creatorCompanionId) return
+  private async notifyProgress(task: BoardTask, previousStatus: BoardTask['status'], resultSubmitted = false): Promise<void> {
+    if (!task.creatorCompanionId) return
+    if (task.status === 'review') {
+      if (!task.resultSummary || (!resultSubmitted && task.status === previousStatus)) return
+    } else if (task.status === previousStatus || (task.status !== 'done' && task.status !== 'blocked')) return
     await this.notifier?.(task, previousStatus)
   }
 }

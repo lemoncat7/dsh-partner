@@ -149,7 +149,6 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
       if (action === 'accept' || action === 'reject') {
         const task = tasks.require(taskId)
-        if (task.assigneeCompanionId === companion.id) throw new Error('任务负责人不能验收自己的执行结果')
         if (task.reviewerCompanionId && task.reviewerCompanionId !== companion.id) throw new Error('当前伙伴不是这个任务指定的验收伙伴')
         return JSON.stringify(action === 'accept'
           ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id })

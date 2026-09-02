@@ -14,7 +14,7 @@ import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/ds
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { completedTurnEvents, extractOutboundAttachments } from '../agent-runtime.js'
+import { completedTurnEvents, extractOutboundAttachments, isTaskProgressNoticeSummary } from '../agent-runtime.js'
 import type { PartnerReply } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 
@@ -332,9 +332,9 @@ export class ChannelManager {
 export function isAutonomousDeliveryTurn(events: readonly SessionEvent[]): boolean {
   return events.some(event => event.type === 'user/message'
     && event.data.source.kind === 'plugin'
-    && event.data.source.plugin === 'tool-goal'
     && event.data.source.form === 'notice'
-    && event.data.source.summary?.startsWith('complete:'))
+    && (event.data.source.plugin === 'tool-goal' && event.data.source.summary?.startsWith('complete:')
+      || event.data.source.plugin === '@lemoncat7/dsh-partner' && isTaskProgressNoticeSummary(event.data.source.summary)))
 }
 
 export function requiredChannel(store: PartnerStore, id: string): WeixinChannel {

@@ -171,7 +171,10 @@ test('task results, reviewer opinions and terminal progress notifications stay o
   const board = new TaskBoardService(item.store)
   const notifications = []
   board.setProgressNotifier(async (task, previousStatus) => { notifications.push({ task, previousStatus }) })
-  await assert.rejects(() => board.create({ title: '错误验收配置', assigneeCompanionId: 'companion-default', reviewerCompanionId: 'companion-default' }, { kind: 'user' }), /不能与任务负责人相同/)
+  const selfReviewed = await board.create({ title: '同一伙伴执行并验收', assigneeCompanionId: 'companion-default', reviewerCompanionId: 'companion-default' }, { kind: 'user' })
+  assert.equal(selfReviewed.reviewerCompanionId, 'companion-default')
+  const defaultReviewed = await board.create({ title: '创建伙伴默认验收' }, { kind: 'companion', companionId: 'companion-default' })
+  assert.equal(defaultReviewed.reviewerCompanionId, 'companion-default')
   const task = await board.create({
     title: '生成可验收产出', assigneeCompanionId: 'companion-default', reviewerCompanionId: 'companion-reviewer', creatorSessionId: 'session-owner',
   }, { kind: 'companion', companionId: 'companion-default' })
@@ -181,9 +184,25 @@ test('task results, reviewer opinions and terminal progress notifications stay o
   const done = await board.accept(inspected.id, { kind: 'user' })
   assert.equal(done.resultSummary, '产出文件与测试证据')
   assert.equal(done.reviewSummary, '建议通过：证据完整')
+  assert.equal(notifications.length, 2)
+  assert.equal(notifications[0].previousStatus, 'doing')
+  assert.equal(notifications[0].task.status, 'review')
+  assert.equal(notifications[1].previousStatus, 'review')
+  assert.equal(notifications[1].task.status, 'done')
+})
+
+test('submitting a result notifies review even when the worker moved the task early', async t => {
+  const item = await fixture(); t.after(item.close)
+  const board = new TaskBoardService(item.store)
+  const notifications = []
+  board.setProgressNotifier(async (task, previousStatus) => { notifications.push({ task, previousStatus }) })
+  const task = await board.create({ title: '提前转待验收' }, { kind: 'companion', companionId: 'companion-default' })
+  const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'companion', companionId: 'companion-default' })
+  const premature = await board.update(doing.id, { expectedRevision: doing.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+  assert.equal(notifications.length, 0)
+  await board.completeExecution(premature.id, '现在才有可验收的真实结果', { kind: 'companion', companionId: 'companion-default' })
   assert.equal(notifications.length, 1)
-  assert.equal(notifications[0].previousStatus, 'review')
-  assert.equal(notifications[0].task.status, 'done')
+  assert.equal(notifications[0].task.resultSummary, '现在才有可验收的真实结果')
 })
 
 test('delegation returns after assignment while execution continues in the background', async t => {

@@ -202,27 +202,31 @@ export class PartnerAgentRuntime {
   }
 
   async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
-    if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
+    if (!task.creatorCompanionId || (task.status !== 'review' && task.status !== 'done' && task.status !== 'blocked')) return
     const companion = this.store.snapshot().companions.find(item => item.id === task.creatorCompanionId)
     if (!companion) return
     const state = this.store.snapshot()
     const routes = state.sessions.filter(item => item.companionId === companion.id)
     const downstream = state.tasks.filter(item => item.dependencyTaskIds.includes(task.id) && item.status !== 'done')
-    const route = routes.find(item => item.sessionId === task.creatorSessionId && !this.isArchived(item))
-      ?? routes.find(item => item.kind === 'local' && !this.isArchived(item))
-      ?? routes.filter(item => !this.isArchived(item)).sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
+    const route = selectTaskNotificationRoute(routes, task.creatorSessionId, item => this.isArchived(item))
       ?? await this.createLocalSession(companion.id)
     const agent = await this.ensureAgent(companion, route)
+    const isReviewer = task.status === 'review' && task.reviewerCompanionId === companion.id
+    const instruction = isReviewer
+      ? '这是你创建并分配的看板任务，执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务。'
+      : task.status === 'review'
+        ? '这是你创建并分配的看板任务进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，请向用户简要说明当前进度。'
+        : '这是你创建并分配的看板任务进度事件。不要重新执行已经完成的工作。请检查依赖它的后续任务是否已经解锁；需要时继续在看板上分配，然后向用户简要汇报当前进展。'
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: [
-        '这是你创建并分配的看板任务进度事件。不要重新执行已经完成的工作。请检查依赖它的后续任务是否已经解锁；需要时继续在看板上分配，然后向用户简要汇报当前进展。',
+        instruction,
         `任务：${task.title}`,
         `状态：${previousStatus} → ${task.status}`,
         task.resultSummary ? `结果：\n${task.resultSummary.slice(0, 3000)}` : '',
         task.reviewSummary ? `验收：\n${task.reviewSummary.slice(0, 2000)}` : '',
         downstream.length > 0 ? `后续任务：\n${downstream.map(item => `- ${item.title}（${item.status}）`).join('\n')}` : '没有依赖此任务的后续任务。',
       ].filter(Boolean).join('\n\n') }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: task.status === 'done' ? '看板任务已完成' : '看板任务受阻' },
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: taskProgressNoticeSummary(task.status) },
     }))
   }
 
@@ -658,6 +662,30 @@ export class PartnerAgentRuntime {
     }
     await (await workspace).attachSession(route.sessionId as SessionId)
   }
+}
+
+const TASK_PROGRESS_NOTICE_SUMMARIES = ['看板任务待验收', '看板任务已完成', '看板任务受阻'] as const
+
+function taskProgressNoticeSummary(status: BoardTask['status']): typeof TASK_PROGRESS_NOTICE_SUMMARIES[number] {
+  if (status === 'review') return '看板任务待验收'
+  if (status === 'done') return '看板任务已完成'
+  return '看板任务受阻'
+}
+
+export function isTaskProgressNoticeSummary(value: string | undefined): boolean {
+  return TASK_PROGRESS_NOTICE_SUMMARIES.some(item => item === value)
+}
+
+export function selectTaskNotificationRoute(
+  routes: readonly ChannelSession[],
+  creatorSessionId: string | undefined,
+  archived: (route: ChannelSession) => boolean,
+): ChannelSession | undefined {
+  const available = routes.filter(route => !archived(route))
+  return available.find(route => route.sessionId === creatorSessionId)
+    ?? available.filter(route => route.kind === 'channel').sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
+    ?? available.find(route => route.kind === 'local')
+    ?? available.sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
 }
 
 function delay(milliseconds: number): Promise<void> {

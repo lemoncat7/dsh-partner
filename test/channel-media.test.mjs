@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
 import { answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
-import { extractOutboundAttachments } from '../lib/agent-runtime.js'
+import { extractOutboundAttachments, selectTaskNotificationRoute } from '../lib/agent-runtime.js'
 import { CONCERN_CREATED_NOTICE, concernCreatedNoticeFromEvent } from '../lib/concern-notification.js'
 
 function encrypt(value, key) {
@@ -17,8 +17,23 @@ function encrypt(value, key) {
 test('routes completed autonomous goals without mirroring ordinary plugin notices', () => {
   const goal = { type: 'user/message', data: { source: { kind: 'plugin', plugin: 'tool-goal', form: 'notice', summary: 'complete: finished' } } }
   const heartbeat = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴正在进行低打扰心跳检查' } } }
+  const taskReview = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务待验收' } } }
+  const taskDone = { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务已完成' } } }
   assert.equal(isAutonomousDeliveryTurn([goal]), true)
+  assert.equal(isAutonomousDeliveryTurn([taskReview]), true)
+  assert.equal(isAutonomousDeliveryTurn([taskDone]), true)
   assert.equal(isAutonomousDeliveryTurn([heartbeat]), false)
+})
+
+test('task notifications preserve their original channel and prefer another channel over local fallback', () => {
+  const routes = [
+    { id: 'local', kind: 'local', sessionId: 'session-local', channelId: '@local', userId: 'owner', companionId: 'companion-default', lastMessageAt: 300 },
+    { id: 'old-channel', kind: 'channel', sessionId: 'session-old', channelId: 'weixin-1', userId: 'user', companionId: 'companion-default', lastMessageAt: 100 },
+    { id: 'new-channel', kind: 'channel', sessionId: 'session-new', channelId: 'weixin-1', userId: 'user', companionId: 'companion-default', lastMessageAt: 200 },
+  ]
+  assert.equal(selectTaskNotificationRoute(routes, 'session-old', () => false)?.id, 'old-channel')
+  assert.equal(selectTaskNotificationRoute(routes, 'missing', () => false)?.id, 'new-channel')
+  assert.equal(selectTaskNotificationRoute(routes, 'session-old', route => route.id === 'old-channel')?.id, 'new-channel')
 })
 
 test('recognizes automatic concern creation notices for the current channel', () => {
