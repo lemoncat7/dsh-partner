@@ -58,13 +58,15 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.match(scheduleSource, /name="companionId" required/)
 })
 
-test('companion capabilities render enabled Skills first and disclose unselected Skills on demand', () => {
+test('companion capabilities keep a four-card Skill overview and disclose selection near the header', () => {
   const settings = skillSource.slice(skillSource.indexOf('export function CompanionSkillSettings'), skillSource.indexOf('function NewSkillForm'))
-  assert.match(settings, /enabledSkills\.map/)
+  assert.match(settings, /enabledSkills\.slice\(0, 4\)/)
+  assert.match(settings, /visibleEnabledSkills\.map/)
   assert.doesNotMatch(settings, /catalog\.installed\.map/)
   assert.match(settings, /aria-expanded=\{selecting\}/)
   assert.match(settings, /visibleAvailableSkills\.map/)
   assert.match(settings, /slice\(0, 80\)/)
+  assert.ok(settings.indexOf('{selecting &&') < settings.indexOf('visibleEnabledSkills.map'))
 })
 
 test('task board refreshes while visible and keeps card details collapsed by default', () => {
@@ -73,4 +75,6 @@ test('task board refreshes while visible and keeps card details collapsed by def
   assert.match(boardSource, /aria-expanded=\{expanded\}/)
   assert.match(boardSource, /task\.resultSummary/)
   assert.match(boardSource, /dependencyTaskIds/)
+  assert.match(boardSource, />依赖任务 <small>可选<\/small>/)
+  assert.match(boardSource, /留空表示该任务不依赖其他任务/)
 })

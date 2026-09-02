@@ -221,8 +221,8 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
   const online = channel?.runtimeStatus === 'running'
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
-      <span><small>工作台</small><h2>{online ? `${companion.name} 正在微信待命` : `连接 ${companion.name} 的第一条渠道`}</h2></span>
-      <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份已经就绪，连接微信后即可开始持续工作。'}</p>
+      <span><small>工作台</small><h2>{online ? `${companion.name} 正在微信待命` : `${companion.name} 已准备就绪`}</h2></span>
+      <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份、会话与能力已经准备完成。'}</p>
     </header>
 
     <GlassSurface as="section" interactive className={`dsh-partner-home-channel${online ? ' is-online' : ''}`} borderRadius={20} distortionScale={-16} saturation={1.08}>
@@ -252,8 +252,8 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
         <div className="dsh-partner-home-capability-list">{capabilities.length ? capabilities.map(item => <em key={item}>{item}</em>) : <small>尚未声明能力范围</small>}</div>
       </GlassSurface>
       <GlassSurface as="section" interactive className="dsh-partner-home-continuity" borderRadius={15} distortionScale={-11} saturation={1.06}>
-        <header><span><IconDataOutline16 size={16} /></span><div><small>伙伴对话</small><strong>{localSession ? '本地会话已建立' : '随时开始，不依赖微信'}</strong></div><button type="button" onClick={() => localSession === undefined ? void startSession(companion.id) : localSession.archived ? void renewSession(localSession.id) : void openSession(localSession.id, localSession.sessionId)}>{localSession === undefined ? '开始对话' : localSession.archived ? '开始新会话' : '打开会话'}</button></header>
-        <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；另有 ${sessions.filter(item => item.kind === 'channel').length} 个渠道会话。` : '本地对话使用伙伴自己的身份、模型、能力与独立工作目录。微信只是可选的额外入口。'}</p>
+        <header><span><IconDataOutline16 size={16} /></span><div><small>伙伴对话</small><strong>{localSession?.archived ? '会话已归档' : '伙伴会话已建立'}</strong></div><button type="button" onClick={() => localSession === undefined ? void startSession(companion.id) : localSession.archived ? void renewSession(localSession.id) : void openSession(localSession.id, localSession.sessionId)}>{localSession === undefined ? '开始对话' : localSession.archived ? '开始新会话' : '打开会话'}</button></header>
+        <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；另有 ${sessions.filter(item => item.kind === 'channel').length} 个渠道会话。` : '伙伴会话正在初始化，稍后即可打开。'}</p>
       </GlassSurface>
     </div>
   </div>

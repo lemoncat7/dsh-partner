@@ -93,6 +93,9 @@ test('creates and reuses a local companion conversation without a channel pairin
     }
     const runtime = new PartnerAgentRuntime(ctx, store, directory)
     const companion = store.snapshot().companions[0]
+    const prepared = await runtime.ensureLocalSessionRecord(companion.id)
+    assert.equal(prepared.kind, 'local')
+    assert.equal(created.length, 0)
     const first = await runtime.createLocalSession(companion.id)
     const reused = await runtime.createLocalSession(companion.id)
     assert.equal(first.kind, 'local')

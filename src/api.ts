@@ -76,6 +76,11 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const now = Date.now()
       const companion: Companion = { ...draft, automation: structuredClone(DEFAULT_AUTOMATION), id: createId('companion'), createdAt: now, updatedAt: now }
       await runtime.store.update(state => { state.companions.push(companion) })
+      try { await runtime.agents.ensureLocalSessionRecord(companion.id) }
+      catch (error) {
+        await runtime.store.update(state => { state.companions = state.companions.filter(item => item.id !== companion.id) }).catch(() => {})
+        throw error
+      }
       return sendJson(res, 201, companion)
     }
     const id = segments[1]

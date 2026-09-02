@@ -167,12 +167,11 @@ export class PartnerAgentRuntime {
     return route
   }
 
-  async createLocalSession(companionId: string): Promise<ChannelSession> {
+  async ensureLocalSessionRecord(companionId: string): Promise<ChannelSession> {
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (companion === undefined) throw new Error('伙伴身份不存在')
     const existing = this.store.snapshot().sessions.find(item => item.companionId === companionId && item.kind === 'local')
     if (existing !== undefined && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) {
-      await this.ensureAgent(companion, existing)
       return existing
     }
     const now = Date.now()
@@ -190,6 +189,13 @@ export class PartnerAgentRuntime {
       state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
       state.sessions.push(route)
     })
+    return route
+  }
+
+  async createLocalSession(companionId: string): Promise<ChannelSession> {
+    const companion = this.store.snapshot().companions.find(item => item.id === companionId)
+    if (companion === undefined) throw new Error('伙伴身份不存在')
+    const route = await this.ensureLocalSessionRecord(companionId)
     await this.ensureAgent(companion, route)
     return route
   }
@@ -480,6 +486,7 @@ export class PartnerAgentRuntime {
     this.handles.clear()
     this.profileVersions.clear()
     this.heartbeatQueues.clear()
+    this.taskQueues.clear()
     this.steeringQueues.clear()
   }
 
