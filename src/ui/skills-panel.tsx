@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { IconBrowseOutline16, IconCheckOutline16, IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutline16, IconCloseOutline16, IconPlusOutline16, IconRefreshOutline16, IconSearchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type MarketSkillView, type SkillCatalogView, type SkillMarketNetworkTestView, type SkillMarketNetworkView, type SkillMarketView } from '../client-api.js'
 import { CollectionEmpty, CollectionSkeleton, WorkspaceBlock, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
@@ -33,6 +33,10 @@ export function SkillsPanel(): JSX.Element {
     return market.entries.filter(item => (item.sourceId === activeSource) && (!normalized || `${item.name} ${item.description} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(normalized)))
   }, [activeSource, market.entries, query])
   const sources = [{ id: 'builtin', name: '内置精选' }, ...market.sources.map(source => ({ id: source.id, name: source.name }))]
+  const sourceCounts = useMemo(() => market.entries.reduce((counts, entry) => {
+    counts.set(entry.sourceId, (counts.get(entry.sourceId) ?? 0) + 1)
+    return counts
+  }, new Map<string, number>()), [market.entries])
   const install = async (entry: MarketSkillView): Promise<void> => {
     setBusy(entry.id); setActionError(undefined)
     try {
@@ -59,8 +63,10 @@ export function SkillsPanel(): JSX.Element {
       </article>)}</div>{catalog.installed.length > 4 && <button type="button" className="dsh-partner-skill-disclosure" aria-expanded={showAllInstalled} onClick={() => setShowAllInstalled(value => !value)}>{showAllInstalled ? '收起已安装 Skill' : `查看全部 ${catalog.installed.length} 个已安装 Skill`}</button>}</>}
     </WorkspaceBlock>
     <WorkspaceBlock title="市场目录" detail="内置 ClawHub、LoopHub、SkillHub，与 nomifun 当前 Skill 榜单一致" actions={<><button type="button" onClick={() => setEditingNetwork(true)}>代理设置{network.proxyUrl ? ' · 已启用' : ''}</button><button type="button" onClick={() => setAddingSource(true)}><IconPlusOutline16 size={14} />自定义源</button></>}>
-      <nav className="dsh-partner-market-sources" aria-label="Skill 市场来源">{sources.map(source => <button type="button" key={source.id} className={activeSource === source.id ? 'is-active' : ''} aria-pressed={activeSource === source.id} onClick={() => setActiveSource(source.id)}>{source.name}<small>{market.entries.filter(entry => entry.sourceId === source.id).length}</small></button>)}</nav>
-      <label className="dsh-partner-feature-search"><IconBrowseOutline16 size={16} /><span className="sr-only">搜索 Skill</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、说明或标签" /></label>
+      <div className="dsh-partner-market-toolbar">
+        <SkillSearch value={query} change={setQuery} count={visible.length} label="搜索 Skill 市场" placeholder="搜索名称、说明或标签" loading={loading} />
+        <nav className="dsh-partner-market-sources" aria-label="Skill 市场来源">{sources.map(source => <button type="button" key={source.id} className={activeSource === source.id ? 'is-active' : ''} aria-pressed={activeSource === source.id} onClick={() => setActiveSource(source.id)}><span>{source.name}</span><small>{sourceCounts.get(source.id) ?? 0}</small></button>)}</nav>
+      </div>
       {market.errors.some(item => item.sourceId === activeSource) && <p className="dsh-partner-inline-warning">{market.errors.filter(item => item.sourceId === activeSource).map(item => item.error).join('；')}</p>}
       {loading ? <CollectionSkeleton rows={4} /> : <div className="dsh-partner-market-grid">{visible.map(entry => {
         const current = installed.get(entry.id)
@@ -105,7 +111,7 @@ export function CompanionSkillSettings({ companionId }: { companionId: string })
   return <section className="dsh-partner-capability-detail" aria-labelledby="dsh-partner-skill-capability-title">
     <header><span><small>PARTNER SKILLS</small><strong id="dsh-partner-skill-capability-title">当前伙伴的 Skill</strong></span><div className="dsh-partner-capability-actions"><em>{enabledSkills.length} 个启用</em>{catalog.installed.length > 0 && <button type="button" aria-expanded={selecting} onClick={() => setSelecting(value => !value)}><IconPlusOutline16 size={14} />添加 Skill</button>}</div></header>
     {selecting && <div className="dsh-partner-skill-picker" aria-label="添加 Skill">
-      <label className="dsh-partner-skill-picker-search"><IconBrowseOutline16 size={16} /><span className="sr-only">搜索可添加的 Skill</span><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、说明或标识" /></label>
+      <SkillSearch value={query} change={setQuery} count={availableSkills.length} label="搜索可添加的 Skill" placeholder="搜索名称、说明或标识" autoFocus compact />
       <div className="dsh-partner-skill-picker-list">{visibleAvailableSkills.map(skill => <article key={skill.id}><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.executionContext === 'fork' ? '隔离临时会话执行' : '可信当前会话执行'}</small></span><button type="button" disabled={busy === skill.id} onClick={() => { void setBinding(skill.id, true) }}>{busy === skill.id ? '添加中…' : '添加'}</button></article>)}{availableSkills.length === 0 && <p className="dsh-partner-skill-picker-empty">{query ? '没有匹配的未启用 Skill。' : '所有已安装 Skill 都已启用。'}</p>}</div>
       {availableSkills.length > visibleAvailableSkills.length && <small className="dsh-partner-skill-picker-limit">还有 {availableSkills.length - visibleAvailableSkills.length} 个结果，请输入关键词继续筛选。</small>}
     </div>}
@@ -118,6 +124,32 @@ export function CompanionSkillSettings({ companionId }: { companionId: string })
     </>}
     {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
   </section>
+}
+
+function SkillSearch({ value, change, count, label, placeholder, loading = false, autoFocus = false, compact = false }: {
+  value: string
+  change(value: string): void
+  count: number
+  label: string
+  placeholder: string
+  loading?: boolean
+  autoFocus?: boolean
+  compact?: boolean
+}): JSX.Element {
+  return <div className={`dsh-partner-skill-search${compact ? ' is-compact' : ''}`} role="search" aria-label={label}>
+    <span className="dsh-partner-skill-search-icon" aria-hidden="true"><IconSearchOutline16 size={16} /></span>
+    <input
+      type="search"
+      value={value}
+      autoFocus={autoFocus}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={event => change(event.target.value)}
+      onKeyDown={event => { if (event.key === 'Escape' && value) { event.preventDefault(); change('') } }}
+    />
+    {value && <button type="button" className="dsh-partner-skill-search-clear" aria-label="清空搜索" title="清空搜索" onClick={() => change('')}><IconCloseOutline16 size={14} /></button>}
+    <span className="dsh-partner-skill-search-count" aria-live="polite">{loading ? '同步中' : `${count} 项`}</span>
+  </div>
 }
 
 function NewSkillForm({ existingIds, close, changed }: { existingIds: string[]; close(): void; changed(): Promise<void> | void }): JSX.Element {

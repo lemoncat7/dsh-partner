@@ -33,6 +33,15 @@ test('dropdowns and installed Skill disclosure follow the shared workspace contr
   assert.match(market, /aria-expanded=\{showAllInstalled\}/)
 })
 
+test('Skill searches share one accessible command field with result and clear states', () => {
+  assert.match(skills, /function SkillSearch/)
+  assert.match(skills, /IconSearchOutline16/)
+  assert.match(skills, /aria-label="清空搜索"/)
+  assert.match(skills, /aria-live="polite"/)
+  assert.match(skills, /event\.key === 'Escape'/)
+  assert.equal((skills.match(/<SkillSearch /g) ?? []).length, 2)
+})
+
 test('new companions start empty and creation is exposed as an explicit capability', () => {
   assert.match(entry, /draft, capabilities: \[\]/)
   assert.match(entry, /id: 'companions', title: '创建伙伴'/)
