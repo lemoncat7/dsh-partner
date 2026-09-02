@@ -17,6 +17,7 @@ import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.j
 import { parseMarketResponse } from '../lib/skills/markets/adapters.js'
 import { builtinMarketSources } from '../lib/skills/markets/builtin.js'
 import { requestRemoteText } from '../lib/skills/network.js'
+import { extractSkillMarkdown } from '../lib/skills/zip.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-partner-workspace-'))
@@ -106,10 +107,24 @@ test('locally authored Skill documents install through the same bounded reposito
   const item = await fixture(); t.after(item.close)
   const service = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   await service.initialize()
-  const installed = await service.installLocal(`---\nname: local-review\ndisplay-name: 本地审阅\ndescription: 审阅本地变更\nversion: 1.0.0\ncontext: fork\nallowed-tools: [read, grep]\n---\n# 本地审阅\n\n检查变更并给出证据。`, 'local-review')
+  const installed = await service.installLocal(`---\nname: 本地审阅\ndisplay-name: 本地审阅\ndescription: 审阅本地变更\nversion: 1.0.0\ncontext: fork\nallowed-tools:\n  - read\n  - grep\n---\n# 本地审阅\n\n检查变更并给出证据。`, 'local-review')
   assert.equal(installed.source, 'local')
+  assert.equal(installed.name, '本地审阅')
   assert.equal(installed.displayName, '本地审阅')
   assert.deepEqual(installed.allowedTools, ['read', 'grep'])
+})
+
+test('Skill ZIP accepts case-insensitive SKILL.md and an unambiguous single Markdown document', () => {
+  const preferred = storedZip([
+    { name: 'package/README.md', body: 'Package notes' },
+    { name: 'package/skill.md', body: '---\nname: 中文技能\n---\n执行技能' },
+  ])
+  assert.match(extractSkillMarkdown(preferred, 4096), /name: 中文技能/)
+  const single = storedZip([{ name: '发布检查.md', body: '# 发布检查\n执行检查' }])
+  assert.match(extractSkillMarkdown(single, 4096), /执行检查/)
+  assert.throws(() => extractSkillMarkdown(storedZip([
+    { name: 'README.md', body: '说明' }, { name: 'GUIDE.md', body: '指南' },
+  ]), 4096), /multiple Markdown files/)
 })
 
 test('untrusted Skill cannot request inline execution and tampering is detected', async t => {
@@ -278,4 +293,25 @@ async function waitFor(predicate, timeoutMs = 1000) {
     if (Date.now() >= deadline) throw new Error('condition timed out')
     await new Promise(resolve => setTimeout(resolve, 5))
   }
+}
+
+function storedZip(entries) {
+  const localParts = []
+  const centralParts = []
+  let localOffset = 0
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name)
+    const body = Buffer.from(entry.body)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(body.length, 18); local.writeUInt32LE(body.length, 22); local.writeUInt16LE(name.length, 26)
+    localParts.push(local, name, body)
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt32LE(body.length, 20); central.writeUInt32LE(body.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt32LE(localOffset, 42)
+    centralParts.push(central, name)
+    localOffset += local.length + name.length + body.length
+  }
+  const directory = Buffer.concat(centralParts)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(localOffset, 16)
+  return Buffer.concat([...localParts, directory, end])
 }
