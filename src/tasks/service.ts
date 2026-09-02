@@ -130,13 +130,14 @@ export class TaskBoardService {
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new Error('Task does not exist')
-      if (task.status !== 'doing') throw new Error('只有进行中的任务可以提交执行结果')
+      if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
       task.resultSummary = boundedText(result, 'result', 12_000)
       delete task.reviewSummary
-      task.status = 'review'
+      const movedToReview = task.status === 'doing'
+      if (movedToReview) task.status = 'review'
       task.revision += 1
       task.updatedAt = Date.now()
-      appendActivity(state.taskActivities, task.id, actor, 'result', '执行结果已提交，等待验收', task.updatedAt)
+      appendActivity(state.taskActivities, task.id, actor, 'result', movedToReview ? '执行结果已提交，等待验收' : '执行结果已补充到待验收任务', task.updatedAt)
       output = structuredClone(task)
     })
     return output

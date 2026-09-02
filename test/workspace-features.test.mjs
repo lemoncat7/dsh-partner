@@ -205,6 +205,25 @@ test('delegation returns after assignment while execution continues in the backg
   assert.equal(board.require(task.id).resultSummary, '后台执行完成')
 })
 
+test('orchestrator preserves output when an executing companion moves its task to review early', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '提前移动状态' }, { kind: 'user' })
+  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service.setSessionExecutor({ execute: async () => {
+    const current = board.require(task.id)
+    await board.update(task.id, { expectedRevision: current.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+    return { run: { id: 'session-run-early-review' }, output: '状态提前移动，但这个结果必须保留' }
+  } })
+  t.after(() => service.close())
+  const delegation = await service.delegate({ taskId: task.id, initiatedBy: 'user', to: 'companion-default', request: '完成任务' })
+  await waitFor(() => Boolean(board.require(task.id).resultSummary))
+  assert.equal(board.require(task.id).status, 'review')
+  assert.equal(board.require(task.id).resultSummary, '状态提前移动，但这个结果必须保留')
+  await waitFor(() => item.store.snapshot().delegations.find(entry => entry.id === delegation.id)?.status === 'completed')
+})
+
 test('interrupted delegations are durably reclaimed after restart without blocking the task', async t => {
   const item = await fixture(); t.after(item.close)
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
@@ -229,6 +248,28 @@ test('interrupted delegations are durably reclaimed after restart without blocki
   assert.equal(delegation.attempts, 2)
   assert.equal(board.require(task.id).resultSummary, '恢复执行完成')
   assert.ok(board.snapshot().activities.some(activity => activity.kind === 'recovered'))
+})
+
+test('startup repairs legacy canceled delegations that reached review without saving a result', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '修复丢失结果' }, { kind: 'user' })
+  const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'user' })
+  await board.update(task.id, { expectedRevision: doing.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+  await item.store.update(state => state.delegations.push({
+    id: 'delegation-lost-result', kind: 'task', taskId: task.id, initiatedBy: 'user', toCompanionId: 'companion-default',
+    request: '恢复丢失的结果', status: 'canceled', attempts: 2, error: '任务状态已经变为 review，忽略旧执行结果',
+    createdAt: Date.now() - 30_000, completedAt: Date.now() - 10_000,
+  }))
+  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service.setSessionExecutor({ execute: async () => ({ run: { id: 'session-run-repaired' }, output: '重新恢复的完整结果' }) })
+  t.after(() => service.close())
+  await service.start()
+  await waitFor(() => board.require(task.id).resultSummary === '重新恢复的完整结果')
+  assert.equal(board.require(task.id).status, 'review')
+  assert.equal(item.store.snapshot().delegations.find(entry => entry.id === 'delegation-lost-result').attempts, 3)
+  assert.ok(board.snapshot().activities.some(activity => activity.message.includes('未保存执行结果')))
 })
 
 test('transient network failures stay in progress and enter the durable retry queue', async t => {

@@ -153,10 +153,26 @@ export class PartnerCollaborationService {
   }
 
   private async reconcileInterruptedWork(): Promise<void> {
-    const recovered: Array<{ taskId: string; kind: 'task' | 'review' }> = []
+    const recovered: Array<{ taskId: string; kind: 'task' | 'review'; repairedLostResult?: boolean }> = []
     const now = Date.now()
     await this.store.update(state => {
       for (const item of state.delegations) {
+        const task = state.tasks.find(value => value.id === item.taskId)
+        const lostResult = delegationKind(item) === 'task' && item.status === 'canceled'
+          && item.error?.includes('忽略旧执行结果') === true && task?.status === 'review' && !task.resultSummary
+        if (lostResult && task) {
+          task.status = 'doing'
+          task.revision += 1
+          task.updatedAt = now
+          delete task.reviewSummary
+          delete task.completedAt
+          item.status = 'queued'
+          item.nextAttemptAt = now
+          item.error = '旧版协调器丢弃了提前进入待验收的执行结果，任务已重新进入恢复队列'
+          delete item.completedAt
+          recovered.push({ taskId: item.taskId, kind: 'task', repairedLostResult: true })
+          continue
+        }
         if (item.status !== 'running') continue
         item.status = 'queued'
         item.attempts = Math.max(1, item.attempts ?? 0)
@@ -166,7 +182,11 @@ export class PartnerCollaborationService {
         recovered.push({ taskId: item.taskId, kind: delegationKind(item) })
       }
     })
-    for (const item of recovered) await this.tasks.recordRecovery(item.taskId, item.kind === 'review' ? '服务恢复后已重新接管未完成的伙伴验收' : '服务恢复后已重新接管未完成的伙伴任务', false)
+    for (const item of recovered) await this.tasks.recordRecovery(
+      item.taskId,
+      item.repairedLostResult ? '检测到旧版协调器未保存执行结果，已重新接管任务' : item.kind === 'review' ? '服务恢复后已重新接管未完成的伙伴验收' : '服务恢复后已重新接管未完成的伙伴任务',
+      false,
+    )
   }
 
   private async tick(): Promise<void> {
@@ -229,7 +249,7 @@ export class PartnerCollaborationService {
         if (latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧验收结果`); return }
         await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id })
       } else {
-        if (latest.status !== 'doing') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
+        if (latest.status !== 'doing' && latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
         await this.tasks.completeExecution(task.id, result.output, { kind: 'companion', companionId: to.id })
       }
       await this.complete(delegation.id, result.run.id, result.output)
