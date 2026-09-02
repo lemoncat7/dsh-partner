@@ -57,7 +57,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
-  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 12 })
+  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 13 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({
       id: provider.id, name: provider.name,

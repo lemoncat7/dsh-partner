@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
+import { createServer } from 'node:http'
 import { PartnerStore } from '../lib/store.js'
 import { SkillRepository } from '../lib/skills/repository.js'
 import { SkillService } from '../lib/skills/service.js'
@@ -15,6 +16,7 @@ import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
 import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
 import { parseMarketResponse } from '../lib/skills/markets/adapters.js'
 import { builtinMarketSources } from '../lib/skills/markets/builtin.js'
+import { requestRemoteText } from '../lib/skills/network.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-partner-workspace-'))
@@ -34,9 +36,10 @@ function response() {
 test('migrated store exposes all bounded workspace domains', async t => {
   const item = await fixture(); t.after(item.close)
   const state = item.store.snapshot()
-  assert.equal(state.schemaVersion, 12)
+  assert.equal(state.schemaVersion, 13)
   for (const key of ['skills', 'skillBindings', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns']) assert.deepEqual(state[key], [])
   assert.deepEqual(state.skillMarketSources.map(source => source.name), ['ClawHub', 'LoopHub', 'SkillHub'])
+  assert.deepEqual(state.skillMarketNetwork, {})
 })
 
 test('built-in market installs separately from companion binding', async t => {
@@ -62,6 +65,33 @@ test('nomifun-compatible market adapters normalize ClawHub, LoopHub and SkillHub
   assert.equal(loop[0].version, '2.0.1')
   assert.equal(hub[0].skillUrl, 'https://api.skillhub.cn/api/v1/download?slug=research')
   assert.ok([claw[0], loop[0], hub[0]].every(entry => entry.installKind === 'zip'))
+})
+
+test('Skill market proxy settings are local and the bounded client routes HTTP requests through them', async t => {
+  const item = await fixture(); t.after(item.close)
+  let requestedUrl = ''
+  const proxy = createServer((req, res) => { requestedUrl = req.url ?? ''; res.setHeader('content-type', 'text/plain'); res.end('proxied') })
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => proxy.close(resolve)))
+  const address = proxy.address()
+  const proxyUrl = `http://127.0.0.1:${address.port}`
+  const text = await requestRemoteText({ url: 'http://market.invalid/index.json', proxyUrl, maxBytes: 1024, timeoutMs: 2_000 })
+  assert.equal(text, 'proxied')
+  assert.equal(requestedUrl, 'http://market.invalid/index.json')
+  const service = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  assert.deepEqual(await service.setNetworkSettings({ proxyUrl }), { proxyUrl: `${proxyUrl}/` })
+  assert.deepEqual(service.networkSettings(), { proxyUrl: `${proxyUrl}/` })
+  await assert.rejects(() => service.setNetworkSettings({ proxyUrl: 'socks5://127.0.0.1:1080' }), /仅支持 http/)
+})
+
+test('locally authored Skill documents install through the same bounded repository', async t => {
+  const item = await fixture(); t.after(item.close)
+  const service = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  await service.initialize()
+  const installed = await service.installLocal(`---\nname: local-review\ndisplay-name: 本地审阅\ndescription: 审阅本地变更\nversion: 1.0.0\ncontext: fork\nallowed-tools: [read, grep]\n---\n# 本地审阅\n\n检查变更并给出证据。`, 'local-review')
+  assert.equal(installed.source, 'local')
+  assert.equal(installed.displayName, '本地审阅')
+  assert.deepEqual(installed.allowedTools, ['read', 'grep'])
 })
 
 test('untrusted Skill cannot request inline execution and tampering is detected', async t => {

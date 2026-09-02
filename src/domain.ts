@@ -85,7 +85,7 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
-  schemaVersion: 12
+  schemaVersion: 13
   companions: Companion[]
   channels: WeixinChannel[]
   pairings: PairingRequest[]
@@ -95,12 +95,17 @@ export interface PartnerState {
   skills: PartnerSkill[]
   skillBindings: CompanionSkillBinding[]
   skillMarketSources: SkillMarketSource[]
+  skillMarketNetwork: SkillMarketNetworkSettings
   tasks: BoardTask[]
   taskActivities: TaskActivity[]
   delegations: PartnerDelegation[]
   companionAccessGrants: CompanionAccessGrant[]
   schedules: ScheduledPartnerTask[]
   executionRuns: ExecutionRun[]
+}
+
+export interface SkillMarketNetworkSettings {
+  proxyUrl?: string
 }
 
 /** A directed capability-directory and delegation grant: from -> to. */

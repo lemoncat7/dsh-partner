@@ -9,6 +9,7 @@ import { SkillRepository } from './repository.js'
 import { BUILTIN_SKILLS, BUILTIN_SKILL_SOURCE } from './builtin.js'
 import { marketRequest, parseMarketResponse } from './markets/adapters.js'
 import { extractSkillMarkdown } from './zip.js'
+import { normalizeProxyUrl, requestRemoteBytes, requestRemoteText } from './network.js'
 
 const MARKET_CACHE_MS = 5 * 60_000
 const MAX_MARKET_BYTES = 1024 * 1024
@@ -99,6 +100,32 @@ export class SkillService {
     this.cache.delete(sourceId)
   }
 
+  networkSettings(): { proxyUrl?: string } {
+    return this.store.snapshot().skillMarketNetwork
+  }
+
+  async setNetworkSettings(input: unknown): Promise<{ proxyUrl?: string }> {
+    const value = input as Record<string, unknown>
+    const proxyUrl = normalizeProxyUrl(value.proxyUrl)
+    await this.store.update(state => { state.skillMarketNetwork = proxyUrl ? { proxyUrl } : {} })
+    this.cache.clear()
+    return this.networkSettings()
+  }
+
+  async testNetwork(input: unknown): Promise<{ ok: true; latencyMs: number; sourceCount: number; entryCount: number }> {
+    const value = input as Record<string, unknown>
+    const proxyUrl = normalizeProxyUrl(value.proxyUrl)
+    const sources = this.store.snapshot().skillMarketSources.filter(item => item.enabled)
+    const startedAt = Date.now()
+    const results = await Promise.allSettled(sources.map(source => this.fetchMarket(source, proxyUrl)))
+    const succeeded = results.filter((result): result is PromiseFulfilledResult<MarketSkillEntry[]> => result.status === 'fulfilled')
+    if (succeeded.length === 0) {
+      const reasons = results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : [])
+      throw new Error(`Skill 市场网络测试失败：${reasons.slice(0, 2).join('；') || '没有可用市场'}`)
+    }
+    return { ok: true, latencyMs: Date.now() - startedAt, sourceCount: succeeded.length, entryCount: succeeded.reduce((sum, result) => sum + result.value.length, 0) }
+  }
+
   async market(force = false): Promise<{ sources: SkillMarketSource[]; entries: MarketSkillEntry[]; errors: Array<{ sourceId: string; error: string }> }> {
     const sources = this.store.snapshot().skillMarketSources.filter(item => item.enabled)
     const errors: Array<{ sourceId: string; error: string }> = []
@@ -129,7 +156,10 @@ export class SkillService {
     if (!source) throw new Error('Skill market source is unavailable')
     const entry = (await this.loadMarket(source, false)).find(item => item.id === entryId)
     if (!entry) throw new Error('Skill market entry does not exist')
-    const document = entry.installKind === 'zip' ? await fetchSkillFromZip(entry.skillUrl, MAX_SKILL_BYTES) : await fetchText(entry.skillUrl, MAX_SKILL_BYTES)
+    const proxyUrl = this.networkSettings().proxyUrl
+    const document = entry.installKind === 'zip'
+      ? await fetchSkillFromZip(entry.skillUrl, MAX_SKILL_BYTES, proxyUrl)
+      : await fetchText(entry.skillUrl, MAX_SKILL_BYTES, undefined, proxyUrl)
     if (entry.checksum && sha256(document) !== normalizeChecksum(entry.checksum)) throw new Error('Skill checksum verification failed')
     const installed = await this.repository.install({
       id: entry.id, document, source: 'market', sourceId: source.id, trusted: source.trusted,
@@ -143,11 +173,15 @@ export class SkillService {
   private async loadMarket(source: SkillMarketSource, force: boolean): Promise<MarketSkillEntry[]> {
     const cached = this.cache.get(source.id)
     if (!force && cached && cached.expiresAt > Date.now()) return cached.entries
-    const request = marketRequest(source)
-    const raw = await fetchText(request.url, MAX_MARKET_BYTES, request.init)
-    const entries = parseMarketResponse(JSON.parse(raw), source)
+    const entries = await this.fetchMarket(source, this.networkSettings().proxyUrl)
     this.cache.set(source.id, { entries, expiresAt: Date.now() + MARKET_CACHE_MS })
     return entries
+  }
+
+  private async fetchMarket(source: SkillMarketSource, proxyUrl?: string): Promise<MarketSkillEntry[]> {
+    const request = marketRequest(source)
+    const raw = await fetchText(request.url, MAX_MARKET_BYTES, request.init, proxyUrl)
+    return parseMarketResponse(JSON.parse(raw), source)
   }
 
   private assertInstallCapacity(skillId: string): void {
@@ -164,22 +198,21 @@ export function renderEnabledSkills(companion: Companion, skills: PartnerSkill[]
   ].join('\n')
 }
 
-async function fetchText(url: string, limit: number, init: RequestInit = {}): Promise<string> {
-  const response = await fetch(validHttpUrl(url), { ...init, signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json,text/markdown,text/plain', ...init.headers } })
-  if (!response.ok) throw new Error(`HTTP ${response.status} while fetching ${new URL(url).host}`)
-  const advertised = Number(response.headers.get('content-length') ?? 0)
-  if (advertised > limit) throw new Error('Remote content exceeds the size limit')
-  const buffer = new Uint8Array(await response.arrayBuffer())
-  if (buffer.byteLength > limit) throw new Error('Remote content exceeds the size limit')
-  return new TextDecoder().decode(buffer)
+async function fetchText(url: string, limit: number, init: RequestInit = {}, proxyUrl?: string): Promise<string> {
+  const headers = new Headers(init.headers)
+  if (!headers.has('accept')) headers.set('accept', 'application/json,text/markdown,text/plain')
+  return requestRemoteText({
+    url: validHttpUrl(url), maxBytes: limit, timeoutMs: 15_000, headers,
+    ...(init.method ? { method: init.method } : {}),
+    ...(typeof init.body === 'string' ? { body: init.body } : {}),
+    ...(proxyUrl ? { proxyUrl } : {}),
+  })
 }
-async function fetchSkillFromZip(url: string, limit: number): Promise<string> {
-  const response = await fetch(validHttpUrl(url), { signal: AbortSignal.timeout(20_000), headers: { accept: 'application/zip,application/octet-stream' } })
-  if (!response.ok) throw new Error(`HTTP ${response.status} while downloading Skill package from ${new URL(url).host}`)
-  const advertised = Number(response.headers.get('content-length') ?? 0)
-  if (advertised > 8 * 1024 * 1024) throw new Error('Skill package exceeds the 8 MiB limit')
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Skill package exceeds the 8 MiB limit')
+async function fetchSkillFromZip(url: string, limit: number, proxyUrl?: string): Promise<string> {
+  const bytes = await requestRemoteBytes({
+    url: validHttpUrl(url), maxBytes: 8 * 1024 * 1024, timeoutMs: 20_000,
+    headers: { accept: 'application/zip,application/octet-stream' }, ...(proxyUrl ? { proxyUrl } : {}),
+  })
   return extractSkillMarkdown(bytes, limit)
 }
 function validHttpUrl(value: string): string {

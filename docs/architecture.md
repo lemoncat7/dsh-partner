@@ -17,8 +17,9 @@ client -> HTTP feature routers -> application services -> repositories/store
 - `execution/`: the only owner of short-lived DSH agent sessions. Skill forks,
   delegations and schedules use this service instead of recreating agent setup.
 - `skills/`: Skill metadata, filesystem loader, atomic installer, market cache,
-  companion bindings and model-facing tools. Skill bodies stay on disk; the
-  JSON state only stores indexes and checksums.
+  bounded proxy-aware network transport, companion bindings and model-facing
+  tools. Skill bodies stay on disk; the JSON state only stores indexes,
+  checksums and non-secret local network preferences.
 - `tasks/`: task-board state, optimistic revisions, activities and model-facing
   tools. UI drag-and-drop is never the only way to move a task.
 - `collaboration/`: directed companion grants, the public capability directory
@@ -41,6 +42,9 @@ client -> HTTP feature routers -> application services -> repositories/store
   use a revision to reject stale concurrent updates.
 - Market downloads are bounded, checksum-verified when supplied, written into a
   temporary directory and atomically renamed.
+- Market discovery and package installation share one bounded transport. The
+  optional local HTTP proxy applies to both paths and rejects embedded proxy
+  credentials.
 - Public ZIP packages are parsed in memory and only the shallowest safe
   `SKILL.md` entry is accepted; archive paths are never extracted to disk.
 

@@ -362,10 +362,10 @@ test('migrates legacy partner states to the current schema and preserves focus o
     }
     await writeFile(path, JSON.stringify({ schemaVersion: 9, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 12)
+    assert.equal(state.schemaVersion, 13)
     assert.equal(state.companions[0].automation.heartbeat.legacyFocus, '项目风险\n依赖更新')
     assert.equal('focus' in state.companions[0].automation.heartbeat, false)
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 12)
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 13)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -379,7 +379,7 @@ test('migrates schema v1 defaults and obsolete focus cursor through the current 
       channels: [], pairings: [], sessions: [], recentReceipts: [],
     }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 12)
+    assert.equal(state.schemaVersion, 13)
     assert.equal(state.companions[0].automation.memory.retentionDays, 0)
     assert.equal(state.companions[0].automation.heartbeat.enabled, false)
     assert.deepEqual(state.heartbeatStates, [])

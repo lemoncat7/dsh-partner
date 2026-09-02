@@ -65,6 +65,8 @@ export interface SkillMarketSourceView { id: string; name: string; kind: 'dsh-in
 export interface MarketSkillView { id: string; name: string; description: string; version: string; tags: string[]; sourceId: string }
 export interface SkillCatalogView { installed: SkillView[]; bindings: SkillBindingView[]; sources: SkillMarketSourceView[] }
 export interface SkillMarketView { sources: SkillMarketSourceView[]; entries: MarketSkillView[]; errors: Array<{ sourceId: string; error: string }> }
+export interface SkillMarketNetworkView { proxyUrl?: string }
+export interface SkillMarketNetworkTestView { ok: true; latencyMs: number; sourceCount: number; entryCount: number }
 
 export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
 export interface BoardTaskView {

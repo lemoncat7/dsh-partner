@@ -48,6 +48,11 @@ export async function dispatchPartnerWorkspaceApi(
     }
   }
   if (segments[0] === 'skill-markets') {
+    if (segments[1] === 'network' && segments.length === 2) {
+      if (method === 'GET') { sendJson(res, 200, runtime.skills.networkSettings()); return true }
+      if (method === 'PUT') { mutation(req); sendJson(res, 200, await runtime.skills.setNetworkSettings(await readObject(req))); return true }
+      if (method === 'POST') { mutation(req); sendJson(res, 200, await runtime.skills.testNetwork(await readObject(req))); return true }
+    }
     if (method === 'POST' && segments.length === 1) { mutation(req); sendJson(res, 201, await runtime.skills.addMarketSource(await readObject(req))); return true }
     if (method === 'DELETE' && segments[1] && segments.length === 2) { mutation(req); await runtime.skills.removeMarketSource(segments[1]); sendJson(res, 204, undefined); return true }
   }

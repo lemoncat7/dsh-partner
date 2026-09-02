@@ -75,9 +75,9 @@ export class PartnerStore {
 
 function emptyState(): PartnerState {
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [],
-    skills: [], skillBindings: [], skillMarketSources: mergeBuiltinMarketSources([]), tasks: [], taskActivities: [], delegations: [], companionAccessGrants: [], schedules: [], executionRuns: [],
+    skills: [], skillBindings: [], skillMarketSources: mergeBuiltinMarketSources([]), skillMarketNetwork: {}, tasks: [], taskActivities: [], delegations: [], companionAccessGrants: [], schedules: [], executionRuns: [],
   }
 }
 
@@ -213,6 +213,9 @@ function parseState(value: unknown): PartnerState {
       delegations: Array.isArray(legacy.delegations) ? legacy.delegations.map(item => ({ initiatedBy: 'companion', ...(item as Record<string, unknown>) })) : [],
     }
   }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 12) {
+    value = { ...(value as Record<string, unknown>), schemaVersion: 13, skillMarketNetwork: {} }
+  }
   validateState(value)
   return value
 }
@@ -220,13 +223,15 @@ function parseState(value: unknown): PartnerState {
 function validateState(value: unknown): asserts value is PartnerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('partner state must be an object')
   const state = value as Partial<PartnerState>
-  if (state.schemaVersion !== 12) throw new Error('unsupported partner state schema')
+  if (state.schemaVersion !== 13) throw new Error('unsupported partner state schema')
   for (const key of [
     'companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates',
     'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns',
   ] as const) {
     if (!Array.isArray(state[key])) throw new Error(`partner state ${key} must be an array`)
   }
+  if (typeof state.skillMarketNetwork !== 'object' || state.skillMarketNetwork === null || Array.isArray(state.skillMarketNetwork)) throw new Error('partner state skillMarketNetwork must be an object')
+  if (state.skillMarketNetwork.proxyUrl !== undefined && typeof state.skillMarketNetwork.proxyUrl !== 'string') throw new Error('partner state skillMarketNetwork.proxyUrl must be a string')
   const companionIds = new Set(state.companions!.map(companion => companion.id))
   const grantKeys = new Set<string>()
   if (state.companionAccessGrants!.length > 1000) throw new Error('partner state companionAccessGrants exceeds limit')

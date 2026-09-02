@@ -41,8 +41,8 @@
 - 可配置静默时段、检查间隔、每日通知上限、失败退避和手动检查；失败后不会早于正常检查间隔重试
 - 修改伙伴身份或能力时清理该伙伴的渠道 Session，防止新旧人格串联
 - Windows、macOS、Linux 兼容的原子状态写入
-- 兼容 `SKILL.md` 的伙伴 Skill：安装与伙伴启用关系分离，支持 `inline` / `fork` 上下文、`allowed-tools` 权限收缩、校验和审计及本地 Skill
-- 内置精选 Skill，以及与 nomifun 当前一致的 ClawHub、LoopHub、SkillHub 三个公开 Skill 榜单；支持受限 ZIP 安装与兼容 JSON 索引的团队源，非可信市场强制使用隔离临时会话
+- 兼容 `SKILL.md` 的伙伴 Skill：安装与伙伴启用关系分离，支持在管理台创建本地 Skill、`inline` / `fork` 上下文、`allowed-tools` 权限收缩、校验和审计
+- 内置精选 Skill，以及与 nomifun 当前一致的 ClawHub、LoopHub、SkillHub 三个公开 Skill 榜单；支持统一 HTTP 代理、连接测试、受限 ZIP 安装与兼容 JSON 索引的团队源，非可信市场强制使用隔离临时会话
 - 人与伙伴共享的任务看板：收集箱、待开始、进行中、待验收、受阻、已完成六个状态，带优先级、负责人、乐观并发 revision 与有界活动记录
 - 有向伙伴授权和真实委派：在 A 的能力页勾选 B 后，A 才能查看 B 的公开能力并通过 `@B` 委派；用户本人可从全局看板直接指派任意伙伴，只共享任务信封、公开能力和结果摘要
 - 伙伴会话内提供 `partner_skill`、`partner_task_board`、`partner_collaborate` 和 `partner_schedule` 四组作用域工具，不污染普通 DSH 会话的工具表
@@ -141,3 +141,5 @@ ClawHub、LoopHub、SkillHub 是内置公共来源，默认启用且不能删除
 ```
 
 `skillUrl` 可相对索引 URL。市场索引上限 1 MiB、单个 `SKILL.md` 上限 512 KiB；未标记为可信的市场即使声明 `context: inline`，安装后也会强制改为 `fork`。
+
+市场页面的“代理设置”接受不含账号、密码和路径的 `http://host:port`。配置仅保存在当前客户端的伙伴状态中，同时作用于市场索引、Markdown Skill 和 ZIP 安装包下载；测试连接不会先写入配置。需要鉴权的代理应在本地网关侧处理，不要把凭据写进代理 URL。
