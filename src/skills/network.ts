@@ -93,17 +93,22 @@ function tunnelHttps(target: URL, proxy: URL, input: RemoteTextRequest): Promise
     })
     const fail = (error: unknown): void => reject(networkError(error))
     connectRequest.setTimeout(input.timeoutMs, () => connectRequest.destroy(new Error('Skill market proxy connection timed out')))
-    connectRequest.once('error', fail)
+    connectRequest.on('error', fail)
     connectRequest.once('connect', (response, socket, head) => {
       if (response.statusCode !== 200) {
         socket.destroy()
         reject(new Error(`Skill market proxy CONNECT returned HTTP ${response.statusCode ?? 0}`))
         return
       }
+      // CONNECT exposes the underlying socket separately from the TLS wrapper.
+      // Some proxies reset that raw socket during package downloads; keep an
+      // error consumer attached for the socket's full lifetime so a failed
+      // install cannot become an uncaught process-level error.
+      socket.on('error', fail)
       if (head.byteLength > 0) socket.unshift(head)
       const secureSocket = tlsConnect({ socket, servername: target.hostname })
       secureSocket.setTimeout(input.timeoutMs, () => secureSocket.destroy(new Error('Skill market TLS connection timed out')))
-      secureSocket.once('error', fail)
+      secureSocket.on('error', fail)
       secureSocket.once('secureConnect', () => {
         const headers = requestHeaders(input.headers, target.host, input.body)
         void issue(httpsRequest, {
@@ -130,7 +135,7 @@ function issue(
   return new Promise((resolve, reject) => {
     const outgoing = request(options, resolve)
     outgoing.setTimeout(timeoutMs, () => outgoing.destroy(new Error('Skill market request timed out')))
-    outgoing.once('error', error => reject(networkError(error)))
+    outgoing.on('error', error => reject(networkError(error)))
     if (body) outgoing.write(body)
     outgoing.end()
   })
@@ -167,10 +172,14 @@ function readBounded(response: IncomingMessage, limit: number, host: string): Pr
       chunks.push(chunk)
     })
     response.once('end', () => resolve(Buffer.concat(chunks)))
-    response.once('error', error => reject(networkError(error)))
+    response.on('error', error => reject(networkError(error)))
   })
 }
 
 function networkError(error: unknown): Error {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'ECONNRESET') return new Error('Skill 市场代理连接被中断，请检查代理后重试')
+  if (code === 'ECONNREFUSED') return new Error('无法连接 Skill 市场代理，请确认地址和端口可用')
+  if (code === 'ENOTFOUND') return new Error('无法解析 Skill 市场或代理地址，请检查网络配置')
   return error instanceof Error ? error : new Error(String(error))
 }

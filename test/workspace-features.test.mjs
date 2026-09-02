@@ -84,6 +84,24 @@ test('Skill market proxy settings are local and the bounded client routes HTTP r
   await assert.rejects(() => service.setNetworkSettings({ proxyUrl: 'socks5://127.0.0.1:1080' }), /仅支持 http/)
 })
 
+test('HTTPS proxy resets reject the current request without escaping as an uncaught socket error', async t => {
+  const proxy = createServer()
+  proxy.on('connect', (_req, socket) => {
+    socket.on('error', () => {})
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+    setImmediate(() => socket.destroy())
+  })
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => proxy.close(resolve)))
+  const address = proxy.address()
+  await assert.rejects(() => requestRemoteText({
+    url: 'https://market.invalid/SKILL.md',
+    proxyUrl: `http://127.0.0.1:${address.port}`,
+    maxBytes: 1024,
+    timeoutMs: 2_000,
+  }))
+})
+
 test('locally authored Skill documents install through the same bounded repository', async t => {
   const item = await fixture(); t.after(item.close)
   const service = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))

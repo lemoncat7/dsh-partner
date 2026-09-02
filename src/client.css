@@ -201,6 +201,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-capability-detail > header em { color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); font-style: normal; }
 .dsh-partner-feature-empty { margin: 0; padding: 24px 16px; border: 1px dashed var(--partner-border); border-radius: 12px; color: var(--partner-text-tertiary); font-size: var(--partner-font-body); line-height: 1.55; text-align: center; }
 .dsh-partner-inline-warning { margin: 0; padding: 9px 11px; border-radius: 9px; color: var(--partner-warning); background: color-mix(in srgb, var(--partner-warning) 8%, transparent); font-size: var(--partner-font-caption); }
+.dsh-partner-feature-error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--partner-danger) 22%, transparent); border-radius: 10px; color: var(--partner-danger); background: color-mix(in srgb, var(--partner-danger) 7%, var(--partner-raised)); font-size: var(--partner-font-body); line-height: 1.5; overflow-wrap: anywhere; }
 .dsh-partner-skill-installed { display: grid; gap: 8px; }
 .dsh-partner-market-sources { display: flex; gap: 7px; overflow-x: auto; padding: 1px 1px 4px; scrollbar-width: thin; }
 .dsh-partner-market-sources > button { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--partner-separator); border-radius: 9px; color: var(--partner-text-secondary); background: var(--partner-control); font: 590 var(--partner-font-body)/1 var(--partner-font-family); cursor: pointer; }
@@ -213,6 +214,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-skill-installed article > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
 .dsh-partner-skill-installed strong { font-size: var(--partner-font-label); font-weight: 600; }
 .dsh-partner-skill-installed p { overflow: hidden; margin: 0; color: var(--partner-text-secondary); font-size: var(--partner-font-body); text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-skill-installed .dsh-partner-skill-action-error { grid-column: 2 / -1; overflow: visible; padding: 8px 10px; border-radius: 8px; color: var(--partner-danger); background: color-mix(in srgb, var(--partner-danger) 7%, transparent); font-size: var(--partner-font-caption); line-height: 1.45; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .dsh-partner-skill-installed small { color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); }
 .dsh-partner-feature-switch { position: relative; width: 38px; height: 22px; min-height: 22px !important; padding: 0 !important; border-radius: 999px !important; background: color-mix(in srgb, var(--partner-text) 9%, transparent) !important; box-shadow: none !important; }
 .dsh-partner-feature-switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--partner-raised); box-shadow: 0 1px 3px color-mix(in srgb, #000 16%, transparent); transition: transform .18s var(--partner-ease-out); }
@@ -245,6 +247,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-market-grid article > span small { color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); font-weight: 650; letter-spacing: .06em; }
 .dsh-partner-market-grid strong { font-size: var(--partner-font-label); }
 .dsh-partner-market-grid p { display: -webkit-box; overflow: hidden; margin: 0; color: var(--partner-text-secondary); font-size: var(--partner-font-body); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.dsh-partner-market-grid .dsh-partner-market-card-error { display: block; overflow: visible; padding: 8px 10px; border-radius: 8px; color: var(--partner-danger); background: color-mix(in srgb, var(--partner-danger) 7%, transparent); font-size: var(--partner-font-caption); line-height: 1.45; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
 .dsh-partner-market-grid footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .dsh-partner-market-grid footer small { color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); }
 .dsh-partner-feature-form,

@@ -9,6 +9,7 @@ export function SkillsPanel(): JSX.Element {
   const [activeSource, setActiveSource] = useState('market-clawhub')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
+  const [actionError, setActionError] = useState<{ kind: 'install' | 'uninstall'; id: string; message: string }>()
   const [addingSource, setAddingSource] = useState(false)
   const [creatingSkill, setCreatingSkill] = useState(false)
   const [editingNetwork, setEditingNetwork] = useState(false)
@@ -29,25 +30,27 @@ export function SkillsPanel(): JSX.Element {
   }, [activeSource, market.entries, query])
   const sources = [{ id: 'builtin', name: '内置精选' }, ...market.sources.map(source => ({ id: source.id, name: source.name }))]
   const install = async (entry: MarketSkillView): Promise<void> => {
-    setBusy(entry.id)
+    setBusy(entry.id); setActionError(undefined)
     try {
       await api('/skills/market/install', { method: 'POST', body: JSON.stringify({ sourceId: entry.sourceId, entryId: entry.id }) })
       await load()
-    } catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    } catch (reason) { setActionError({ kind: 'install', id: entry.id, message: message(reason) }) } finally { setBusy(undefined) }
   }
   const uninstall = async (id: string): Promise<void> => {
-    setBusy(id)
+    setBusy(id); setActionError(undefined)
     try { await api(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }); await load() }
-    catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    catch (reason) { setActionError({ kind: 'uninstall', id, message: message(reason) }) } finally { setBusy(undefined) }
   }
   return <div className="dsh-partner-feature-page">
     <header className="dsh-partner-feature-hero"><span><small>CAPABILITY CATALOG</small><h2>Skill 市场</h2><p>这里负责安装和维护 Skill；安装后，再到具体伙伴的“能力”页面选择是否启用。</p></span><button type="button" onClick={() => { void load(true) }}><IconRefreshOutline16 size={15} />刷新市场</button></header>
+    {error && <p className="dsh-partner-feature-error" role="alert">{error}</p>}
     <section className="dsh-partner-feature-block">
       <header><span><strong>已安装</strong><small>{catalog.installed.length} 个可供伙伴使用</small></span><button type="button" onClick={() => setCreatingSkill(value => !value)}><IconPlusOutline16 size={14} />新建 Skill</button></header>
       {creatingSkill && <NewSkillForm existingIds={catalog.installed.map(skill => skill.id)} close={() => setCreatingSkill(false)} changed={load} />}
       {catalog.installed.length === 0 ? <Empty text="还没有安装 Skill，可从下方市场选择。" /> : <div className="dsh-partner-skill-installed is-market">{catalog.installed.map(skill => <article key={skill.id}>
         <span className="dsh-partner-skill-mark"><IconCheckOutline16 size={16} /></span><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.version} · {skill.executionContext === 'fork' ? '临时会话' : '当前会话'} · {skill.source}</small></span>
         <button type="button" className="is-icon" disabled={busy === skill.id} aria-label={`卸载 ${skill.displayName}`} onClick={() => { void uninstall(skill.id) }}><IconTrashOutline16 size={15} /></button>
+        {actionError?.kind === 'uninstall' && actionError.id === skill.id && <p className="dsh-partner-skill-action-error" role="alert">卸载失败：{actionError.message}</p>}
       </article>)}</div>}
     </section>
     <section className="dsh-partner-feature-block">
@@ -59,11 +62,12 @@ export function SkillsPanel(): JSX.Element {
       {market.errors.some(item => item.sourceId === activeSource) && <p className="dsh-partner-inline-warning">{market.errors.filter(item => item.sourceId === activeSource).map(item => item.error).join('；')}</p>}
       <div className="dsh-partner-market-grid">{visible.map(entry => {
         const current = installed.get(entry.id)
-        return <article key={`${entry.sourceId}:${entry.id}`}><span><small>{entry.tags.slice(0, 3).join(' · ') || 'SKILL'}</small><strong>{entry.name}</strong><p>{entry.description}</p></span><footer><small>v{entry.version}</small>{current ? <button type="button" disabled><IconCheckOutline16 size={14} />已安装</button> : <button type="button" disabled={busy === entry.id} onClick={() => { void install(entry) }}>{busy === entry.id ? '安装中…' : '安装'}</button>}</footer></article>
+        const cardError = actionError?.kind === 'install' && actionError.id === entry.id ? actionError.message : undefined
+        const errorId = cardError ? `dsh-partner-skill-error-${entry.id}` : undefined
+        return <article key={`${entry.sourceId}:${entry.id}`}><span><small>{entry.tags.slice(0, 3).join(' · ') || 'SKILL'}</small><strong>{entry.name}</strong><p>{entry.description}</p></span>{cardError && <p id={errorId} className="dsh-partner-market-card-error" role="alert">安装失败：{cardError}</p>}<footer><small>v{entry.version}</small>{current ? <button type="button" disabled><IconCheckOutline16 size={14} />已安装</button> : <button type="button" disabled={busy === entry.id} aria-describedby={errorId} onClick={() => { void install(entry) }}>{busy === entry.id ? '安装中…' : cardError ? '重试安装' : '安装'}</button>}</footer></article>
       })}</div>
       {visible.length === 0 && <Empty text={query ? '当前来源没有匹配的 Skill。' : '当前来源暂时没有可用 Skill，可刷新后重试。'} />}
     </section>
-    {error && <p className="dsh-partner-error" role="alert">{error}</p>}
   </div>
 }
 
