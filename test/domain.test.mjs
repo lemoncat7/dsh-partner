@@ -352,7 +352,7 @@ test('validates bounded memory and heartbeat settings without legacy focus runti
   }), /out of range/)
 })
 
-test('migrates legacy partner states to schema 10 and preserves focus only as a one-shot seed', async () => {
+test('migrates legacy partner states to the current schema and preserves focus only as a one-shot seed', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-migration-'))
   const path = join(directory, 'state.json')
   try {
@@ -362,14 +362,14 @@ test('migrates legacy partner states to schema 10 and preserves focus only as a 
     }
     await writeFile(path, JSON.stringify({ schemaVersion: 9, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 10)
+    assert.equal(state.schemaVersion, 11)
     assert.equal(state.companions[0].automation.heartbeat.legacyFocus, '项目风险\n依赖更新')
     assert.equal('focus' in state.companions[0].automation.heartbeat, false)
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 10)
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 11)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('migrates schema v1 defaults and obsolete focus cursor through schema 10', async () => {
+test('migrates schema v1 defaults and obsolete focus cursor through the current schema', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-v1-'))
   const path = join(directory, 'state.json')
   try {
@@ -379,7 +379,7 @@ test('migrates schema v1 defaults and obsolete focus cursor through schema 10', 
       channels: [], pairings: [], sessions: [], recentReceipts: [],
     }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 10)
+    assert.equal(state.schemaVersion, 11)
     assert.equal(state.companions[0].automation.memory.retentionDays, 0)
     assert.equal(state.companions[0].automation.heartbeat.enabled, false)
     assert.deepEqual(state.heartbeatStates, [])

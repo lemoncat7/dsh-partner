@@ -9,7 +9,7 @@ import { activatePluginWorkspace, observePluginWorkspace } from './workspace-own
 import {
   IconAgentPresetOutline16, IconCheckOutline14, IconChevronDownOutline14, IconChevronLeftOutline14,
   IconDataOutline16, IconEditOutline16, IconLinkOutline16, IconPlusOutline16,
-  IconRefreshOutline16, IconTrashOutline16, IconUserOutline16,
+  IconRefreshOutline16, IconTrashOutline16, IconUserOutline16, IconBrowseOutline16, IconListPenOutline16, IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
 import cssText from './client.css'
@@ -17,12 +17,15 @@ import { api, loadPartner, type AutomationView, type Capability, type ChannelVie
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
 import { GlassSurface } from './glass-surface.js'
+import { SkillsPanel } from './ui/skills-panel.js'
+import { TaskBoardPanel } from './ui/task-board-panel.js'
+import { SchedulePanel } from './ui/schedule-panel.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
-type Tab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
+type Tab = 'home' | 'identity' | 'capabilities' | 'skills' | 'board' | 'schedules' | 'weixin' | 'memory'
 
 interface Controller {
   open(companionId?: string): void
@@ -164,6 +167,9 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             <TabButton active={tab === 'home'} onClick={() => setTab('home')} icon={<IconAgentPresetOutline16 size={16} />}>总览</TabButton>
             <TabButton active={tab === 'identity'} onClick={() => setTab('identity')} icon={<IconEditOutline16 size={16} />}>身份</TabButton>
             <TabButton active={tab === 'capabilities'} onClick={() => setTab('capabilities')} icon={<IconAgentPresetOutline16 size={16} />}>能力</TabButton>
+            <TabButton active={tab === 'skills'} onClick={() => setTab('skills')} icon={<IconBrowseOutline16 size={16} />}>Skill</TabButton>
+            <TabButton active={tab === 'board'} onClick={() => setTab('board')} icon={<IconListPenOutline16 size={16} />}>看板</TabButton>
+            <TabButton active={tab === 'schedules'} onClick={() => setTab('schedules')} icon={<IconPlayOutline16 size={16} />}>定时</TabButton>
             <TabButton active={tab === 'weixin'} onClick={() => setTab('weixin')} icon={<WeixinGlyph />}>微信</TabButton>
             <TabButton active={tab === 'memory'} onClick={() => setTab('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
           </nav>
@@ -171,6 +177,9 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             {tab === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setTab} openSession={openSession} renewSession={renewSession} />}
             {tab === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={refresh} />}
             {tab === 'capabilities' && <CapabilityEditor companion={selected} presets={snapshot?.presets ?? []} onChanged={refresh} />}
+            {tab === 'skills' && <SkillsPanel companionId={selected.id} />}
+            {tab === 'board' && <TaskBoardPanel companion={selected} />}
+            {tab === 'schedules' && <SchedulePanel companionId={selected.id} />}
             {tab === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
             {tab === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} renewSession={renewSession} onChanged={refresh} />}
           </div>

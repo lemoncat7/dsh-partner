@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
-import { DEFAULT_AUTOMATION, normalizeAutomation, normalizeCompanionDraft, object, text, type ChannelView, type Companion } from './domain.js'
+import { DEFAULT_AUTOMATION, normalizeAutomation, normalizeCompanionDraft, text, type ChannelView, type Companion } from './domain.js'
 import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { ChannelManager, requiredCompanion } from './channels/manager.js'
@@ -12,8 +12,12 @@ import { PartnerMemoryStore } from './memory-store.js'
 import { HeartbeatScheduler } from './heartbeat.js'
 import { DailyReviewScheduler } from './daily-review.js'
 import { PartnerConcernStore } from './concern-store.js'
-
-const MAX_BODY_BYTES = 1_048_576
+import type { SkillService } from './skills/service.js'
+import type { TaskBoardService } from './tasks/service.js'
+import type { PartnerCollaborationService } from './collaboration/service.js'
+import type { PartnerSchedulerService } from './scheduler/service.js'
+import { dispatchPartnerWorkspaceApi } from './api/features/workspace-api.js'
+import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson } from './api/http.js'
 
 export interface WebServerLike {
   register(route: { kind: 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
@@ -30,6 +34,10 @@ interface ApiRuntime {
   concerns: PartnerConcernStore
   heartbeat: HeartbeatScheduler
   dailyReview: DailyReviewScheduler
+  skills: SkillService
+  tasks: TaskBoardService
+  collaboration: PartnerCollaborationService
+  scheduler: PartnerSchedulerService
 }
 
 export function registerPartnerApi(webServer: WebServerLike, prefix: string, runtime: ApiRuntime): () => void {
@@ -49,7 +57,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
-  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 10 })
+  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 11 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({
       id: provider.id, name: provider.name,
@@ -58,6 +66,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     return sendJson(res, 200, { providers, defaultSelection: runtime.ctx.agentDefaultModel.currentSelection() })
   }
   if (method === 'GET' && segments.length === 0) return sendJson(res, 200, await snapshot(runtime))
+  if (await dispatchPartnerWorkspaceApi(req, res, segments, url, runtime)) return
 
   if (segments[0] === 'companions') {
     if (method === 'POST' && segments.length === 1) {
@@ -82,10 +91,21 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     if (id !== undefined && method === 'DELETE' && segments.length === 2) {
       mutation(req)
       requiredCompanion(runtime.store, id)
-      if (runtime.store.snapshot().channels.some(item => item.companionId === id)) throw httpError(409, '请先删除或换绑该伙伴的微信渠道')
-      if (runtime.store.snapshot().companions.length <= 1) throw httpError(409, '至少保留一个伙伴')
+      const current = runtime.store.snapshot()
+      if (current.channels.some(item => item.companionId === id)) throw httpError(409, '请先删除或换绑该伙伴的微信渠道')
+      if (current.companions.length <= 1) throw httpError(409, '至少保留一个伙伴')
+      if (current.executionRuns.some(item => item.ownerCompanionId === id && item.status === 'running')) throw httpError(409, '伙伴仍有正在执行的临时任务，请等待完成后再删除')
       await runtime.agents.resetCompanion(id)
-      await runtime.store.update(state => { state.companions = state.companions.filter(item => item.id !== id) })
+      await runtime.store.update(state => {
+        state.companions = state.companions.filter(item => item.id !== id)
+        state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
+        state.schedules = state.schedules.filter(item => item.companionId !== id)
+        for (const task of state.tasks) if (task.assigneeCompanionId === id) {
+          delete task.assigneeCompanionId
+          task.revision += 1
+          task.updatedAt = Date.now()
+        }
+      })
       await runtime.memory.clear(id)
       await runtime.concerns.clear(id)
       return sendJson(res, 204, undefined)
@@ -263,41 +283,3 @@ async function snapshot(runtime: ApiRuntime): Promise<{
 
 function createId(prefix: string): string { return `${prefix}-${randomBytes(10).toString('hex')}` }
 function localDay(now: number): string { const date = new Date(now); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
-
-function assertSameOrigin(req: IncomingMessage): void {
-  const origin = req.headers.origin
-  const host = req.headers.host
-  if (origin !== undefined && host !== undefined && new URL(origin).host !== host) throw httpError(403, 'cross-origin Partner API access is forbidden')
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined && site !== 'same-origin' && site !== 'same-site' && site !== 'none') throw httpError(403, 'cross-site Partner API access is forbidden')
-}
-
-function mutation(req: IncomingMessage): void {
-  if (req.headers['x-dsh-partner-request'] !== '1') throw httpError(403, 'missing Partner mutation request header')
-}
-
-async function readObject(req: IncomingMessage): Promise<Record<string, unknown>> {
-  let total = 0
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    total += buffer.length
-    if (total > MAX_BODY_BYTES) throw httpError(413, 'request body is too large')
-    chunks.push(buffer)
-  }
-  try { return object(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'), 'request body') }
-  catch (error) { if (error instanceof HttpError) throw error; throw httpError(400, error instanceof Error ? error.message : 'request body is invalid') }
-}
-
-class HttpError extends Error { constructor(readonly status: number, message: string) { super(message) } }
-function httpError(status: number, message: string): HttpError { return new HttpError(status, message) }
-function sendError(res: ServerResponse, error: unknown): void {
-  const status = error instanceof HttpError ? error.status : 500
-  sendJson(res, status, { error: error instanceof Error ? error.message : String(error) })
-}
-function sendJson(res: ServerResponse, status: number, value: unknown): void {
-  res.statusCode = status
-  res.setHeader('content-type', 'application/json; charset=utf-8')
-  res.setHeader('cache-control', 'no-store')
-  res.end(status === 204 ? undefined : JSON.stringify(value))
-}

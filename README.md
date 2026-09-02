@@ -41,6 +41,13 @@
 - 可配置静默时段、检查间隔、每日通知上限、失败退避和手动检查；失败后不会早于正常检查间隔重试
 - 修改伙伴身份或能力时清理该伙伴的渠道 Session，防止新旧人格串联
 - Windows、macOS、Linux 兼容的原子状态写入
+- 兼容 `SKILL.md` 的伙伴 Skill：安装与伙伴启用关系分离，支持 `inline` / `fork` 上下文、`allowed-tools` 权限收缩、校验和审计及本地 Skill
+- 内置可直接安装的精选 Skill 市场，并支持添加兼容 JSON 索引的团队市场源；远程内容限流、校验并原子安装，非可信市场强制使用隔离临时会话
+- 人与伙伴共享的任务看板：收集箱、待开始、进行中、待验收、受阻、已完成六个状态，带优先级、负责人、乐观并发 revision 与有界活动记录
+- 安全伙伴目录和真实委派：伙伴可通过 `@伙伴名` 解析稳定身份，把看板任务交给对应伙伴执行；只共享任务信封、公开能力和结果摘要，不共享私有会话、凭据与长期记忆
+- 伙伴会话内提供 `partner_skill`、`partner_task_board`、`partner_collaborate` 和 `partner_schedule` 四组作用域工具，不污染普通 DSH 会话的工具表
+- 伙伴定时任务支持间隔与每日时间、跳过或排队重叠、手动执行和重启恢复；每次使用新临时会话，完成后默认销毁，也可选择保留以便审计
+- Skill fork、伙伴委派和定时任务共用同一个有界临时执行器，统一处理模型/预设组合、并发上限、超时、工具权限、运行记录与会话回收
 
 心跳默认关闭，升级后不会突然主动发送消息。群聊策略和多渠道适配尚未开放。
 
@@ -91,6 +98,8 @@ dsh plugin --profile web add ./lemoncat7-dsh-partner-<version>.tgz
 - 普通状态：`statePath` 指向的 JSON 文件。
 - 伙伴记忆：`<defaultCwd>/partners/<伙伴 ID>/memory/`，按联系人隔离保存每日完整对话归档、人物画像、每日回顾、结构化长期记忆和有证据的记忆关系；画像按版本进入联系人会话，其他记忆按当前话题与一跳强关系召回，默认永久保留。
 - 伙伴挂念：`<defaultCwd>/partners/<伙伴 ID>/concerns/concerns.sqlite`，保存挂念生命周期、变化观察、去重指纹、候选审计和打扰决策；候选审计保留 90 天，SQLite 使用 WAL、索引和串行事务写入。
+- Skill 内容：`<defaultCwd>/partner-system/skills/<Skill ID>/SKILL.md`；普通状态文件只保存来源、版本、路径、校验和及伙伴启用关系，不复制 Skill 正文。
+- 看板、调度、委派和临时运行索引：保存在 `statePath` 的原子状态文件中，并对任务数、活动历史、计划数和运行记录设置硬上限，防止长期使用后无限膨胀。
 - 敏感凭据：DSH Credential Store，scope 为 `dsh-partner-weixin`。
 - 管理 API：默认 `/partner-local/v1`，仅接受同源请求；写操作还要求 `X-DSH-Partner-Request: 1`。
 - 微信机器人只能绑定一个伙伴；联系人上下文不会跨机器人、伙伴或其他联系人共享。
@@ -106,3 +115,27 @@ npm pack --dry-run
 ```
 
 要求 Node.js `^22.19.0 || >=24.0.0`，与当前 DSH 运行时一致。
+
+新模块的依赖方向、隐私边界和持久化约束见 [`docs/architecture.md`](docs/architecture.md)。
+
+## Skill 市场索引
+
+自定义市场源返回 JSON 数组，或返回带 `skills` 数组的对象：
+
+```json
+{
+  "skills": [
+    {
+      "id": "team-release-audit",
+      "name": "团队发布审计",
+      "description": "执行团队约定的发布前检查。",
+      "version": "1.0.0",
+      "tags": ["release", "audit"],
+      "skillUrl": "./team-release-audit/SKILL.md",
+      "checksum": "sha256:可选的64位十六进制摘要"
+    }
+  ]
+}
+```
+
+`skillUrl` 可相对索引 URL。市场索引上限 1 MiB、单个 `SKILL.md` 上限 512 KiB；未标记为可信的市场即使声明 `context: inline`，安装后也会强制改为 `fork`。

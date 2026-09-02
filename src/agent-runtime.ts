@@ -26,6 +26,8 @@ import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { HEARTBEAT_LOCAL_COMMAND, heartbeatLocalCommandTool } from './heartbeat-command.js'
+import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
+export { renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 
 type RuntimeContext = Context & {
   agents: Context['agents']
@@ -40,6 +42,10 @@ interface KnowledgeTrackingService {
     id: string; subject: string; event: string; evidence: string; source: string; reference?: string; at: number
   }, signal?: AbortSignal): Promise<{ storage: 'knowledge' | 'local'; outcome: string; knowledgeBaseId?: string }>
   list?(agent: { session: { id: string; header: { cwd?: string }; events: readonly [] } }, query?: string, limit?: number, signal?: AbortSignal): Promise<ConcernSource[]>
+}
+
+export interface PartnerAgentComposer {
+  compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): void
 }
 
 const HEARTBEAT_TIMEOUT_MS = 115_000
@@ -104,6 +110,7 @@ export class PartnerAgentRuntime {
     private readonly memory?: PartnerMemoryStore,
     private readonly reflection?: MemoryReflectionService,
     private readonly concerns?: PartnerConcernStore,
+    private readonly composer?: PartnerAgentComposer,
   ) {}
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
@@ -416,7 +423,7 @@ export class PartnerAgentRuntime {
       source: { kind: 'user' },
     }))
     await agent.whenIdle()
-    const response = extractAssistantText(agent, startSeq)
+    const response = assistantTextAfter(agent, startSeq)
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === session.id)
       if (target) target.lastMessageAt = Date.now()
@@ -494,7 +501,7 @@ export class PartnerAgentRuntime {
       agentCtx.systemPrompt.section({
         name: 'partner-identity',
         order: -10,
-        text: renderPersona(companion),
+        text: renderPartnerPersona(companion),
       })
       agentCtx.systemPrompt.section({
         name: 'partner-tool-routing',
@@ -506,6 +513,7 @@ export class PartnerAgentRuntime {
         order: -8,
         text: renderProfile(profile),
       })
+      this.composer?.compose(agentCtx as Context & { tools: ToolRuntime }, companion)
     }
     let handle: AgentHandle
     try {
@@ -666,14 +674,6 @@ function renderDeferredMentions(entries: ConcernObservation[]): string {
   ].join('\n')
 }
 
-export function resolveAgentOptions(defaultModel: AgentDefaultModelConfig, companion: Companion) {
-  return {
-    ...defaultModel.currentSelection(),
-    ...(companion.provider ? { provider: companion.provider } : {}),
-    ...(companion.model ? { model: companion.model } : {}),
-  }
-}
-
 export function canReuseSession(route: ChannelSession, companionId: string, archivedSessionIds: readonly SessionId[]): boolean {
   return route.companionId === companionId && !archivedSessionIds.includes(route.sessionId as SessionId)
 }
@@ -766,7 +766,7 @@ async function runHeartbeatInference(
       for await (const chunk of prepared.stream({
         ...prepared.config,
         messages,
-        system: renderPersona(companion, 'heartbeat'),
+        system: renderPartnerPersona(companion, 'heartbeat'),
         tools: discoveryOpen ? tools : [],
         signal,
       })) assembler.push(chunk)
@@ -1021,43 +1021,6 @@ function formatDuration(milliseconds: number): string {
 }
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-
-function renderPersona(companion: Companion, surface: 'conversation' | 'heartbeat' = 'conversation'): string {
-  const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
-  return [
-    `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
-    `角色：${companion.role}`,
-    companion.description ? `定位：${companion.description}` : '',
-    companion.instructions ? `长期行为准则：\n${companion.instructions}` : '',
-    `用户为此伙伴启用的能力范围：${capabilities}。能力标识不等于授权；只能调用当前会话实际提供且已经通过权限校验的工具。`,
-    surface === 'heartbeat'
-      ? '这是一轮独立的伙伴心跳，不是用户聊天的延续。只根据本轮真实可读信息行动，最终结果由渠道适配器决定是否发送。'
-      : '这个会话由 DSH 网页与微信私聊渠道共同使用。保持同一上下文，不要假定每条消息都来自微信；渠道回传由适配器负责。回答兼顾网页与移动端阅读，执行外部操作前继续遵守工具自身的授权与审批边界。',
-  ].filter(Boolean).join('\n\n')
-}
-
-export function renderToolProtocol(): string {
-  return [
-    'DSH 工具调用协议（必须遵守）：工具 SDK 中出现某项能力，不代表它可以作为顶层函数直接调用。',
-    '先以当前请求真正暴露的顶层工具清单为准。若顶层只提供 `run_code`，则它是唯一允许直接调用的工具；`web_search`、知识库、SSH 等 SDK 能力必须放进 `run_code` 程序，通过生成的 `tools` SDK 按准确签名调用，例如 `await tools.web_search(...)`。绝不要直接发起名为 `web_search` 的顶层工具调用。',
-    '`run_code` 的程序只返回完成当前任务所需的精简结果。需要顺序依赖时逐个 `await`，互不依赖的只读调用才可并行。',
-    '若工具结果提示 “only `run_code` is callable directly”，说明路由方式错误；立即在同一轮改用 `run_code` 重试。只有规范重试也失败时，才向用户说明真正的失败原因。',
-    '若当前请求原生暴露了目标工具，则可以直接调用该原生工具；不要臆造未出现在顶层清单或生成 SDK 中的工具。',
-    '需要把生成的图片或文档交给用户时，最终回复必须用 Markdown 链接明确引用伙伴工作目录中的文件，例如 `[下载文件](/绝对路径/文件.pdf)`；不要只说“文件在这里”。渠道会在确认真实路径位于伙伴工作目录后发送附件。',
-  ].join('\n')
-}
-
-function extractAssistantText(agent: Agent, fromSeq: number): string {
-  const messages: string[] = []
-  for (const event of agent.session.events) {
-    if (event.seq < fromSeq || event.type !== 'assistant/message' || event.data.interrupted) continue
-    const text = event.data.message.content
-      .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
-      .map(block => block.text.trim()).filter(Boolean).join('\n')
-    if (text) messages.push(text)
-  }
-  return messages.join('\n\n').trim()
-}
 
 function textContent(content: readonly { type: string; text?: string }[]): string {
   return content.filter((block): block is { type: 'text'; text: string } => block.type === 'text' && typeof block.text === 'string')

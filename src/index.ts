@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { join } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -17,6 +18,13 @@ import { MemoryReflectionService } from './memory-reflection.js'
 import { DailyReviewScheduler } from './daily-review.js'
 import { PartnerConcernStore, type LegacyConcernSeed } from './concern-store.js'
 import { registerPartnerConcernTool } from './concern-tool.js'
+import { SkillRepository } from './skills/repository.js'
+import { SkillService } from './skills/service.js'
+import { TaskBoardService } from './tasks/service.js'
+import { EphemeralExecutionService } from './execution/service.js'
+import { PartnerCollaborationService } from './collaboration/service.js'
+import { PartnerSchedulerService } from './scheduler/service.js'
+import { PartnerAgentComposition } from './collaboration/composition.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -59,7 +67,14 @@ export function apply(context: Context, config: PartnerConfig): void {
       for (const companion of state.companions) delete companion.automation.heartbeat.legacyFocus
     })
     const reflection = new MemoryReflectionService(ctx, memory, concerns)
-    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns)
+    const skills = new SkillService(store, new SkillRepository(join(resolved.defaultCwd, 'partner-system', 'skills')))
+    await skills.initialize()
+    const tasks = new TaskBoardService(store)
+    const executor = new EphemeralExecutionService(ctx, store, resolved.defaultCwd)
+    const collaboration = new PartnerCollaborationService(store, skills, tasks, executor)
+    const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone)
+    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor)
+    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
     const channels = new ChannelManager(ctx, store, credentials, agents)
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
@@ -75,7 +90,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -83,15 +98,18 @@ export function apply(context: Context, config: PartnerConfig): void {
     if (resolved.autoStartChannels) await channels.startEnabled()
     heartbeat.start()
     dailyReview.start()
+    scheduler.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
     return async () => {
       disposeApi?.()
       disposeSessionObserver()
       disposeConcernTool()
+      await scheduler.close()
       await heartbeat.close()
       await dailyReview.close()
       await channels.close()
       await agents.close()
+      await executor.close()
     }
   }, 'dsh-partner.runtime')
 }

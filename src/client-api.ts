@@ -56,6 +56,34 @@ export interface LoginView {
   qrContent?: string; accountId?: string; baseUrl?: string; error?: string; expiresAt: number
 }
 
+export interface SkillView {
+  id: string; name: string; displayName: string; description: string; version: string
+  source: 'builtin' | 'market' | 'local'; sourceId?: string; executionContext: 'inline' | 'fork'; trusted: boolean; updatedAt: number
+}
+export interface SkillBindingView { companionId: string; skillId: string; enabled: boolean }
+export interface SkillMarketSourceView { id: string; name: string; indexUrl: string; enabled: boolean; trusted: boolean }
+export interface MarketSkillView { id: string; name: string; description: string; version: string; tags: string[]; sourceId: string }
+export interface SkillCatalogView { installed: SkillView[]; bindings: SkillBindingView[]; sources: SkillMarketSourceView[] }
+export interface SkillMarketView { sources: SkillMarketSourceView[]; entries: MarketSkillView[]; errors: Array<{ sourceId: string; error: string }> }
+
+export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
+export interface BoardTaskView {
+  id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'
+  assigneeCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
+  skillIds: string[]; relatedTaskIds: string[]; dueAt?: number
+}
+export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
+export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }
+export interface PartnerDirectoryEntryView { id: string; name: string; role: string; description: string; capabilities: string[]; enabledSkills: Array<{ id: string; name: string }>; availability: 'available' | 'busy' | 'offline' }
+
+export interface ScheduledTaskView {
+  id: string; companionId: string; title: string; prompt: string
+  schedule: { kind: 'interval'; minutes: number } | { kind: 'daily'; hour: number; minute: number }
+  enabled: boolean; destroySessionAfterRun: boolean; overlapPolicy: 'skip' | 'queue'; timeoutMinutes: number
+  nextRunAt: number; lastRunAt?: number; lastRunStatus?: 'completed' | 'failed' | 'skipped'; createdAt: number; updatedAt: number
+}
+export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'skill'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
+
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'
   const response = await fetch(`${PARTNER_API}${path}`, {

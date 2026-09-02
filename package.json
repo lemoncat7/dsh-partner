@@ -30,6 +30,7 @@
     "lib/**/*.d.ts",
     "lib/**/*.map",
     "cordis.patch.yml",
+    "docs/architecture.md",
     "README.md",
     "LICENSE"
   ],

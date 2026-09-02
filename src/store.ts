@@ -73,7 +73,11 @@ export class PartnerStore {
 }
 
 function emptyState(): PartnerState {
-  return { schemaVersion: 10, companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }
+  return {
+    schemaVersion: 11,
+    companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [],
+    skills: [], skillBindings: [], skillMarketSources: [], tasks: [], taskActivities: [], delegations: [], schedules: [], executionRuns: [],
+  }
 }
 
 function parseState(value: unknown): PartnerState {
@@ -187,6 +191,12 @@ function parseState(value: unknown): PartnerState {
       }) : legacy.companions,
     }
   }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 10) {
+    value = {
+      ...(value as Record<string, unknown>), schemaVersion: 11,
+      skills: [], skillBindings: [], skillMarketSources: [], tasks: [], taskActivities: [], delegations: [], schedules: [], executionRuns: [],
+    }
+  }
   validateState(value)
   return value
 }
@@ -194,8 +204,11 @@ function parseState(value: unknown): PartnerState {
 function validateState(value: unknown): asserts value is PartnerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('partner state must be an object')
   const state = value as Partial<PartnerState>
-  if (state.schemaVersion !== 10) throw new Error('unsupported partner state schema')
-  for (const key of ['companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates'] as const) {
+  if (state.schemaVersion !== 11) throw new Error('unsupported partner state schema')
+  for (const key of [
+    'companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates',
+    'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'schedules', 'executionRuns',
+  ] as const) {
     if (!Array.isArray(state[key])) throw new Error(`partner state ${key} must be an array`)
   }
 }

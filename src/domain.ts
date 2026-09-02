@@ -1,3 +1,9 @@
+import type { CompanionSkillBinding, PartnerSkill, SkillMarketSource } from './skills/domain.js'
+import type { BoardTask, TaskActivity } from './tasks/domain.js'
+import type { PartnerDelegation } from './collaboration/domain.js'
+import type { ExecutionRun } from './execution/domain.js'
+import type { ScheduledPartnerTask } from './scheduler/domain.js'
+
 export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
@@ -79,13 +85,21 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
-  schemaVersion: 10
+  schemaVersion: 11
   companions: Companion[]
   channels: WeixinChannel[]
   pairings: PairingRequest[]
   sessions: ChannelSession[]
   recentReceipts: string[]
   heartbeatStates: HeartbeatRuntimeState[]
+  skills: PartnerSkill[]
+  skillBindings: CompanionSkillBinding[]
+  skillMarketSources: SkillMarketSource[]
+  tasks: BoardTask[]
+  taskActivities: TaskActivity[]
+  delegations: PartnerDelegation[]
+  schedules: ScheduledPartnerTask[]
+  executionRuns: ExecutionRun[]
 }
 
 export interface CompanionDraft {
