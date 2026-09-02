@@ -4,6 +4,8 @@ import test from 'node:test'
 
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
+const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
+const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
 
 test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
   const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
@@ -39,4 +41,18 @@ test('interactive glare batches layout reads into animation frames', () => {
   assert.match(renderGlare, /getBoundingClientRect/)
   assert.doesNotMatch(moveGlare, /getBoundingClientRect/)
   assert.match(moveGlare, /glarePointerRef\.current = \{ clientX, clientY \}/)
+})
+
+test('global workspaces stay in the roster while partner Skill bindings stay in capabilities', () => {
+  const partnerTabs = clientSource.slice(clientSource.indexOf('<nav className="dsh-partner-tabs"'), clientSource.indexOf('</nav>', clientSource.indexOf('<nav className="dsh-partner-tabs"')))
+  assert.match(clientSource, /className="dsh-partner-workspace-nav"/)
+  assert.match(clientSource, />Skill 市场</)
+  assert.match(clientSource, />任务看板</)
+  assert.match(clientSource, />定时任务</)
+  assert.doesNotMatch(partnerTabs, />Skill</)
+  assert.doesNotMatch(partnerTabs, />看板</)
+  assert.doesNotMatch(partnerTabs, />定时</)
+  assert.match(clientSource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
+  assert.match(skillSource, /这里负责安装和维护 Skill/)
+  assert.match(scheduleSource, /name="companionId" required/)
 })

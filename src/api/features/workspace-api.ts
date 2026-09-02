@@ -8,6 +8,7 @@ import { mutation, readObject, sendJson } from '../http.js'
 
 export interface PartnerWorkspaceApiRuntime {
   store: PartnerStore
+  agents: { reloadCompanion(companionId: string): Promise<void> }
   skills: SkillService
   tasks: TaskBoardService
   collaboration: PartnerCollaborationService
@@ -53,7 +54,16 @@ export async function dispatchPartnerWorkspaceApi(
   if (segments[0] === 'companions' && segments[1] && segments[2] === 'skills' && segments[3] && method === 'PUT' && segments.length === 4) {
     mutation(req); const body = await readObject(req)
     if (typeof body.enabled !== 'boolean') throw new Error('enabled must be boolean')
-    await runtime.skills.setBinding(segments[1], segments[3], body.enabled)
+    const companionId = segments[1]
+    const skillId = segments[3]
+    const previous = runtime.store.snapshot().skillBindings.find(item => item.companionId === companionId && item.skillId === skillId)?.enabled ?? false
+    await runtime.skills.setBinding(companionId, skillId, body.enabled)
+    try { await runtime.agents.reloadCompanion(companionId) }
+    catch (error) {
+      await runtime.skills.setBinding(companionId, skillId, previous)
+      await runtime.agents.reloadCompanion(companionId).catch(() => {})
+      throw error
+    }
     sendJson(res, 200, { ok: true }); return true
   }
   if (segments[0] === 'tasks') {

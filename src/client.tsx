@@ -17,7 +17,7 @@ import { api, loadPartner, type AutomationView, type Capability, type ChannelVie
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
 import { GlassSurface } from './glass-surface.js'
-import { SkillsPanel } from './ui/skills-panel.js'
+import { CompanionSkillSettings, SkillsPanel } from './ui/skills-panel.js'
 import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 
@@ -25,7 +25,11 @@ const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
-type Tab = 'home' | 'identity' | 'capabilities' | 'skills' | 'board' | 'schedules' | 'weixin' | 'memory'
+type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
+type WorkspacePage = 'skills' | 'board' | 'schedules'
+type View = CompanionTab | WorkspacePage
+
+const WORKSPACE_PAGES = new Set<View>(['skills', 'board', 'schedules'])
 
 interface Controller {
   open(companionId?: string): void
@@ -117,7 +121,7 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
 function PartnerWorkspace({ controller }: ConversationProps & { controller: Controller }): JSX.Element {
   const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
   const [selectedId, setSelectedId] = useState(controller.selected())
-  const [tab, setTab] = useState<Tab>('home')
+  const [view, setView] = useState<View>('home')
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const refresh = useCallback(async () => {
@@ -136,7 +140,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
       const companion = await api<CompanionView>('/companions', { method: 'POST', body: JSON.stringify({ companion: {
         name: '新伙伴', role: '长期 AI 工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'skills'],
       } }) })
-      await refresh(); setSelectedId(companion.id); setTab('identity')
+      await refresh(); setSelectedId(companion.id); setView('identity')
     } catch (reason) { setError(message(reason)) }
   }
   const openSession = async (routeId: string, sessionId: string): Promise<void> => {
@@ -147,41 +151,46 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
     try { setError(undefined); await controller.renewSession(routeId) }
     catch (reason) { setError(message(reason)) }
   }
+  const workspacePage = WORKSPACE_PAGES.has(view)
+  const openCompanion = (id: string): void => { setSelectedId(id); setView('home') }
   return <main className="dsh-partner-workspace">
-    <header className="dsh-partner-topbar"><div><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div></header>
+    <header className="dsh-partner-topbar"><div><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div><nav className="dsh-partner-mobile-workspace-nav" aria-label="伙伴工作区快捷入口"><button type="button" className={view === 'skills' ? 'is-active' : ''} aria-label="Skill 市场" onClick={() => setView('skills')}><IconBrowseOutline16 size={16} /><span>Skill</span></button><button type="button" className={view === 'board' ? 'is-active' : ''} aria-label="任务看板" onClick={() => setView('board')}><IconListPenOutline16 size={16} /><span>看板</span></button><button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-label="定时任务" onClick={() => setView('schedules')}><IconPlayOutline16 size={16} /><span>定时</span></button></nav></header>
     <div className="dsh-partner-grid">
       <aside className="dsh-partner-roster">
         <div className="dsh-partner-roster-title"><span><small>COMPANIONS</small><strong>伙伴名册</strong></span><button type="button" onClick={() => { void create() }} aria-label="新建伙伴"><IconPlusOutline16 size={16} /></button></div>
         <div className="dsh-partner-roster-list">{snapshot?.companions.map(companion => {
           const channel = snapshot.channels.find(item => item.companionId === companion.id)
-          return <button type="button" key={companion.id} className={selectedId === companion.id ? 'is-active' : ''} onClick={() => { setSelectedId(companion.id); setTab('home') }}>
+          return <button type="button" key={companion.id} className={!workspacePage && selectedId === companion.id ? 'is-active' : ''} onClick={() => openCompanion(companion.id)}>
             <Avatar name={companion.name} /><span><strong>{companion.name}</strong><small>{companion.role}</small></span><i className={channel?.runtimeStatus === 'running' ? 'is-online' : ''} title={channel ? channel.runtimeStatus : '未连接渠道'} />
           </button>
         })}</div>
+        <nav className="dsh-partner-workspace-nav" aria-label="伙伴工作区">
+          <button type="button" className={view === 'skills' ? 'is-active' : ''} aria-current={view === 'skills' ? 'page' : undefined} onClick={() => setView('skills')}><span><IconBrowseOutline16 size={16} /></span><strong>Skill 市场</strong><small>安装与管理能力</small></button>
+          <button type="button" className={view === 'board' ? 'is-active' : ''} aria-current={view === 'board' ? 'page' : undefined} onClick={() => setView('board')}><span><IconListPenOutline16 size={16} /></span><strong>任务看板</strong><small>协作、委派与验收</small></button>
+          <button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-current={view === 'schedules' ? 'page' : undefined} onClick={() => setView('schedules')}><span><IconPlayOutline16 size={16} /></span><strong>定时任务</strong><small>选择伙伴周期执行</small></button>
+        </nav>
         <div className="dsh-partner-roster-note"><IconLinkOutline16 size={16} /><span><strong>身份与渠道分离</strong><small>微信只负责收发，权限仍由 DSH 工具决定。</small></span></div>
       </aside>
-      <section className="dsh-partner-stage">
-        {loading ? <State title="正在读取伙伴…" /> : selected === undefined ? <State title="创建第一个伙伴" detail="伙伴会保存独立身份、能力和微信会话。" action={<button onClick={() => { void create() }}>新建伙伴</button>} /> : <>
+      <section className={`dsh-partner-stage${workspacePage ? ' is-workspace-page' : ''}`}>
+        {loading ? <State title="正在读取伙伴…" /> : workspacePage ? <div className="dsh-partner-stage-scroll is-workspace-page">
+          {view === 'skills' && <SkillsPanel />}
+          {view === 'board' && <TaskBoardPanel />}
+          {view === 'schedules' && <SchedulePanel companions={snapshot?.companions ?? []} />}
+        </div> : selected === undefined ? <State title="创建第一个伙伴" detail="伙伴会保存独立身份、能力和微信会话。" action={<button onClick={() => { void create() }}>新建伙伴</button>} /> : <>
           <div className="dsh-partner-identity"><Avatar name={selected.name} /><span><small>ACTIVE COMPANION</small><h1>{selected.name}</h1><p>{selected.description || selected.role}</p></span><Status channel={snapshot?.channels.find(item => item.companionId === selected.id)} /></div>
           <nav className="dsh-partner-tabs" aria-label="伙伴配置">
-            <TabButton active={tab === 'home'} onClick={() => setTab('home')} icon={<IconAgentPresetOutline16 size={16} />}>总览</TabButton>
-            <TabButton active={tab === 'identity'} onClick={() => setTab('identity')} icon={<IconEditOutline16 size={16} />}>身份</TabButton>
-            <TabButton active={tab === 'capabilities'} onClick={() => setTab('capabilities')} icon={<IconAgentPresetOutline16 size={16} />}>能力</TabButton>
-            <TabButton active={tab === 'skills'} onClick={() => setTab('skills')} icon={<IconBrowseOutline16 size={16} />}>Skill</TabButton>
-            <TabButton active={tab === 'board'} onClick={() => setTab('board')} icon={<IconListPenOutline16 size={16} />}>看板</TabButton>
-            <TabButton active={tab === 'schedules'} onClick={() => setTab('schedules')} icon={<IconPlayOutline16 size={16} />}>定时</TabButton>
-            <TabButton active={tab === 'weixin'} onClick={() => setTab('weixin')} icon={<WeixinGlyph />}>微信</TabButton>
-            <TabButton active={tab === 'memory'} onClick={() => setTab('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
+            <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<IconAgentPresetOutline16 size={16} />}>总览</TabButton>
+            <TabButton active={view === 'identity'} onClick={() => setView('identity')} icon={<IconEditOutline16 size={16} />}>身份</TabButton>
+            <TabButton active={view === 'capabilities'} onClick={() => setView('capabilities')} icon={<IconAgentPresetOutline16 size={16} />}>能力</TabButton>
+            <TabButton active={view === 'weixin'} onClick={() => setView('weixin')} icon={<WeixinGlyph />}>微信</TabButton>
+            <TabButton active={view === 'memory'} onClick={() => setView('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
           </nav>
           <div className="dsh-partner-stage-scroll">
-            {tab === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setTab} openSession={openSession} renewSession={renewSession} />}
-            {tab === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={refresh} />}
-            {tab === 'capabilities' && <CapabilityEditor companion={selected} presets={snapshot?.presets ?? []} onChanged={refresh} />}
-            {tab === 'skills' && <SkillsPanel companionId={selected.id} />}
-            {tab === 'board' && <TaskBoardPanel companion={selected} />}
-            {tab === 'schedules' && <SchedulePanel companionId={selected.id} />}
-            {tab === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
-            {tab === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} renewSession={renewSession} onChanged={refresh} />}
+            {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} renewSession={renewSession} />}
+            {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={refresh} />}
+            {view === 'capabilities' && <CapabilityEditor companion={selected} presets={snapshot?.presets ?? []} onChanged={refresh} />}
+            {view === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
+            {view === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} renewSession={renewSession} onChanged={refresh} />}
           </div>
         </>}
         {error && <p className="dsh-partner-error" role="alert">{error}</p>}
@@ -190,12 +199,12 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   </main>
 }
 
-function HomePanel({ companion, snapshot, navigate, openSession, renewSession }: { companion: CompanionView; snapshot: PartnerSnapshot; navigate(tab: Tab): void; openSession(routeId: string, sessionId: string): Promise<void>; renewSession(routeId: string): Promise<void> }): JSX.Element {
+function HomePanel({ companion, snapshot, navigate, openSession, renewSession }: { companion: CompanionView; snapshot: PartnerSnapshot; navigate(tab: CompanionTab): void; openSession(routeId: string, sessionId: string): Promise<void>; renewSession(routeId: string): Promise<void> }): JSX.Element {
   const channel = snapshot.channels.find(item => item.companionId === companion.id)
   const sessions = snapshot.sessions.filter(item => item.companionId === companion.id)
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
-  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: '技能', ssh: 'SSH', git: 'Git' })[item])
+  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', collaboration: '伙伴协作', ssh: 'SSH', git: 'Git' })[item])
   const online = channel?.runtimeStatus === 'running'
   const latestSession = sessions.reduce<(typeof sessions)[number] | undefined>((latest, item) => latest === undefined || item.lastMessageAt > latest.lastMessageAt ? item : latest, undefined)
   return <div className="dsh-partner-home">
@@ -279,7 +288,8 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
   }
   const choices: { id: Capability; title: string; detail: string }[] = [
     { id: 'knowledge', title: '知识库', detail: '允许伙伴在已挂载范围内检索与回写知识。' },
-    { id: 'skills', title: '技能', detail: '使用当前 Agent Preset 提供的技能与工作流程。' },
+    { id: 'skills', title: 'Skill', detail: '使用为当前伙伴单独启用的 Skill 能力与工作流程。' },
+    { id: 'collaboration', title: '伙伴协作', detail: '查看授权伙伴的公开能力，通过 @伙伴 和看板分配真实任务。' },
     { id: 'ssh', title: 'SSH', detail: '通过 SSH 插件授权的主机与命令边界工作。' },
     { id: 'git', title: 'Git', detail: '预留 Git 工具能力，仍需对应插件实际安装。' },
   ]
@@ -289,6 +299,8 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
   return <div className="dsh-partner-form is-capabilities"><Section eyebrow="COMPOSITION" title="能力组合" detail="伙伴声明意图范围；真正可调用的工具仍来自所选 Agent Preset，并继续执行各插件权限。" />
     <Field label="Agent Preset" hint="决定这个伙伴实际加载哪些工具、技能和系统提示。"><select value={form.presetId} onChange={event => setForm({ ...form, presetId: event.target.value })}><option value="">跟随 DSH 默认 Preset</option>{presets.filter(item => !item.broken).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
     <div className="dsh-partner-capabilities">{choices.map(choice => <GlassSurface as="button" interactive type="button" key={choice.id} className={form.capabilities.includes(choice.id) ? 'is-active' : ''} borderRadius={12} distortionScale={-9} saturation={1.05} aria-pressed={form.capabilities.includes(choice.id)} onClick={() => toggle(choice.id)}><span>{form.capabilities.includes(choice.id) && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></GlassSurface>)}</div>
+    {form.capabilities.includes('skills') && companion.capabilities.includes('skills') && <CompanionSkillSettings companionId={companion.id} />}
+    {form.capabilities.includes('skills') && !companion.capabilities.includes('skills') && <p className="dsh-partner-inline-note">先应用能力组合，再为当前伙伴选择具体 Skill。</p>}
     <div className="dsh-partner-fields two"><Field label="模型提供方" hint="模型目录来自当前客户端"><select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value, model: '' })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.provider || '正在读取'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="模型" hint="随提供方联动"><select value={form.model} onChange={event => setForm({ ...form, model: event.target.value })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.model || '正在读取'}</option>{currentModelMissing && <option value={form.model}>当前配置 · {form.model}</option>}{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
     {error && <p className="dsh-partner-inline-error">{error}</p>}<div className="dsh-partner-form-actions"><span /><button type="button" disabled={saving} onClick={() => { void save() }}>{saving ? '正在应用…' : '应用能力组合'}</button></div>
   </div>

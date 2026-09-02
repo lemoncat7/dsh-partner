@@ -3,17 +3,31 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { Readable } from 'node:stream'
 import { PartnerStore } from '../lib/store.js'
 import { SkillRepository } from '../lib/skills/repository.js'
 import { SkillService } from '../lib/skills/service.js'
 import { loadSkill } from '../lib/skills/loader.js'
 import { TaskBoardService, TaskConflictError } from '../lib/tasks/service.js'
 import { nextOccurrence } from '../lib/scheduler/service.js'
+import { PartnerCollaborationService } from '../lib/collaboration/service.js'
+import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
+import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
+import { registerPartnerApi } from '../lib/api.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-partner-workspace-'))
   const store = await PartnerStore.open(join(root, 'state.json'))
   return { root, store, close: () => rm(root, { recursive: true, force: true }) }
+}
+
+function request(method, url, body) {
+  const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)])
+  return Object.assign(req, { method, url, headers: { host: 'localhost', origin: 'http://localhost', 'x-dsh-partner-request': '1' } })
+}
+
+function response() {
+  return { statusCode: 0, body: '', setHeader() {}, end(value) { this.body = value?.toString() ?? '' } }
 }
 
 test('migrated store exposes all bounded workspace domains', async t => {
@@ -55,6 +69,72 @@ test('task board rejects stale concurrent updates and records activities', async
   assert.equal(moved.revision, 2)
   await assert.rejects(() => board.update(task.id, { expectedRevision: 1, status: 'done' }, { kind: 'user' }), TaskConflictError)
   assert.equal(board.snapshot().activities.length, 2)
+})
+
+test('cross-partner delegation requires the explicit collaboration capability', async t => {
+  const item = await fixture(); t.after(item.close)
+  await item.store.update(state => state.companions.push({
+    ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴', createdAt: 2, updatedAt: 2,
+  }))
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '权限边界测试' }, { kind: 'user' })
+  const service = new PartnerCollaborationService(item.store, skills, board, { execute: async () => { throw new Error('executor must not run') } })
+  await assert.rejects(() => service.delegate({
+    taskId: task.id, fromCompanionId: 'companion-default', to: 'companion-reviewer', request: '执行任务',
+  }), /没有伙伴协作权限/)
+  assert.equal(item.store.snapshot().delegations.length, 0)
+})
+
+test('partner collaboration tools are composed only inside an authorized companion scope', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const collaboration = new PartnerCollaborationService(item.store, skills, board, {})
+  const composition = new PartnerAgentComposition(item.store, skills, board, collaboration, {}, {})
+  const compose = companion => {
+    const names = []
+    composition.compose({ tools: { register: tool => names.push(tool.name) }, systemPrompt: { section() {} } }, companion)
+    return names
+  }
+  const companion = item.store.snapshot().companions[0]
+  assert.ok(compose(companion).includes('partner_task_board'))
+  assert.ok(!compose(companion).includes('partner_collaborate'))
+  assert.ok(compose(companion).includes('partner_skill'))
+  assert.ok(compose({ ...companion, capabilities: [...companion.capabilities, 'collaboration'] }).includes('partner_collaborate'))
+})
+
+test('Skill binding reload observes the committed binding state', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  await skills.initialize()
+  const installed = await skills.installMarket('builtin', 'technical-research')
+  let observed = false
+  const handled = await dispatchPartnerWorkspaceApi(
+    request('PUT', '/', { enabled: true }), response(), ['companions', 'companion-default', 'skills', installed.id], new URL('http://localhost/'),
+    {
+      store: item.store, skills, tasks: {}, collaboration: {}, scheduler: {},
+      agents: { async reloadCompanion() { observed = skills.bindings('companion-default').some(skill => skill.id === installed.id) } },
+    },
+  )
+  assert.equal(handled, true)
+  assert.equal(observed, true)
+})
+
+test('companion capability reload observes committed permissions', async t => {
+  const item = await fixture(); t.after(item.close)
+  let handler
+  let observed = false
+  const runtime = {
+    store: item.store,
+    agents: { async reloadCompanion(id) { observed = item.store.snapshot().companions.find(companion => companion.id === id)?.capabilities.includes('collaboration') === true } },
+  }
+  registerPartnerApi({ register(route) { handler = route.handler; return () => {} } }, '/partner-local/v1', runtime)
+  const companion = item.store.snapshot().companions[0]
+  const res = response()
+  await handler(request('PUT', '/partner-local/v1/companions/companion-default', { companion: { ...companion, capabilities: [...companion.capabilities, 'collaboration'] } }), res)
+  assert.equal(res.statusCode, 200)
+  assert.equal(observed, true)
 })
 
 test('daily schedule calculation follows the configured time zone', () => {

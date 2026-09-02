@@ -84,8 +84,13 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const previous = requiredCompanion(runtime.store, id)
       const draft = normalizeCompanionDraft((await readObject(req)).companion)
       const next: Companion = { ...draft, automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Date.now() }
-      await runtime.agents.reloadCompanion(id)
       await runtime.store.update(state => { state.companions = state.companions.map(item => item.id === id ? next : item) })
+      try { await runtime.agents.reloadCompanion(id) }
+      catch (error) {
+        await runtime.store.update(state => { state.companions = state.companions.map(item => item.id === id ? previous : item) })
+        await runtime.agents.reloadCompanion(id).catch(() => {})
+        throw error
+      }
       return sendJson(res, 200, next)
     }
     if (id !== undefined && method === 'DELETE' && segments.length === 2) {

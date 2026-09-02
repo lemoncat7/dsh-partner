@@ -25,18 +25,21 @@ export class PartnerAgentComposition {
 
   compose(ctx: AgentCompositionContext, companion: Companion): void {
     const enabledSkills = this.skills.bindings(companion.id)
-    ctx.tools.register(skillTool(companion, this.skills, this.executor))
-    ctx.tools.register(taskTool(companion, this.tasks, this.collaboration))
-    ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
+    const canCollaborate = companion.capabilities.includes('collaboration')
+    if (companion.capabilities.includes('skills')) ctx.tools.register(skillTool(companion, this.skills, this.executor))
+    ctx.tools.register(taskTool(companion, this.tasks, this.collaboration, canCollaborate))
+    if (canCollaborate) ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
     ctx.tools.register(scheduleTool(companion, this.scheduler))
-    const directory = this.collaboration.directory().filter(item => item.id !== companion.id)
+    const directory = canCollaborate ? this.collaboration.directory().filter(item => item.id !== companion.id) : []
     ctx.systemPrompt.section({
       name: 'partner-collaboration', order: -7,
       text: [
         renderEnabledSkills(companion, enabledSkills),
-        '你可以使用伙伴看板记录工作，并通过 partner_collaborate 将明确任务交给其他伙伴。用户以“@伙伴名”表达指派时，先在伙伴目录解析稳定 id，再创建或选定看板任务并委派；不得只口头声称对方会处理。',
-        directory.length > 0 ? `可协作伙伴：${directory.map(item => `@${item.name}（${item.role}，${item.availability}）`).join('；')}` : '当前没有其他可协作伙伴。',
-        '伙伴间只共享任务信封、公开能力与结果摘要，不共享私有会话、凭据或长期记忆。',
+        canCollaborate
+          ? '你已获得伙伴协作权限。可以使用伙伴看板记录工作，并通过 partner_collaborate 将明确任务交给其他伙伴。用户以“@伙伴名”表达指派时，先在伙伴目录解析稳定 id，再创建或选定看板任务并委派；不得只口头声称对方会处理。'
+          : '你可以使用伙伴看板维护自己的工作，但未获得伙伴协作权限，不能枚举其他伙伴的能力、把任务分配给其他伙伴或调用 partner_collaborate。',
+        canCollaborate ? (directory.length > 0 ? `可协作伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；${item.availability}）`).join('；')}` : '当前没有其他可协作伙伴。') : '',
+        canCollaborate ? '伙伴间只共享任务信封、公开能力与结果摘要，不共享私有会话、凭据或长期记忆。' : '',
       ].filter(Boolean).join('\n\n'),
     })
   }
@@ -75,7 +78,12 @@ function skillTool(companion: Companion, skills: SkillService, executor: Ephemer
   })
 }
 
-function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: PartnerCollaborationService): ToolDefinition {
+function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: PartnerCollaborationService, canCollaborate: boolean): ToolDefinition {
+  const resolveAssignee = (value: string): string => {
+    const target = collaboration.resolveCompanion(value)
+    if (target.id !== companion.id && !canCollaborate) throw new Error('This companion is not allowed to assign work to other companions')
+    return target.id
+  }
   return textTool({
     name: 'partner_task_board',
     description: 'Read and maintain the shared partner task board. Create concrete work, move status with expectedRevision, assign a companion, or append an auditable comment.',
@@ -90,13 +98,13 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       const action = requiredText(input.action, 'action', 20)
       if (action === 'list') return JSON.stringify(tasks.snapshot())
       if (action === 'create') {
-        const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? collaboration.resolveCompanion(input.assignee).id : undefined
+        const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
         return JSON.stringify(await tasks.create({ ...input, ...(assignee ? { assigneeCompanionId: assignee } : {}) }, { kind: 'companion', companionId: companion.id }))
       }
       const taskId = requiredText(input.taskId, 'taskId', 160)
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
       if (action === 'update') {
-        const assignee = typeof input.assignee === 'string' ? collaboration.resolveCompanion(input.assignee).id : undefined
+        const assignee = typeof input.assignee === 'string' ? resolveAssignee(input.assignee) : undefined
         return JSON.stringify(await tasks.update(taskId, { ...input, ...('assignee' in input ? { assigneeCompanionId: assignee ?? '' } : {}) }, { kind: 'companion', companionId: companion.id }))
       }
       throw new Error('Task board action is invalid')

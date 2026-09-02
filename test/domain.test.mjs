@@ -38,8 +38,8 @@ test('evaluates heartbeat schedules in the configured timezone', () => {
 test('normalizes companions, capabilities and optional model routes', () => {
   assert.deepEqual(normalizeCompanionDraft({
     name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '', presetId: '', provider: '', model: '',
-    capabilities: ['knowledge', 'knowledge', 'ssh', 'root-access'],
-  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh'] })
+    capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'root-access'],
+  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'collaboration', 'ssh'] })
 })
 
 test('inherits the DSH default model and permits companion overrides', () => {

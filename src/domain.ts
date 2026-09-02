@@ -4,7 +4,7 @@ import type { PartnerDelegation } from './collaboration/domain.js'
 import type { ExecutionRun } from './execution/domain.js'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
 
-export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git'
+export type CompanionCapability = 'knowledge' | 'skills' | 'collaboration' | 'ssh' | 'git'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
@@ -241,5 +241,5 @@ function optionalText(value: unknown, label: string, max: number): string | unde
 }
 
 function isCapability(value: string): value is CompanionCapability {
-  return value === 'knowledge' || value === 'skills' || value === 'ssh' || value === 'git'
+  return value === 'knowledge' || value === 'skills' || value === 'collaboration' || value === 'ssh' || value === 'git'
 }

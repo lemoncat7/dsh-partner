@@ -37,6 +37,7 @@ export class PartnerCollaborationService {
   async delegate(input: { taskId: string; fromCompanionId: string; to: string; request: string; parentSessionId?: string }): Promise<PartnerDelegation> {
     const task = this.tasks.require(input.taskId)
     const from = this.requireCompanion(input.fromCompanionId)
+    if (!from.capabilities.includes('collaboration')) throw new Error(`伙伴「${from.name}」没有伙伴协作权限`)
     const to = this.resolveCompanion(input.to)
     if (from.id === to.id) throw new Error('伙伴不能把任务委派给自己')
     const request = requiredText(input.request, 'request', 8000)
