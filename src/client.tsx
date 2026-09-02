@@ -225,7 +225,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
       <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份、会话与能力已经准备完成。'}</p>
     </header>
 
-    <GlassSurface as="section" interactive className={`dsh-partner-home-channel${online ? ' is-online' : ''}`} borderRadius={20} distortionScale={-16} saturation={1.08}>
+    <section className={`dsh-partner-home-channel${online ? ' is-online' : ''}`}>
       <div className="dsh-partner-home-route" aria-hidden="true">
         <Avatar name={companion.name} />
         <span className="dsh-partner-route-line"><i /></span>
@@ -240,21 +240,21 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
           <span>{!channel ? '扫码完成，无需粘贴 Token' : `${approved} 位联系人 · ${sessions.length} 个独立会话`}</span>
         </div>
       </div>
-    </GlassSurface>
+    </section>
 
     <div className="dsh-partner-home-details">
-      <GlassSurface as="section" interactive className="dsh-partner-home-profile" borderRadius={15} distortionScale={-11} saturation={1.06}>
+      <section className="dsh-partner-home-profile">
         <header><span><IconUserOutline16 size={16} /></span><div><small>伙伴底稿</small><strong>{companion.role}</strong></div><button type="button" onClick={() => navigate('identity')}>编辑</button></header>
         <blockquote>{companion.instructions || companion.description || '尚未设置长期行为准则。'}</blockquote>
-      </GlassSurface>
-      <GlassSurface as="section" interactive className="dsh-partner-home-runtime" borderRadius={15} distortionScale={-11} saturation={1.06}>
+      </section>
+      <section className="dsh-partner-home-runtime">
         <header><span><IconAgentPresetOutline16 size={16} /></span><div><small>运行能力</small><strong>{companion.presetId || 'DSH 默认 Preset'}</strong></div><button type="button" onClick={() => navigate('capabilities')}>调整</button></header>
         <div className="dsh-partner-home-capability-list">{capabilities.length ? capabilities.map(item => <em key={item}>{item}</em>) : <small>尚未声明能力范围</small>}</div>
-      </GlassSurface>
-      <GlassSurface as="section" interactive className="dsh-partner-home-continuity" borderRadius={15} distortionScale={-11} saturation={1.06}>
+      </section>
+      <section className="dsh-partner-home-continuity">
         <header><span><IconDataOutline16 size={16} /></span><div><small>伙伴对话</small><strong>{localSession?.archived ? '会话已归档' : '伙伴会话已建立'}</strong></div><button type="button" onClick={() => localSession === undefined ? void startSession(companion.id) : localSession.archived ? void renewSession(localSession.id) : void openSession(localSession.id, localSession.sessionId)}>{localSession === undefined ? '开始对话' : localSession.archived ? '开始新会话' : '打开会话'}</button></header>
         <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；另有 ${sessions.filter(item => item.kind === 'channel').length} 个渠道会话。` : '伙伴会话正在初始化，稍后即可打开。'}</p>
-      </GlassSurface>
+      </section>
     </div>
   </div>
 }

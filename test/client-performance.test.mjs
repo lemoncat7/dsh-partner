@@ -20,6 +20,14 @@ test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
   assert.doesNotMatch(graphMemory, /<GlassSurface/)
 })
 
+test('overview cards avoid dynamic glare and per-card SVG observers', () => {
+  const homePanel = clientSource.slice(clientSource.indexOf('function HomePanel('), clientSource.indexOf('function IdentityEditor('))
+
+  assert.doesNotMatch(homePanel, /<GlassSurface/)
+  assert.match(homePanel, /<section className=\{`dsh-partner-home-channel/)
+  assert.match(homePanel, /<section className="dsh-partner-home-profile">/)
+})
+
 test('memory graph is fetched only by the graph view', () => {
   const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
   const memoryLibrary = clientSource.slice(clientSource.indexOf('function MemoryLibrary('), clientSource.indexOf('function ProfileLibrary('))

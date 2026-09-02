@@ -581,8 +581,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-home-heading small { color: var(--partner-accent); font-size: var(--partner-font-caption); font-weight: 700; letter-spacing: .08em; }
 .dsh-partner-home-heading h2 { margin: 0; font-size: var(--partner-font-display); line-height: 1.18; font-weight: 660; letter-spacing: -.035em; }
 .dsh-partner-home-heading p { max-width: 320px; margin: 0 0 2px; color: var(--partner-text-secondary); font-size: var(--partner-font-body); line-height: 1.55; text-align: right; }
-.dsh-partner-home-channel { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(330px, 1.2fr); align-items: center; min-height: 238px; overflow: hidden; border: 1px solid var(--partner-border); border-radius: 20px; background: linear-gradient(118deg, color-mix(in srgb, var(--partner-glass-highlight) 18%, transparent), transparent 56%), var(--partner-pane); box-shadow: inset 0 1px 0 var(--partner-glass-highlight), var(--partner-shadow-md); transition: transform 240ms var(--partner-ease-out), box-shadow 240ms ease, border-color 180ms ease; }
-.dsh-partner-home-channel:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 var(--partner-glass-highlight), var(--partner-shadow-lg); }
+.dsh-partner-home-channel { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(330px, 1.2fr); align-items: center; min-height: 238px; overflow: hidden; border: 1px solid var(--partner-border); border-radius: 20px; background: linear-gradient(118deg, color-mix(in srgb, var(--partner-glass-highlight) 18%, transparent), transparent 56%), var(--partner-pane); box-shadow: inset 0 1px 0 var(--partner-glass-highlight), var(--partner-shadow-md); }
 .dsh-partner-home-route { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 28px; background: radial-gradient(circle at 42% 50%, color-mix(in srgb, var(--partner-glass-highlight) 44%, transparent), transparent 58%); }
 .dsh-partner-home-route > .dsh-partner-avatar { position: relative; z-index: 1; width: 58px; height: 58px; border-radius: 18px; background: var(--partner-raised); box-shadow: 0 9px 28px color-mix(in srgb, var(--partner-accent-strong) 10%, transparent); font-size: var(--partner-font-title); }
 .dsh-partner-route-line { position: relative; width: clamp(58px, 7vw, 94px); height: 1px; margin: 0 10px; overflow: hidden; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--partner-accent) 25%, transparent) 0 4px, transparent 4px 9px); }
@@ -616,7 +615,6 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
     inset 0 -1px 0 var(--partner-glass-rim-shadow),
     0 8px 22px rgba(31, 31, 35, .075),
     0 2px 5px rgba(31, 31, 35, .045);
-  transition: transform 220ms var(--partner-ease-out), border-color 180ms ease, box-shadow 220ms ease;
 }
 .dsh-partner-home-details > section::after {
   position: absolute;
