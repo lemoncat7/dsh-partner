@@ -52,6 +52,21 @@ export class EphemeralExecutionService {
     return this.semaphore.use(() => this.run(request))
   }
 
+  async reconcileInterruptedRuns(): Promise<number> {
+    let recovered = 0
+    await this.store.update(state => {
+      const now = Date.now()
+      for (const run of state.executionRuns) {
+        if (run.status !== 'queued' && run.status !== 'running') continue
+        run.status = 'failed'
+        run.completedAt = now
+        run.error = 'DSH restarted before this execution completed; its durable owner will decide whether to resume it'
+        recovered += 1
+      }
+    })
+    return recovered
+  }
+
   async close(): Promise<void> {
     this.closed = true
     for (const handle of this.active.values()) handle.agent.cancel({ kind: 'disposed' })

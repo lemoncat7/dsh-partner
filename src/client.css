@@ -331,6 +331,12 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-task-fields label { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); }
 .dsh-partner-task-detail select { width: 100%; height: 34px; padding: 0 28px 0 9px; border: 1px solid var(--partner-border); border-radius: 8px; color: var(--partner-text-secondary); background-color: var(--partner-control); font: var(--partner-font-body)/1 var(--partner-font-family); }
 .dsh-partner-task-detail select:focus { border-color: var(--partner-focus-ring); background-color: var(--partner-raised); box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-focus-ring) 14%, transparent); }
+.dsh-partner-task-execution { display: grid; min-height: 48px; grid-template-columns: 9px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--partner-accent) 24%, var(--partner-separator)); border-radius: 9px; background: color-mix(in srgb, var(--partner-accent) 5%, var(--partner-raised)); }
+.dsh-partner-task-execution > i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--partner-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-success) 12%, transparent); }
+.dsh-partner-task-execution[data-state="queued"] > i { background: var(--partner-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-warning) 12%, transparent); }
+.dsh-partner-task-execution > span { display: grid; min-width: 0; gap: 3px; }
+.dsh-partner-task-execution strong { font-size: var(--partner-font-body); font-weight: 620; }
+.dsh-partner-task-execution small { overflow: hidden; color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-partner-task-dependency { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--partner-separator); border-radius: 9px; background: color-mix(in srgb, var(--partner-control) 64%, transparent); }
 .dsh-partner-task-dependency > header { display: grid; gap: 2px; }
 .dsh-partner-task-dependency > header strong { font-size: var(--partner-font-body); font-weight: 620; }

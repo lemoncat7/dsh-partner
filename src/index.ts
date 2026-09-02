@@ -72,6 +72,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     await skills.initialize()
     const tasks = new TaskBoardService(store)
     const executor = new EphemeralExecutionService(ctx, store, resolved.defaultCwd)
+    const interruptedRuns = await executor.reconcileInterruptedRuns()
+    if (interruptedRuns > 0) ctx.logger.info(`dsh-partner: reconciled ${interruptedRuns} interrupted execution run(s)`)
     const collaboration = new PartnerCollaborationService(store, skills, tasks, executor)
     const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone)
     const companions = new CompanionService(store)
@@ -83,6 +85,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     tasks.setProgressNotifier((task, previousStatus) => agents.notifyTaskProgress(task, previousStatus).catch(error => {
       ctx.logger.warn(`dsh-partner task progress notification failed: ${error instanceof Error ? error.message : String(error)}`)
     }))
+    await collaboration.start()
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
     const channels = new ChannelManager(ctx, store, credentials, agents)
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
@@ -109,6 +112,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     scheduler.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
     return async () => {
+      collaboration.beginShutdown()
       disposeApi?.()
       disposeSessionObserver()
       disposeConcernTool()
@@ -118,6 +122,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       await channels.close()
       await agents.close()
       await executor.close()
+      await collaboration.close()
     }
   }, 'dsh-partner.runtime')
 }

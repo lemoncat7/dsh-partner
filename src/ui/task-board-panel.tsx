@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { IconCheckOutline16, IconChevronDownOutline14, IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
+import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDelegationView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
 import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
 const COLUMNS: Array<{ id: BoardTaskStatusView; label: string }> = [
@@ -12,6 +12,7 @@ const LIVE_REFRESH_MS = 4_000
 export function TaskBoardPanel(): JSX.Element {
   const [board, setBoard] = useState<TaskBoardView>({ tasks: [], activities: [] })
   const [directory, setDirectory] = useState<PartnerDirectoryEntryView[]>([])
+  const [delegations, setDelegations] = useState<PartnerDelegationView[]>([])
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string>()
   const [busy, setBusy] = useState<string>()
@@ -23,8 +24,8 @@ export function TaskBoardPanel(): JSX.Element {
     if (loadingRef.current) return
     loadingRef.current = true
     try {
-      const [next, collaboration] = await Promise.all([api<TaskBoardView>('/tasks'), api<{ companions: PartnerDirectoryEntryView[] }>('/collaboration')])
-      setBoard(next); setDirectory(collaboration.companions); setSyncedAt(Date.now()); setError(undefined)
+      const [next, collaboration] = await Promise.all([api<TaskBoardView>('/tasks'), api<{ companions: PartnerDirectoryEntryView[]; delegations: PartnerDelegationView[] }>('/collaboration')])
+      setBoard(next); setDirectory(collaboration.companions); setDelegations(collaboration.delegations); setSyncedAt(Date.now()); setError(undefined)
     } catch (reason) { setError(errorMessage(reason)) } finally { loadingRef.current = false; setLoading(false) }
   }, [])
   useEffect(() => {
@@ -77,6 +78,7 @@ export function TaskBoardPanel(): JSX.Element {
       const tasks = board.tasks.filter(item => item.status === column.id)
       return <section key={column.id} data-status={column.id}><header><strong>{column.label}</strong><b>{tasks.length}</b></header><div>{tasks.map(task => <TaskCard
         key={task.id} task={task} tasks={board.tasks} activities={board.activities.filter(item => item.taskId === task.id)} directory={directory}
+        execution={delegations.find(item => item.taskId === task.id && (item.status === 'queued' || item.status === 'running'))}
         expanded={expandedId === task.id} busy={busy === task.id} toggle={() => setExpandedId(current => current === task.id ? undefined : task.id)}
         update={change => { void update(task, change) }} delegate={() => { void delegate(task) }} review={() => { void review(task) }}
         accept={() => { void accept(task) }} reject={reason => { void reject(task, reason) }} remove={() => { void remove(task) }}
@@ -85,8 +87,8 @@ export function TaskBoardPanel(): JSX.Element {
   </div>
 }
 
-function TaskCard({ task, tasks, activities, directory, expanded, busy, toggle, update, delegate, review, accept, reject, remove }: {
-  task: BoardTaskView; tasks: BoardTaskView[]; activities: TaskActivityView[]; directory: PartnerDirectoryEntryView[]; expanded: boolean; busy: boolean
+function TaskCard({ task, tasks, activities, directory, execution, expanded, busy, toggle, update, delegate, review, accept, reject, remove }: {
+  task: BoardTaskView; tasks: BoardTaskView[]; activities: TaskActivityView[]; directory: PartnerDirectoryEntryView[]; execution: PartnerDelegationView | undefined; expanded: boolean; busy: boolean
   toggle(): void; update(change: Record<string, unknown>): void; delegate(): void; review(): void; accept(): void; reject(reason: string): void; remove(): void
 }): JSX.Element {
   const [rejecting, setRejecting] = useState(false)
@@ -100,11 +102,13 @@ function TaskCard({ task, tasks, activities, directory, expanded, busy, toggle, 
   const dependencyCandidates = tasks.filter(item => item.id !== task.id && !task.dependencyTaskIds.includes(item.id) && !dependsOn(item.id, task.id, byId))
   const canExecute = Boolean(task.assigneeCompanionId) && blockers.length === 0 && !['doing', 'review', 'done'].includes(task.status)
   const recentActivities = [...activities].sort((left, right) => right.at - left.at).slice(0, 6)
+  const executionState = execution ? delegationState(execution) : undefined
   return <article className="dsh-partner-task-card" data-expanded={expanded} data-blocked={blockers.length > 0}>
     <span className={`dsh-partner-priority is-${task.priority}`} />
-    <button type="button" className="dsh-partner-task-summary" aria-expanded={expanded} onClick={toggle}><span><strong>{task.title}</strong><p>{task.description || '没有补充说明'}</p><small>{assignee ? `@${assignee.name}` : '未指派'} · {dependencies.length ? `${dependencies.length} 项前置${blockers.length ? `，${blockers.length} 项未完成` : '均已完成'}` : '无前置依赖'}{task.resultSummary ? ' · 已有结果' : ''}</small></span><IconChevronDownOutline14 size={14} /></button>
+    <button type="button" className="dsh-partner-task-summary" aria-expanded={expanded} onClick={toggle}><span><strong>{task.title}</strong><p>{task.description || '没有补充说明'}</p><small>{assignee ? `@${assignee.name}` : '未指派'} · {dependencies.length ? `${dependencies.length} 项前置${blockers.length ? `，${blockers.length} 项未完成` : '均已完成'}` : '无前置依赖'}{task.resultSummary ? ' · 已有结果' : ''}{executionState ? ` · ${executionState.label}` : ''}</small></span><IconChevronDownOutline14 size={14} /></button>
     {expanded && <div className="dsh-partner-task-detail">
       <div className="dsh-partner-task-fields"><label><span>状态</span><select value={task.status} disabled={busy} onChange={event => update({ status: event.target.value })}>{COLUMNS.map(item => <option key={item.id} value={item.id} disabled={(item.id === 'doing' || item.id === 'review' || item.id === 'done') && blockers.length > 0 || item.id === 'done' && task.status !== 'review' && task.status !== 'done'}>{item.label}</option>)}</select></label><label><span>负责人</span><select value={task.assigneeCompanionId ?? ''} disabled={busy || task.status === 'doing'} onChange={event => update({ assigneeCompanionId: event.target.value })}><option value="">未指派</option>{directory.map(item => <option key={item.id} value={item.id} disabled={item.id === task.reviewerCompanionId}>@{item.name} · {item.availability === 'busy' ? '忙碌' : '可用'}</option>)}</select></label><label><span>验收伙伴</span><select value={task.reviewerCompanionId ?? ''} disabled={busy} onChange={event => update({ reviewerCompanionId: event.target.value })}><option value="">留空 · 人工验收</option>{directory.map(item => <option key={item.id} value={item.id} disabled={item.id === task.assigneeCompanionId}>@{item.name}</option>)}</select></label></div>
+      {executionState && <section className="dsh-partner-task-execution" data-state={execution?.status}><i /><span><strong>{executionState.title}</strong><small>{executionState.detail}</small></span></section>}
       <section className="dsh-partner-task-dependency"><header><strong>前置任务</strong><small>{blockers.length ? `${blockers.length} 项未完成，当前任务不能启动` : dependencies.length ? '已全部完成，可以启动' : '没有前置依赖'}</small></header>{dependencies.length > 0 && <div>{dependencies.map(item => <span key={item.id} data-done={item.status === 'done'}><i>{item.status === 'done' ? <IconCheckOutline16 size={12} /> : ''}</i><b>{item.title}</b><button type="button" disabled={busy || ['doing', 'review', 'done'].includes(task.status)} aria-label={`移除前置任务 ${item.title}`} onClick={() => update({ dependencyTaskIds: task.dependencyTaskIds.filter(id => id !== item.id) })}>移除</button></span>)}</div>}{dependencyCandidates.length > 0 && <label><span className="sr-only">增加前置任务</span><select defaultValue="" disabled={busy || ['doing', 'review', 'done'].includes(task.status)} onChange={event => { const id = event.currentTarget.value; if (id) update({ dependencyTaskIds: [...task.dependencyTaskIds, id] }); event.currentTarget.value = '' }}><option value="">增加前置任务…</option>{dependencyCandidates.map(item => <option value={item.id} key={item.id}>{item.title} · {statusLabel(item.status)}</option>)}</select></label>}</section>
       {task.resultSummary && <ResultBlock label="执行结果" value={task.resultSummary} />}
       {task.reviewSummary && <ResultBlock label={`核验意见${reviewer ? ` · @${reviewer.name}` : ''}`} value={task.reviewSummary} />}
@@ -148,3 +152,16 @@ function dependsOn(candidateId: string, targetId: string, tasks: Map<string, Boa
   return (tasks.get(candidateId)?.dependencyTaskIds ?? []).some(id => dependsOn(id, targetId, tasks, visited))
 }
 function statusLabel(value: BoardTaskStatusView): string { return COLUMNS.find(item => item.id === value)?.label ?? value }
+function delegationState(value: PartnerDelegationView): { label: string; title: string; detail: string } {
+  const review = value.kind === 'review'
+  if (value.status === 'queued') {
+    const at = value.nextAttemptAt ? new Date(value.nextAttemptAt).toLocaleString() : '稍后'
+    return { label: '等待自动恢复', title: review ? '验收将在连接恢复后继续' : '任务将在连接恢复后继续', detail: `${at} 自动重试${value.error ? ` · ${value.error}` : ''}` }
+  }
+  const recovered = (value.attempts ?? 1) > 1
+  return {
+    label: recovered ? `第 ${value.attempts} 次恢复中` : review ? '伙伴验收中' : '伙伴执行中',
+    title: recovered ? (review ? '正在恢复伙伴验收' : '正在恢复伙伴任务') : review ? '伙伴正在核验结果' : '伙伴正在执行任务',
+    detail: recovered ? '会先检查已有产出，避免重复写入或重复发布。' : '执行状态会自动同步，无需手动刷新。',
+  }
+}

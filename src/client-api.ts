@@ -77,6 +77,10 @@ export interface BoardTaskView {
 export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
 export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }
 export interface PartnerDirectoryEntryView { id: string; name: string; role: string; description: string; capabilities: string[]; enabledSkills: Array<{ id: string; name: string }>; availability: 'available' | 'busy' | 'offline' }
+export interface PartnerDelegationView {
+  id: string; kind?: 'task' | 'review'; taskId: string; toCompanionId: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
+  attempts?: number; nextAttemptAt?: number; lastAttemptAt?: number; error?: string; createdAt: number
+}
 export interface CompanionAccessView { targetIds: string[]; companions: PartnerDirectoryEntryView[] }
 
 export interface ScheduledTaskView {

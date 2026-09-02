@@ -30,7 +30,7 @@ export interface TaskActivity {
   taskId: string
   actor: 'user' | 'companion' | 'schedule' | 'system'
   actorCompanionId?: string
-  kind: 'created' | 'updated' | 'moved' | 'assigned' | 'delegated' | 'commented' | 'result' | 'reviewed' | 'reopened' | 'completed' | 'failed'
+  kind: 'created' | 'updated' | 'moved' | 'assigned' | 'delegated' | 'commented' | 'result' | 'reviewed' | 'reopened' | 'completed' | 'failed' | 'retrying' | 'recovered'
   message: string
   at: number
 }

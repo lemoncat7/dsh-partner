@@ -107,6 +107,13 @@ export class TaskBoardService {
     })
   }
 
+  async recordRecovery(taskId: string, message: string, retrying: boolean): Promise<void> {
+    await this.store.update(state => {
+      if (!state.tasks.some(item => item.id === taskId)) return
+      appendActivity(state.taskActivities, taskId, { kind: 'system' }, retrying ? 'retrying' : 'recovered', requiredText(message, 'message', 1200), Date.now())
+    })
+  }
+
   assertStartable(taskId: string): BoardTask {
     const state = this.store.snapshot()
     const task = state.tasks.find(item => item.id === taskId)
@@ -252,9 +259,9 @@ export class TaskConflictError extends Error {
   constructor(readonly current: BoardTask) { super('Task changed; refresh it before updating') }
 }
 
-function appendActivity(items: TaskActivity[], taskId: string, actor: TaskActor, kind: TaskActivity['kind'], message: string, at: number): void {
+function appendActivity(items: TaskActivity[], taskId: string, actor: TaskActor | { kind: 'system' }, kind: TaskActivity['kind'], message: string, at: number): void {
   appendBounded(items, {
-    id: `activity-${randomUUID()}`, taskId, actor: actor.kind, ...(actor.companionId ? { actorCompanionId: actor.companionId } : {}), kind, message, at,
+    id: `activity-${randomUUID()}`, taskId, actor: actor.kind, ...('companionId' in actor && actor.companionId ? { actorCompanionId: actor.companionId } : {}), kind, message, at,
   }, MAX_ACTIVITIES)
 }
 function validTimestamp(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value > 0 }

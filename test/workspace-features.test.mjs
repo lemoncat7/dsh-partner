@@ -12,6 +12,7 @@ import { loadSkill } from '../lib/skills/loader.js'
 import { TaskBoardService, TaskConflictError } from '../lib/tasks/service.js'
 import { nextOccurrence } from '../lib/scheduler/service.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
+import { EphemeralExecutionService } from '../lib/execution/service.js'
 import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
 import { CompanionService } from '../lib/companions/service.js'
 import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
@@ -202,6 +203,83 @@ test('delegation returns after assignment while execution continues in the backg
   finish()
   await waitFor(() => board.require(task.id).status === 'review')
   assert.equal(board.require(task.id).resultSummary, '后台执行完成')
+})
+
+test('interrupted delegations are durably reclaimed after restart without blocking the task', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '恢复中的任务' }, { kind: 'user' })
+  await board.update(task.id, { expectedRevision: task.revision, status: 'doing', assigneeCompanionId: 'companion-default' }, { kind: 'user' })
+  await item.store.update(state => state.delegations.push({
+    id: 'delegation-interrupted', kind: 'task', taskId: task.id, initiatedBy: 'user', toCompanionId: 'companion-default',
+    request: '完成中断前的工作', status: 'running', attempts: 1, createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000,
+  }))
+  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service.setSessionExecutor({ execute: async ({ prompt }) => {
+    assert.match(prompt, /中断后的第 2 次恢复执行/)
+    assert.match(prompt, /避免重复写入、重复提交、重复发布/)
+    return { run: { id: 'session-run-recovered' }, output: '恢复执行完成' }
+  } })
+  t.after(() => service.close())
+  await service.start()
+  await waitFor(() => board.require(task.id).status === 'review')
+  const delegation = item.store.snapshot().delegations.find(entry => entry.id === 'delegation-interrupted')
+  assert.equal(delegation.status, 'completed')
+  assert.equal(delegation.attempts, 2)
+  assert.equal(board.require(task.id).resultSummary, '恢复执行完成')
+  assert.ok(board.snapshot().activities.some(activity => activity.kind === 'recovered'))
+})
+
+test('transient network failures stay in progress and enter the durable retry queue', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '等待网络恢复' }, { kind: 'user' })
+  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service.setSessionExecutor({ execute: async () => { throw new TypeError('fetch failed: ECONNRESET') } })
+  t.after(() => service.close())
+  const delegation = await service.delegate({ taskId: task.id, initiatedBy: 'user', to: 'companion-default', request: '联网完成任务' })
+  await waitFor(() => item.store.snapshot().delegations.find(entry => entry.id === delegation.id)?.status === 'queued' && board.snapshot().activities.some(activity => activity.kind === 'retrying'))
+  const queued = item.store.snapshot().delegations.find(entry => entry.id === delegation.id)
+  assert.equal(board.require(task.id).status, 'doing')
+  assert.equal(queued.attempts, 1)
+  assert.ok(queued.nextAttemptAt > Date.now())
+  assert.match(queued.error, /fetch failed/)
+  assert.ok(board.snapshot().activities.some(activity => activity.kind === 'retrying'))
+})
+
+test('interrupted companion review is also reclaimed instead of silently disappearing', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '等待伙伴验收', reviewerCompanionId: 'companion-default' }, { kind: 'user' })
+  const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'user' })
+  await board.completeExecution(doing.id, '待核验产出', { kind: 'companion', companionId: 'companion-default' })
+  await item.store.update(state => state.delegations.push({
+    id: 'review-interrupted', kind: 'review', taskId: task.id, initiatedBy: 'user', toCompanionId: 'companion-default',
+    request: '核验任务', status: 'running', attempts: 1, createdAt: Date.now() - 30_000,
+  }))
+  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service.setSessionExecutor({ execute: async () => ({ run: { id: 'review-run-recovered' }, output: '建议通过：产出完整' }) })
+  t.after(() => service.close())
+  await service.start()
+  await waitFor(() => Boolean(board.require(task.id).reviewSummary) && item.store.snapshot().delegations.find(entry => entry.id === 'review-interrupted')?.status === 'completed')
+  assert.equal(board.require(task.id).reviewSummary, '建议通过：产出完整')
+  assert.equal(item.store.snapshot().delegations.find(entry => entry.id === 'review-interrupted').status, 'completed')
+})
+
+test('stale execution runs are reconciled so companions do not remain busy forever', async t => {
+  const item = await fixture(); t.after(item.close)
+  await item.store.update(state => state.executionRuns.push({
+    id: 'run-interrupted', kind: 'schedule', ownerCompanionId: 'companion-default', sessionId: 'session-interrupted',
+    sourceId: 'schedule-test', status: 'running', destroyAfterRun: true, startedAt: Date.now() - 10_000, toolNames: [],
+  }))
+  const executor = new EphemeralExecutionService({}, item.store, item.root)
+  assert.equal(await executor.reconcileInterruptedRuns(), 1)
+  const run = item.store.snapshot().executionRuns[0]
+  assert.equal(run.status, 'failed')
+  assert.match(run.error, /restarted/)
 })
 
 test('cross-partner delegation uses directed grants while user delegation bypasses partner grants', async t => {
