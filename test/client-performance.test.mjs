@@ -62,7 +62,7 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.doesNotMatch(partnerTabs, />看板</)
   assert.doesNotMatch(partnerTabs, />定时</)
   assert.match(clientSource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
-  assert.match(skillSource, /这里负责安装和维护 Skill/)
+  assert.match(skillSource, /集中安装和维护工作能力/)
   assert.match(scheduleSource, /name="companionId" required/)
 })
 

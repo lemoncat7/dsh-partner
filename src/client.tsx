@@ -1,18 +1,19 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { ClientContext, ISessions, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
-import { activatePluginWorkspace, observePluginWorkspace } from './workspace-ownership.js'
+import { observePluginWorkspace } from './workspace-ownership.js'
 import {
   IconAgentPresetOutline16, IconCheckOutline14, IconChevronDownOutline14, IconChevronLeftOutline14,
   IconDataOutline16, IconEditOutline16, IconLinkOutline16, IconPlusOutline16,
   IconRefreshOutline16, IconTrashOutline16, IconUserOutline16, IconBrowseOutline16, IconListPenOutline16, IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
-import cssText from './client.css'
+import baseCssText from './client.css'
+import workspaceCssText from './ui/workspace-ui.css'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot, type UserProfileSnapshotView } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
@@ -21,9 +22,14 @@ import { CompanionSkillSettings, SkillsPanel } from './ui/skills-panel.js'
 import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 import { CompanionAccessPanel } from './ui/companion-access-panel.js'
+import { Avatar, ChannelStatus as Status, ContentState as State, FormField as Field, SectionHeading as Section, TabButton, WeixinGlyph, relativeTime } from './ui/partner-components.js'
+import { errorMessage as message } from './ui/workspace-components.js'
+import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
+import { createPartnerController, type PartnerController as Controller } from './client-controller.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
+const cssText = `${baseCssText}\n${workspaceCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
@@ -32,70 +38,16 @@ type View = CompanionTab | WorkspacePage
 
 const WORKSPACE_PAGES = new Set<View>(['skills', 'board', 'schedules'])
 
-interface Controller {
-  open(companionId?: string): void
-  close(): void
-  toggle(): void
-  isOpen(): boolean
-  selected(): string | undefined
-  openSession(routeId: string, sessionId: string): Promise<void>
-  startSession(companionId: string): Promise<void>
-  renewSession(routeId: string): Promise<void>
-  subscribe(listener: () => void): () => void
-}
-
 export const inject = ['slots', 'layout', 'sessions']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(installStyles, 'dsh-partner: styles')
-  const controller = createController(ctx)
+  const controller = createPartnerController(ctx, PLUGIN_ID, (props, current) => <PartnerWorkspace {...props} controller={current} />)
   ctx.effect(() => observePluginWorkspace(PLUGIN_ID, controller.close), 'dsh-partner: exclusive workspace')
   ctx.effect(() => () => controller.close(), 'dsh-partner: workspace lifecycle')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'partner', order: -120,
   }, props => <PartnerSidebar {...props} controller={controller} collapse={() => ctx.layout.toggleSidebar()} />))
-}
-
-function createController(ctx: ClientContext): Controller {
-  const listeners = new Set<() => void>()
-  let selected: string | undefined
-  let dispose: (() => void) | undefined
-  const notify = (): void => { for (const listener of listeners) listener() }
-  const controller: Controller = {
-    open(companionId) {
-      if (companionId !== undefined) selected = companionId
-      if (dispose === undefined) {
-        activatePluginWorkspace(PLUGIN_ID)
-        dispose = ctx.slots.register({ name: 'conversation', priority: -3 }, props => <PartnerWorkspace {...props} controller={controller} />)
-      }
-      notify()
-    },
-    close() { const current = dispose; dispose = undefined; current?.(); notify() },
-    toggle() { if (dispose === undefined) controller.open(); else controller.close() },
-    isOpen: () => dispose !== undefined,
-    selected: () => selected,
-    async openSession(routeId, sessionId) {
-      const prepared = await api<{ sessionId: string }>(`/sessions/${encodeURIComponent(routeId)}/prepare`, { method: 'POST' })
-      if (prepared.sessionId !== sessionId) throw new Error('伙伴会话标识不一致')
-      await waitForClientSession(ctx, sessionId)
-      controller.close()
-      clientSessions(ctx).open(sessionId as SessionId)
-    },
-    async startSession(companionId) {
-      const created = await api<{ routeId: string; sessionId: string }>(`/companions/${encodeURIComponent(companionId)}/session`, { method: 'POST' })
-      await waitForClientSession(ctx, created.sessionId)
-      dispose?.(); dispose = undefined
-      clientSessions(ctx).open(created.sessionId as SessionId)
-    },
-    async renewSession(routeId) {
-      const renewed = await api<{ routeId: string; sessionId: string }>(`/sessions/${encodeURIComponent(routeId)}/renew`, { method: 'POST' })
-      await waitForClientSession(ctx, renewed.sessionId)
-      controller.close()
-      clientSessions(ctx).open(renewed.sessionId as SessionId)
-    },
-    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
-  }
-  return controller
 }
 
 function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse(): void }): JSX.Element {
@@ -132,6 +84,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const [view, setView] = useState<View>('home')
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
+  const [creatingCompanion, setCreatingCompanion] = useState(false)
   const refresh = useCallback(async () => {
     try {
       const next = await loadPartner()
@@ -143,13 +96,13 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => controller.subscribe(() => { const next = controller.selected(); if (next) setSelectedId(next) }), [controller])
   const selected = snapshot?.companions.find(item => item.id === selectedId)
-  const create = async (): Promise<void> => {
+  const create = async (draft: NewCompanionDraft): Promise<void> => {
     try {
       const companion = await api<CompanionView>('/companions', { method: 'POST', body: JSON.stringify({ companion: {
-        name: '新伙伴', role: '长期 AI 工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'skills'],
+        ...draft, capabilities: ['knowledge', 'skills'],
       } }) })
-      await refresh(); setSelectedId(companion.id); setView('identity')
-    } catch (reason) { setError(message(reason)) }
+      await refresh(); setSelectedId(companion.id); setView('identity'); setCreatingCompanion(false)
+    } catch (reason) { setError(message(reason)); throw reason }
   }
   const openSession = async (routeId: string, sessionId: string): Promise<void> => {
     try { setError(undefined); await controller.openSession(routeId, sessionId) }
@@ -166,10 +119,11 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const workspacePage = WORKSPACE_PAGES.has(view)
   const openCompanion = (id: string): void => { setSelectedId(id); setView('home') }
   return <main className="dsh-partner-workspace">
+    {creatingCompanion && <CompanionCreateDialog close={() => setCreatingCompanion(false)} create={create} />}
     <header className="dsh-partner-topbar"><div><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div><nav className="dsh-partner-mobile-workspace-nav" aria-label="伙伴工作区快捷入口"><button type="button" className={view === 'skills' ? 'is-active' : ''} aria-label="Skill 市场" onClick={() => setView('skills')}><IconBrowseOutline16 size={16} /><span>Skill</span></button><button type="button" className={view === 'board' ? 'is-active' : ''} aria-label="任务看板" onClick={() => setView('board')}><IconListPenOutline16 size={16} /><span>看板</span></button><button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-label="定时任务" onClick={() => setView('schedules')}><IconPlayOutline16 size={16} /><span>定时</span></button></nav></header>
     <div className="dsh-partner-grid">
       <aside className="dsh-partner-roster">
-        <div className="dsh-partner-roster-title"><span><small>COMPANIONS</small><strong>伙伴名册</strong></span><button type="button" onClick={() => { void create() }} aria-label="新建伙伴"><IconPlusOutline16 size={16} /></button></div>
+        <div className="dsh-partner-roster-title"><span><small>COMPANIONS</small><strong>伙伴名册</strong></span><button type="button" onClick={() => setCreatingCompanion(true)} aria-label="新建伙伴"><IconPlusOutline16 size={16} /></button></div>
         <div className="dsh-partner-roster-list">{snapshot?.companions.map(companion => {
           const channel = snapshot.channels.find(item => item.companionId === companion.id)
           return <button type="button" key={companion.id} className={!workspacePage && selectedId === companion.id ? 'is-active' : ''} onClick={() => openCompanion(companion.id)}>
@@ -188,7 +142,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
           {view === 'skills' && <SkillsPanel />}
           {view === 'board' && <TaskBoardPanel />}
           {view === 'schedules' && <SchedulePanel companions={snapshot?.companions ?? []} />}
-        </div> : selected === undefined ? <State title="创建第一个伙伴" detail="伙伴会保存独立身份、能力和微信会话。" action={<button onClick={() => { void create() }}>新建伙伴</button>} /> : <>
+        </div> : selected === undefined ? <State title="创建第一个伙伴" detail="伙伴会保存独立身份、能力和微信会话。" action={<button onClick={() => setCreatingCompanion(true)}>新建伙伴</button>} /> : <>
           <div className="dsh-partner-identity"><Avatar name={selected.name} /><span><small>ACTIVE COMPANION</small><h1>{selected.name}</h1><p>{selected.description || selected.role}</p></span><Status channel={snapshot?.channels.find(item => item.companionId === selected.id)} /></div>
           <nav className="dsh-partner-tabs" aria-label="伙伴配置">
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<IconAgentPresetOutline16 size={16} />}>总览</TabButton>
@@ -264,6 +218,7 @@ function IdentityEditor({ companion, count, onChanged }: { companion: CompanionV
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string>()
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
   useEffect(() => { setForm(companionDraft(companion)); setSaved(false) }, [companion.id, companion.updatedAt])
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault(); setSaving(true); setError(undefined)
@@ -271,7 +226,6 @@ function IdentityEditor({ companion, count, onChanged }: { companion: CompanionV
     catch (reason) { setError(message(reason)) } finally { setSaving(false) }
   }
   const remove = async (): Promise<void> => {
-    if (!window.confirm(`删除伙伴「${companion.name}」？此操作要求先移除已绑定渠道。`)) return
     try { await api(`/companions/${companion.id}`, { method: 'DELETE' }); await onChanged() } catch (reason) { setError(message(reason)) }
   }
   return <form className="dsh-partner-form is-identity" onSubmit={event => { void submit(event) }}>
@@ -281,7 +235,7 @@ function IdentityEditor({ companion, count, onChanged }: { companion: CompanionV
     <Field label="长期行为准则" hint="建议写职责、表达方式与边界；渠道、工具和授权由系统单独控制。"><textarea rows={9} maxLength={12000} value={form.instructions} onChange={event => setForm({ ...form, instructions: event.target.value })} /></Field>
     {error && <p className="dsh-partner-inline-error">{error}</p>}
     <div className="dsh-partner-form-actions"><span>{saved && <><IconCheckOutline14 size={14} />已保存，后续微信消息将使用新身份</>}</span><button disabled={saving}>{saving ? '正在保存…' : '保存身份'}</button></div>
-    <div className="dsh-partner-identity-danger"><span><strong>删除伙伴</strong><small>必须先移除已绑定微信渠道；不会自动把联系人转交给其他伙伴。</small></span><button type="button" disabled={count <= 1} onClick={() => { void remove() }}><IconTrashOutline16 size={16} />删除</button></div>
+    <div className="dsh-partner-identity-danger" data-confirming={confirmingRemove}><span><strong>{confirmingRemove ? `确认删除「${companion.name}」？` : '删除伙伴'}</strong><small>{confirmingRemove ? '该伙伴的本地配置会被移除；已有渠道必须先解绑。' : '必须先移除已绑定微信渠道；不会自动把联系人转交给其他伙伴。'}</small></span><div>{confirmingRemove && <button type="button" className="is-secondary" onClick={() => setConfirmingRemove(false)}>取消</button>}<button type="button" className={confirmingRemove ? 'is-danger' : ''} disabled={count <= 1} onClick={() => confirmingRemove ? void remove() : setConfirmingRemove(true)}><IconTrashOutline16 size={16} />{confirmingRemove ? '确认删除' : '删除'}</button></div></div>
   </form>
 }
 
@@ -420,7 +374,6 @@ function MemoryPanel({ companion, snapshot, openSession, startSession, renewSess
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
   const deleteMemory = async (item: MemoryView): Promise<void> => {
-    if (!window.confirm(`删除记忆「${item.subject}」？`)) return
     setBusy(true); setError(undefined)
     try { await api(`/companions/${companion.id}/memory/${item.id}`, { method: 'DELETE' }); if (editing?.id === item.id) setEditing(undefined); await loadMemory() }
     catch (reason) { setError(message(reason)) } finally { setBusy(false) }
@@ -719,32 +672,20 @@ function ReflectionGroup({ title, items }: { title: string; items: string[] }): 
 }
 
 function MemoryCard({ item, editing, busy, setEditing, save, remove }: { item: MemoryView; editing: MemoryView | undefined; busy: boolean; setEditing(value?: MemoryView): void; save(): void; remove(): void }): JSX.Element {
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
   return <article data-kind={item.kind}>{editing ? <div className="dsh-partner-memory-editor">
     <input aria-label="记忆主题" value={editing.subject} onChange={event => setEditing({ ...editing, subject: event.target.value })} />
     <textarea aria-label="记忆内容" value={editing.content} onChange={event => setEditing({ ...editing, content: event.target.value })} />
     <footer><button type="button" onClick={() => setEditing(undefined)}>取消</button><button type="button" className="is-primary" disabled={busy || !editing.subject.trim() || !editing.content.trim()} onClick={save}>保存修正</button></footer>
   </div> : <>
-    <header><span>{memoryKind(item.kind)}</span><div><button type="button" onClick={() => setEditing({ ...item })}>编辑</button><button type="button" onClick={remove}>删除</button></div></header>
+    <header><span>{memoryKind(item.kind)}</span><div>{confirmingRemove ? <><button type="button" onClick={() => setConfirmingRemove(false)}>取消</button><button type="button" className="is-danger" disabled={busy} onClick={remove}>确认删除</button></> : <><button type="button" onClick={() => setEditing({ ...item })}>编辑</button><button type="button" onClick={() => setConfirmingRemove(true)}>删除</button></>}</div></header>
     <strong>{item.subject}</strong><p>{item.content}</p>
     <footer><progress max={1} value={item.confidence} aria-label={`置信度 ${Math.round(item.confidence * 100)}%`} /><small>{item.locked ? '手动确认' : `${Math.round(item.confidence * 100)}% 可信`} · {relativeTime(item.updatedAt)}</small></footer>
     {item.evidence.length > 0 && <details className="dsh-partner-memory-evidence"><summary>查看对话依据 <b>{item.evidence.length}</b></summary><div>{[...item.evidence].reverse().map(evidence => <blockquote key={`${evidence.turnId}:${evidence.at}`}><p>{evidence.excerpt}</p><time>{new Date(evidence.at).toLocaleString()}</time></blockquote>)}</div></details>}
   </>}</article>
 }
 
-function Status({ channel }: { channel: ChannelView | undefined }): JSX.Element {
-  const status = !channel ? 'unbound' : channel.runtimeStatus
-  return <span className={`dsh-partner-status is-${status}`}><i />{!channel ? '未连接' : statusLabel(channel.runtimeStatus)}</span>
-}
-function statusLabel(status: ChannelView['runtimeStatus']): string { return status === 'running' ? '微信在线' : status === 'starting' ? '连接中' : status === 'error' ? '连接异常' : '已停用' }
-
-function Avatar({ name, small = false }: { name: string; small?: boolean }): JSX.Element { return <span className={`dsh-partner-avatar${small ? ' is-small' : ''}`} aria-hidden="true">{[...name][0] ?? '伴'}</span> }
-function WeixinGlyph({ large = false }: { large?: boolean }): JSX.Element { return <span className={`dsh-partner-weixin-glyph${large ? ' is-large' : ''}`} aria-hidden="true"><i /><b /></span> }
-function TabButton({ active, onClick, icon, children }: { active: boolean; onClick(): void; icon: ReactNode; children: ReactNode }): JSX.Element { return <button type="button" className={active ? 'is-active' : ''} onClick={onClick}>{icon}<span>{children}</span></button> }
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): JSX.Element { return <label className="dsh-partner-field"><span><strong>{label}</strong>{hint && <small>{hint}</small>}</span>{children}</label> }
-function Section({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }): JSX.Element { return <header className="dsh-partner-section"><small>{eyebrow}</small><h2>{title}</h2><p>{detail}</p></header> }
-function State({ title, detail, action, compact = false }: { title: string; detail?: string; action?: ReactNode; compact?: boolean }): JSX.Element { return <div className={`dsh-partner-state${compact ? ' is-compact' : ''}`}><IconAgentPresetOutline16 size={20} /><strong>{title}</strong>{detail && <p>{detail}</p>}{action}</div> }
 function companionDraft(companion: CompanionView): { name: string; role: string; description: string; instructions: string; presetId: string; provider: string; model: string; capabilities: Capability[] } { return { name: companion.name, role: companion.role, description: companion.description, instructions: companion.instructions, presetId: companion.presetId ?? '', provider: companion.provider ?? '', model: companion.model ?? '', capabilities: [...companion.capabilities] } }
-function relativeTime(value: number): string { const minutes = Math.floor((Date.now() - value) / 60_000); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时前` : `${Math.floor(minutes / 1440)} 天前` }
 function concernObservationStatus(item: ConcernObservationView): string {
   if (item.decision === 'notify') return item.mentionedAt === undefined ? '待提醒' : '已提醒'
   if (item.decision === 'feed') return '伙伴动态'
@@ -758,21 +699,4 @@ function concernObservationExplanation(item: ConcernObservationView): string {
   return '仅保留为观察记录，不打扰你'
 }
 function memoryKind(value: MemoryView['kind']): string { return ({ profile: '画像', preference: '偏好', task: '任务', event: '事件', relationship: '关系', emotion: '情绪信号' })[value] }
-function message(reason: unknown): string { return reason instanceof Error ? reason.message : String(reason) }
-function waitForClientSession(ctx: ClientContext, sessionId: string): Promise<void> {
-  const id = sessionId as SessionId
-  const sessions = clientSessions(ctx)
-  if (sessions.list.getSnapshot().byId[id] !== undefined) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    let stop = (): void => {}
-    const timeout = window.setTimeout(() => { stop(); reject(new Error('伙伴会话尚未同步到网页，请稍后重试')) }, 5_000)
-    stop = sessions.list.subscribe(() => {
-      if (sessions.list.getSnapshot().byId[id] === undefined) return
-      window.clearTimeout(timeout)
-      stop()
-      resolve()
-    })
-  })
-}
-function clientSessions(ctx: ClientContext): ISessions { return ctx.sessions as unknown as ISessions }
 function installStyles(): () => void { let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null; if (!style) { style = document.createElement('style'); style.id = STYLE_ID; style.textContent = cssText; document.head.append(style) } return () => style?.remove() }

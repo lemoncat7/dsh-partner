@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { IconCheckOutline16, IconChevronDownOutline14, IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
+import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
 const COLUMNS: Array<{ id: BoardTaskStatusView; label: string }> = [
   { id: 'backlog', label: '收集箱' }, { id: 'ready', label: '待开始' }, { id: 'doing', label: '进行中' },
@@ -14,6 +15,7 @@ export function TaskBoardPanel(): JSX.Element {
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string>()
   const [busy, setBusy] = useState<string>()
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [syncedAt, setSyncedAt] = useState<number>()
   const loadingRef = useRef(false)
@@ -23,7 +25,7 @@ export function TaskBoardPanel(): JSX.Element {
     try {
       const [next, collaboration] = await Promise.all([api<TaskBoardView>('/tasks'), api<{ companions: PartnerDirectoryEntryView[] }>('/collaboration')])
       setBoard(next); setDirectory(collaboration.companions); setSyncedAt(Date.now()); setError(undefined)
-    } catch (reason) { setError(message(reason)) } finally { loadingRef.current = false }
+    } catch (reason) { setError(errorMessage(reason)) } finally { loadingRef.current = false; setLoading(false) }
   }, [])
   useEffect(() => {
     void load()
@@ -35,7 +37,7 @@ export function TaskBoardPanel(): JSX.Element {
   const update = async (task: BoardTaskView, change: Record<string, unknown>): Promise<void> => {
     setBusy(task.id); setError(undefined)
     try { await api(`/tasks/${task.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: task.revision, ...change }) }); await load() }
-    catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   const delegate = async (task: BoardTaskView): Promise<void> => {
     if (!task.assigneeCompanionId) return
@@ -43,35 +45,35 @@ export function TaskBoardPanel(): JSX.Element {
     try {
       await api(`/tasks/${task.id}/delegate`, { method: 'POST', body: JSON.stringify({ to: task.assigneeCompanionId, request: task.description || `完成任务：${task.title}` }) })
       await load()
-    } catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    } catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   const review = async (task: BoardTaskView): Promise<void> => {
     if (!task.reviewerCompanionId) return
     setBusy(task.id); setError(undefined)
     try { await api(`/tasks/${task.id}/review`, { method: 'POST', body: JSON.stringify({ to: task.reviewerCompanionId }) }); await load() }
-    catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   const accept = async (task: BoardTaskView): Promise<void> => {
     setBusy(task.id); setError(undefined)
     try { await api(`/tasks/${task.id}/accept`, { method: 'POST' }); await load() }
-    catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   const reject = async (task: BoardTaskView, reason: string): Promise<void> => {
     if (!reason) return
     setBusy(task.id); setError(undefined)
     try { await api(`/tasks/${task.id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); await load() }
-    catch (cause) { setError(message(cause)) } finally { setBusy(undefined) }
+    catch (cause) { setError(errorMessage(cause)) } finally { setBusy(undefined) }
   }
   const remove = async (task: BoardTaskView): Promise<void> => {
     setBusy(task.id); setError(undefined)
     try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); if (expandedId === task.id) setExpandedId(undefined); await load() }
-    catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
+    catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   return <div className="dsh-partner-feature-page is-board">
-    <header className="dsh-partner-feature-hero"><span><small>SHARED WORKSPACE</small><h2>伙伴任务看板</h2><p>多步、依赖、委派或跨会话工作才进入看板。前置任务完成后才能执行，结果经过验收后才会解锁后续任务。</p></span><div><span className="dsh-partner-board-live" title={syncedAt ? `最近同步 ${new Date(syncedAt).toLocaleTimeString()}` : '正在连接'}><i />实时同步</span><button type="button" onClick={() => setCreating(value => !value)}><IconPlusOutline16 size={15} />新任务</button></div></header>
-    {error && <p className="dsh-partner-feature-error" role="alert">{error}</p>}
-    {creating && <TaskForm companions={directory} tasks={board.tasks} close={() => setCreating(false)} changed={load} />}
-    <div className="dsh-partner-board" aria-label="任务看板">{COLUMNS.map(column => {
+    <WorkspaceHero eyebrow="Shared workspace" title="伙伴任务看板" detail="承接多步、依赖和跨伙伴工作。前置任务完成后才能执行，结果验收通过后才会解锁后续任务。" actions={<><span className="dsh-partner-board-live" title={syncedAt ? `最近同步 ${new Date(syncedAt).toLocaleTimeString()}` : '正在连接'}><i />实时同步</span><button type="button" onClick={() => setCreating(true)}><IconPlusOutline16 size={15} />新任务</button></>} />
+    {error && <WorkspaceNotice>{error}</WorkspaceNotice>}
+    {creating && <WorkspaceDialog title="新建任务" detail="写清目标、负责人和验收边界；只有真正存在前置关系时才添加依赖。" close={() => setCreating(false)} width="wide"><TaskForm companions={directory} tasks={board.tasks} close={() => setCreating(false)} changed={load} /></WorkspaceDialog>}
+    {loading ? <CollectionSkeleton rows={6} /> : <div className="dsh-partner-board" aria-label="任务看板">{COLUMNS.map(column => {
       const tasks = board.tasks.filter(item => item.status === column.id)
       return <section key={column.id} data-status={column.id}><header><strong>{column.label}</strong><b>{tasks.length}</b></header><div>{tasks.map(task => <TaskCard
         key={task.id} task={task} tasks={board.tasks} activities={board.activities.filter(item => item.taskId === task.id)} directory={directory}
@@ -79,7 +81,7 @@ export function TaskBoardPanel(): JSX.Element {
         update={change => { void update(task, change) }} delegate={() => { void delegate(task) }} review={() => { void review(task) }}
         accept={() => { void accept(task) }} reject={reason => { void reject(task, reason) }} remove={() => { void remove(task) }}
       />)}</div>{tasks.length === 0 && <p>暂无任务</p>}</section>
-    })}</div>
+    })}</div>}
   </div>
 }
 
@@ -120,11 +122,13 @@ function ResultBlock({ label, value }: { label: string; value: string }): JSX.El
 
 function TaskForm({ companions, tasks, close, changed }: { companions: PartnerDirectoryEntryView[]; tasks: BoardTaskView[]; close(): void; changed(): Promise<void> }): JSX.Element {
   const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
   const [assignee, setAssignee] = useState('')
   const [reviewer, setReviewer] = useState('')
   const dependencyOptions = tasks.filter(item => item.status !== 'done')
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault(); const data = new FormData(event.currentTarget)
+    setBusy(true); setError(undefined)
     try {
       await api('/tasks', { method: 'POST', body: JSON.stringify({
         title: data.get('title'), description: data.get('description'), priority: data.get('priority'), status: 'backlog',
@@ -132,9 +136,9 @@ function TaskForm({ companions, tasks, close, changed }: { companions: PartnerDi
         dependencyTaskIds: data.getAll('dependencyTaskId'),
       }) })
       await changed(); close()
-    } catch (reason) { setError(message(reason)) }
+    } catch (reason) { setError(errorMessage(reason)) } finally { setBusy(false) }
   }
-  return <form className="dsh-partner-task-form" onSubmit={event => { void submit(event) }}><label><span>任务名称</span><input name="title" maxLength={200} required autoFocus /></label><label><span>负责人</span><select name="assignee" value={assignee} onChange={event => setAssignee(event.target.value)}><option value="">未指派</option>{companions.map(item => <option key={item.id} value={item.id} disabled={item.id === reviewer}>@{item.name}</option>)}</select></label><label className="is-wide"><span>任务说明</span><textarea name="description" maxLength={8000} rows={4} /></label><label><span>优先级</span><select name="priority" defaultValue="normal"><option value="low">低</option><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select></label><label><span>验收伙伴</span><select name="reviewer" value={reviewer} onChange={event => setReviewer(event.target.value)}><option value="">留空 · 人工验收</option>{companions.map(item => <option key={item.id} value={item.id} disabled={item.id === assignee}>@{item.name}</option>)}</select></label><div className="dsh-partner-task-form-dependencies is-wide"><span>依赖任务 <small>可选</small></span>{dependencyOptions.length > 0 ? <div>{dependencyOptions.map(item => <label key={item.id}><input type="checkbox" name="dependencyTaskId" value={item.id} /><i /><span>{item.title}</span><small>{statusLabel(item.status)}</small></label>)}</div> : <p>当前没有可选的未完成任务</p>}<small>可以选择多个；留空表示该任务不依赖其他任务。</small></div><footer><button type="submit"><IconPlusOutline16 size={14} />创建任务</button><button type="button" onClick={close}>取消</button></footer>{error && <p role="alert">{error}</p>}</form>
+  return <form className="dsh-partner-task-form" aria-busy={busy} onSubmit={event => { void submit(event) }}><label><span>任务名称</span><input name="title" maxLength={200} required autoFocus placeholder="一句话说明交付目标" /></label><label><span>负责人</span><select name="assignee" value={assignee} onChange={event => setAssignee(event.target.value)}><option value="">未指派</option>{companions.map(item => <option key={item.id} value={item.id} disabled={item.id === reviewer}>@{item.name}</option>)}</select></label><label className="is-wide"><span>任务说明</span><textarea name="description" maxLength={8000} rows={5} placeholder="补充背景、交付物和完成条件" /></label><label><span>优先级</span><select name="priority" defaultValue="normal"><option value="low">低</option><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select></label><label><span>验收伙伴</span><select name="reviewer" value={reviewer} onChange={event => setReviewer(event.target.value)}><option value="">留空 · 人工验收</option>{companions.map(item => <option key={item.id} value={item.id} disabled={item.id === assignee}>@{item.name}</option>)}</select></label><div className="dsh-partner-task-form-dependencies is-wide"><span>依赖任务 <small>可选</small></span>{dependencyOptions.length > 0 ? <div>{dependencyOptions.map(item => <label key={item.id}><input type="checkbox" name="dependencyTaskId" value={item.id} /><i /><span>{item.title}</span><small>{statusLabel(item.status)}</small></label>)}</div> : <p>当前没有可选的未完成任务</p>}<small>可以选择多个；留空表示该任务不依赖其他任务。</small></div>{error && <WorkspaceNotice>{error}</WorkspaceNotice>}<footer><button type="button" disabled={busy} onClick={close}>取消</button><button type="submit" className="is-primary" disabled={busy}><IconPlusOutline16 size={14} />{busy ? '创建中…' : '创建任务'}</button></footer></form>
 }
 
 function dependsOn(candidateId: string, targetId: string, tasks: Map<string, BoardTaskView>, visited = new Set<string>()): boolean {
@@ -144,4 +148,3 @@ function dependsOn(candidateId: string, targetId: string, tasks: Map<string, Boa
   return (tasks.get(candidateId)?.dependencyTaskIds ?? []).some(id => dependsOn(id, targetId, tasks, visited))
 }
 function statusLabel(value: BoardTaskStatusView): string { return COLUMNS.find(item => item.id === value)?.label ?? value }
-function message(value: unknown): string { return value instanceof Error ? value.message : String(value) }

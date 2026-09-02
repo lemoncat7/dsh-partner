@@ -29,9 +29,22 @@ client -> HTTP feature routers -> application services -> repositories/store
   history. It does not implement agent execution.
 - `api/features/`: thin HTTP adapters. Parsing and response mapping live here;
   business policy stays in services.
-- `ui/`: global workspace pages only. Skill installation, the shared board and
-  schedules are top-level destinations; companion-specific identity, channel,
-  memory and capability bindings remain in the companion detail screen.
+- `client-controller.tsx`: owns opening/closing the plugin workspace and
+  preparing, renewing and switching DSH sessions. It has no page markup.
+- `client.tsx`: the composition root for sidebar registration and companion
+  detail routing. It does not own reusable controls or session orchestration.
+- `ui/workspace-components.tsx`: the shared workspace template contract. Page
+  heroes, content sections, focus-managed create/configure drawers, notices,
+  empty states and loading skeletons are defined once here.
+- `ui/partner-components.tsx`: small companion-specific presentation
+  primitives such as identity marks, channel status, form fields and section
+  headings. These components do not fetch data.
+- `ui/*-panel.tsx`: one feature per module. Skill installation, the shared
+  board and schedules are top-level destinations; each panel owns only its
+  resource state and business actions and composes the shared templates.
+- `ui/workspace-ui.css`: interaction and material rules for the shared
+  templates. Feature-specific layout may remain in `client.css`, but new
+  cross-feature UI contracts belong in this module.
 
 ## Persistence rules
 
@@ -45,8 +58,23 @@ client -> HTTP feature routers -> application services -> repositories/store
 - Market discovery and package installation share one bounded transport. The
   optional local HTTP proxy applies to both paths and rejects embedded proxy
   credentials.
-- Public ZIP packages are parsed in memory and only the shallowest safe
-  `SKILL.md` entry is accepted; archive paths are never extracted to disk.
+- Public ZIP packages are parsed in memory and archive paths are never
+  extracted to disk. A case-insensitive `SKILL.md` is preferred; a package
+  with exactly one Markdown document may use that document, while ambiguous
+  multi-Markdown packages are rejected.
+
+## Client interaction rules
+
+- Creation and configuration flows use the shared focus-managed drawer. They
+  restore focus on close, trap keyboard focus while open, close on Escape and
+  never rely on browser-native dialogs.
+- Lists expose loading, empty, error, disabled and retry states without moving
+  errors to an unrelated page footer.
+- Visual feedback uses opacity and transforms. Static overview cards do not
+  create pointer tracking, SVG displacement filters or per-card resize
+  observers.
+- Form controls and buttons are fully styled by the plugin; browser and theme
+  defaults are not part of the component contract.
 
 ## Capability and privacy rules
 

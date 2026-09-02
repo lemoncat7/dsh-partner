@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+const read = path => readFile(new URL(path, import.meta.url), 'utf8')
+const [entry, controller, shared, skills, board, schedules, companionCreate] = await Promise.all([
+  read('../src/client.tsx'),
+  read('../src/client-controller.tsx'),
+  read('../src/ui/workspace-components.tsx'),
+  read('../src/ui/skills-panel.tsx'),
+  read('../src/ui/task-board-panel.tsx'),
+  read('../src/ui/schedule-panel.tsx'),
+  read('../src/ui/companion-create.tsx'),
+])
+
+test('client composition root delegates session orchestration to one controller', () => {
+  assert.match(entry, /createPartnerController/)
+  assert.doesNotMatch(entry, /function waitForClientSession/)
+  assert.doesNotMatch(entry, /ctx\.sessions as unknown as ISessions/)
+  assert.match(controller, /function waitForClientSession/)
+  assert.match(controller, /async openSession/)
+  assert.match(controller, /async renewSession/)
+})
+
+test('global feature pages share one template and one create-dialog contract', () => {
+  for (const source of [skills, board, schedules]) {
+    assert.match(source, /<WorkspaceHero/)
+    assert.match(source, /<WorkspaceDialog/)
+    assert.match(source, /<WorkspaceNotice/)
+  }
+  assert.match(shared, /role="dialog"/)
+  assert.match(shared, /aria-modal="true"/)
+  assert.match(shared, /event\.key === 'Escape'/)
+  assert.match(shared, /event\.key !== 'Tab'/)
+})
+
+test('creation flows expose bounded pending and inline error states without browser dialogs', () => {
+  for (const source of [entry, skills, board, schedules, companionCreate]) assert.doesNotMatch(source, /window\.(alert|confirm|prompt)\(/)
+  for (const source of [skills, board, schedules, companionCreate]) {
+    assert.match(source, /aria-busy=/)
+    assert.match(source, /disabled=\{busy/)
+  }
+})
