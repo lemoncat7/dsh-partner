@@ -35,6 +35,7 @@ export class PartnerAgentComposition {
       text: [
         renderEnabledSkills(companion, enabledSkills),
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
+        '是否拆成看板任务由工作形态决定：只有工作跨多步、需要并行、需要等待外部条件、存在明确前置依赖、需要其他伙伴专长，或必须跨会话持续跟踪时才建任务。一次回答内可直接完成的简单事项不要制造看板负担。拆解后每个子任务必须有可验收产出；存在先后关系时写入 dependencyTaskIds，前置任务完成前不得启动后续任务。执行者提交结果后进入 review；指定验收伙伴时由其给出核验意见，最终通过或打回后再推进后续任务。完成全部拆解与委派后，立即向用户返回任务、负责人、依赖和验收安排的看板摘要；不要轮询状态或等待被委派任务执行结束，终态进度会反向通知你。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
       ].filter(Boolean).join('\n\n'),
@@ -83,26 +84,47 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'Read and maintain the shared partner task board. Create concrete work, move status with expectedRevision, assign a companion, or append an auditable comment.',
-    parameters: actionParameters(['list', 'create', 'update', 'comment'], {
+    description: 'Read and maintain the shared partner task board. Use it for multi-step, dependent, delegated, or cross-session work; do not create tasks for trivial one-turn answers. Dependencies block execution until done, and completed work must pass review.',
+    parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
-      assignee: { type: 'string', description: 'Companion id or @name.' }, expectedRevision: { type: 'integer' }, message: { type: 'string' },
+      assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
+      dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
+      expectedRevision: { type: 'integer' }, message: { type: 'string' },
     }),
-    async execute(raw) {
+    async execute(raw, exec) {
       const input = record(raw, 'arguments')
       const action = requiredText(input.action, 'action', 20)
       if (action === 'list') return JSON.stringify(tasks.snapshot())
       if (action === 'create') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
-        return JSON.stringify(await tasks.create({ ...input, ...(assignee ? { assigneeCompanionId: assignee } : {}) }, { kind: 'companion', companionId: companion.id }))
+        const reviewer = typeof input.reviewer === 'string' && input.reviewer.trim() ? resolveAssignee(input.reviewer) : undefined
+        return JSON.stringify(await tasks.create({
+          ...input,
+          creatorSessionId: requireAgent(exec).session.id,
+          ...(assignee ? { assigneeCompanionId: assignee } : {}),
+          ...(reviewer ? { reviewerCompanionId: reviewer } : {}),
+        }, { kind: 'companion', companionId: companion.id }))
       }
       const taskId = requiredText(input.taskId, 'taskId', 160)
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
+      if (action === 'accept' || action === 'reject') {
+        const task = tasks.require(taskId)
+        if (task.assigneeCompanionId === companion.id) throw new Error('任务负责人不能验收自己的执行结果')
+        if (task.reviewerCompanionId && task.reviewerCompanionId !== companion.id) throw new Error('当前伙伴不是这个任务指定的验收伙伴')
+        return JSON.stringify(action === 'accept'
+          ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id })
+          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }))
+      }
       if (action === 'update') {
-        const assignee = typeof input.assignee === 'string' ? resolveAssignee(input.assignee) : undefined
-        return JSON.stringify(await tasks.update(taskId, { ...input, ...('assignee' in input ? { assigneeCompanionId: assignee ?? '' } : {}) }, { kind: 'companion', companionId: companion.id }))
+        const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
+        const reviewer = typeof input.reviewer === 'string' && input.reviewer.trim() ? resolveAssignee(input.reviewer) : undefined
+        return JSON.stringify(await tasks.update(taskId, {
+          ...input,
+          ...('assignee' in input ? { assigneeCompanionId: assignee ?? '' } : {}),
+          ...('reviewer' in input ? { reviewerCompanionId: reviewer ?? '' } : {}),
+        }, { kind: 'companion', companionId: companion.id }))
       }
       throw new Error('Task board action is invalid')
     },
@@ -112,7 +134,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
 function collaborationTool(companion: Companion, store: PartnerStore, collaboration: PartnerCollaborationService): ToolDefinition {
   return textTool({
     name: 'partner_collaborate',
-    description: 'Inspect the safe companion directory or delegate an existing board task to @another companion. Delegation creates a real temporary execution and returns its result; it never exposes private transcripts or credentials.',
+    description: 'Inspect the safe companion directory or asynchronously delegate an existing board task to @another companion. Delegate returns as soon as assignment is queued; progress and results flow through the board and notify the creator companion. It never exposes private transcripts or credentials.',
     parameters: actionParameters(['directory', 'delegate', 'status'], {
       taskId: { type: 'string' }, companion: { type: 'string', description: 'Target companion id or @name.' }, request: { type: 'string' }, delegationId: { type: 'string' },
     }),

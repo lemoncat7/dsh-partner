@@ -159,5 +159,5 @@ function restrictTools(ctx: ExecutionContext, requested: string[]): void {
 }
 
 function executionSummary(kind: ExecutionKind): string {
-  return ({ skill: '伙伴执行 Skill', delegation: '伙伴执行委派任务', schedule: '伙伴执行定时任务' })[kind]
+  return ({ skill: '伙伴执行 Skill', delegation: '伙伴执行委派任务', review: '伙伴核验看板任务', schedule: '伙伴执行定时任务' })[kind]
 }

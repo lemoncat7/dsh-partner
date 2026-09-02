@@ -135,7 +135,7 @@ export class ChannelManager {
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
     const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
-    if (route === undefined) return
+    if (route === undefined || route.kind === 'local') return
     const concernNotice = concernCreatedNoticeFromEvent(event)
     if (concernNotice !== undefined) {
       await this.queueProactive(route, `concern-created:${session.id}:${event.seq}`, { text: concernNotice, attachments: [] })

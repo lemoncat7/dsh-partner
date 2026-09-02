@@ -54,7 +54,7 @@ test('preserves and renews isolated companion sessions correctly', async () => {
   try {
     const store = await PartnerStore.open(join(directory, 'state.json'))
     const companion = store.snapshot().companions[0]
-    const route = { id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', cwd: '/home/node/partners/a', lastMessageAt: 1 }
+    const route = { id: 'route-1', kind: 'channel', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', cwd: '/home/node/partners/a', lastMessageAt: 1 }
     await store.update(state => state.sessions.push(route))
     await new PartnerAgentRuntime({}, store, '/home/node').reloadCompanion(companion.id)
     assert.equal(store.snapshot().sessions[0]?.sessionId, 'session-1')
@@ -64,6 +64,46 @@ test('preserves and renews isolated companion sessions correctly', async () => {
     assert.notEqual(renewed.sessionId, route.sessionId)
     assert.equal(renewed.userId, route.userId)
     assert.equal(renewed.cwd, route.cwd)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('creates and reuses a local companion conversation without a channel pairing', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-local-session-'))
+  try {
+    const store = await PartnerStore.open(join(directory, 'state.json'))
+    const archivedSessionIds = []
+    const created = []
+    const ctx = {
+      workspaceRegistry: {
+        archivedSessionIds,
+        async create() { return { async attachSession() {} } },
+      },
+      agentDefaultModel: { currentSelection: () => ({ provider: 'test', model: 'test-model' }) },
+      agents: {
+        get() { return undefined },
+        async resume() { throw new Error('not persisted yet') },
+        async create(options) {
+          const agentCtx = { get: name => name === 'agentPresets' ? { async mount() {} } : undefined, systemPrompt: { section() {} } }
+          await options.setup(agentCtx)
+          const agent = { status: 'idle', session: { id: options.sessionId, header: { cwd: options.meta.cwd }, events: [], seq: 0 } }
+          created.push(options.sessionId)
+          return { agent, async dispose() {} }
+        },
+      },
+    }
+    const runtime = new PartnerAgentRuntime(ctx, store, directory)
+    const companion = store.snapshot().companions[0]
+    const first = await runtime.createLocalSession(companion.id)
+    const reused = await runtime.createLocalSession(companion.id)
+    assert.equal(first.kind, 'local')
+    assert.equal(first.channelId, '@local')
+    assert.equal(reused.sessionId, first.sessionId)
+    assert.equal(store.snapshot().channels.length, 0)
+    assert.equal(store.snapshot().pairings.length, 0)
+    archivedSessionIds.push(first.sessionId)
+    const renewed = await runtime.createLocalSession(companion.id)
+    assert.notEqual(renewed.sessionId, first.sessionId)
+    assert.equal(created.length, 2)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -273,7 +313,7 @@ test('does not invoke the agent when no concern is due', async () => {
     await store.update(state => {
       state.channels.push({ id: 'weixin-1', companionId: companion.id, accountId: 'account', name: '微信', enabled: true, createdAt: 1, updatedAt: 1 })
       state.pairings.push({ id: 'pairing-1', channelId: 'weixin-1', userId: 'user-1', displayName: '用户', status: 'approved', createdAt: 1, updatedAt: 1 })
-      state.sessions.push({ id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
+      state.sessions.push({ id: 'route-1', kind: 'channel', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
     })
     let agentCalls = 0
     let dueOptions
@@ -300,7 +340,7 @@ test('checks only the selected concern when manually triggered from its row', as
     await store.update(state => {
       state.channels.push({ id: 'weixin-1', companionId: companion.id, accountId: 'account', name: '微信', enabled: true, createdAt: 1, updatedAt: 1 })
       state.pairings.push({ id: 'pairing-1', channelId: 'weixin-1', userId: 'user-1', displayName: '用户', status: 'approved', createdAt: 1, updatedAt: 1 })
-      state.sessions.push({ id: 'route-1', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
+      state.sessions.push({ id: 'route-1', kind: 'channel', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', lastMessageAt: 1 })
     })
     let dueOptions
     let agentConcerns
@@ -362,10 +402,10 @@ test('migrates legacy partner states to the current schema and preserves focus o
     }
     await writeFile(path, JSON.stringify({ schemaVersion: 9, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 13)
+    assert.equal(state.schemaVersion, 14)
     assert.equal(state.companions[0].automation.heartbeat.legacyFocus, '项目风险\n依赖更新')
     assert.equal('focus' in state.companions[0].automation.heartbeat, false)
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 13)
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 14)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -379,10 +419,32 @@ test('migrates schema v1 defaults and obsolete focus cursor through the current 
       channels: [], pairings: [], sessions: [], recentReceipts: [],
     }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 13)
+    assert.equal(state.schemaVersion, 14)
     assert.equal(state.companions[0].automation.memory.retentionDays, 0)
     assert.equal(state.companions[0].automation.heartbeat.enabled, false)
     assert.deepEqual(state.heartbeatStates, [])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('migrates schema v13 sessions and task relationships into explicit runtime types', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-v13-'))
+  const path = join(directory, 'state.json')
+  try {
+    const current = (await PartnerStore.open(path)).snapshot()
+    const task = {
+      id: 'task-legacy', title: '旧任务', description: '', status: 'backlog', priority: 'normal', createdBy: 'user',
+      skillIds: [], relatedTaskIds: ['task-dependency'], revision: 1, createdAt: 1, updatedAt: 1,
+    }
+    const dependency = { ...task, id: 'task-dependency', title: '前置任务', relatedTaskIds: [] }
+    await writeFile(path, JSON.stringify({
+      ...current, schemaVersion: 13, tasks: [dependency, task],
+      sessions: [{ id: 'route-old', channelId: 'weixin-old', userId: 'user-old', companionId: current.companions[0].id, sessionId: 'session-old', lastMessageAt: 1 }],
+    }))
+    const migrated = (await PartnerStore.open(path)).snapshot()
+    assert.equal(migrated.schemaVersion, 14)
+    assert.equal(migrated.sessions[0].kind, 'channel')
+    assert.deepEqual(migrated.tasks.find(item => item.id === 'task-legacy').dependencyTaskIds, ['task-dependency'])
+    assert.equal('relatedTaskIds' in migrated.tasks.find(item => item.id === 'task-legacy'), false)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 

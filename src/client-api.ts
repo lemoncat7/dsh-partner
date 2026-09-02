@@ -21,7 +21,7 @@ export interface PairingView {
   status: 'pending' | 'approved' | 'blocked'; createdAt: number; updatedAt: number
 }
 export interface ChannelSessionView {
-  id: string; channelId: string; userId: string; companionId: string; sessionId: string; cwd?: string; lastMessageAt: number; archived: boolean
+  id: string; kind: 'local' | 'channel'; channelId: string; userId: string; companionId: string; sessionId: string; cwd?: string; lastMessageAt: number; archived: boolean
 }
 export interface HeartbeatStateView {
   companionId: string; lastCheckedAt?: number; lastSentAt?: number; nextCheckAt: number
@@ -71,8 +71,8 @@ export interface SkillMarketNetworkTestView { ok: true; latencyMs: number; sourc
 export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
 export interface BoardTaskView {
   id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'
-  assigneeCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
-  skillIds: string[]; relatedTaskIds: string[]; dueAt?: number
+  assigneeCompanionId?: string; reviewerCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
+  skillIds: string[]; dependencyTaskIds: string[]; resultSummary?: string; reviewSummary?: string; dueAt?: number
 }
 export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
 export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }
@@ -85,7 +85,7 @@ export interface ScheduledTaskView {
   enabled: boolean; destroySessionAfterRun: boolean; overlapPolicy: 'skip' | 'queue'; timeoutMinutes: number
   nextRunAt: number; lastRunAt?: number; lastRunStatus?: 'completed' | 'failed' | 'skipped'; createdAt: number; updatedAt: number
 }
-export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'skill'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
+export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'review' | 'skill'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
 
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'

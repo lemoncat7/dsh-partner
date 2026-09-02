@@ -57,7 +57,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
-  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 13 })
+  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 14 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({
       id: provider.id, name: provider.name,
@@ -79,6 +79,12 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       return sendJson(res, 201, companion)
     }
     const id = segments[1]
+    if (id !== undefined && method === 'POST' && segments[2] === 'session' && segments.length === 3) {
+      mutation(req)
+      requiredCompanion(runtime.store, id)
+      const route = await runtime.agents.createLocalSession(id)
+      return sendJson(res, 201, { routeId: route.id, sessionId: route.sessionId })
+    }
     if (id !== undefined && method === 'PUT' && segments.length === 2) {
       mutation(req)
       const previous = requiredCompanion(runtime.store, id)
@@ -106,10 +112,11 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
         state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
         state.companionAccessGrants = state.companionAccessGrants.filter(grant => grant.fromCompanionId !== id && grant.toCompanionId !== id)
         state.schedules = state.schedules.filter(item => item.companionId !== id)
-        for (const task of state.tasks) if (task.assigneeCompanionId === id) {
-          delete task.assigneeCompanionId
-          task.revision += 1
-          task.updatedAt = Date.now()
+        for (const task of state.tasks) {
+          let changed = false
+          if (task.assigneeCompanionId === id) { delete task.assigneeCompanionId; changed = true }
+          if (task.reviewerCompanionId === id) { delete task.reviewerCompanionId; changed = true }
+          if (changed) { task.revision += 1; task.updatedAt = Date.now() }
         }
       })
       await runtime.memory.clear(id)

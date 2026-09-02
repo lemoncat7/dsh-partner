@@ -10,10 +10,15 @@ export interface BoardTask {
   status: TaskStatus
   priority: TaskPriority
   assigneeCompanionId?: string
+  reviewerCompanionId?: string
   createdBy: 'user' | 'companion' | 'schedule'
   creatorCompanionId?: string
+  creatorSessionId?: string
   skillIds: string[]
-  relatedTaskIds: string[]
+  /** Tasks that must reach done before this task can start. */
+  dependencyTaskIds: string[]
+  resultSummary?: string
+  reviewSummary?: string
   dueAt?: number
   revision: number
   createdAt: number
@@ -25,7 +30,7 @@ export interface TaskActivity {
   taskId: string
   actor: 'user' | 'companion' | 'schedule' | 'system'
   actorCompanionId?: string
-  kind: 'created' | 'updated' | 'moved' | 'assigned' | 'delegated' | 'commented' | 'completed' | 'failed'
+  kind: 'created' | 'updated' | 'moved' | 'assigned' | 'delegated' | 'commented' | 'result' | 'reviewed' | 'reopened' | 'completed' | 'failed'
   message: string
   at: number
 }

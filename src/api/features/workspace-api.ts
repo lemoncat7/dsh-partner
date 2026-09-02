@@ -97,6 +97,17 @@ export async function dispatchPartnerWorkspaceApi(
     if (id && method === 'POST' && segments[2] === 'comment' && segments.length === 3) {
       mutation(req); const body = await readObject(req); await runtime.tasks.comment(id, String(body.message ?? ''), { kind: 'user' }); sendJson(res, 200, { ok: true }); return true
     }
+    if (id && method === 'POST' && segments[2] === 'accept' && segments.length === 3) {
+      mutation(req); sendJson(res, 200, await runtime.tasks.accept(id, { kind: 'user' })); return true
+    }
+    if (id && method === 'POST' && segments[2] === 'reject' && segments.length === 3) {
+      mutation(req); const body = await readObject(req)
+      sendJson(res, 200, await runtime.tasks.reject(id, String(body.reason ?? ''), { kind: 'user' })); return true
+    }
+    if (id && method === 'POST' && segments[2] === 'review' && segments.length === 3) {
+      mutation(req); const body = await readObject(req)
+      sendJson(res, 200, await runtime.collaboration.reviewTask({ taskId: id, to: String(body.to ?? '') })); return true
+    }
     if (id && method === 'POST' && segments[2] === 'delegate' && segments.length === 3) {
       mutation(req); const body = await readObject(req)
       sendJson(res, 200, await runtime.collaboration.delegate({

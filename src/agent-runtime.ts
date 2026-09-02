@@ -21,6 +21,7 @@ import type { MemoryReflectionService } from './memory-reflection.js'
 import { concernObservationPrompt } from './autonomy.js'
 import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
 import type { PartnerConcernStore } from './concern-store.js'
+import type { BoardTask } from './tasks/domain.js'
 import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
@@ -99,6 +100,7 @@ export class PartnerAgentRuntime {
   private readonly handles = new Map<string, AgentHandle>()
   private readonly queues = new Map<string, Promise<void>>()
   private readonly heartbeatQueues = new Map<string, Promise<HeartbeatExecution>>()
+  private readonly taskQueues = new Map<string, Promise<void>>()
   private readonly steeringQueues = new Map<string, Promise<void>>()
   private readonly workspaces = new Map<string, Promise<Workspace>>()
   private readonly profileVersions = new Map<string, string>()
@@ -165,6 +167,84 @@ export class PartnerAgentRuntime {
     return route
   }
 
+  async createLocalSession(companionId: string): Promise<ChannelSession> {
+    const companion = this.store.snapshot().companions.find(item => item.id === companionId)
+    if (companion === undefined) throw new Error('伙伴身份不存在')
+    const existing = this.store.snapshot().sessions.find(item => item.companionId === companionId && item.kind === 'local')
+    if (existing !== undefined && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) {
+      await this.ensureAgent(companion, existing)
+      return existing
+    }
+    const now = Date.now()
+    const route: ChannelSession = {
+      id: `route-${randomUUID()}`,
+      kind: 'local',
+      channelId: '@local',
+      userId: `owner:${companion.id}`,
+      companionId: companion.id,
+      sessionId: `session-${randomUUID()}`,
+      cwd: partnerCwd(this.defaultCwd, companion.id),
+      lastMessageAt: now,
+    }
+    await this.store.update(state => {
+      state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
+      state.sessions.push(route)
+    })
+    await this.ensureAgent(companion, route)
+    return route
+  }
+
+  async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
+    if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
+    const companion = this.store.snapshot().companions.find(item => item.id === task.creatorCompanionId)
+    if (!companion) return
+    const state = this.store.snapshot()
+    const routes = state.sessions.filter(item => item.companionId === companion.id)
+    const downstream = state.tasks.filter(item => item.dependencyTaskIds.includes(task.id) && item.status !== 'done')
+    const route = routes.find(item => item.sessionId === task.creatorSessionId && !this.isArchived(item))
+      ?? routes.find(item => item.kind === 'local' && !this.isArchived(item))
+      ?? routes.filter(item => !this.isArchived(item)).sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
+      ?? await this.createLocalSession(companion.id)
+    const agent = await this.ensureAgent(companion, route)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: [
+        '这是你创建并分配的看板任务进度事件。不要重新执行已经完成的工作。请检查依赖它的后续任务是否已经解锁；需要时继续在看板上分配，然后向用户简要汇报当前进展。',
+        `任务：${task.title}`,
+        `状态：${previousStatus} → ${task.status}`,
+        task.resultSummary ? `结果：\n${task.resultSummary.slice(0, 3000)}` : '',
+        task.reviewSummary ? `验收：\n${task.reviewSummary.slice(0, 2000)}` : '',
+        downstream.length > 0 ? `后续任务：\n${downstream.map(item => `- ${item.title}（${item.status}）`).join('\n')}` : '没有依赖此任务的后续任务。',
+      ].filter(Boolean).join('\n\n') }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: task.status === 'done' ? '看板任务已完成' : '看板任务受阻' },
+    }))
+  }
+
+  async executeTask(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string }): Promise<{ run: { id: string }; output: string }> {
+    const route = await this.createLocalSession(input.companion.id)
+    const key = route.sessionId
+    const previous = this.taskQueues.get(key) ?? Promise.resolve()
+    let output = ''
+    const current = previous.catch(() => {}).then(async () => {
+      const agent = await this.ensureAgent(input.companion, route)
+      if (agent.status !== 'idle') await agent.whenIdle()
+      const startSeq = agent.session.seq
+      agent.followup(createUserMessage({
+        content: [{ type: 'text', text: input.prompt }],
+        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
+      }))
+      await agent.whenIdle()
+      output = assistantTextAfter(agent, startSeq).trim()
+      if (!output) throw new Error('伙伴会话没有产生任务结果')
+    })
+    this.taskQueues.set(key, current)
+    try {
+      await current
+      return { run: { id: `session-task-${randomUUID()}` }, output }
+    } finally {
+      if (this.taskQueues.get(key) === current) this.taskQueues.delete(key)
+    }
+  }
+
   isArchived(route: ChannelSession): boolean {
     return this.ctx.workspaceRegistry.archivedSessionIds.includes(route.sessionId as SessionId)
   }
@@ -173,10 +253,13 @@ export class PartnerAgentRuntime {
     const previous = this.store.snapshot().sessions.find(item => item.id === routeId)
     if (previous === undefined) throw new Error('伙伴会话不存在')
     if (!this.isArchived(previous)) return previous
+    const companion = this.store.snapshot().companions.find(item => item.id === previous.companionId)
+    if (companion === undefined) throw new Error('伙伴身份不存在')
     const next = renewedSession(previous)
     await this.store.update(state => {
       state.sessions = state.sessions.map(item => item.id === routeId ? next : item)
     })
+    await this.ensureAgent(companion, next)
     return next
   }
 
@@ -463,6 +546,7 @@ export class PartnerAgentRuntime {
     const now = Date.now()
     const session: ChannelSession = {
       id: `route-${randomUUID()}`,
+      kind: 'channel',
       channelId,
       userId,
       companionId: companion.id,
@@ -501,7 +585,7 @@ export class PartnerAgentRuntime {
       agentCtx.systemPrompt.section({
         name: 'partner-identity',
         order: -10,
-        text: renderPartnerPersona(companion),
+        text: renderPartnerPersona(companion, route.kind === 'local' ? 'local' : 'conversation'),
       })
       agentCtx.systemPrompt.section({
         name: 'partner-tool-routing',

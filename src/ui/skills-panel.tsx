@@ -75,25 +75,40 @@ export function CompanionSkillSettings({ companionId }: { companionId: string })
   const [catalog, setCatalog] = useState<SkillCatalogView>({ installed: [], bindings: [], sources: [] })
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
+  const [selecting, setSelecting] = useState(false)
+  const [query, setQuery] = useState('')
   const load = useCallback(async () => {
     try { setCatalog(await api<SkillCatalogView>('/skills')); setError(undefined) }
     catch (reason) { setError(message(reason)) }
   }, [])
   useEffect(() => { void load() }, [load, companionId])
-  const enabled = new Set(catalog.bindings.filter(item => item.companionId === companionId && item.enabled).map(item => item.skillId))
-  const toggle = async (skillId: string): Promise<void> => {
+  useEffect(() => { setSelecting(false); setQuery(''); setError(undefined) }, [companionId])
+  const enabled = useMemo(() => new Set(catalog.bindings.filter(item => item.companionId === companionId && item.enabled).map(item => item.skillId)), [catalog.bindings, companionId])
+  const enabledSkills = useMemo(() => catalog.installed.filter(skill => enabled.has(skill.id)), [catalog.installed, enabled])
+  const availableSkills = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase()
+    return catalog.installed.filter(skill => !enabled.has(skill.id) && (!normalized || `${skill.displayName} ${skill.description} ${skill.id}`.toLocaleLowerCase().includes(normalized)))
+  }, [catalog.installed, enabled, query])
+  const visibleAvailableSkills = availableSkills.slice(0, 80)
+  const setBinding = async (skillId: string, nextEnabled: boolean): Promise<void> => {
     setBusy(skillId)
+    setError(undefined)
     try {
-      await api(`/companions/${encodeURIComponent(companionId)}/skills/${encodeURIComponent(skillId)}`, { method: 'PUT', body: JSON.stringify({ enabled: !enabled.has(skillId) }) })
+      await api(`/companions/${encodeURIComponent(companionId)}/skills/${encodeURIComponent(skillId)}`, { method: 'PUT', body: JSON.stringify({ enabled: nextEnabled }) })
       await load()
     } catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
   }
   return <section className="dsh-partner-capability-detail" aria-labelledby="dsh-partner-skill-capability-title">
-    <header><span><small>PARTNER SKILLS</small><strong id="dsh-partner-skill-capability-title">当前伙伴的 Skill</strong></span><em>{enabled.size} 个启用</em></header>
-    {catalog.installed.length === 0 ? <p className="dsh-partner-feature-empty">尚未安装 Skill，请先从左侧的 Skill 市场安装。</p> : <div className="dsh-partner-skill-installed">{catalog.installed.map(skill => <article key={skill.id}>
+    <header><span><small>PARTNER SKILLS</small><strong id="dsh-partner-skill-capability-title">当前伙伴的 Skill</strong></span><div className="dsh-partner-capability-actions"><em>{enabledSkills.length} 个启用</em>{catalog.installed.length > 0 && <button type="button" aria-expanded={selecting} onClick={() => setSelecting(value => !value)}><IconPlusOutline16 size={14} />添加 Skill</button>}</div></header>
+    {catalog.installed.length === 0 ? <p className="dsh-partner-feature-empty">尚未安装 Skill，请先从左侧的 Skill 市场安装。</p> : enabledSkills.length === 0 ? <p className="dsh-partner-feature-empty">当前伙伴还没有启用 Skill。点击“添加 Skill”选择需要的能力。</p> : <div className="dsh-partner-skill-installed is-binding">{enabledSkills.map(skill => <article key={skill.id}>
       <span className="dsh-partner-skill-mark"><IconCheckOutline16 size={16} /></span><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.executionContext === 'fork' ? '隔离临时会话执行' : '可信当前会话执行'}</small></span>
-      <button type="button" className="dsh-partner-feature-switch" data-on={enabled.has(skill.id)} disabled={busy === skill.id} aria-label={`${enabled.has(skill.id) ? '停用' : '启用'} ${skill.displayName}`} aria-pressed={enabled.has(skill.id)} onClick={() => { void toggle(skill.id) }}><i /></button>
+      <button type="button" className="dsh-partner-skill-binding-action" disabled={busy === skill.id} aria-label={`从当前伙伴停用 ${skill.displayName}`} onClick={() => { void setBinding(skill.id, false) }}>{busy === skill.id ? '处理中…' : '停用'}</button>
     </article>)}</div>}
+    {selecting && <div className="dsh-partner-skill-picker" aria-label="添加 Skill">
+      <label className="dsh-partner-skill-picker-search"><IconBrowseOutline16 size={16} /><span className="sr-only">搜索可添加的 Skill</span><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、说明或标识" /></label>
+      <div className="dsh-partner-skill-picker-list">{visibleAvailableSkills.map(skill => <article key={skill.id}><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.executionContext === 'fork' ? '隔离临时会话执行' : '可信当前会话执行'}</small></span><button type="button" disabled={busy === skill.id} onClick={() => { void setBinding(skill.id, true) }}>{busy === skill.id ? '添加中…' : '添加'}</button></article>)}{availableSkills.length === 0 && <p className="dsh-partner-skill-picker-empty">{query ? '没有匹配的未启用 Skill。' : '所有已安装 Skill 都已启用。'}</p>}</div>
+      {availableSkills.length > visibleAvailableSkills.length && <small className="dsh-partner-skill-picker-limit">还有 {availableSkills.length - visibleAvailableSkills.length} 个结果，请输入关键词继续筛选。</small>}
+    </div>}
     {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
   </section>
 }

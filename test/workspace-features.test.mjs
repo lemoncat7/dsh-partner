@@ -36,7 +36,7 @@ function response() {
 test('migrated store exposes all bounded workspace domains', async t => {
   const item = await fixture(); t.after(item.close)
   const state = item.store.snapshot()
-  assert.equal(state.schemaVersion, 13)
+  assert.equal(state.schemaVersion, 14)
   for (const key of ['skills', 'skillBindings', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns']) assert.deepEqual(state[key], [])
   assert.deepEqual(state.skillMarketSources.map(source => source.name), ['ClawHub', 'LoopHub', 'SkillHub'])
   assert.deepEqual(state.skillMarketNetwork, {})
@@ -133,6 +133,61 @@ test('task board rejects stale concurrent updates and records activities', async
   assert.equal(board.snapshot().activities.length, 2)
 })
 
+test('task dependencies block execution, reject cycles and unlock only after accepted completion', async t => {
+  const item = await fixture(); t.after(item.close)
+  const board = new TaskBoardService(item.store)
+  const prerequisite = await board.create({ title: '完成基础能力' }, { kind: 'user' })
+  const dependent = await board.create({ title: '推进后续工作', dependencyTaskIds: [prerequisite.id] }, { kind: 'user' })
+  assert.throws(() => board.assertStartable(dependent.id), /前置任务尚未完成/)
+  await assert.rejects(() => board.update(prerequisite.id, { expectedRevision: prerequisite.revision, dependencyTaskIds: [dependent.id] }, { kind: 'user' }), /循环/)
+  const doing = await board.update(prerequisite.id, { expectedRevision: prerequisite.revision, status: 'doing' }, { kind: 'user' })
+  const review = await board.completeExecution(doing.id, '基础能力已完成并通过测试', { kind: 'companion', companionId: 'companion-default' })
+  await board.accept(review.id, { kind: 'user' })
+  assert.equal(board.assertStartable(dependent.id).id, dependent.id)
+})
+
+test('task results, reviewer opinions and terminal progress notifications stay on the task', async t => {
+  const item = await fixture(); t.after(item.close)
+  await item.store.update(state => state.companions.push({
+    ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴', createdAt: 2, updatedAt: 2,
+  }))
+  const board = new TaskBoardService(item.store)
+  const notifications = []
+  board.setProgressNotifier(async (task, previousStatus) => { notifications.push({ task, previousStatus }) })
+  await assert.rejects(() => board.create({ title: '错误验收配置', assigneeCompanionId: 'companion-default', reviewerCompanionId: 'companion-default' }, { kind: 'user' }), /不能与任务负责人相同/)
+  const task = await board.create({
+    title: '生成可验收产出', assigneeCompanionId: 'companion-default', reviewerCompanionId: 'companion-reviewer', creatorSessionId: 'session-owner',
+  }, { kind: 'companion', companionId: 'companion-default' })
+  const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'companion', companionId: 'companion-default' })
+  const review = await board.completeExecution(doing.id, '产出文件与测试证据', { kind: 'companion', companionId: 'companion-default' })
+  const inspected = await board.recordReview(review.id, '建议通过：证据完整', { kind: 'companion', companionId: 'companion-reviewer' })
+  const done = await board.accept(inspected.id, { kind: 'user' })
+  assert.equal(done.resultSummary, '产出文件与测试证据')
+  assert.equal(done.reviewSummary, '建议通过：证据完整')
+  assert.equal(notifications.length, 1)
+  assert.equal(notifications[0].previousStatus, 'review')
+  assert.equal(notifications[0].task.status, 'done')
+})
+
+test('delegation returns after assignment while execution continues in the background', async t => {
+  const item = await fixture(); t.after(item.close)
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const board = new TaskBoardService(item.store)
+  const task = await board.create({ title: '异步执行任务' }, { kind: 'user' })
+  let finish
+  const execution = new Promise(resolve => { finish = resolve })
+  const service = new PartnerCollaborationService(item.store, skills, board, {
+    execute: async () => { throw new Error('delegation should use the companion session executor') },
+  })
+  service.setSessionExecutor({ execute: async () => { await execution; return { run: { id: 'session-run-async' }, output: '后台执行完成' } } })
+  const delegated = await service.delegate({ taskId: task.id, initiatedBy: 'user', to: 'companion-default', request: '开始执行' })
+  assert.equal(delegated.status, 'running')
+  assert.equal(board.require(task.id).status, 'doing')
+  finish()
+  await waitFor(() => board.require(task.id).status === 'review')
+  assert.equal(board.require(task.id).resultSummary, '后台执行完成')
+})
+
 test('cross-partner delegation uses directed grants while user delegation bypasses partner grants', async t => {
   const item = await fixture(); t.after(item.close)
   await item.store.update(state => state.companions.push({
@@ -216,3 +271,11 @@ test('daily schedule calculation follows the configured time zone', () => {
   assert.equal(parts, '09:05')
   assert.ok(next > now)
 })
+
+async function waitFor(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('condition timed out')
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+}

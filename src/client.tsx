@@ -39,6 +39,7 @@ interface Controller {
   isOpen(): boolean
   selected(): string | undefined
   openSession(routeId: string, sessionId: string): Promise<void>
+  startSession(companionId: string): Promise<void>
   renewSession(routeId: string): Promise<void>
   subscribe(listener: () => void): () => void
 }
@@ -79,6 +80,12 @@ function createController(ctx: ClientContext): Controller {
       await waitForClientSession(ctx, sessionId)
       controller.close()
       clientSessions(ctx).open(sessionId as SessionId)
+    },
+    async startSession(companionId) {
+      const created = await api<{ routeId: string; sessionId: string }>(`/companions/${encodeURIComponent(companionId)}/session`, { method: 'POST' })
+      await waitForClientSession(ctx, created.sessionId)
+      dispose?.(); dispose = undefined
+      clientSessions(ctx).open(created.sessionId as SessionId)
     },
     async renewSession(routeId) {
       const renewed = await api<{ routeId: string; sessionId: string }>(`/sessions/${encodeURIComponent(routeId)}/renew`, { method: 'POST' })
@@ -148,6 +155,10 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
     try { setError(undefined); await controller.openSession(routeId, sessionId) }
     catch (reason) { setError(message(reason)) }
   }
+  const startSession = async (companionId: string): Promise<void> => {
+    try { setError(undefined); await controller.startSession(companionId) }
+    catch (reason) { setError(message(reason)) }
+  }
   const renewSession = async (routeId: string): Promise<void> => {
     try { setError(undefined); await controller.renewSession(routeId) }
     catch (reason) { setError(message(reason)) }
@@ -187,11 +198,11 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             <TabButton active={view === 'memory'} onClick={() => setView('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
           </nav>
           <div className="dsh-partner-stage-scroll">
-            {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} renewSession={renewSession} />}
+            {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} />}
             {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={refresh} />}
             {view === 'capabilities' && <CapabilityEditor companion={selected} presets={snapshot?.presets ?? []} onChanged={refresh} />}
             {view === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
-            {view === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} renewSession={renewSession} onChanged={refresh} />}
+            {view === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
           </div>
         </>}
         {error && <p className="dsh-partner-error" role="alert">{error}</p>}
@@ -200,14 +211,14 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   </main>
 }
 
-function HomePanel({ companion, snapshot, navigate, openSession, renewSession }: { companion: CompanionView; snapshot: PartnerSnapshot; navigate(tab: CompanionTab): void; openSession(routeId: string, sessionId: string): Promise<void>; renewSession(routeId: string): Promise<void> }): JSX.Element {
+function HomePanel({ companion, snapshot, navigate, openSession, startSession, renewSession }: { companion: CompanionView; snapshot: PartnerSnapshot; navigate(tab: CompanionTab): void; openSession(routeId: string, sessionId: string): Promise<void>; startSession(companionId: string): Promise<void>; renewSession(routeId: string): Promise<void> }): JSX.Element {
   const channel = snapshot.channels.find(item => item.companionId === companion.id)
   const sessions = snapshot.sessions.filter(item => item.companionId === companion.id)
+  const localSession = sessions.find(item => item.kind === 'local')
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
   const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git' })[item])
   const online = channel?.runtimeStatus === 'running'
-  const latestSession = sessions.reduce<(typeof sessions)[number] | undefined>((latest, item) => latest === undefined || item.lastMessageAt > latest.lastMessageAt ? item : latest, undefined)
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
       <span><small>工作台</small><h2>{online ? `${companion.name} 正在微信待命` : `连接 ${companion.name} 的第一条渠道`}</h2></span>
@@ -241,8 +252,8 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
         <div className="dsh-partner-home-capability-list">{capabilities.length ? capabilities.map(item => <em key={item}>{item}</em>) : <small>尚未声明能力范围</small>}</div>
       </GlassSurface>
       <GlassSurface as="section" interactive className="dsh-partner-home-continuity" borderRadius={15} distortionScale={-11} saturation={1.06}>
-        <header><span><IconDataOutline16 size={16} /></span><div><small>会话连续性</small><strong>{sessions.length ? `${sessions.length} 个共享会话` : '等待第一条消息'}</strong></div><button type="button" onClick={() => latestSession === undefined ? navigate('memory') : latestSession.archived ? void renewSession(latestSession.id) : void openSession(latestSession.id, latestSession.sessionId)}>{latestSession === undefined ? '查看' : latestSession.archived ? '开始新会话' : '打开会话'}</button></header>
-        <p>{sessions.length ? `最近活动于 ${relativeTime(Math.max(...sessions.map(item => item.lastMessageAt)))}` : '微信联系人通过配对后，将在这里建立独立上下文。'}</p>
+        <header><span><IconDataOutline16 size={16} /></span><div><small>伙伴对话</small><strong>{localSession ? '本地会话已建立' : '随时开始，不依赖微信'}</strong></div><button type="button" onClick={() => localSession === undefined ? void startSession(companion.id) : localSession.archived ? void renewSession(localSession.id) : void openSession(localSession.id, localSession.sessionId)}>{localSession === undefined ? '开始对话' : localSession.archived ? '开始新会话' : '打开会话'}</button></header>
+        <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；另有 ${sessions.filter(item => item.kind === 'channel').length} 个渠道会话。` : '本地对话使用伙伴自己的身份、模型、能力与独立工作目录。微信只是可选的额外入口。'}</p>
       </GlassSurface>
     </div>
   </div>
@@ -349,8 +360,10 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
   </div>
 }
 
-function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged }: { companion: CompanionView; snapshot: PartnerSnapshot; openSession(routeId: string, sessionId: string): Promise<void>; renewSession(routeId: string): Promise<void>; onChanged(): Promise<void> }): JSX.Element {
-  const sessions = snapshot.sessions.filter(item => item.companionId === companion.id)
+function MemoryPanel({ companion, snapshot, openSession, startSession, renewSession, onChanged }: { companion: CompanionView; snapshot: PartnerSnapshot; openSession(routeId: string, sessionId: string): Promise<void>; startSession(companionId: string): Promise<void>; renewSession(routeId: string): Promise<void>; onChanged(): Promise<void> }): JSX.Element {
+  const sessions = snapshot.sessions.filter(item => item.companionId === companion.id).sort((left, right) => Number(right.kind === 'local') - Number(left.kind === 'local') || right.lastMessageAt - left.lastMessageAt)
+  const localSession = sessions.find(item => item.kind === 'local')
+  const channelSessionCount = sessions.filter(item => item.kind === 'channel').length
   const heartbeat = snapshot.heartbeatStates.find(item => item.companionId === companion.id)
   const [automation, setAutomation] = useState<AutomationView>(() => structuredClone(companion.automation))
   const [memories, setMemories] = useState<MemoryView[]>([])
@@ -430,8 +443,8 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
       await loadMemory()
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
-  return <div className="dsh-partner-form is-memory"><Section eyebrow="CONTINUITY" title="会话记忆" detail="这里展示渠道会话边界。知识库仍由知识库插件管理，伙伴不会把不同微信联系人的原始上下文混在一起。" />
-    <div className="dsh-partner-metrics"><article><small>渠道会话</small><strong>{sessions.length}</strong><p>每位联系人独立</p></article><article><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></article><article><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></article></div>
+  return <div className="dsh-partner-form is-memory"><Section eyebrow="CONTINUITY" title="会话记忆" detail="伙伴可以直接在 DSH 中建立本地对话；微信只是可选渠道。不同联系人仍保持独立上下文，知识库继续由知识库插件管理。" />
+    <div className="dsh-partner-metrics"><article><small>伙伴会话</small><strong>{sessions.length}</strong><p>{localSession ? `1 个本地 · ${channelSessionCount} 个渠道` : `${channelSessionCount} 个渠道`}</p></article><article><small>长期记忆</small><strong>{memories.filter(item => item.status === 'active').length}</strong><p>{reflections.length} 篇每日回顾</p></article><article><small>最近心跳</small><strong>{heartbeat?.lastCheckedAt ? relativeTime(heartbeat.lastCheckedAt) : '尚未'}</strong><p>{heartbeat?.lastError ? '上次执行异常' : `今日发送 ${heartbeat?.sentCount ?? 0} 次`}</p></article></div>
 
     <div className="dsh-partner-automation-grid"><section className="dsh-partner-automation">
       <header><span><strong>学习与长期记忆</strong><small>按联系人归档完整对话，提炼每日回顾和结构化记忆，并在相关话题出现时召回。</small></span><button type="button" className="dsh-partner-switch" data-on={automation.memory.enabled} aria-label="启用伙伴学习" onClick={() => setAutomation(current => ({ ...current, memory: { ...current.memory, enabled: !current.memory.enabled } }))}><i /></button></header>
@@ -457,8 +470,8 @@ function MemoryPanel({ companion, snapshot, openSession, renewSession, onChanged
 
     <MemoryLibrary companionId={companion.id} revision={memoryRevision} profiles={profiles} memories={memories} reflections={reflections} editing={editing} busy={busy} setEditing={setEditing} save={() => { void saveMemory() }} remove={item => { void deleteMemory(item) }} />
 
-    <div className="dsh-partner-section-heading"><span><small>SESSIONS</small><strong>共享会话</strong></span></div>
-    <div className="dsh-partner-session-list">{sessions.map(item => <article key={item.id} data-archived={item.archived}><span><IconDataOutline16 size={16} /></span><div><strong>微信联系人 · {item.userId.slice(-6)}</strong><small>{item.archived ? '已归档 · 长期记忆保留' : `${item.sessionId} · ${new Date(item.lastMessageAt).toLocaleString()}`}</small></div><button type="button" className={item.archived ? 'is-primary' : undefined} onClick={() => { if (item.archived) void renewSession(item.id); else void openSession(item.id, item.sessionId) }}>{item.archived ? '开始新会话' : '打开会话'}</button></article>)}{sessions.length === 0 && <State title="还没有共享会话" detail="联系人完成配对并发来第一条消息后，伙伴会创建网页与微信共用的会话。" compact />}</div>
+    <div className="dsh-partner-section-heading"><span><small>SESSIONS</small><strong>伙伴会话</strong></span>{localSession === undefined && <button type="button" onClick={() => { void startSession(companion.id) }}><IconPlusOutline16 size={14} />开始本地对话</button>}</div>
+    <div className="dsh-partner-session-list">{sessions.map(item => <article key={item.id} data-archived={item.archived} data-kind={item.kind}><span><IconDataOutline16 size={16} /></span><div><strong>{item.kind === 'local' ? '本地伙伴会话' : `微信联系人 · ${item.userId.slice(-6)}`}</strong><small>{item.archived ? '已归档 · 长期记忆保留' : `${item.sessionId} · ${new Date(item.lastMessageAt).toLocaleString()}`}</small></div><button type="button" className={item.archived ? 'is-primary' : undefined} onClick={() => { if (item.archived) void renewSession(item.id); else void openSession(item.id, item.sessionId) }}>{item.archived ? '开始新会话' : '打开会话'}</button></article>)}{sessions.length === 0 && <State title="还没有伙伴会话" detail="无需连接微信，直接开始本地对话；以后连接的微信联系人会继续使用各自独立的渠道会话。" action={<button type="button" onClick={() => { void startSession(companion.id) }}>开始对话</button>} compact />}</div>
   </div>
 }
 

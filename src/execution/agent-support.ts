@@ -2,7 +2,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { Companion } from '../domain.js'
 
-export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'heartbeat' | 'ephemeral' = 'conversation'): string {
+export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'local' | 'heartbeat' | 'ephemeral' = 'conversation'): string {
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [
     `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
@@ -14,7 +14,9 @@ export function renderPartnerPersona(companion: Companion, surface: 'conversatio
       ? '这是一轮独立的伙伴心跳，不是用户聊天的延续。只根据本轮真实可读信息行动，最终结果由渠道适配器决定是否发送。'
       : surface === 'ephemeral'
         ? '这是一个有明确边界的临时工作会话。只处理本轮任务，使用真实工具结果，完成后给出可审计的结果摘要；不得读取或推断其他伙伴的私有会话、凭据与长期记忆。'
-        : '这个会话由 DSH 网页与微信私聊渠道共同使用。保持同一上下文，不要假定每条消息都来自微信；渠道回传由适配器负责。回答兼顾网页与移动端阅读，执行外部操作前继续遵守工具自身的授权与审批边界。',
+        : surface === 'local'
+          ? '这是用户在 DSH 中与你直接建立的本地伙伴会话，不依赖任何外部渠道。保持连续上下文并正常使用已授权能力；不要假定消息来自微信。'
+          : '这个会话由 DSH 网页与微信私聊渠道共同使用。保持同一上下文，不要假定每条消息都来自微信；渠道回传由适配器负责。回答兼顾网页与移动端阅读，执行外部操作前继续遵守工具自身的授权与审批边界。',
   ].filter(Boolean).join('\n\n')
 }
 

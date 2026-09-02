@@ -75,7 +75,7 @@ export class PartnerStore {
 
 function emptyState(): PartnerState {
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [],
     skills: [], skillBindings: [], skillMarketSources: mergeBuiltinMarketSources([]), skillMarketNetwork: {}, tasks: [], taskActivities: [], delegations: [], companionAccessGrants: [], schedules: [], executionRuns: [],
   }
@@ -216,6 +216,22 @@ function parseState(value: unknown): PartnerState {
   if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 12) {
     value = { ...(value as Record<string, unknown>), schemaVersion: 13, skillMarketNetwork: {} }
   }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 13) {
+    const legacy = value as Record<string, unknown>
+    value = {
+      ...legacy,
+      schemaVersion: 14,
+      sessions: Array.isArray(legacy.sessions) ? legacy.sessions.map(item => {
+        const session = item as Record<string, unknown>
+        return { ...session, kind: session.kind === 'local' ? 'local' : 'channel' }
+      }) : legacy.sessions,
+      tasks: Array.isArray(legacy.tasks) ? legacy.tasks.map(item => {
+        const task = item as Record<string, unknown>
+        const { relatedTaskIds, ...rest } = task
+        return { ...rest, dependencyTaskIds: Array.isArray(task.dependencyTaskIds) ? task.dependencyTaskIds : Array.isArray(relatedTaskIds) ? relatedTaskIds : [] }
+      }) : legacy.tasks,
+    }
+  }
   validateState(value)
   return value
 }
@@ -223,7 +239,7 @@ function parseState(value: unknown): PartnerState {
 function validateState(value: unknown): asserts value is PartnerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('partner state must be an object')
   const state = value as Partial<PartnerState>
-  if (state.schemaVersion !== 13) throw new Error('unsupported partner state schema')
+  if (state.schemaVersion !== 14) throw new Error('unsupported partner state schema')
   for (const key of [
     'companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates',
     'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns',

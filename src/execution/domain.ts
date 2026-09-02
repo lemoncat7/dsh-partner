@@ -1,4 +1,4 @@
-export type ExecutionKind = 'schedule' | 'delegation' | 'skill'
+export type ExecutionKind = 'schedule' | 'delegation' | 'review' | 'skill'
 export type ExecutionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled' | 'timed-out'
 
 export interface ExecutionRun {

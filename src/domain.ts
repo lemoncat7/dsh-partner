@@ -75,6 +75,8 @@ export interface PairingRequest {
 
 export interface ChannelSession {
   id: string
+  /** Local DSH conversation or a channel-backed contact conversation. */
+  kind: 'local' | 'channel'
   channelId: string
   userId: string
   companionId: string
@@ -85,7 +87,7 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
-  schemaVersion: 13
+  schemaVersion: 14
   companions: Companion[]
   channels: WeixinChannel[]
   pairings: PairingRequest[]

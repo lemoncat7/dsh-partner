@@ -6,6 +6,7 @@ const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
 const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
+const boardSource = await readFile(new URL('../src/ui/task-board-panel.tsx', import.meta.url), 'utf8')
 
 test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
   const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
@@ -55,4 +56,21 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.match(clientSource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
   assert.match(skillSource, /这里负责安装和维护 Skill/)
   assert.match(scheduleSource, /name="companionId" required/)
+})
+
+test('companion capabilities render enabled Skills first and disclose unselected Skills on demand', () => {
+  const settings = skillSource.slice(skillSource.indexOf('export function CompanionSkillSettings'), skillSource.indexOf('function NewSkillForm'))
+  assert.match(settings, /enabledSkills\.map/)
+  assert.doesNotMatch(settings, /catalog\.installed\.map/)
+  assert.match(settings, /aria-expanded=\{selecting\}/)
+  assert.match(settings, /visibleAvailableSkills\.map/)
+  assert.match(settings, /slice\(0, 80\)/)
+})
+
+test('task board refreshes while visible and keeps card details collapsed by default', () => {
+  assert.match(boardSource, /LIVE_REFRESH_MS = 4_000/)
+  assert.match(boardSource, /document\.visibilityState === 'visible'/)
+  assert.match(boardSource, /aria-expanded=\{expanded\}/)
+  assert.match(boardSource, /task\.resultSummary/)
+  assert.match(boardSource, /dependencyTaskIds/)
 })
