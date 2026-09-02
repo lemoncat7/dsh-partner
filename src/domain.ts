@@ -4,7 +4,7 @@ import type { PartnerDelegation } from './collaboration/domain.js'
 import type { ExecutionRun } from './execution/domain.js'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
 
-export type CompanionCapability = 'knowledge' | 'skills' | 'collaboration' | 'ssh' | 'git'
+export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
@@ -85,7 +85,7 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
-  schemaVersion: 11
+  schemaVersion: 12
   companions: Companion[]
   channels: WeixinChannel[]
   pairings: PairingRequest[]
@@ -98,8 +98,16 @@ export interface PartnerState {
   tasks: BoardTask[]
   taskActivities: TaskActivity[]
   delegations: PartnerDelegation[]
+  companionAccessGrants: CompanionAccessGrant[]
   schedules: ScheduledPartnerTask[]
   executionRuns: ExecutionRun[]
+}
+
+/** A directed capability-directory and delegation grant: from -> to. */
+export interface CompanionAccessGrant {
+  fromCompanionId: string
+  toCompanionId: string
+  createdAt: number
 }
 
 export interface CompanionDraft {
@@ -241,5 +249,5 @@ function optionalText(value: unknown, label: string, max: number): string | unde
 }
 
 function isCapability(value: string): value is CompanionCapability {
-  return value === 'knowledge' || value === 'skills' || value === 'collaboration' || value === 'ssh' || value === 'git'
+  return value === 'knowledge' || value === 'skills' || value === 'ssh' || value === 'git'
 }

@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFocus, type PartnerState } from './domain.js'
+import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -74,9 +75,9 @@ export class PartnerStore {
 
 function emptyState(): PartnerState {
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     companions: [createDefaultCompanion()], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [],
-    skills: [], skillBindings: [], skillMarketSources: [], tasks: [], taskActivities: [], delegations: [], schedules: [], executionRuns: [],
+    skills: [], skillBindings: [], skillMarketSources: mergeBuiltinMarketSources([]), tasks: [], taskActivities: [], delegations: [], companionAccessGrants: [], schedules: [], executionRuns: [],
   }
 }
 
@@ -197,6 +198,21 @@ function parseState(value: unknown): PartnerState {
       skills: [], skillBindings: [], skillMarketSources: [], tasks: [], taskActivities: [], delegations: [], schedules: [], executionRuns: [],
     }
   }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === 11) {
+    const legacy = value as Record<string, unknown>
+    const sources = Array.isArray(legacy.skillMarketSources) ? legacy.skillMarketSources.map(item => ({ ...(item as Record<string, unknown>), kind: 'dsh-index' })) : []
+    value = {
+      ...legacy,
+      schemaVersion: 12,
+      companions: Array.isArray(legacy.companions) ? legacy.companions.map(item => {
+        const companion = item as Record<string, unknown>
+        return { ...companion, capabilities: Array.isArray(companion.capabilities) ? companion.capabilities.filter(capability => capability !== 'collaboration') : [] }
+      }) : legacy.companions,
+      skillMarketSources: mergeBuiltinMarketSources(sources as PartnerState['skillMarketSources']),
+      companionAccessGrants: [],
+      delegations: Array.isArray(legacy.delegations) ? legacy.delegations.map(item => ({ initiatedBy: 'companion', ...(item as Record<string, unknown>) })) : [],
+    }
+  }
   validateState(value)
   return value
 }
@@ -204,12 +220,22 @@ function parseState(value: unknown): PartnerState {
 function validateState(value: unknown): asserts value is PartnerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('partner state must be an object')
   const state = value as Partial<PartnerState>
-  if (state.schemaVersion !== 11) throw new Error('unsupported partner state schema')
+  if (state.schemaVersion !== 12) throw new Error('unsupported partner state schema')
   for (const key of [
     'companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates',
-    'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'schedules', 'executionRuns',
+    'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns',
   ] as const) {
     if (!Array.isArray(state[key])) throw new Error(`partner state ${key} must be an array`)
+  }
+  const companionIds = new Set(state.companions!.map(companion => companion.id))
+  const grantKeys = new Set<string>()
+  if (state.companionAccessGrants!.length > 1000) throw new Error('partner state companionAccessGrants exceeds limit')
+  for (const grant of state.companionAccessGrants!) {
+    if (!companionIds.has(grant.fromCompanionId) || !companionIds.has(grant.toCompanionId)) throw new Error('partner access grant references a missing companion')
+    if (grant.fromCompanionId === grant.toCompanionId) throw new Error('partner access grant cannot target itself')
+    const key = `${grant.fromCompanionId}\u0000${grant.toCompanionId}`
+    if (grantKeys.has(key)) throw new Error('partner access grant is duplicated')
+    grantKeys.add(key)
   }
 }
 

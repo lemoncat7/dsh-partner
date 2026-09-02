@@ -1,6 +1,6 @@
 export const PARTNER_API = '/partner-local/v1'
 
-export type Capability = 'knowledge' | 'skills' | 'collaboration' | 'ssh' | 'git'
+export type Capability = 'knowledge' | 'skills' | 'ssh' | 'git'
 export interface AutomationView {
   memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; dailyReviewEnabled: boolean; dailyReviewHour: number }
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
@@ -61,7 +61,7 @@ export interface SkillView {
   source: 'builtin' | 'market' | 'local'; sourceId?: string; executionContext: 'inline' | 'fork'; trusted: boolean; updatedAt: number
 }
 export interface SkillBindingView { companionId: string; skillId: string; enabled: boolean }
-export interface SkillMarketSourceView { id: string; name: string; indexUrl: string; enabled: boolean; trusted: boolean }
+export interface SkillMarketSourceView { id: string; name: string; kind: 'dsh-index' | 'clawhub' | 'loophub' | 'skillhub'; indexUrl: string; enabled: boolean; trusted: boolean; builtin?: boolean }
 export interface MarketSkillView { id: string; name: string; description: string; version: string; tags: string[]; sourceId: string }
 export interface SkillCatalogView { installed: SkillView[]; bindings: SkillBindingView[]; sources: SkillMarketSourceView[] }
 export interface SkillMarketView { sources: SkillMarketSourceView[]; entries: MarketSkillView[]; errors: Array<{ sourceId: string; error: string }> }
@@ -75,6 +75,7 @@ export interface BoardTaskView {
 export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
 export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }
 export interface PartnerDirectoryEntryView { id: string; name: string; role: string; description: string; capabilities: string[]; enabledSkills: Array<{ id: string; name: string }>; availability: 'available' | 'busy' | 'offline' }
+export interface CompanionAccessView { targetIds: string[]; companions: PartnerDirectoryEntryView[] }
 
 export interface ScheduledTaskView {
   id: string; companionId: string; title: string; prompt: string

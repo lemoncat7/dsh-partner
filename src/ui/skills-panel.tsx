@@ -6,6 +6,7 @@ export function SkillsPanel(): JSX.Element {
   const [catalog, setCatalog] = useState<SkillCatalogView>({ installed: [], bindings: [], sources: [] })
   const [market, setMarket] = useState<SkillMarketView>({ sources: [], entries: [], errors: [] })
   const [query, setQuery] = useState('')
+  const [activeSource, setActiveSource] = useState('market-clawhub')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
   const [addingSource, setAddingSource] = useState(false)
@@ -21,8 +22,9 @@ export function SkillsPanel(): JSX.Element {
   const installed = new Map(catalog.installed.map(item => [item.id, item]))
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
-    return market.entries.filter(item => !normalized || `${item.name} ${item.description} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(normalized))
-  }, [market.entries, query])
+    return market.entries.filter(item => (item.sourceId === activeSource) && (!normalized || `${item.name} ${item.description} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(normalized)))
+  }, [activeSource, market.entries, query])
+  const sources = [{ id: 'builtin', name: '内置精选' }, ...market.sources.map(source => ({ id: source.id, name: source.name }))]
   const install = async (entry: MarketSkillView): Promise<void> => {
     setBusy(entry.id)
     try {
@@ -45,15 +47,16 @@ export function SkillsPanel(): JSX.Element {
       </article>)}</div>}
     </section>
     <section className="dsh-partner-feature-block">
-      <header><span><strong>Skill 市场</strong><small>内置精选 + 可扩展市场源</small></span><button type="button" onClick={() => setAddingSource(value => !value)}><IconPlusOutline16 size={14} />市场源</button></header>
+      <header><span><strong>Skill 市场</strong><small>内置 ClawHub、LoopHub、SkillHub，与 nomifun 当前 Skill 榜单一致</small></span><button type="button" onClick={() => setAddingSource(value => !value)}><IconPlusOutline16 size={14} />自定义源</button></header>
       {addingSource && <MarketSourceForm close={() => setAddingSource(false)} changed={() => load(true)} />}
+      <nav className="dsh-partner-market-sources" aria-label="Skill 市场来源">{sources.map(source => <button type="button" key={source.id} className={activeSource === source.id ? 'is-active' : ''} aria-pressed={activeSource === source.id} onClick={() => setActiveSource(source.id)}>{source.name}<small>{market.entries.filter(entry => entry.sourceId === source.id).length}</small></button>)}</nav>
       <label className="dsh-partner-feature-search"><IconBrowseOutline16 size={16} /><span className="sr-only">搜索 Skill</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、说明或标签" /></label>
-      {market.errors.length > 0 && <p className="dsh-partner-inline-warning">{market.errors.map(item => item.error).join('；')}</p>}
+      {market.errors.some(item => item.sourceId === activeSource) && <p className="dsh-partner-inline-warning">{market.errors.filter(item => item.sourceId === activeSource).map(item => item.error).join('；')}</p>}
       <div className="dsh-partner-market-grid">{visible.map(entry => {
         const current = installed.get(entry.id)
         return <article key={`${entry.sourceId}:${entry.id}`}><span><small>{entry.tags.slice(0, 3).join(' · ') || 'SKILL'}</small><strong>{entry.name}</strong><p>{entry.description}</p></span><footer><small>v{entry.version}</small>{current ? <button type="button" disabled><IconCheckOutline16 size={14} />已安装</button> : <button type="button" disabled={busy === entry.id} onClick={() => { void install(entry) }}>{busy === entry.id ? '安装中…' : '安装'}</button>}</footer></article>
       })}</div>
-      {visible.length === 0 && <Empty text={query ? '没有匹配的 Skill。' : '市场暂时没有可用 Skill，可添加兼容的 JSON 索引源。'} />}
+      {visible.length === 0 && <Empty text={query ? '当前来源没有匹配的 Skill。' : '当前来源暂时没有可用 Skill，可刷新后重试。'} />}
     </section>
     {error && <p className="dsh-partner-error" role="alert">{error}</p>}
   </div>

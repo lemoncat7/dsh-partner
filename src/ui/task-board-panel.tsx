@@ -11,15 +11,12 @@ export function TaskBoardPanel(): JSX.Element {
   const [board, setBoard] = useState<TaskBoardView>({ tasks: [], activities: [] })
   const [directory, setDirectory] = useState<PartnerDirectoryEntryView[]>([])
   const [creating, setCreating] = useState(false)
-  const [coordinatorId, setCoordinatorId] = useState('')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
   const load = useCallback(async () => {
     try {
       const [next, collaboration] = await Promise.all([api<TaskBoardView>('/tasks'), api<{ companions: PartnerDirectoryEntryView[] }>('/collaboration')])
       setBoard(next); setDirectory(collaboration.companions)
-      const coordinators = collaboration.companions.filter(item => item.capabilities.includes('collaboration'))
-      setCoordinatorId(current => coordinators.some(item => item.id === current) ? current : coordinators[0]?.id ?? '')
       setError(undefined)
     } catch (reason) { setError(message(reason)) }
   }, [])
@@ -35,17 +32,16 @@ export function TaskBoardPanel(): JSX.Element {
     catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
   }
   const delegate = async (task: BoardTaskView): Promise<void> => {
-    if (!task.assigneeCompanionId || !coordinatorId || task.assigneeCompanionId === coordinatorId) return
+    if (!task.assigneeCompanionId) return
     setBusy(task.id)
     try {
-      await api(`/tasks/${task.id}/delegate`, { method: 'POST', body: JSON.stringify({ fromCompanionId: coordinatorId, to: task.assigneeCompanionId, request: task.description || `完成任务：${task.title}` }) })
+      await api(`/tasks/${task.id}/delegate`, { method: 'POST', body: JSON.stringify({ to: task.assigneeCompanionId, request: task.description || `完成任务：${task.title}` }) })
       await load()
     } catch (reason) { setError(message(reason)) } finally { setBusy(undefined) }
   }
   const remove = async (id: string): Promise<void> => { setBusy(id); try { await api(`/tasks/${id}`, { method: 'DELETE' }); await load() } catch (reason) { setError(message(reason)) } finally { setBusy(undefined) } }
   return <div className="dsh-partner-feature-page is-board">
-    <header className="dsh-partner-feature-hero"><span><small>SHARED WORKSPACE</small><h2>伙伴任务看板</h2><p>人和伙伴共享同一份任务状态；授权了“伙伴协作”的伙伴可以查看安全能力目录并把任务真正委派给另一位伙伴。</p></span><div><label className="dsh-partner-feature-filter"><span>委派发起者</span><select aria-label="委派发起伙伴" value={coordinatorId} onChange={event => setCoordinatorId(event.target.value)}><option value="">未授权</option>{directory.filter(item => item.capabilities.includes('collaboration')).map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label><button type="button" onClick={() => { void load() }}><IconRefreshOutline16 size={15} />刷新</button><button type="button" onClick={() => setCreating(true)}><IconPlusOutline16 size={15} />新任务</button></div></header>
-    {directory.length > 0 && !coordinatorId && <p className="dsh-partner-inline-warning">还没有伙伴获得“伙伴协作”能力。看板仍可编辑，但暂时不能发起跨伙伴委派。</p>}
+    <header className="dsh-partner-feature-hero"><span><small>SHARED WORKSPACE</small><h2>伙伴任务看板</h2><p>你可以直接把任务交给任意伙伴；伙伴自主拆解工作时，只能委派给能力页中明确授权的伙伴。</p></span><div><button type="button" onClick={() => { void load() }}><IconRefreshOutline16 size={15} />刷新</button><button type="button" onClick={() => setCreating(true)}><IconPlusOutline16 size={15} />新任务</button></div></header>
     {creating && <TaskForm companions={directory} close={() => setCreating(false)} changed={load} />}
     <div className="dsh-partner-board" aria-label="任务看板">{COLUMNS.map(column => {
       const tasks = board.tasks.filter(item => item.status === column.id)
@@ -54,7 +50,7 @@ export function TaskBoardPanel(): JSX.Element {
         <strong>{task.title}</strong><p>{task.description || '没有补充说明'}</p>
         <label><span>状态</span><select value={task.status} disabled={busy === task.id} onChange={event => { void move(task, event.target.value as BoardTaskStatusView) }}>{COLUMNS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <label><span>负责人</span><select value={task.assigneeCompanionId ?? ''} disabled={busy === task.id} onChange={event => { void assign(task, event.target.value) }}><option value="">未指派</option>{directory.map(item => <option key={item.id} value={item.id}>@{item.name} · {item.availability === 'busy' ? '忙碌' : '可用'}</option>)}</select></label>
-        <footer><small>r{task.revision} · {new Date(task.updatedAt).toLocaleDateString()}</small><span>{task.assigneeCompanionId && coordinatorId && task.assigneeCompanionId !== coordinatorId && <button type="button" disabled={busy === task.id} onClick={() => { void delegate(task) }}>{busy === task.id ? '执行中…' : '委派执行'}</button>}<button type="button" className="is-icon" aria-label={`删除 ${task.title}`} disabled={busy === task.id} onClick={() => { void remove(task.id) }}><IconTrashOutline16 size={14} /></button></span></footer>
+        <footer><small>r{task.revision} · {new Date(task.updatedAt).toLocaleDateString()}</small><span>{task.assigneeCompanionId && <button type="button" disabled={busy === task.id} onClick={() => { void delegate(task) }}>{busy === task.id ? '执行中…' : `交给 @${directory.find(item => item.id === task.assigneeCompanionId)?.name ?? '伙伴'}`}</button>}<button type="button" className="is-icon" aria-label={`删除 ${task.title}`} disabled={busy === task.id} onClick={() => { void remove(task.id) }}><IconTrashOutline16 size={14} /></button></span></footer>
       </article>)}</div>{tasks.length === 0 && <p>暂无任务</p>}</section>
     })}</div>
     {error && <p className="dsh-partner-error" role="alert">{error}</p>}

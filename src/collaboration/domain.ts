@@ -3,7 +3,8 @@ export type DelegationStatus = 'queued' | 'running' | 'completed' | 'failed' | '
 export interface PartnerDelegation {
   id: string
   taskId: string
-  fromCompanionId: string
+  initiatedBy: 'user' | 'companion'
+  fromCompanionId?: string
   toCompanionId: string
   request: string
   status: DelegationStatus

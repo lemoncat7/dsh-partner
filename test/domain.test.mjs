@@ -39,7 +39,7 @@ test('normalizes companions, capabilities and optional model routes', () => {
   assert.deepEqual(normalizeCompanionDraft({
     name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '', presetId: '', provider: '', model: '',
     capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'root-access'],
-  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'collaboration', 'ssh'] })
+  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh'] })
 })
 
 test('inherits the DSH default model and permits companion overrides', () => {
@@ -362,10 +362,10 @@ test('migrates legacy partner states to the current schema and preserves focus o
     }
     await writeFile(path, JSON.stringify({ schemaVersion: 9, companions: [companion], channels: [], pairings: [], sessions: [], recentReceipts: [], heartbeatStates: [] }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 11)
+    assert.equal(state.schemaVersion, 12)
     assert.equal(state.companions[0].automation.heartbeat.legacyFocus, '项目风险\n依赖更新')
     assert.equal('focus' in state.companions[0].automation.heartbeat, false)
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 11)
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 12)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -379,7 +379,7 @@ test('migrates schema v1 defaults and obsolete focus cursor through the current 
       channels: [], pairings: [], sessions: [], recentReceipts: [],
     }))
     const state = (await PartnerStore.open(path)).snapshot()
-    assert.equal(state.schemaVersion, 11)
+    assert.equal(state.schemaVersion, 12)
     assert.equal(state.companions[0].automation.memory.retentionDays, 0)
     assert.equal(state.companions[0].automation.heartbeat.enabled, false)
     assert.deepEqual(state.heartbeatStates, [])

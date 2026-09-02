@@ -29,9 +29,11 @@ export interface CompanionSkillBinding {
 export interface SkillMarketSource {
   id: string
   name: string
+  kind: 'dsh-index' | 'clawhub' | 'loophub' | 'skillhub'
   indexUrl: string
   enabled: boolean
   trusted: boolean
+  builtin?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -43,6 +45,7 @@ export interface MarketSkillEntry {
   version: string
   tags: string[]
   skillUrl: string
+  installKind?: 'markdown' | 'zip'
   checksum?: string
   sourceId: string
 }

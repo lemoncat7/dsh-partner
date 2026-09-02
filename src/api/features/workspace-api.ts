@@ -66,6 +66,23 @@ export async function dispatchPartnerWorkspaceApi(
     }
     sendJson(res, 200, { ok: true }); return true
   }
+  if (segments[0] === 'companions' && segments[1] && segments[2] === 'access' && segments.length === 3) {
+    const companionId = segments[1]
+    if (method === 'GET') { sendJson(res, 200, { targetIds: runtime.collaboration.accessTargetIds(companionId), companions: runtime.collaboration.directory().filter(item => item.id !== companionId) }); return true }
+    if (method === 'PUT') {
+      mutation(req); const body = await readObject(req)
+      if (!Array.isArray(body.targetIds) || !body.targetIds.every(id => typeof id === 'string')) throw new Error('targetIds must be a string array')
+      const previous = runtime.collaboration.accessTargetIds(companionId)
+      const targetIds = await runtime.collaboration.replaceAccessTargets(companionId, body.targetIds)
+      try { await runtime.agents.reloadCompanion(companionId) }
+      catch (error) {
+        await runtime.collaboration.replaceAccessTargets(companionId, previous)
+        await runtime.agents.reloadCompanion(companionId).catch(() => {})
+        throw error
+      }
+      sendJson(res, 200, { targetIds }); return true
+    }
+  }
   if (segments[0] === 'tasks') {
     if (method === 'GET' && segments.length === 1) { sendJson(res, 200, runtime.tasks.snapshot()); return true }
     if (method === 'POST' && segments.length === 1) { mutation(req); sendJson(res, 201, await runtime.tasks.create(await readObject(req), { kind: 'user' })); return true }
@@ -78,7 +95,7 @@ export async function dispatchPartnerWorkspaceApi(
     if (id && method === 'POST' && segments[2] === 'delegate' && segments.length === 3) {
       mutation(req); const body = await readObject(req)
       sendJson(res, 200, await runtime.collaboration.delegate({
-        taskId: id, fromCompanionId: String(body.fromCompanionId ?? ''), to: String(body.to ?? ''), request: String(body.request ?? ''),
+        taskId: id, initiatedBy: 'user', to: String(body.to ?? ''), request: String(body.request ?? ''),
       })); return true
     }
   }

@@ -13,7 +13,8 @@ import { nextOccurrence } from '../lib/scheduler/service.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
 import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
-import { registerPartnerApi } from '../lib/api.js'
+import { parseMarketResponse } from '../lib/skills/markets/adapters.js'
+import { builtinMarketSources } from '../lib/skills/markets/builtin.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-partner-workspace-'))
@@ -33,8 +34,9 @@ function response() {
 test('migrated store exposes all bounded workspace domains', async t => {
   const item = await fixture(); t.after(item.close)
   const state = item.store.snapshot()
-  assert.equal(state.schemaVersion, 11)
-  for (const key of ['skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'schedules', 'executionRuns']) assert.deepEqual(state[key], [])
+  assert.equal(state.schemaVersion, 12)
+  for (const key of ['skills', 'skillBindings', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns']) assert.deepEqual(state[key], [])
+  assert.deepEqual(state.skillMarketSources.map(source => source.name), ['ClawHub', 'LoopHub', 'SkillHub'])
 })
 
 test('built-in market installs separately from companion binding', async t => {
@@ -48,6 +50,18 @@ test('built-in market installs separately from companion binding', async t => {
   assert.equal(service.bindings('companion-default').length, 0)
   await service.setBinding('companion-default', installed.id, true)
   assert.deepEqual(service.bindings('companion-default').map(skill => skill.id), ['technical-research'])
+})
+
+test('nomifun-compatible market adapters normalize ClawHub, LoopHub and SkillHub rankings', () => {
+  const [clawhub, loophub, skillhub] = builtinMarketSources(1)
+  const claw = parseMarketResponse({ value: { page: [{ ownerHandle: 'alice', skill: { slug: 'web-audit', displayName: 'Web Audit', summary: 'Audit sites', topics: ['web'], isSuspicious: false }, latestVersion: { version: '1.2.0' } }] } }, clawhub)
+  const loop = parseMarketResponse({ data: { items: [{ author: 'bob', name: 'Planner', brief: 'Plan work', category: 'productivity', security_level: 'A', download_url: 'https://dl.cocoloop.cn/bss/skills/bob-planner-2.0.1.zip' }] } }, loophub)
+  const hub = parseMarketResponse({ data: { skills: [{ name: 'Research', slug: 'research', description_zh: '资料研究', version: '3.0.0', namespace: { canonicalName: '@carol/research', handle: 'carol' }, subCategories: [{ name: '检索' }] }] } }, skillhub)
+  assert.deepEqual([claw.length, loop.length, hub.length], [1, 1, 1])
+  assert.equal(claw[0].skillUrl, 'https://clawhub.ai/api/v1/download?slug=web-audit&version=1.2.0')
+  assert.equal(loop[0].version, '2.0.1')
+  assert.equal(hub[0].skillUrl, 'https://api.skillhub.cn/api/v1/download?slug=research')
+  assert.ok([claw[0], loop[0], hub[0]].every(entry => entry.installKind === 'zip'))
 })
 
 test('untrusted Skill cannot request inline execution and tampering is detected', async t => {
@@ -71,7 +85,7 @@ test('task board rejects stale concurrent updates and records activities', async
   assert.equal(board.snapshot().activities.length, 2)
 })
 
-test('cross-partner delegation requires the explicit collaboration capability', async t => {
+test('cross-partner delegation uses directed grants while user delegation bypasses partner grants', async t => {
   const item = await fixture(); t.after(item.close)
   await item.store.update(state => state.companions.push({
     ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴', createdAt: 2, updatedAt: 2,
@@ -79,14 +93,25 @@ test('cross-partner delegation requires the explicit collaboration capability', 
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   const board = new TaskBoardService(item.store)
   const task = await board.create({ title: '权限边界测试' }, { kind: 'user' })
-  const service = new PartnerCollaborationService(item.store, skills, board, { execute: async () => { throw new Error('executor must not run') } })
+  const service = new PartnerCollaborationService(item.store, skills, board, { execute: async () => ({ run: { id: 'run-1' }, output: '完成' }) })
   await assert.rejects(() => service.delegate({
-    taskId: task.id, fromCompanionId: 'companion-default', to: 'companion-reviewer', request: '执行任务',
-  }), /没有伙伴协作权限/)
+    taskId: task.id, initiatedBy: 'companion', fromCompanionId: 'companion-default', to: 'companion-reviewer', request: '执行任务',
+  }), /未获授权/)
   assert.equal(item.store.snapshot().delegations.length, 0)
+  await service.replaceAccessTargets('companion-default', ['companion-reviewer'])
+  assert.equal(service.canAccess('companion-default', 'companion-reviewer'), true)
+  assert.equal(service.canAccess('companion-reviewer', 'companion-default'), false)
+  assert.deepEqual(service.directoryFor('companion-default').map(entry => entry.id), ['companion-reviewer'])
+  const delegated = await service.delegate({ taskId: task.id, initiatedBy: 'companion', fromCompanionId: 'companion-default', to: 'companion-reviewer', request: '执行任务' })
+  assert.equal(delegated.initiatedBy, 'companion')
+
+  const userTask = await board.create({ title: '用户直接委派' }, { kind: 'user' })
+  const userDelegation = await service.delegate({ taskId: userTask.id, initiatedBy: 'user', to: 'companion-default', request: '用户执行' })
+  assert.equal(userDelegation.initiatedBy, 'user')
+  assert.equal(userDelegation.fromCompanionId, undefined)
 })
 
-test('partner collaboration tools are composed only inside an authorized companion scope', async t => {
+test('partner collaboration tools are always available but their directory remains grant-scoped', async t => {
   const item = await fixture(); t.after(item.close)
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   const board = new TaskBoardService(item.store)
@@ -99,9 +124,9 @@ test('partner collaboration tools are composed only inside an authorized compani
   }
   const companion = item.store.snapshot().companions[0]
   assert.ok(compose(companion).includes('partner_task_board'))
-  assert.ok(!compose(companion).includes('partner_collaborate'))
+  assert.ok(compose(companion).includes('partner_collaborate'))
   assert.ok(compose(companion).includes('partner_skill'))
-  assert.ok(compose({ ...companion, capabilities: [...companion.capabilities, 'collaboration'] }).includes('partner_collaborate'))
+  assert.deepEqual(collaboration.directoryFor(companion.id), [])
 })
 
 test('Skill binding reload observes the committed binding state', async t => {
@@ -121,19 +146,18 @@ test('Skill binding reload observes the committed binding state', async t => {
   assert.equal(observed, true)
 })
 
-test('companion capability reload observes committed permissions', async t => {
+test('companion access API commits directed grants before reloading the source companion', async t => {
   const item = await fixture(); t.after(item.close)
-  let handler
+  await item.store.update(state => state.companions.push({ ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴' }))
+  const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
+  const collaboration = new PartnerCollaborationService(item.store, skills, new TaskBoardService(item.store), {})
   let observed = false
-  const runtime = {
-    store: item.store,
-    agents: { async reloadCompanion(id) { observed = item.store.snapshot().companions.find(companion => companion.id === id)?.capabilities.includes('collaboration') === true } },
-  }
-  registerPartnerApi({ register(route) { handler = route.handler; return () => {} } }, '/partner-local/v1', runtime)
-  const companion = item.store.snapshot().companions[0]
   const res = response()
-  await handler(request('PUT', '/partner-local/v1/companions/companion-default', { companion: { ...companion, capabilities: [...companion.capabilities, 'collaboration'] } }), res)
-  assert.equal(res.statusCode, 200)
+  const handled = await dispatchPartnerWorkspaceApi(request('PUT', '/', { targetIds: ['companion-reviewer'] }), res, ['companions', 'companion-default', 'access'], new URL('http://localhost/'), {
+    store: item.store, skills, tasks: {}, collaboration, scheduler: {},
+    agents: { async reloadCompanion(id) { observed = id === 'companion-default' && collaboration.canAccess(id, 'companion-reviewer') } },
+  })
+  assert.equal(handled, true)
   assert.equal(observed, true)
 })
 

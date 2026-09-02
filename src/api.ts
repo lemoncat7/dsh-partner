@@ -57,7 +57,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
-  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 11 })
+  if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 12 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({
       id: provider.id, name: provider.name,
@@ -104,6 +104,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       await runtime.store.update(state => {
         state.companions = state.companions.filter(item => item.id !== id)
         state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
+        state.companionAccessGrants = state.companionAccessGrants.filter(grant => grant.fromCompanionId !== id && grant.toCompanionId !== id)
         state.schedules = state.schedules.filter(item => item.companionId !== id)
         for (const task of state.tasks) if (task.assigneeCompanionId === id) {
           delete task.assigneeCompanionId

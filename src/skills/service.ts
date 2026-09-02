@@ -7,6 +7,8 @@ import type { LoadedSkill, MarketSkillEntry, PartnerSkill, SkillMarketSource } f
 import { sha256 } from './loader.js'
 import { SkillRepository } from './repository.js'
 import { BUILTIN_SKILLS, BUILTIN_SKILL_SOURCE } from './builtin.js'
+import { marketRequest, parseMarketResponse } from './markets/adapters.js'
+import { extractSkillMarkdown } from './zip.js'
 
 const MARKET_CACHE_MS = 5 * 60_000
 const MAX_MARKET_BYTES = 1024 * 1024
@@ -78,7 +80,7 @@ export class SkillService {
     const indexUrl = validHttpUrl(requiredText(value.indexUrl, 'indexUrl', 2000))
     const now = Date.now()
     const source: SkillMarketSource = {
-      id: `market-${randomUUID()}`, name: requiredText(value.name, 'name', 100), indexUrl,
+      id: `market-${randomUUID()}`, name: requiredText(value.name, 'name', 100), kind: 'dsh-index', indexUrl,
       enabled: optionalBoolean(value.enabled, true), trusted: optionalBoolean(value.trusted, false), createdAt: now, updatedAt: now,
     }
     await this.store.update(state => {
@@ -89,7 +91,11 @@ export class SkillService {
   }
 
   async removeMarketSource(sourceId: string): Promise<void> {
-    await this.store.update(state => { state.skillMarketSources = state.skillMarketSources.filter(item => item.id !== sourceId) })
+    await this.store.update(state => {
+      const source = state.skillMarketSources.find(item => item.id === sourceId)
+      if (source?.builtin) throw new Error('Built-in Skill market source cannot be removed')
+      state.skillMarketSources = state.skillMarketSources.filter(item => item.id !== sourceId)
+    })
     this.cache.delete(sourceId)
   }
 
@@ -123,7 +129,7 @@ export class SkillService {
     if (!source) throw new Error('Skill market source is unavailable')
     const entry = (await this.loadMarket(source, false)).find(item => item.id === entryId)
     if (!entry) throw new Error('Skill market entry does not exist')
-    const document = await fetchText(entry.skillUrl, MAX_SKILL_BYTES)
+    const document = entry.installKind === 'zip' ? await fetchSkillFromZip(entry.skillUrl, MAX_SKILL_BYTES) : await fetchText(entry.skillUrl, MAX_SKILL_BYTES)
     if (entry.checksum && sha256(document) !== normalizeChecksum(entry.checksum)) throw new Error('Skill checksum verification failed')
     const installed = await this.repository.install({
       id: entry.id, document, source: 'market', sourceId: source.id, trusted: source.trusted,
@@ -137,8 +143,9 @@ export class SkillService {
   private async loadMarket(source: SkillMarketSource, force: boolean): Promise<MarketSkillEntry[]> {
     const cached = this.cache.get(source.id)
     if (!force && cached && cached.expiresAt > Date.now()) return cached.entries
-    const raw = await fetchText(source.indexUrl, MAX_MARKET_BYTES)
-    const entries = parseMarketIndex(JSON.parse(raw), source)
+    const request = marketRequest(source)
+    const raw = await fetchText(request.url, MAX_MARKET_BYTES, request.init)
+    const entries = parseMarketResponse(JSON.parse(raw), source)
     this.cache.set(source.id, { entries, expiresAt: Date.now() + MARKET_CACHE_MS })
     return entries
   }
@@ -157,34 +164,23 @@ export function renderEnabledSkills(companion: Companion, skills: PartnerSkill[]
   ].join('\n')
 }
 
-function parseMarketIndex(value: unknown, source: SkillMarketSource): MarketSkillEntry[] {
-  const entries = Array.isArray(value) ? value : (value as { skills?: unknown })?.skills
-  if (!Array.isArray(entries) || entries.length > 2000) throw new Error('Skill market index must contain at most 2000 skills')
-  const base = new URL(source.indexUrl)
-  return entries.map((item, index) => {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw new Error(`Market skill ${index} is invalid`)
-    const row = item as Record<string, unknown>
-    const id = requiredText(row.id, 'id', 120)
-    const skillUrl = new URL(requiredText(row.skillUrl, 'skillUrl', 2000), base).toString()
-    validHttpUrl(skillUrl)
-    const checksum = typeof row.checksum === 'string' && row.checksum.trim() ? normalizeChecksum(row.checksum) : undefined
-    return {
-      id, name: requiredText(row.name, 'name', 120), description: requiredText(row.description, 'description', 600),
-      version: typeof row.version === 'string' ? row.version.slice(0, 80) : '0.0.0',
-      tags: Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.slice(0, 40)).slice(0, 20) : [],
-      skillUrl, ...(checksum ? { checksum } : {}), sourceId: source.id,
-    }
-  })
-}
-
-async function fetchText(url: string, limit: number): Promise<string> {
-  const response = await fetch(validHttpUrl(url), { signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json,text/markdown,text/plain' } })
+async function fetchText(url: string, limit: number, init: RequestInit = {}): Promise<string> {
+  const response = await fetch(validHttpUrl(url), { ...init, signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json,text/markdown,text/plain', ...init.headers } })
   if (!response.ok) throw new Error(`HTTP ${response.status} while fetching ${new URL(url).host}`)
   const advertised = Number(response.headers.get('content-length') ?? 0)
   if (advertised > limit) throw new Error('Remote content exceeds the size limit')
   const buffer = new Uint8Array(await response.arrayBuffer())
   if (buffer.byteLength > limit) throw new Error('Remote content exceeds the size limit')
   return new TextDecoder().decode(buffer)
+}
+async function fetchSkillFromZip(url: string, limit: number): Promise<string> {
+  const response = await fetch(validHttpUrl(url), { signal: AbortSignal.timeout(20_000), headers: { accept: 'application/zip,application/octet-stream' } })
+  if (!response.ok) throw new Error(`HTTP ${response.status} while downloading Skill package from ${new URL(url).host}`)
+  const advertised = Number(response.headers.get('content-length') ?? 0)
+  if (advertised > 8 * 1024 * 1024) throw new Error('Skill package exceeds the 8 MiB limit')
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Skill package exceeds the 8 MiB limit')
+  return extractSkillMarkdown(bytes, limit)
 }
 function validHttpUrl(value: string): string {
   const url = new URL(value)

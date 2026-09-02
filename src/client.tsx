@@ -20,6 +20,7 @@ import { GlassSurface } from './glass-surface.js'
 import { CompanionSkillSettings, SkillsPanel } from './ui/skills-panel.js'
 import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
+import { CompanionAccessPanel } from './ui/companion-access-panel.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
@@ -204,7 +205,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, renewSession }:
   const sessions = snapshot.sessions.filter(item => item.companionId === companion.id)
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
-  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', collaboration: '伙伴协作', ssh: 'SSH', git: 'Git' })[item])
+  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git' })[item])
   const online = channel?.runtimeStatus === 'running'
   const latestSession = sessions.reduce<(typeof sessions)[number] | undefined>((latest, item) => latest === undefined || item.lastMessageAt > latest.lastMessageAt ? item : latest, undefined)
   return <div className="dsh-partner-home">
@@ -289,7 +290,6 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
   const choices: { id: Capability; title: string; detail: string }[] = [
     { id: 'knowledge', title: '知识库', detail: '允许伙伴在已挂载范围内检索与回写知识。' },
     { id: 'skills', title: 'Skill', detail: '使用为当前伙伴单独启用的 Skill 能力与工作流程。' },
-    { id: 'collaboration', title: '伙伴协作', detail: '查看授权伙伴的公开能力，通过 @伙伴 和看板分配真实任务。' },
     { id: 'ssh', title: 'SSH', detail: '通过 SSH 插件授权的主机与命令边界工作。' },
     { id: 'git', title: 'Git', detail: '预留 Git 工具能力，仍需对应插件实际安装。' },
   ]
@@ -301,6 +301,7 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
     <div className="dsh-partner-capabilities">{choices.map(choice => <GlassSurface as="button" interactive type="button" key={choice.id} className={form.capabilities.includes(choice.id) ? 'is-active' : ''} borderRadius={12} distortionScale={-9} saturation={1.05} aria-pressed={form.capabilities.includes(choice.id)} onClick={() => toggle(choice.id)}><span>{form.capabilities.includes(choice.id) && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></GlassSurface>)}</div>
     {form.capabilities.includes('skills') && companion.capabilities.includes('skills') && <CompanionSkillSettings companionId={companion.id} />}
     {form.capabilities.includes('skills') && !companion.capabilities.includes('skills') && <p className="dsh-partner-inline-note">先应用能力组合，再为当前伙伴选择具体 Skill。</p>}
+    <CompanionAccessPanel companionId={companion.id} />
     <div className="dsh-partner-fields two"><Field label="模型提供方" hint="模型目录来自当前客户端"><select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value, model: '' })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.provider || '正在读取'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="模型" hint="随提供方联动"><select value={form.model} onChange={event => setForm({ ...form, model: event.target.value })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.model || '正在读取'}</option>{currentModelMissing && <option value={form.model}>当前配置 · {form.model}</option>}{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
     {error && <p className="dsh-partner-inline-error">{error}</p>}<div className="dsh-partner-form-actions"><span /><button type="button" disabled={saving} onClick={() => { void save() }}>{saving ? '正在应用…' : '应用能力组合'}</button></div>
   </div>

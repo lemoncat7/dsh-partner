@@ -25,21 +25,18 @@ export class PartnerAgentComposition {
 
   compose(ctx: AgentCompositionContext, companion: Companion): void {
     const enabledSkills = this.skills.bindings(companion.id)
-    const canCollaborate = companion.capabilities.includes('collaboration')
     if (companion.capabilities.includes('skills')) ctx.tools.register(skillTool(companion, this.skills, this.executor))
-    ctx.tools.register(taskTool(companion, this.tasks, this.collaboration, canCollaborate))
-    if (canCollaborate) ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
+    ctx.tools.register(taskTool(companion, this.tasks, this.collaboration))
+    ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
     ctx.tools.register(scheduleTool(companion, this.scheduler))
-    const directory = canCollaborate ? this.collaboration.directory().filter(item => item.id !== companion.id) : []
+    const directory = this.collaboration.directoryFor(companion.id)
     ctx.systemPrompt.section({
       name: 'partner-collaboration', order: -7,
       text: [
         renderEnabledSkills(companion, enabledSkills),
-        canCollaborate
-          ? '你已获得伙伴协作权限。可以使用伙伴看板记录工作，并通过 partner_collaborate 将明确任务交给其他伙伴。用户以“@伙伴名”表达指派时，先在伙伴目录解析稳定 id，再创建或选定看板任务并委派；不得只口头声称对方会处理。'
-          : '你可以使用伙伴看板维护自己的工作，但未获得伙伴协作权限，不能枚举其他伙伴的能力、把任务分配给其他伙伴或调用 partner_collaborate。',
-        canCollaborate ? (directory.length > 0 ? `可协作伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；${item.availability}）`).join('；')}` : '当前没有其他可协作伙伴。') : '',
-        canCollaborate ? '伙伴间只共享任务信封、公开能力与结果摘要，不共享私有会话、凭据或长期记忆。' : '',
+        '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
+        directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
+        '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
       ].filter(Boolean).join('\n\n'),
     })
   }
@@ -78,10 +75,10 @@ function skillTool(companion: Companion, skills: SkillService, executor: Ephemer
   })
 }
 
-function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: PartnerCollaborationService, canCollaborate: boolean): ToolDefinition {
+function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: PartnerCollaborationService): ToolDefinition {
   const resolveAssignee = (value: string): string => {
     const target = collaboration.resolveCompanion(value)
-    if (target.id !== companion.id && !canCollaborate) throw new Error('This companion is not allowed to assign work to other companions')
+    if (target.id !== companion.id && !collaboration.canAccess(companion.id, target.id)) throw new Error(`当前伙伴未获授权访问 @${target.name}`)
     return target.id
   }
   return textTool({
@@ -123,16 +120,16 @@ function collaborationTool(companion: Companion, store: PartnerStore, collaborat
     async execute(raw, exec) {
       const input = record(raw, 'arguments')
       const action = requiredText(input.action, 'action', 20)
-      if (action === 'directory') return JSON.stringify(collaboration.directory())
+      if (action === 'directory') return JSON.stringify(collaboration.directoryFor(companion.id))
       if (action === 'status') {
         const id = requiredText(input.delegationId, 'delegationId', 160)
-        const value = store.snapshot().delegations.find(item => item.id === id)
+        const value = store.snapshot().delegations.find(item => item.id === id && (item.fromCompanionId === companion.id || item.toCompanionId === companion.id))
         if (!value) throw new Error('Delegation does not exist')
         return JSON.stringify(value)
       }
       if (action !== 'delegate') throw new Error('Collaboration action is invalid')
       const result = await collaboration.delegate({
-        taskId: requiredText(input.taskId, 'taskId', 160), fromCompanionId: companion.id,
+        taskId: requiredText(input.taskId, 'taskId', 160), initiatedBy: 'companion', fromCompanionId: companion.id,
         to: requiredText(input.companion, 'companion', 160), request: requiredText(input.request, 'request', 8000),
         parentSessionId: requireAgent(exec).session.id,
       })

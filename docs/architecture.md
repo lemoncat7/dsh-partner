@@ -21,9 +21,9 @@ client -> HTTP feature routers -> application services -> repositories/store
   JSON state only stores indexes and checksums.
 - `tasks/`: task-board state, optimistic revisions, activities and model-facing
   tools. UI drag-and-drop is never the only way to move a task.
-- `collaboration/`: the public companion directory and delegation envelopes.
-  It never exposes another companion's private transcript, credentials or
-  memory store.
+- `collaboration/`: directed companion grants, the public capability directory
+  and delegation envelopes. It never exposes another companion's private
+  transcript, credentials or memory store.
 - `scheduler/`: schedule calculation, overlap policy, restart recovery and run
   history. It does not implement agent execution.
 - `api/features/`: thin HTTP adapters. Parsing and response mapping live here;
@@ -41,6 +41,8 @@ client -> HTTP feature routers -> application services -> repositories/store
   use a revision to reject stale concurrent updates.
 - Market downloads are bounded, checksum-verified when supplied, written into a
   temporary directory and atomically renamed.
+- Public ZIP packages are parsed in memory and only the shallowest safe
+  `SKILL.md` entry is accepted; archive paths are never extracted to disk.
 
 ## Capability and privacy rules
 
@@ -49,9 +51,10 @@ client -> HTTP feature routers -> application services -> repositories/store
 - Market Skills execute in a forked temporary session by default.
 - Companion collaboration exposes identity, declared capabilities, enabled
   Skill names, availability and the assigned task envelope only.
-- Cross-companion directory access, assignment and `@companion` delegation are
-  composed only when the initiating companion has the explicit
-  `collaboration` capability. The service checks the same permission again so
-  HTTP callers cannot bypass the scoped tool boundary.
+- Cross-companion directory access, assignment and `@companion` delegation use
+  explicit directed grants (`A -> B`). A grant is not reciprocal. The model
+  receives only A's granted directory and the service checks the same edge
+  again at execution time. User-initiated board delegation is a separate actor
+  and may target any created companion without impersonating another partner.
 - Delegation depth is bounded and self-delegation is rejected.
 - Scheduled jobs default to non-overlapping execution and a disposable session.
