@@ -79,6 +79,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const companions = new CompanionService(store)
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
+    collaboration.setAccessChangeNotifier(id => agents.reloadCompanion(id))
     companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
     for (const companion of store.snapshot().companions) await agents.ensureLocalSessionRecord(companion.id)
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })

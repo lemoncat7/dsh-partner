@@ -261,7 +261,7 @@ test('interrupted delegations are durably reclaimed after restart without blocki
   } })
   t.after(() => service.close())
   await service.start()
-  await waitFor(() => board.require(task.id).status === 'review')
+  await waitFor(() => item.store.snapshot().delegations.find(entry => entry.id === 'delegation-interrupted')?.status === 'completed')
   const delegation = item.store.snapshot().delegations.find(entry => entry.id === 'delegation-interrupted')
   assert.equal(delegation.status, 'completed')
   assert.equal(delegation.attempts, 2)
@@ -376,6 +376,7 @@ test('partner collaboration tools are always available, grant-scoped, and inject
   await skills.setBinding('companion-default', planning.id, true)
   const board = new TaskBoardService(item.store)
   const collaboration = new PartnerCollaborationService(item.store, skills, board, {})
+  await item.store.update(state => state.companions.push({ ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴' }))
   const companions = new CompanionService(item.store)
   companions.setSessionProvisioner(async companionId => {
     await item.store.update(state => state.sessions.push({
@@ -400,12 +401,15 @@ test('partner collaboration tools are always available, grant-scoped, and inject
   assert.ok(defaultNames.includes('partner_collaborate'))
   assert.equal(defaultNames.includes('partner_skill'), false)
   assert.equal(defaultNames.includes('partner_companions'), false)
+  assert.equal(defaultNames.includes('partner_schedule'), false)
   assert.equal(defaultComposition.sections.some(section => section.name === 'partner-inline-skills'), false)
-  const authorizedComposition = await compose({ ...companion, capabilities: ['skills', 'companions'] })
+  const authorizedComposition = await compose({ ...companion, capabilities: ['skills', 'companions', 'schedules', 'access'] })
   const authorizedTools = authorizedComposition.tools
   const authorizedNames = authorizedTools.map(tool => tool.name)
   assert.ok(authorizedNames.includes('partner_skill'))
   assert.ok(authorizedNames.includes('partner_companions'))
+  assert.ok(authorizedNames.includes('partner_schedule'))
+  assert.ok(authorizedNames.includes('partner_access_grants'))
   const inlineSkills = authorizedComposition.sections.find(section => section.name === 'partner-inline-skills')
   assert.ok(inlineSkills)
   assert.match(inlineSkills.text, /<partner-inline-skill id="task-planning"/)
@@ -418,6 +422,15 @@ test('partner collaboration tools are always available, grant-scoped, and inject
   assert.deepEqual(created.capabilities, [])
   assert.equal(created.memoryEnabled, false)
   assert.equal(item.store.snapshot().sessions.some(session => session.companionId === created.id), true)
+  const accessTool = authorizedTools.find(tool => tool.name === 'partner_access_grants')
+  const grant = JSON.parse(await accessTool.execute({ action: 'grant', grantee: '@资料伙伴', target: '@审阅伙伴' }, {}))
+  assert.equal(grant.authorized, true)
+  assert.equal(grant.managedBy, companion.name)
+  assert.equal(collaboration.canAccess(created.id, 'companion-reviewer'), true)
+  const access = JSON.parse(await accessTool.execute({ action: 'list' }, {}))
+  assert.equal(access.grants.some(item => item.granteeId === created.id && item.targetId === 'companion-reviewer'), true)
+  await accessTool.execute({ action: 'revoke', grantee: created.id, target: 'companion-reviewer' }, {})
+  assert.equal(collaboration.canAccess(created.id, 'companion-reviewer'), false)
   assert.deepEqual(collaboration.directoryFor(companion.id), [])
 })
 
@@ -481,10 +494,11 @@ test('companion access API commits directed grants before reloading the source c
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   const collaboration = new PartnerCollaborationService(item.store, skills, new TaskBoardService(item.store), {})
   let observed = false
+  collaboration.setAccessChangeNotifier(async id => { observed = id === 'companion-default' && collaboration.canAccess(id, 'companion-reviewer') })
   const res = response()
   const handled = await dispatchPartnerWorkspaceApi(request('PUT', '/', { targetIds: ['companion-reviewer'] }), res, ['companions', 'companion-default', 'access'], new URL('http://localhost/'), {
     store: item.store, skills, tasks: {}, collaboration, scheduler: {},
-    agents: { async reloadCompanion(id) { observed = id === 'companion-default' && collaboration.canAccess(id, 'companion-reviewer') } },
+    agents: { async reloadCompanion() {} },
   })
   assert.equal(handled, true)
   assert.equal(observed, true)

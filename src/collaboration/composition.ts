@@ -28,36 +28,91 @@ export class PartnerAgentComposition {
     private readonly companions: CompanionService,
   ) {}
 
-  async compose(ctx: AgentCompositionContext, companion: Companion): Promise<void> {
+  async compose(ctx: AgentCompositionContext, companion: Companion): Promise<() => void> {
     const skillsEnabled = companion.capabilities.includes('skills')
     const enabledSkills = skillsEnabled ? this.skills.bindings(companion.id) : []
     const inlineSkills = await loadInlineSkills(this.skills, enabledSkills)
     const injectedSkillIds = new Set(inlineSkills.map(skill => skill.id))
-    if (skillsEnabled) ctx.tools.register(skillTool(companion, this.skills, this.executor))
-    if (companion.capabilities.includes('companions')) ctx.tools.register(companionTool(this.companions))
-    ctx.tools.register(taskTool(companion, this.tasks, this.collaboration))
-    ctx.tools.register(collaborationTool(companion, this.store, this.collaboration))
-    ctx.tools.register(scheduleTool(companion, this.scheduler))
-    const directory = this.collaboration.directoryFor(companion.id)
-    ctx.systemPrompt.section({
-      name: 'partner-collaboration', order: -7,
-      text: [
+    const disposers: Array<() => void> = []
+    try {
+      if (skillsEnabled) disposers.push(ctx.tools.register(skillTool(companion, this.skills, this.executor)))
+      if (companion.capabilities.includes('companions')) disposers.push(ctx.tools.register(companionTool(this.companions)))
+      if (companion.capabilities.includes('access')) disposers.push(ctx.tools.register(accessGrantTool(companion, this.collaboration)))
+      disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
+      disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
+      if (companion.capabilities.includes('schedules')) disposers.push(ctx.tools.register(scheduleTool(companion, this.scheduler)))
+      const directory = this.collaboration.directoryFor(companion.id)
+      disposers.push(ctx.systemPrompt.section({
+        name: 'partner-collaboration', order: -7,
+        text: [
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
         companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限，需要用户随后在管理台单独授权。' : '',
+        companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
+        companion.capabilities.includes('schedules') ? '你拥有“定时任务”能力。只有用户明确要求未来某个时间或按周期执行时，才创建 partner_schedule；普通待办、当前轮次工作和一次性立即执行不能擅自改成定时任务。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '是否拆成看板任务由工作形态决定：只有工作跨多步、需要并行、需要等待外部条件、存在明确前置依赖、需要其他伙伴专长，或必须跨会话持续跟踪时才建任务。一次回答内可直接完成的简单事项不要制造看板负担。拆解后每个子任务必须有可验收产出；存在先后关系时写入 dependencyTaskIds，前置任务完成前不得启动后续任务。执行者提交结果后进入 review；指定验收伙伴时由其给出核验意见，最终通过或打回后再推进后续任务。完成全部拆解与委派后，立即向用户返回任务、负责人、依赖和验收安排的看板摘要；不要轮询状态或等待被委派任务执行结束，终态进度会反向通知你。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
-      ].filter(Boolean).join('\n\n'),
-    })
-    if (inlineSkills.length > 0) ctx.systemPrompt.section({
-      name: 'partner-inline-skills', order: -6,
-      text: [
-        '以下是已启用且经校验的可信 inline Skill 指令。当当前需求符合 Skill 的用途时直接遵循，无需再调用 partner_skill load；不匹配时不要强行套用。',
-        ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
-      ].join('\n\n'),
-    })
+        ].filter(Boolean).join('\n\n'),
+      }))
+      if (inlineSkills.length > 0) disposers.push(ctx.systemPrompt.section({
+        name: 'partner-inline-skills', order: -6,
+        text: [
+          '以下是已启用且经校验的可信 inline Skill 指令。当当前需求符合 Skill 的用途时直接遵循，无需再调用 partner_skill load；不匹配时不要强行套用。',
+          ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
+        ].join('\n\n'),
+      }))
+    } catch (error) {
+      disposeAll(disposers)
+      throw error
+    }
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      disposeAll(disposers)
+    }
   }
+}
+
+function accessGrantTool(companion: Companion, collaboration: PartnerCollaborationService): ToolDefinition {
+  return textTool({
+    name: 'partner_access_grants',
+    description: 'List or administer directed access relationships between companions. A grant means the grantee may access the target companion public identity, capabilities, task envelopes, and result summaries. Change relationships only on an explicit user request; never infer extra or reciprocal grants.',
+    parameters: actionParameters(['list', 'grant', 'revoke'], {
+      grantee: { type: 'string', description: 'Companion id or @name that should gain or lose access. Required for grant and revoke.' },
+      target: { type: 'string', description: 'Companion id or @name the grantee should be allowed or forbidden to access. Required for grant and revoke.' },
+    }),
+    presentCall: args => ({ card: 'generic', title: `伙伴授权 · ${typeof (args as { action?: unknown }).action === 'string' ? (args as { action: string }).action : '操作'}` }),
+    async execute(raw) {
+      const input = record(raw, 'arguments')
+      const action = requiredText(input.action, 'action', 20)
+      if (action === 'list') {
+        const directory = collaboration.directory()
+        const byId = new Map(directory.map(item => [item.id, item]))
+        return JSON.stringify({
+          companions: directory.map(item => ({ id: item.id, name: item.name, role: item.role })),
+          grants: collaboration.accessGrants().map(grant => ({
+            granteeId: grant.fromCompanionId, grantee: byId.get(grant.fromCompanionId)?.name ?? grant.fromCompanionId,
+            targetId: grant.toCompanionId, target: byId.get(grant.toCompanionId)?.name ?? grant.toCompanionId,
+          })),
+        })
+      }
+      const grantee = collaboration.resolveCompanion(requiredText(input.grantee, 'grantee', 160))
+      const target = collaboration.resolveCompanion(requiredText(input.target, 'target', 160))
+      if (grantee.id === target.id) throw new Error('伙伴不能获得访问自己的授权')
+      const targets = new Set(collaboration.accessTargetIds(grantee.id))
+      if (action === 'grant') targets.add(target.id)
+      else if (action === 'revoke') targets.delete(target.id)
+      else throw new Error('Partner access action is invalid')
+      await collaboration.updateAccessTargets(grantee.id, [...targets])
+      return JSON.stringify({ managedBy: companion.name, granteeId: grantee.id, grantee: grantee.name, targetId: target.id, target: target.name, authorized: action === 'grant' })
+    },
+  })
+}
+
+function disposeAll(disposers: Array<() => void>): void {
+  for (let index = disposers.length - 1; index >= 0; index -= 1) disposers[index]?.()
 }
 
 async function loadInlineSkills(service: SkillService, enabled: ReturnType<SkillService['bindings']>): Promise<LoadedSkill[]> {

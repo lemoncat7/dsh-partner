@@ -23,15 +23,15 @@ export interface ConcernSuggestion {
 
 /** Register one compact, partner-session-only tool for evidence-backed implicit concern candidates. */
 export function registerPartnerConcernTool(ctx: ConcernToolContext, store: PartnerStore, concerns: PartnerConcernStore): () => void {
-  const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns))
+  const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()))
   const disposeVisibility = installVisibility(ctx, store)
   return () => { disposeVisibility(); disposeTool() }
 }
 
-function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStore): ToolDefinition {
+function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStore, submissions: ConcernTurnSubmissionGate): ToolDefinition {
   return {
     name: TOOL_NAME,
-    description: 'Suggest one implicit concern only when the current user message gives direct evidence of a concrete unresolved matter worth checking later. Do not use for ordinary preferences, identity, broad interests, completed work, or an explicit "remind/watch this" request. Evidence must be an exact excerpt from the current user message. The backend may reject or merge the candidate.',
+    description: 'Suggest one implicit concern only when the current user message directly proves that something survives this turn: an unresolved or recurring problem, a temporary workaround, a pending external result, or a need to keep observing future changes. Never use for one-shot research, collecting information, search, summary, translation, writing, ordinary execution, preferences, broad interests, or completed work. An explicit "remind/watch this" request uses the explicit concern flow. Evidence must be an exact excerpt that contains the continuity signal; topic importance alone is insufficient. The backend may reject or merge the candidate.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
@@ -56,17 +56,28 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       if (route === undefined) throw new Error('partner_concern_suggest is only available in a partner-owned conversation')
       const companion = store.snapshot().companions.find(item => item.id === route.companionId)
       if (companion === undefined || !companion.automation.memory.enabled) throw new Error('伙伴长期记忆未启用，不能提交隐式关注')
-      const currentUserText = latestUserText(agent)
+      const currentUser = latestUserMessage(agent)
+      const currentUserText = currentUser.text
       if (explicitConcernDirective(currentUserText)) throw new Error('用户已经明确要求关注；该请求由明确关注流程处理，不应提交为隐式关注')
       const suggestion = validateConcernSuggestion(raw, currentUserText)
+      if (!submissions.claim(agent, currentUser.seq)) return JSON.stringify({
+        outcome: 'already_processed_this_turn',
+        reason: '本轮已经提交过关注候选，请继续处理用户当前任务；仍可调用其他所需工具。',
+      })
       const candidate: ConcernCandidate = {
         subject: suggestion.subject, reason: suggestion.reason, operation: 'upsert', priority: suggestion.priority,
         confidence: suggestion.confidence, watchKind: suggestion.watchKind, watchQuery: suggestion.watchQuery,
         resources: extractConcernResources(`${suggestion.subject} ${suggestion.reason} ${suggestion.evidence}`),
       }
-      const result = await concerns.ingestCandidates(route.companionId, `${route.channelId}:${route.userId}`, [candidate], 'implicit', Date.now(), {
-        source: 'tool', sessionId: agent.session.id, evidence: suggestion.evidence, maxImplicitCreates: 1,
-      })
+      let result: Awaited<ReturnType<PartnerConcernStore['ingestCandidates']>>
+      try {
+        result = await concerns.ingestCandidates(route.companionId, `${route.channelId}:${route.userId}`, [candidate], 'implicit', Date.now(), {
+          source: 'tool', sessionId: agent.session.id, evidence: suggestion.evidence, maxImplicitCreates: 1,
+        })
+      } catch (error) {
+        submissions.release(agent, currentUser.seq)
+        throw error
+      }
       const entry = result.entries[0]
       return JSON.stringify({
         outcome: entry?.decision ?? 'rejected',
@@ -130,13 +141,27 @@ function requireAgent(exec: ToolRunContext): Agent {
   return exec.agent
 }
 
-function latestUserText(agent: Agent): string {
+function latestUserMessage(agent: Agent): { seq: number; text: string } {
   for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
     const event = agent.session.events[index]
     if (event?.type !== 'user/message' || event.data.source.kind !== 'user') continue
-    return event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim()
+    return { seq: event.seq, text: event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() }
   }
   throw new Error('current partner turn has no user message evidence')
+}
+
+export class ConcernTurnSubmissionGate {
+  private readonly processed = new WeakMap<Agent, number>()
+
+  claim(agent: Agent, userMessageSeq: number): boolean {
+    if (this.processed.get(agent) === userMessageSeq) return false
+    this.processed.set(agent, userMessageSeq)
+    return true
+  }
+
+  release(agent: Agent, userMessageSeq: number): void {
+    if (this.processed.get(agent) === userMessageSeq) this.processed.delete(agent)
+  }
 }
 
 function object(value: unknown): Record<string, unknown> {

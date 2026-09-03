@@ -5,13 +5,15 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
+import { Context } from '@deepseek-ai/cordis'
+import { createScope } from '@deepseek-ai/dsh-scope'
 import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeAutomation, normalizeCompanionDraft } from '../lib/domain.js'
 import { PartnerAgentRuntime, canReuseSession, completedTurnEvents, heartbeatToolDenial, heartbeatToolPolicy, parseConcernObservations, partnerCwd, renewedSession, renderHeartbeatActivity, renderMemory, renderToolProtocol, resolveAgentOptions } from '../lib/agent-runtime.js'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerMemoryStore } from '../lib/memory-store.js'
 import { PartnerConcernStore } from '../lib/concern-store.js'
-import { boundedConcernCheckMinutes, concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, implicitConcernRejection, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
-import { applyConcernToolVisibility, validateConcernSuggestion } from '../lib/concern-tool.js'
+import { boundedConcernCheckMinutes, concernDecay, concernInterval, concernLifecycleRequest, concernSubjectSimilarity, extractConcernResources, hasSustainedConcernEvidence, implicitConcernRejection, interruptDecision, normalizeConcernSubject, selectConcernLifecycleTarget } from '../lib/concern-domain.js'
+import { applyConcernToolVisibility, ConcernTurnSubmissionGate, validateConcernSuggestion } from '../lib/concern-tool.js'
 import { explicitConcernDirective, parseDailyReview, parseReflection, protectConcernDirective } from '../lib/memory-reflection.js'
 import { HeartbeatScheduler, heartbeatRetryAt, localDay, nextAllowedTime, nextDay, quiet } from '../lib/heartbeat.js'
 import { concernObservationPrompt } from '../lib/autonomy.js'
@@ -38,8 +40,8 @@ test('evaluates heartbeat schedules in the configured timezone', () => {
 test('normalizes companions, capabilities and optional model routes', () => {
   assert.deepEqual(normalizeCompanionDraft({
     name: ' 墨伴 ', role: '工作伙伴', description: '', instructions: '', presetId: '', provider: '', model: '',
-    capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'companions', 'root-access'],
-  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh', 'companions'] })
+    capabilities: ['knowledge', 'knowledge', 'collaboration', 'ssh', 'companions', 'schedules', 'access', 'root-access'],
+  }), { name: '墨伴', role: '工作伙伴', description: '', instructions: '', capabilities: ['knowledge', 'ssh', 'companions', 'schedules', 'access'] })
 })
 
 test('new companion defaults keep memory, review, heartbeat and capabilities disabled', () => {
@@ -118,6 +120,80 @@ test('creates and reuses a local companion conversation without a channel pairin
     assert.notEqual(renewed.sessionId, first.sessionId)
     assert.equal(created.length, 2)
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('recomposes one recovered partner agent exactly once and releases its scoped contributions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-recovered-agent-'))
+  const root = new Context()
+  const carrier = {}
+  const scope = createScope(root, carrier, { parent: {} })
+  const sections = new Set()
+  let maintenanceRuns = 0
+  let composerRuns = 0
+  let composerDisposals = 0
+  try {
+    const store = await PartnerStore.open(join(directory, 'state.json'))
+    const companion = store.snapshot().companions[0]
+    const route = { id: 'route-recovered', kind: 'local', channelId: '@local', userId: companion.id, companionId: companion.id, sessionId: 'session-recovered', cwd: directory, lastMessageAt: 1 }
+    await store.update(state => state.sessions.push(route))
+    const agentCtx = scope.ctx.extend({
+      agent: carrier,
+      tools: {},
+      systemPrompt: {
+        section(value) {
+          assert.equal(sections.has(value.name), false)
+          sections.add(value.name)
+          return () => sections.delete(value.name)
+        },
+      },
+    })
+    const agent = {
+      id: route.sessionId, status: 'idle', ctx: agentCtx,
+      session: { id: route.sessionId, header: { cwd: directory }, events: [], seq: 0 },
+      async whenIdle() {},
+      async runMaintenance(job) { maintenanceRuns += 1; return job(new AbortController().signal) },
+    }
+    const ctx = root.extend({
+      agents: { get: id => id === route.sessionId ? agent : undefined },
+      workspaceRegistry: { archivedSessionIds: [], async create() { return { async attachSession() {} } } },
+    })
+    const composer = {
+      async compose() {
+        composerRuns += 1
+        return () => { composerDisposals += 1 }
+      },
+    }
+    const runtime = new PartnerAgentRuntime(ctx, store, directory, undefined, undefined, undefined, composer)
+    await runtime.prepareSession(route.id)
+    await runtime.prepareSession(route.id)
+    assert.equal(maintenanceRuns, 1)
+    assert.equal(composerRuns, 1)
+    assert.deepEqual([...sections].sort(), ['partner-identity', 'partner-tool-routing'])
+    await runtime.reloadCompanion(companion.id)
+    assert.equal(composerDisposals, 1)
+    assert.equal(sections.size, 0)
+    await runtime.prepareSession(route.id)
+    assert.equal(maintenanceRuns, 2)
+    assert.equal(composerRuns, 2)
+    await runtime.close()
+    assert.equal(composerDisposals, 2)
+    assert.equal(sections.size, 0)
+  } finally {
+    await scope.dispose()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('allows one concern submission per direct user turn without blocking later turns', () => {
+  const gate = new ConcernTurnSubmissionGate()
+  const first = {}
+  const second = {}
+  assert.equal(gate.claim(first, 10), true)
+  assert.equal(gate.claim(first, 10), false)
+  assert.equal(gate.claim(first, 20), true)
+  assert.equal(gate.claim(second, 10), true)
+  gate.release(first, 20)
+  assert.equal(gate.claim(first, 20), true)
 })
 
 test('assigns each companion an isolated working directory', () => {
@@ -605,12 +681,21 @@ test('gates, bounds and audits implicit concern candidates through one policy', 
     assert.equal(rejected.entries[0]?.decision, 'rejected')
     assert.equal((await store.list('companion-1')).length, 0)
 
+    const oneShot = { subject: '抖音热点资料', reason: '这次需要整理热点', operation: 'upsert', priority: .9, confidence: .95, watchKind: 'web', watchQuery: '抖音热点变化' }
+    assert.equal(hasSustainedConcernEvidence('帮我收集一下抖音最近的热点资料'), false)
+    assert.equal(hasSustainedConcernEvidence('这个问题还没有解决，后续继续关注修复进展'), true)
+    const oneShotResult = await store.ingestCandidates('companion-1', 'weixin:user', [oneShot], 'implicit', 100, {
+      source: 'tool', sessionId: 'session-1', evidence: '帮我收集一下抖音最近的热点资料', maxImplicitCreates: 1,
+    })
+    assert.equal(oneShotResult.created.length, 0)
+    assert.match(oneShotResult.entries[0]?.reason ?? '', /没有未闭环|持续观察/)
+
     const candidates = ['终端输入持续延迟', 'SFTP 目录无法进入', '平板布局仍然越界'].map(subject => ({
       subject, reason: '当前问题尚未闭环', operation: 'upsert', priority: .78, confidence: .86,
       watchKind: 'workspace', watchQuery: `${subject}后续变化`,
     }))
     const accepted = await store.ingestCandidates('companion-1', 'weixin:user', candidates, 'implicit', 101, {
-      source: 'reflection', sessionId: 'session-1', evidence: '本轮对话',
+      source: 'reflection', sessionId: 'session-1', evidence: '这些问题仍然没有解决，需要后续继续观察',
     })
     assert.equal(accepted.created.length, 2)
     assert.equal(accepted.entries[2]?.decision, 'rejected')

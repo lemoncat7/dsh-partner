@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
+const clientCss = await readFile(new URL('../src/client.css', import.meta.url), 'utf8')
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
 const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
@@ -77,10 +78,22 @@ test('companion capabilities keep a four-card Skill overview and disclose select
   assert.ok(settings.indexOf('{selecting &&') < settings.indexOf('visibleEnabledSkills.map'))
 })
 
-test('task board refreshes while visible and keeps card details collapsed by default', () => {
+test('growing companion capabilities use grouped semantic sections instead of one unbounded card row', () => {
+  assert.match(clientSource, /dsh-partner-capability-groups/)
+  assert.match(clientSource, /工作工具/)
+  assert.match(clientSource, /协作与自动化/)
+  assert.match(clientSource, /伙伴授权/)
+  assert.match(clientCss, /\.dsh-partner-capability-group > header/)
+  assert.match(clientCss, /repeat\(auto-fit, minmax\(190px, 1fr\)\)/)
+})
+
+test('task board refreshes while visible and opens full details in an accessible dialog', () => {
   assert.match(boardSource, /LIVE_REFRESH_MS = 4_000/)
   assert.match(boardSource, /document\.visibilityState === 'visible'/)
-  assert.match(boardSource, /aria-expanded=\{expanded\}/)
+  assert.match(boardSource, /aria-haspopup="dialog"/)
+  assert.match(boardSource, /eyebrow="TASK DETAIL"/)
+  assert.match(boardSource, /function TaskDetail/)
+  assert.doesNotMatch(boardSource.slice(boardSource.indexOf('function TaskCard'), boardSource.indexOf('function TaskDetail')), /dsh-partner-task-detail/)
   assert.match(boardSource, /task\.resultSummary/)
   assert.match(boardSource, /dependencyTaskIds/)
   assert.match(boardSource, />依赖任务 <small>可选<\/small>/)

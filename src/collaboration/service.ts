@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { appendBounded } from '../core/collections.js'
 import { requiredText } from '../core/validation.js'
-import type { Companion } from '../domain.js'
+import type { Companion, CompanionAccessGrant } from '../domain.js'
 import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
@@ -24,6 +24,7 @@ export class PartnerCollaborationService {
   private timer: NodeJS.Timeout | undefined
   private started = false
   private closing = false
+  private accessChangeNotifier?: (companionId: string) => Promise<void>
 
   constructor(
     private readonly store: PartnerStore,
@@ -34,6 +35,10 @@ export class PartnerCollaborationService {
 
   setSessionExecutor(executor: PartnerSessionExecutor): void {
     this.sessionExecutor = executor
+  }
+
+  setAccessChangeNotifier(notifier: (companionId: string) => Promise<void>): void {
+    this.accessChangeNotifier = notifier
   }
 
   async start(): Promise<void> {
@@ -82,6 +87,10 @@ export class PartnerCollaborationService {
     return this.store.snapshot().companionAccessGrants.filter(grant => grant.fromCompanionId === companionId).map(grant => grant.toCompanionId)
   }
 
+  accessGrants(): CompanionAccessGrant[] {
+    return this.store.snapshot().companionAccessGrants
+  }
+
   canAccess(fromCompanionId: string, toCompanionId: string): boolean {
     return this.store.snapshot().companionAccessGrants.some(grant => grant.fromCompanionId === fromCompanionId && grant.toCompanionId === toCompanionId)
   }
@@ -100,6 +109,20 @@ export class PartnerCollaborationService {
       draft.companionAccessGrants.push(...unique.map(toCompanionId => previous.get(toCompanionId) ?? { fromCompanionId, toCompanionId, createdAt: now }))
     })
     return unique
+  }
+
+  /** Persist one directed access roster and recompose the grantee atomically. */
+  async updateAccessTargets(fromCompanionId: string, targetIds: string[]): Promise<string[]> {
+    const previous = this.accessTargetIds(fromCompanionId)
+    const next = await this.replaceAccessTargets(fromCompanionId, targetIds)
+    try {
+      await this.accessChangeNotifier?.(fromCompanionId)
+      return next
+    } catch (error) {
+      await this.replaceAccessTargets(fromCompanionId, previous)
+      await this.accessChangeNotifier?.(fromCompanionId).catch(() => {})
+      throw error
+    }
   }
 
   resolveCompanion(reference: string): Companion {

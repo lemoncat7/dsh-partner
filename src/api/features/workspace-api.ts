@@ -77,14 +77,7 @@ export async function dispatchPartnerWorkspaceApi(
     if (method === 'PUT') {
       mutation(req); const body = await readObject(req)
       if (!Array.isArray(body.targetIds) || !body.targetIds.every(id => typeof id === 'string')) throw new Error('targetIds must be a string array')
-      const previous = runtime.collaboration.accessTargetIds(companionId)
-      const targetIds = await runtime.collaboration.replaceAccessTargets(companionId, body.targetIds)
-      try { await runtime.agents.reloadCompanion(companionId) }
-      catch (error) {
-        await runtime.collaboration.replaceAccessTargets(companionId, previous)
-        await runtime.agents.reloadCompanion(companionId).catch(() => {})
-        throw error
-      }
+      const targetIds = await runtime.collaboration.updateAccessTargets(companionId, body.targetIds)
       sendJson(res, 200, { targetIds }); return true
     }
   }

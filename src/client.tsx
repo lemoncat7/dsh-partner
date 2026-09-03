@@ -171,7 +171,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
   const localSession = sessions.find(item => item.kind === 'local')
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
-  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git', companions: '创建伙伴' })[item])
+  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git', companions: '创建伙伴', schedules: '定时任务', access: '伙伴授权' })[item])
   const online = channel?.runtimeStatus === 'running'
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
@@ -252,19 +252,31 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
     try { await api(`/companions/${companion.id}`, { method: 'PUT', body: JSON.stringify({ companion: form }) }); await onChanged() }
     catch (reason) { setError(message(reason)) } finally { setSaving(false) }
   }
-  const choices: { id: Capability; title: string; detail: string }[] = [
-    { id: 'knowledge', title: '知识库', detail: '允许伙伴在已挂载范围内检索与回写知识。' },
-    { id: 'skills', title: 'Skill', detail: '使用为当前伙伴单独启用的 Skill 能力与工作流程。' },
-    { id: 'ssh', title: 'SSH', detail: '通过 SSH 插件授权的主机与命令边界工作。' },
-    { id: 'git', title: 'Git', detail: '预留 Git 工具能力，仍需对应插件实际安装。' },
-    { id: 'companions', title: '创建伙伴', detail: '允许伙伴按明确需求创建独立身份；新伙伴默认没有任何能力与记忆。' },
+  const groups: Array<{ id: string; eyebrow: string; title: string; detail: string; choices: Array<{ id: Capability; title: string; detail: string }> }> = [
+    { id: 'tools', eyebrow: 'TOOLS', title: '工作工具', detail: '连接当前伙伴能够使用的专业工具。', choices: [
+      { id: 'knowledge', title: '知识库', detail: '在已挂载范围内检索与回写知识。' },
+      { id: 'skills', title: 'Skill', detail: '使用单独启用的 Skill 与工作流程。' },
+      { id: 'ssh', title: 'SSH', detail: '在 SSH 插件授权边界内操作主机。' },
+      { id: 'git', title: 'Git', detail: '预留 Git 能力，需对应插件实际安装。' },
+    ] },
+    { id: 'coordination', eyebrow: 'COORDINATION', title: '协作与自动化', detail: '控制伙伴建立关系和自主安排工作的权限。', choices: [
+      { id: 'companions', title: '创建伙伴', detail: '按明确需求创建默认无权限的新伙伴。' },
+      { id: 'access', title: '伙伴授权', detail: '按明确要求配置伙伴之间的单向访问关系。' },
+      { id: 'schedules', title: '定时任务', detail: '创建并管理由自己执行的周期任务。' },
+    ] },
   ]
   const selectedProvider = form.provider || modelCatalog?.defaultSelection.provider || ''
   const modelOptions = modelCatalog?.providers.find(item => item.id === selectedProvider)?.models ?? []
   const currentModelMissing = Boolean(form.model) && !modelOptions.some(item => item.id === form.model)
   return <div className="dsh-partner-form is-capabilities"><Section eyebrow="COMPOSITION" title="能力组合" detail="伙伴声明意图范围；真正可调用的工具仍来自所选 Agent Preset，并继续执行各插件权限。" />
     <div className="dsh-partner-runtime-fields"><Field label="Agent Preset" hint="工具、Skill 与系统提示"><select value={form.presetId} onChange={event => setForm({ ...form, presetId: event.target.value })}><option value="">跟随 DSH 默认 Preset</option>{presets.filter(item => !item.broken).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><Field label="模型提供方" hint="来自当前客户端"><select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value, model: '' })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.provider || '正在读取'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="模型" hint="随提供方联动"><select value={form.model} onChange={event => setForm({ ...form, model: event.target.value })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.model || '正在读取'}</option>{currentModelMissing && <option value={form.model}>当前配置 · {form.model}</option>}{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
-    <div className="dsh-partner-capabilities">{choices.map(choice => <GlassSurface as="button" interactive type="button" key={choice.id} className={form.capabilities.includes(choice.id) ? 'is-active' : ''} borderRadius={12} distortionScale={-9} saturation={1.05} aria-pressed={form.capabilities.includes(choice.id)} onClick={() => toggle(choice.id)}><span>{form.capabilities.includes(choice.id) && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></GlassSurface>)}</div>
+    <div className="dsh-partner-capability-groups">{groups.map(group => {
+      const enabled = group.choices.filter(choice => form.capabilities.includes(choice.id)).length
+      return <section className="dsh-partner-capability-group" key={group.id} aria-labelledby={`partner-capability-${group.id}`}><header><span><small>{group.eyebrow}</small><strong id={`partner-capability-${group.id}`}>{group.title}</strong><p>{group.detail}</p></span><em>{enabled} / {group.choices.length} 已启用</em></header><div className="dsh-partner-capabilities">{group.choices.map(choice => {
+        const active = form.capabilities.includes(choice.id)
+        return <button type="button" key={choice.id} className={active ? 'is-active' : ''} aria-pressed={active} onClick={() => toggle(choice.id)}><span>{active && <IconCheckOutline14 size={14} />}</span><strong>{choice.title}</strong><small>{choice.detail}</small></button>
+      })}</div></section>
+    })}</div>
     {form.capabilities.includes('skills') && companion.capabilities.includes('skills') && <CompanionSkillSettings companionId={companion.id} />}
     {form.capabilities.includes('skills') && !companion.capabilities.includes('skills') && <p className="dsh-partner-inline-note">先应用能力组合，再为当前伙伴选择具体 Skill。</p>}
     <CompanionAccessPanel companionId={companion.id} />

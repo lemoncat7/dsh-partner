@@ -93,7 +93,8 @@ export class PartnerConcernStore {
         for (const candidate of candidates.slice(0, 12)) {
           const normalized = normalizeConcernSubject(compact(candidate.subject, 300))
           const existing = normalized ? this.existing(database, companionId, scopeId, normalized) : undefined
-          const rejection = origin === 'implicit' ? implicitConcernRejection(candidate) : undefined
+          const directEvidence = source === 'tool' || source === 'reflection' ? options.evidence : undefined
+          const rejection = origin === 'implicit' ? implicitConcernRejection(candidate, directEvidence) : undefined
           if (rejection !== undefined || (origin === 'implicit' && candidate.operation === 'upsert' && existing === undefined && created.length >= maxImplicitCreates)) {
             const reason = rejection ?? `每批最多新增 ${maxImplicitCreates} 条隐式关注`
             const entry: ConcernApplyEntry = { subject: compact(candidate.subject, 300), decision: 'rejected', reason }

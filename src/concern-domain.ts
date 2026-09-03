@@ -56,7 +56,7 @@ export const MAX_IMPLICIT_CONCERNS_PER_BATCH = 2
  * persisted. Lifecycle operations remain available so stale concerns can be
  * closed even when a later model response has lower confidence.
  */
-export function implicitConcernRejection(candidate: ConcernCandidate): string | undefined {
+export function implicitConcernRejection(candidate: ConcernCandidate, directEvidence?: string): string | undefined {
   if (candidate.operation !== 'upsert') return undefined
   const subjectLength = [...normalizeConcernSubject(candidate.subject)].length
   if (subjectLength < 4) return '关注主题过于宽泛'
@@ -67,7 +67,30 @@ export function implicitConcernRejection(candidate: ConcernCandidate): string | 
   if (priority < IMPLICIT_CONCERN_MIN_PRIORITY) return '优先级不足'
   if (confidence < IMPLICIT_CONCERN_MIN_CONFIDENCE) return '证据置信度不足'
   if (priority * .55 + confidence * .45 < IMPLICIT_CONCERN_MIN_SCORE) return '综合关注分数不足'
+  if (directEvidence !== undefined && !hasSustainedConcernEvidence(directEvidence)) return '当前用户原话没有未闭环、等待结果或持续观察的证据'
   return undefined
+}
+
+/**
+ * A new implicit concern needs direct evidence that something survives the
+ * current turn. Topic importance alone is deliberately insufficient: ordinary
+ * research, search, summarization and one-shot execution must not create a
+ * background watch.
+ */
+export function hasSustainedConcernEvidence(value: string): boolean {
+  const text = value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/\s+/gu, ' ').trim()
+  if (!text) return false
+  return [
+    /(?:还|仍|依旧|一直|再次|又).{0,24}(?:没|未|不|失败|异常|问题|卡住|报错|无效|不稳)/u,
+    /(?:反复|频繁|偶尔|偶发|时不时|多次).{0,24}(?:失败|异常|问题|报错|不稳|丢失|复现)/u,
+    /(?:没|未|尚未).{0,24}(?:完成|解决|修复|结束|闭环|确认|通过)/u,
+    /(?:临时|暂时|先凑合|先这样|权宜|workaround)/iu,
+    /(?:等待|等着|等候|等).{0,20}(?:发布|更新|回复|结果|审核|合并|上线|修复|处理|通知)/u,
+    /(?:持续|定期|长期|后续).{0,24}(?:关注|留意|跟进|观察|检查|追踪|监控)/u,
+    /(?:关注|留意|跟进|盯着|追踪|监控).{0,24}(?:动态|变化|进展|更新|消息|发布|结果)/u,
+    /(?:有|出现).{0,10}(?:新消息|新变化|新进展|更新).{0,16}(?:告诉|通知|提醒)/u,
+    /(?:still|again|not yet|unresolved|waiting for|keep an eye on|monitor|track|follow up|temporary workaround)/iu,
+  ].some(pattern => pattern.test(text))
 }
 
 export interface ConcernObservationCandidate {

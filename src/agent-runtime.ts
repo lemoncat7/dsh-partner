@@ -12,7 +12,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Workspace, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
-import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
+import { createScope, scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import type { PartnerMemoryStore } from './memory-store.js'
@@ -46,7 +46,7 @@ interface KnowledgeTrackingService {
 }
 
 export interface PartnerAgentComposer {
-  compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): void | Promise<void>
+  compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): (() => void) | Promise<() => void>
 }
 
 const HEARTBEAT_TIMEOUT_MS = 115_000
@@ -105,6 +105,9 @@ export class PartnerAgentRuntime {
   private readonly steeringQueues = new Map<string, Promise<void>>()
   private readonly workspaces = new Map<string, Promise<Workspace>>()
   private readonly profileVersions = new Map<string, string>()
+  private readonly restoredCompositions = new Map<string, { agent: Agent; dispose: () => void }>()
+  private readonly restoredCompositionJobs = new Map<string, Promise<void>>()
+  private readonly disposeAgentListener: () => void
 
   constructor(
     private readonly ctx: RuntimeContext,
@@ -114,7 +117,16 @@ export class PartnerAgentRuntime {
     private readonly reflection?: MemoryReflectionService,
     private readonly concerns?: PartnerConcernStore,
     private readonly composer?: PartnerAgentComposer,
-  ) {}
+  ) {
+    this.disposeAgentListener = typeof this.ctx.on === 'function'
+      ? this.ctx.on('agent/disposed', ({ agent }) => {
+        const restored = this.restoredCompositions.get(agent.session.id)
+        if (restored?.agent !== agent) return
+        restored.dispose()
+        this.restoredCompositions.delete(agent.session.id)
+      })
+      : () => {}
+  }
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
     const key = `${channelId}:${userId}`
@@ -481,6 +493,7 @@ export class PartnerAgentRuntime {
       const handle = this.handles.get(item.sessionId)
       this.handles.delete(item.sessionId)
       this.profileVersions.delete(item.sessionId)
+      await this.releaseRestoredComposition(item.sessionId)
       await handle?.dispose().catch(() => {})
     }))
   }
@@ -491,18 +504,31 @@ export class PartnerAgentRuntime {
       const handle = this.handles.get(item.sessionId)
       this.handles.delete(item.sessionId)
       this.profileVersions.delete(item.sessionId)
+      await this.releaseRestoredComposition(item.sessionId)
       await handle?.dispose().catch(() => {})
     }))
     await this.store.update(state => { state.sessions = state.sessions.filter(item => item.channelId !== channelId) })
   }
 
   async close(): Promise<void> {
+    this.disposeAgentListener()
+    await Promise.allSettled(this.restoredCompositionJobs.values())
+    for (const restored of this.restoredCompositions.values()) restored.dispose()
+    this.restoredCompositions.clear()
+    this.restoredCompositionJobs.clear()
     await Promise.all([...this.handles.values()].map(handle => handle.dispose().catch(() => {})))
     this.handles.clear()
     this.profileVersions.clear()
     this.heartbeatQueues.clear()
     this.taskQueues.clear()
     this.steeringQueues.clear()
+  }
+
+  private async releaseRestoredComposition(sessionId: string): Promise<void> {
+    await this.restoredCompositionJobs.get(sessionId)?.catch(() => {})
+    const restored = this.restoredCompositions.get(sessionId)
+    restored?.dispose()
+    this.restoredCompositions.delete(sessionId)
   }
 
   private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
@@ -595,6 +621,7 @@ export class PartnerAgentRuntime {
     }
     const live = this.ctx.agents.get(route.sessionId as SessionId)
     if (live !== undefined) {
+      await this.ensureRestoredComposition(live, companion, route, profile)
       await this.attachSession(companion, route)
       if (profile) this.injectProfileUpdate(live, route.sessionId, profile)
       return live
@@ -643,6 +670,54 @@ export class PartnerAgentRuntime {
     if (profile) this.profileVersions.set(route.sessionId, profile.version)
     await this.attachSession(companion, route)
     return handle.agent
+  }
+
+  private async ensureRestoredComposition(agent: Agent, companion: Companion, route: ChannelSession, profile?: UserProfileSnapshot): Promise<void> {
+    const installed = this.restoredCompositions.get(route.sessionId)
+    if (installed?.agent === agent) return
+    const pending = this.restoredCompositionJobs.get(route.sessionId)
+    if (pending !== undefined) return pending
+    const job = this.composeRestoredAgent(agent, companion, route, profile)
+    this.restoredCompositionJobs.set(route.sessionId, job)
+    try { await job } finally {
+      if (this.restoredCompositionJobs.get(route.sessionId) === job) this.restoredCompositionJobs.delete(route.sessionId)
+    }
+  }
+
+  private async composeRestoredAgent(agent: Agent, companion: Companion, route: ChannelSession, profile?: UserProfileSnapshot): Promise<void> {
+    await agent.whenIdle()
+    let dispose: (() => void) | undefined
+    await agent.runMaintenance(async signal => {
+      if (signal.aborted) throw signal.reason
+      const agentCtx = agent.ctx as Context & { tools: ToolRuntime }
+      const key = scopeOf(agentCtx)
+      if (key === undefined) throw new Error('伙伴会话缺少 Agent 作用域')
+      if (scopeParentOf(key) === undefined) {
+        const presets = agentCtx.get('agentPresets') as AgentPresets | undefined
+        if (presets === undefined) throw new Error('伙伴会话缺少 Agent Presets 服务')
+        await presets.mount(agentCtx, companion.presetId)
+      }
+      const disposers: Array<() => void> = []
+      try {
+        disposers.push(agentCtx.systemPrompt.section({ name: 'partner-identity', order: -10, text: renderPartnerPersona(companion, route.kind === 'local' ? 'local' : 'conversation') }))
+        disposers.push(agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: renderToolProtocol() }))
+        if (profile && profile.entries.length > 0) disposers.push(agentCtx.systemPrompt.section({ name: 'partner-user-profile', order: -8, text: renderProfile(profile) }))
+        if (this.composer) disposers.push(await this.composer.compose(agentCtx, companion))
+      } catch (error) {
+        for (let index = disposers.length - 1; index >= 0; index -= 1) disposers[index]?.()
+        throw error
+      }
+      let disposed = false
+      dispose = () => {
+        if (disposed) return
+        disposed = true
+        for (let index = disposers.length - 1; index >= 0; index -= 1) disposers[index]?.()
+      }
+    })
+    if (dispose === undefined) throw new Error('伙伴会话恢复组合未完成')
+    const previous = this.restoredCompositions.get(route.sessionId)
+    previous?.dispose()
+    this.restoredCompositions.set(route.sessionId, { agent, dispose })
   }
 
   private injectProfileUpdate(agent: Agent, sessionId: string, profile: UserProfileSnapshot): void {
