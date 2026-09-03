@@ -38,8 +38,9 @@ test('sidebar partner heading owns the full row without a duplicate action', () 
   assert.doesNotMatch(sidebar, /dsh-partner-sidebar-open|SidebarSessionDirectory/)
 })
 
-test('workspace dialogs and native option popups use opaque partner-owned surfaces', () => {
-  assert.ok((clientCss.match(/--partner-canvas: var\(--partner-solid-canvas\)/g) ?? []).length >= 2)
+test('workspace exposes the host canvas while dialogs and option popups own opaque surfaces', () => {
+  assert.match(clientCss, /\.dsh-partner-workspace \{[^}]*background: transparent;/)
+  assert.doesNotMatch(clientCss, /--partner-canvas|--partner-solid-canvas/)
   assert.match(workspaceUiCss, /select option \{[^}]*background: var\(--partner-solid-control\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*background: var\(--partner-solid-panel\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog > header \{[^}]*background: var\(--partner-solid-raised\)/)
@@ -51,6 +52,11 @@ test('workspace dialogs and native option popups use opaque partner-owned surfac
   assert.match(workspaceComponents, /<dialog[^>]*open aria-modal="true"/)
   assert.doesNotMatch(workspaceComponents, /className=\{`dsh-partner-workspace-dialog[^>]*role="dialog"/)
   assert.match(clientCss, /--partner-solid-panel: #f4f4f4;/)
+  assert.match(clientCss, /body\[data-ds-dark-theme\][\s\S]*--partner-surface: rgb\(16 23 25 \/ 92%\);/)
+  assert.match(clientCss, /body\[data-ds-dark-theme\][\s\S]*--partner-pane: rgb\(25 33 35 \/ 90%\);/)
+  assert.match(clientCss, /body\[data-ds-dark-theme\][\s\S]*--partner-solid-panel: #182022;/)
+  assert.match(clientCss, /body\[data-ds-dark-theme\][\s\S]*--partner-accent: #69b6ba;/)
+  assert.doesNotMatch(clientCss, /body\[data-ds-dark-theme\][\s\S]*--partner-pane: (?:#2c2c2e|rgba\(8, 10, 12)/)
   assert.equal((clientCss.match(/--partner-dialog-veil: transparent;/g) ?? []).length, 2)
   assert.doesNotMatch(workspaceUiCss, /dsh-partner-dialog-veil/)
 })

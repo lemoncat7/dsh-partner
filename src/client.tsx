@@ -14,6 +14,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import baseCssText from './client.css'
 import workspaceCssText from './ui/workspace-ui.css'
+import responsiveCssText from './ui/responsive-ui.css'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot, type UserProfileSnapshotView } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
@@ -29,7 +30,7 @@ import { createPartnerController, type PartnerController as Controller } from '.
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${responsiveCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
@@ -119,7 +120,17 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const openCompanion = (id: string): void => { setSelectedId(id); setView('home') }
   return <main className="dsh-partner-workspace">
     {creatingCompanion && <CompanionCreateDialog close={() => setCreatingCompanion(false)} create={create} />}
-    <header className="dsh-partner-topbar"><div><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div><nav className="dsh-partner-mobile-workspace-nav" aria-label="伙伴工作区快捷入口"><button type="button" className={view === 'skills' ? 'is-active' : ''} aria-label="Skill 市场" onClick={() => setView('skills')}><IconBrowseOutline16 size={16} /><span>Skill</span></button><button type="button" className={view === 'board' ? 'is-active' : ''} aria-label="任务看板" onClick={() => setView('board')}><IconListPenOutline16 size={16} /><span>看板</span></button><button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-label="定时任务" onClick={() => setView('schedules')}><IconPlayOutline16 size={16} /><span>定时</span></button></nav></header>
+    <header className="dsh-partner-topbar">
+      <div className="dsh-partner-topbar-brand"><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div>
+      <MobileWorkspaceControls
+        companions={snapshot?.companions ?? []}
+        selectedId={selectedId}
+        view={view}
+        openCompanion={openCompanion}
+        openPage={setView}
+        createCompanion={() => setCreatingCompanion(true)}
+      />
+    </header>
     <div className="dsh-partner-grid">
       <aside className="dsh-partner-roster">
         <div className="dsh-partner-roster-title"><span><small>COMPANIONS</small><strong>伙伴名册</strong></span><button type="button" onClick={() => setCreatingCompanion(true)} aria-label="新建伙伴"><IconPlusOutline16 size={16} /></button></div>
@@ -162,6 +173,33 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
       </section>
     </div>
   </main>
+}
+
+function MobileWorkspaceControls({ companions, selectedId, view, openCompanion, openPage, createCompanion }: {
+  companions: CompanionView[]
+  selectedId: string | undefined
+  view: View
+  openCompanion(id: string): void
+  openPage(page: WorkspacePage): void
+  createCompanion(): void
+}): JSX.Element {
+  return <div className="dsh-partner-mobile-controls">
+    <div className="dsh-partner-mobile-companion-row">
+      <label className="dsh-partner-mobile-companion-picker">
+        <span className="sr-only">当前伙伴</span>
+        <select value={selectedId ?? ''} disabled={companions.length === 0} aria-label="切换当前伙伴" onChange={event => openCompanion(event.target.value)}>
+          {companions.length === 0 && <option value="">还没有伙伴</option>}
+          {companions.map(companion => <option value={companion.id} key={companion.id}>{companion.name} · {companion.role}</option>)}
+        </select>
+      </label>
+      <button type="button" className="dsh-partner-mobile-create" onClick={createCompanion} aria-label="新建伙伴"><IconPlusOutline16 size={17} /></button>
+    </div>
+    <nav className="dsh-partner-mobile-workspace-nav" aria-label="伙伴工作区快捷入口">
+      <button type="button" className={view === 'skills' ? 'is-active' : ''} aria-pressed={view === 'skills'} onClick={() => openPage('skills')}><IconBrowseOutline16 size={16} /><span>Skill</span></button>
+      <button type="button" className={view === 'board' ? 'is-active' : ''} aria-pressed={view === 'board'} onClick={() => openPage('board')}><IconListPenOutline16 size={16} /><span>看板</span></button>
+      <button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-pressed={view === 'schedules'} onClick={() => openPage('schedules')}><IconPlayOutline16 size={16} /><span>定时</span></button>
+    </nav>
+  </div>
 }
 
 function HomePanel({ companion, snapshot, navigate, openSession, startSession, renewSession }: { companion: CompanionView; snapshot: PartnerSnapshot; navigate(tab: CompanionTab): void; openSession(routeId: string, sessionId: string): Promise<void>; startSession(companionId: string): Promise<void>; renewSession(routeId: string): Promise<void> }): JSX.Element {
