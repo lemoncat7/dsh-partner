@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8')
-const [entry, controller, shared, skills, board, schedules, companionCreate, workspaceStyles] = await Promise.all([
+const [entry, controller, shared, skills, board, schedules, companionCreate, workspaceStyles, responsiveStyles] = await Promise.all([
   read('../src/client.tsx'),
   read('../src/client-controller.tsx'),
   read('../src/ui/workspace-components.tsx'),
@@ -12,6 +12,7 @@ const [entry, controller, shared, skills, board, schedules, companionCreate, wor
   read('../src/ui/schedule-panel.tsx'),
   read('../src/ui/companion-create.tsx'),
   read('../src/ui/workspace-ui.css'),
+  read('../src/ui/responsive-ui.css'),
 ])
 
 test('client composition root delegates session orchestration to one controller', () => {
@@ -66,4 +67,18 @@ test('creation flows expose bounded pending and inline error states without brow
     assert.match(source, /aria-busy=/)
     assert.match(source, /disabled=\{busy/)
   }
+})
+
+test('mobile workspace preserves companion navigation and touch-safe controls', () => {
+  assert.match(entry, /function MobileWorkspaceControls/)
+  assert.match(entry, /aria-label="切换当前伙伴"/)
+  assert.match(entry, /aria-label="新建伙伴"/)
+  assert.match(responsiveStyles, /@media \(max-width: 760px\)/)
+  assert.match(responsiveStyles, /max-height: 100dvh/)
+  assert.match(responsiveStyles, /min-height: 44px/)
+  assert.match(responsiveStyles, /font-size: 16px/)
+  assert.match(responsiveStyles, /env\(safe-area-inset-bottom\)/)
+  assert.match(responsiveStyles, /\.dsh-partner-skill-picker-list \{[^}]*grid-template-columns: 1fr;/)
+  assert.match(responsiveStyles, /\.dsh-partner-board-tools \{ grid-template-columns: 1fr; \}/)
+  assert.match(responsiveStyles, /\.dsh-partner-schedule-list > article \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) 44px;/)
 })
