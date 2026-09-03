@@ -8,9 +8,9 @@
   --partner-control: rgba(255, 255, 255, .27);
   --partner-card-surface: rgba(255, 255, 255, .16);
   --partner-card-highlight: rgba(255, 255, 255, .58);
-  --partner-solid-canvas: #e9e9ed;
-  --partner-solid-panel: #f2f3f7;
-  --partner-solid-raised: #f8f8fa;
+  --partner-solid-canvas: #ebebeb;
+  --partner-solid-panel: #f4f4f4;
+  --partner-solid-raised: #fafafa;
   --partner-solid-control: #ffffff;
   --partner-dialog-veil: rgba(29, 29, 31, .22);
   --partner-card-shadow:

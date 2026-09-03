@@ -5,6 +5,7 @@ import test from 'node:test'
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
 const clientCss = await readFile(new URL('../src/client.css', import.meta.url), 'utf8')
 const workspaceUiCss = await readFile(new URL('../src/ui/workspace-ui.css', import.meta.url), 'utf8')
+const workspaceComponents = await readFile(new URL('../src/ui/workspace-components.tsx', import.meta.url), 'utf8')
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
 const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
@@ -42,6 +43,10 @@ test('workspace dialogs and native option popups use opaque partner-owned surfac
   assert.match(workspaceUiCss, /select option \{[^}]*background: var\(--partner-solid-control\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*background: var\(--partner-solid-panel\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog > header \{[^}]*background: var\(--partner-solid-raised\)/)
+  assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*position: relative;[^}]*margin: 0;[^}]*padding: 0;/)
+  assert.match(workspaceComponents, /<dialog[^>]*open aria-modal="true"/)
+  assert.doesNotMatch(workspaceComponents, /className=\{`dsh-partner-workspace-dialog[^>]*role="dialog"/)
+  assert.match(clientCss, /--partner-solid-panel: #f4f4f4;/)
   assert.match(clientCss, /--partner-dialog-veil:/)
 })
 

@@ -18,7 +18,7 @@ export function WorkspaceBlock({ title, detail, actions, children, className = '
 export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular' }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide' }): JSX.Element {
   const titleId = useId()
   const detailId = useId()
-  const panelRef = useRef<HTMLElement>(null)
+  const panelRef = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
     const frame = requestAnimationFrame(() => {
@@ -38,10 +38,10 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   return <div className="dsh-partner-workspace-dialog-layer" onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
-    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onKeyDown={keyDown}>
+    <dialog ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}`} open aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onKeyDown={keyDown}>
       <header><span><small>{eyebrow}</small><strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
       <div className="dsh-partner-workspace-dialog-body">{children}</div>
-    </section>
+    </dialog>
   </div>
 }
 
