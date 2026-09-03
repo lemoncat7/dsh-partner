@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { IconCheckOutline16, IconChevronRightOutline14, IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { IconCheckOutline16, IconChevronRightOutline14, IconCloseOutline16, IconPlusOutline16, IconSearchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDelegationView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
 import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
@@ -8,6 +8,7 @@ const COLUMNS: Array<{ id: BoardTaskStatusView; label: string }> = [
   { id: 'review', label: '待验收' }, { id: 'blocked', label: '受阻' }, { id: 'done', label: '已完成' },
 ]
 const LIVE_REFRESH_MS = 4_000
+type BoardStatusFilter = BoardTaskStatusView | 'all'
 
 export function TaskBoardPanel(): JSX.Element {
   const [board, setBoard] = useState<TaskBoardView>({ tasks: [], activities: [] })
@@ -19,8 +20,49 @@ export function TaskBoardPanel(): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [syncedAt, setSyncedAt] = useState<number>()
-  const selectedTask = board.tasks.find(item => item.id === selectedTaskId)
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<BoardStatusFilter>('all')
+  const [assigneeFilter, setAssigneeFilter] = useState('all')
+  const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase())
   const tasksById = useMemo(() => new Map(board.tasks.map(item => [item.id, item])), [board.tasks])
+  const directoryById = useMemo(() => new Map(directory.map(item => [item.id, item])), [directory])
+  const activeDelegationByTaskId = useMemo(() => {
+    const result = new Map<string, PartnerDelegationView>()
+    for (const delegation of delegations) {
+      if ((delegation.status === 'queued' || delegation.status === 'running') && !result.has(delegation.taskId)) result.set(delegation.taskId, delegation)
+    }
+    return result
+  }, [delegations])
+  const selectedTask = selectedTaskId ? tasksById.get(selectedTaskId) : undefined
+  const dependentsById = useMemo(() => {
+    const result = new Map<string, number>()
+    for (const task of board.tasks) for (const dependencyId of task.dependencyTaskIds) result.set(dependencyId, (result.get(dependencyId) ?? 0) + 1)
+    return result
+  }, [board.tasks])
+  const scopedTasks = useMemo(() => board.tasks.filter(task => {
+    if (assigneeFilter !== 'all' && (task.assigneeCompanionId ?? 'unassigned') !== assigneeFilter) return false
+    if (!deferredQuery) return true
+    const dependencies = task.dependencyTaskIds.map(id => tasksById.get(id)?.title ?? '')
+    return [task.title, task.description, task.resultAbstract, task.resultSummary, directoryById.get(task.assigneeCompanionId ?? '')?.name, ...dependencies]
+      .some(value => value?.toLocaleLowerCase().includes(deferredQuery))
+  }), [assigneeFilter, board.tasks, deferredQuery, directoryById, tasksById])
+  const statusCounts = useMemo(() => {
+    const result = new Map<BoardTaskStatusView, number>(COLUMNS.map(column => [column.id, 0]))
+    for (const task of scopedTasks) result.set(task.status, (result.get(task.status) ?? 0) + 1)
+    return result
+  }, [scopedTasks])
+  const visibleColumns = statusFilter === 'all' ? COLUMNS : COLUMNS.filter(column => column.id === statusFilter)
+  const tasksByStatus = useMemo(() => {
+    const priorityRank: Record<BoardTaskView['priority'], number> = { urgent: 3, high: 2, normal: 1, low: 0 }
+    const result = new Map<BoardTaskStatusView, BoardTaskView[]>(COLUMNS.map(column => [column.id, []]))
+    for (const task of scopedTasks) {
+      if (statusFilter !== 'all' && task.status !== statusFilter) continue
+      result.get(task.status)?.push(task)
+    }
+    for (const tasks of result.values()) tasks.sort((left, right) => priorityRank[right.priority] - priorityRank[left.priority] || right.updatedAt - left.updatedAt)
+    return result
+  }, [scopedTasks, statusFilter])
+  const visibleTaskCount = statusFilter === 'all' ? scopedTasks.length : (statusCounts.get(statusFilter) ?? 0)
   const loadingRef = useRef(false)
   const load = useCallback(async () => {
     if (loadingRef.current) return
@@ -78,31 +120,39 @@ export function TaskBoardPanel(): JSX.Element {
     {creating && <WorkspaceDialog title="新建任务" detail="写清目标、负责人和验收边界；只有真正存在前置关系时才添加依赖。" close={() => setCreating(false)} width="wide"><TaskForm companions={directory} tasks={board.tasks} close={() => setCreating(false)} changed={load} /></WorkspaceDialog>}
     {selectedTask && <WorkspaceDialog eyebrow="TASK DETAIL" title={selectedTask.title} detail={taskDialogSummary(selectedTask, directory)} close={() => setSelectedTaskId(undefined)} width="wide"><TaskDetail
       key={selectedTask.id} task={selectedTask} tasks={board.tasks} activities={board.activities.filter(item => item.taskId === selectedTask.id)} directory={directory}
-      execution={delegations.find(item => item.taskId === selectedTask.id && (item.status === 'queued' || item.status === 'running'))}
+      execution={activeDelegationByTaskId.get(selectedTask.id)}
       busy={busy === selectedTask.id} update={change => { void update(selectedTask, change) }} delegate={() => { void delegate(selectedTask) }} review={() => { void review(selectedTask) }}
       accept={() => { void accept(selectedTask) }} reject={reason => { void reject(selectedTask, reason) }} remove={() => { void remove(selectedTask) }}
     /></WorkspaceDialog>}
-    {loading ? <CollectionSkeleton rows={6} /> : <div className="dsh-partner-board" aria-label="任务看板">{COLUMNS.map(column => {
-      const tasks = board.tasks.filter(item => item.status === column.id)
-      return <section key={column.id} data-status={column.id}><header><strong>{column.label}</strong><b>{tasks.length}</b></header><div>{tasks.map(task => <TaskCard
-        key={task.id} task={task} tasksById={tasksById} directory={directory}
-        execution={delegations.find(item => item.taskId === task.id && (item.status === 'queued' || item.status === 'running'))}
+    {loading ? <CollectionSkeleton rows={6} /> : <>
+      <div className="dsh-partner-board-tools">
+        <label className="dsh-partner-board-search"><span className="sr-only">搜索任务</span><span aria-hidden="true"><IconSearchOutline16 size={16} /></span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索任务、负责人或前置任务" />{query && <button type="button" onClick={() => setQuery('')} aria-label="清除任务搜索"><IconCloseOutline16 size={14} /></button>}</label>
+        <label className="dsh-partner-board-assignee"><span className="sr-only">按负责人筛选</span><select value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)}><option value="all">全部伙伴</option><option value="unassigned">未指派</option>{directory.map(item => <option value={item.id} key={item.id}>@{item.name}</option>)}</select></label>
+        <small aria-live="polite">显示 {visibleTaskCount} / {board.tasks.length}</small>
+      </div>
+      <nav className="dsh-partner-board-statuses" aria-label="按任务状态筛选"><button type="button" className={statusFilter === 'all' ? 'is-active' : ''} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}><span>全部</span><b>{scopedTasks.length}</b></button>{COLUMNS.map(column => <button type="button" key={column.id} className={statusFilter === column.id ? 'is-active' : ''} aria-pressed={statusFilter === column.id} onClick={() => setStatusFilter(column.id)}><span>{column.label}</span><b>{statusCounts.get(column.id) ?? 0}</b></button>)}</nav>
+      <div className="dsh-partner-board" data-focused={statusFilter !== 'all'} aria-label="任务看板">{visibleColumns.map(column => {
+      const tasks = tasksByStatus.get(column.id) ?? []
+      const columnTitleId = `dsh-partner-board-${column.id}`
+      return <section key={column.id} data-status={column.id} data-empty={tasks.length === 0} aria-labelledby={columnTitleId}><header><strong id={columnTitleId}>{column.label}</strong><b>{tasks.length}</b></header>{tasks.length > 0 ? <div className="dsh-partner-board-column-list">{tasks.map(task => <TaskCard
+        key={task.id} task={task} tasksById={tasksById} directoryById={directoryById} dependentCount={dependentsById.get(task.id) ?? 0}
+        execution={activeDelegationByTaskId.get(task.id)}
         open={() => setSelectedTaskId(task.id)}
-      />)}</div>{tasks.length === 0 && <p>暂无任务</p>}</section>
-    })}</div>}
+      />)}</div> : <p>{query || assigneeFilter !== 'all' ? '没有匹配任务' : '暂无任务'}</p>}</section>
+    })}</div></>}
   </div>
 }
 
-function TaskCard({ task, tasksById, directory, execution, open }: {
-  task: BoardTaskView; tasksById: ReadonlyMap<string, BoardTaskView>; directory: PartnerDirectoryEntryView[]; execution: PartnerDelegationView | undefined; open(): void
+function TaskCard({ task, tasksById, directoryById, dependentCount, execution, open }: {
+  task: BoardTaskView; tasksById: ReadonlyMap<string, BoardTaskView>; directoryById: ReadonlyMap<string, PartnerDirectoryEntryView>; dependentCount: number; execution: PartnerDelegationView | undefined; open(): void
 }): JSX.Element {
   const dependencies = task.dependencyTaskIds.map(id => tasksById.get(id)).filter((item): item is BoardTaskView => item !== undefined)
   const blockers = dependencies.filter(item => item.status !== 'done')
-  const assignee = directory.find(item => item.id === task.assigneeCompanionId)
+  const completedDependencies = dependencies.length - blockers.length
+  const assignee = directoryById.get(task.assigneeCompanionId ?? '')
   const executionState = execution ? delegationState(execution) : undefined
-  return <article className="dsh-partner-task-card" data-blocked={blockers.length > 0}>
-    <span className={`dsh-partner-priority is-${task.priority}`} />
-    <button type="button" className="dsh-partner-task-summary" aria-haspopup="dialog" onClick={open}><span><strong title={task.title}>{task.title}</strong><small>{assignee ? `@${assignee.name}` : '未指派'} · {dependencies.length ? `${dependencies.length} 项前置${blockers.length ? `，${blockers.length} 项未完成` : '均已完成'}` : '无前置依赖'}{task.resultSummary ? ' · 已有结果' : ''}{executionState ? ` · ${executionState.label}` : ''}</small></span><IconChevronRightOutline14 size={14} /></button>
+  return <article className="dsh-partner-task-card" data-blocked={blockers.length > 0} data-priority={task.priority}>
+    <button type="button" className="dsh-partner-task-summary" aria-haspopup="dialog" onClick={open}><span><span className="dsh-partner-task-card-title"><strong title={task.title}>{task.title}</strong><em>{priorityLabel(task.priority)}</em></span><small className="dsh-partner-task-card-owner">{assignee ? `@${assignee.name}` : '未指派'}{task.resultSummary ? ' · 已有结果' : ''}{executionState ? ` · ${executionState.label}` : ''}</small>{(dependencies.length > 0 || dependentCount > 0) && <span className="dsh-partner-task-relations">{dependencies.length > 0 && <small data-blocked={blockers.length > 0}>前置 {completedDependencies}/{dependencies.length}</small>}{dependentCount > 0 && <small>完成后解锁 {dependentCount}</small>}</span>}</span><IconChevronRightOutline14 size={14} /></button>
   </article>
 }
 
