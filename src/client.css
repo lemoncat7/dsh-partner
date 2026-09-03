@@ -61,26 +61,26 @@
 
 body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   color-scheme: dark;
-  /* Shared DSH plugin dark material: opaque neutral surfaces prevent the host
-     artwork from tinting functional panels and dialogs. */
-  --partner-surface: #1c1c1e;
-  --partner-pane: #2c2c2e;
-  --partner-raised: #323235;
-  --partner-control: #3a3a3c;
-  --partner-card-surface: #323235;
+  /* Owned cool-charcoal glass: sufficiently opaque to resist host tint while
+     preserving depth, blur and edge light across the workspace. */
+  --partner-surface: rgb(16 23 25 / 92%);
+  --partner-pane: rgb(25 33 35 / 90%);
+  --partner-raised: rgb(32 41 43 / 94%);
+  --partner-control: rgb(39 50 53 / 92%);
+  --partner-card-surface: rgb(32 41 43 / 90%);
   --partner-card-highlight: rgba(255, 255, 255, .11);
-  --partner-solid-panel: #2c2c2e;
-  --partner-solid-raised: #323235;
-  --partner-solid-control: #3a3a3c;
+  --partner-solid-panel: #182022;
+  --partner-solid-raised: #20292b;
+  --partner-solid-control: #273235;
   --partner-dialog-veil: transparent;
   --partner-card-shadow:
     inset 0 1px 0 var(--partner-card-highlight),
     inset 0 -1px 0 rgba(0, 0, 0, .28),
     0 12px 30px rgba(0, 0, 0, .28),
     0 2px 7px rgba(0, 0, 0, .2);
-  --partner-text: #f5f5f7;
-  --partner-text-secondary: #d1d1d6;
-  --partner-text-tertiary: #98989d;
+  --partner-text: #e3eaeb;
+  --partner-text-secondary: #bbc9cc;
+  --partner-text-tertiary: #95a7ab;
   --partner-accent: #69b6ba;
   --partner-accent-strong: #8aced0;
   --partner-on-accent: #101819;
@@ -88,9 +88,9 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   --partner-weixin: #30c96b;
   --partner-warning: #ff9f0a;
   --partner-danger: #ff453a;
-  --partner-border: rgba(255, 255, 255, .105);
-  --partner-separator: rgba(255, 255, 255, .08);
-  --partner-hover: rgba(255, 255, 255, .075);
+  --partner-border: rgb(184 204 205 / 11%);
+  --partner-separator: rgb(184 204 205 / 8%);
+  --partner-hover: rgb(105 182 186 / 9%);
   --partner-selected: rgb(105 182 186 / 14%);
   --partner-focus-ring: rgb(105 182 186 / 72%);
   --partner-glass-clear: rgba(0, 0, 0, .1);
