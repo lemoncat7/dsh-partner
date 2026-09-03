@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
 const clientCss = await readFile(new URL('../src/client.css', import.meta.url), 'utf8')
+const workspaceUiCss = await readFile(new URL('../src/ui/workspace-ui.css', import.meta.url), 'utf8')
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
 const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
@@ -27,6 +28,20 @@ test('overview cards avoid dynamic glare and per-card SVG observers', () => {
   assert.doesNotMatch(homePanel, /<GlassSurface/)
   assert.match(homePanel, /<section className=\{`dsh-partner-home-channel/)
   assert.match(homePanel, /<section className="dsh-partner-home-profile">/)
+})
+
+test('sidebar partner heading owns the full row without a duplicate action', () => {
+  const sidebar = clientSource.slice(clientSource.indexOf('function PartnerSidebar('), clientSource.indexOf('function PartnerWorkspace('))
+  assert.match(clientCss, /\.dsh-partner-sidebar-title \{[^}]*flex: 1 1 auto;/)
+  assert.match(clientCss, /\.dsh-partner-sidebar-title \{[^}]*min-height: 32px;/)
+  assert.doesNotMatch(sidebar, /dsh-partner-sidebar-open|SidebarSessionDirectory/)
+})
+
+test('workspace dialogs and native option popups use opaque partner-owned surfaces', () => {
+  assert.match(workspaceUiCss, /select option \{[^}]*background: var\(--partner-solid-control\)/)
+  assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*background: var\(--partner-solid-panel\)/)
+  assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog > header \{[^}]*background: var\(--partner-solid-raised\)/)
+  assert.match(clientCss, /--partner-dialog-veil:/)
 })
 
 test('memory graph is fetched only by the graph view', () => {

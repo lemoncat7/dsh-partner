@@ -66,7 +66,6 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
   return <section ref={ref} className="dsh-partner-sidebar">
     <div className="dsh-partner-sidebar-heading">
       <button type="button" className="dsh-partner-sidebar-title" aria-expanded={open} onClick={() => setOpen(value => !value)}><span data-open={open}><IconChevronDownOutline14 size={14} /></span>伙伴</button>
-      <button type="button" className="dsh-partner-sidebar-open" onClick={() => launch()} aria-label="打开伙伴面板"><IconPlusOutline16 size={16} /></button>
     </div>
     <div className={`dsh-partner-sidebar-list${open ? ' is-open' : ''}`} aria-hidden={!open}>
       <div className="dsh-partner-sidebar-list-inner">
