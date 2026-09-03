@@ -38,8 +38,9 @@ test('sidebar partner heading owns the full row without a duplicate action', () 
   assert.doesNotMatch(sidebar, /dsh-partner-sidebar-open|SidebarSessionDirectory/)
 })
 
-test('workspace dialogs and native option popups use opaque partner-owned surfaces', () => {
-  assert.ok((clientCss.match(/--partner-canvas: var\(--partner-solid-canvas\)/g) ?? []).length >= 2)
+test('workspace exposes the host canvas while dialogs and option popups own opaque surfaces', () => {
+  assert.match(clientCss, /\.dsh-partner-workspace \{[^}]*background: transparent;/)
+  assert.doesNotMatch(clientCss, /--partner-canvas|--partner-solid-canvas/)
   assert.match(workspaceUiCss, /select option \{[^}]*background: var\(--partner-solid-control\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*background: var\(--partner-solid-panel\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog > header \{[^}]*background: var\(--partner-solid-raised\)/)

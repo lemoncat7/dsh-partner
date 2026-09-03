@@ -1,14 +1,12 @@
 .dsh-partner-sidebar,
 .dsh-partner-workspace {
   color-scheme: light;
-  --partner-canvas: var(--partner-solid-canvas);
   --partner-surface: rgba(246, 247, 250, .17);
   --partner-pane: rgba(255, 255, 255, .16);
   --partner-raised: rgba(255, 255, 255, .38);
   --partner-control: rgba(255, 255, 255, .27);
   --partner-card-surface: rgba(255, 255, 255, .16);
   --partner-card-highlight: rgba(255, 255, 255, .58);
-  --partner-solid-canvas: #ebebeb;
   --partner-solid-panel: #f4f4f4;
   --partner-solid-raised: #fafafa;
   --partner-solid-control: #ffffff;
@@ -63,14 +61,12 @@
 
 body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   color-scheme: dark;
-  --partner-canvas: var(--partner-solid-canvas);
   --partner-surface: rgba(8, 10, 12, .19);
   --partner-pane: rgba(8, 10, 12, .18);
   --partner-raised: rgba(8, 10, 12, .42);
   --partner-control: rgba(8, 10, 12, .3);
   --partner-card-surface: rgba(7, 9, 11, .22);
   --partner-card-highlight: rgba(255, 255, 255, .11);
-  --partner-solid-canvas: #1c1c1e;
   --partner-solid-panel: #2c2c2e;
   --partner-solid-raised: #323235;
   --partner-solid-control: #3a3a3c;
@@ -516,7 +512,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 .dsh-partner-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--partner-border); border-radius: 12px; color: var(--partner-text); background: linear-gradient(145deg, var(--partner-glass-thick), var(--partner-control)); box-shadow: inset 0 1px 0 var(--partner-glass-highlight), var(--partner-shadow-sm); font-size: var(--partner-font-label); font-weight: 650; }
 .dsh-partner-avatar.is-small { width: 25px; height: 25px; border-radius: 8px; font-size: var(--partner-font-caption); }
 
-.dsh-partner-workspace { position: relative; isolation: isolate; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; overflow: hidden; background: var(--partner-canvas); }
+.dsh-partner-workspace { position: relative; isolation: isolate; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; overflow: hidden; background: transparent; }
 .dsh-partner-glass-surface { position: relative; isolation: isolate; transition: opacity 180ms ease-out, border-color 180ms ease, box-shadow 220ms var(--partner-ease-out), transform 220ms var(--partner-ease-out); }
 .dsh-partner-glass-surface.is-svg { -webkit-backdrop-filter: var(--partner-glass-filter-id) saturate(var(--partner-glass-saturation)); backdrop-filter: var(--partner-glass-filter-id) saturate(var(--partner-glass-saturation)); }
 .dsh-partner-glass-surface.is-fallback { -webkit-backdrop-filter: var(--partner-glass-filter); backdrop-filter: var(--partner-glass-filter); }
@@ -1323,7 +1319,6 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 
 @media (prefers-reduced-transparency: reduce) {
   :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
-    --partner-canvas: var(--partner-solid-canvas);
     --partner-surface: var(--partner-solid-panel);
     --partner-pane: var(--partner-solid-panel);
     --partner-raised: var(--partner-solid-raised);
@@ -1349,7 +1344,6 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
-    --partner-canvas: var(--partner-solid-canvas);
     --partner-surface: var(--partner-solid-panel);
     --partner-pane: var(--partner-solid-panel);
     --partner-raised: var(--partner-solid-raised);
