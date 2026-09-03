@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "1.4.9-fix.4",
+  "version": "1.5.0",
   "description": "Long-lived AI companions with WeChat channel routing for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
