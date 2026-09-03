@@ -1,7 +1,7 @@
 .dsh-partner-sidebar,
 .dsh-partner-workspace {
   color-scheme: light;
-  --partner-canvas: transparent;
+  --partner-canvas: var(--partner-solid-canvas);
   --partner-surface: rgba(246, 247, 250, .17);
   --partner-pane: rgba(255, 255, 255, .16);
   --partner-raised: rgba(255, 255, 255, .38);
@@ -63,7 +63,7 @@
 
 body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   color-scheme: dark;
-  --partner-canvas: transparent;
+  --partner-canvas: var(--partner-solid-canvas);
   --partner-surface: rgba(8, 10, 12, .19);
   --partner-pane: rgba(8, 10, 12, .18);
   --partner-raised: rgba(8, 10, 12, .42);

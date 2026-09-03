@@ -38,6 +38,7 @@ test('sidebar partner heading owns the full row without a duplicate action', () 
 })
 
 test('workspace dialogs and native option popups use opaque partner-owned surfaces', () => {
+  assert.ok((clientCss.match(/--partner-canvas: var\(--partner-solid-canvas\)/g) ?? []).length >= 2)
   assert.match(workspaceUiCss, /select option \{[^}]*background: var\(--partner-solid-control\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog \{[^}]*background: var\(--partner-solid-panel\)/)
   assert.match(workspaceUiCss, /\.dsh-partner-workspace-dialog > header \{[^}]*background: var\(--partner-solid-raised\)/)
