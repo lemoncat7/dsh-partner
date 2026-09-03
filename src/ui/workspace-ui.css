@@ -65,7 +65,7 @@
   .dsh-partner-schedule-list .is-icon:focus-visible { opacity: 1; }
 }
 
-.dsh-partner-workspace-dialog-layer { position: absolute; z-index: 12; inset: 0; display: flex; justify-content: flex-end; padding: 12px; background: var(--partner-dialog-veil); animation: dsh-partner-dialog-veil 160ms ease-out both; }
+.dsh-partner-workspace-dialog-layer { position: absolute; z-index: 12; inset: 0; display: flex; justify-content: flex-end; padding: 12px; background: var(--partner-dialog-veil); }
 .dsh-partner-workspace-dialog { position: relative; inset: auto; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(540px, 100%); max-width: none; height: 100%; max-height: none; margin: 0; padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--partner-text) 18%, var(--partner-border)); border-radius: 18px; color: var(--partner-text); background: var(--partner-solid-panel); box-shadow: -18px 0 52px color-mix(in srgb, var(--partner-text) 12%, transparent), inset 0 1px 0 var(--partner-card-highlight); animation: dsh-partner-dialog-enter 220ms var(--partner-ease-out) both; }
 .dsh-partner-workspace-dialog.is-wide { width: min(700px, 100%); }
 .dsh-partner-workspace-dialog > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 20px; padding: 22px 22px 18px; border-bottom: 1px solid var(--partner-separator); background: var(--partner-solid-raised); }
@@ -98,7 +98,6 @@
 .dsh-partner-count-label { display: inline-flex; align-items: baseline; gap: 5px; color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); font-variant-numeric: tabular-nums; }
 .dsh-partner-count-label > b { color: var(--partner-text); font-size: var(--partner-font-label); font-weight: 650; }
 
-@keyframes dsh-partner-dialog-veil { from { opacity: 0; } to { opacity: 1; } }
 @keyframes dsh-partner-dialog-enter { from { opacity: 0; transform: translate3d(18px, 0, 0) scale(.992); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
 @keyframes dsh-partner-skeleton { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
 
@@ -110,5 +109,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dsh-partner-workspace-dialog-layer, .dsh-partner-workspace-dialog, .dsh-partner-collection-skeleton > i { animation: none; }
+  .dsh-partner-workspace-dialog, .dsh-partner-collection-skeleton > i { animation: none; }
 }

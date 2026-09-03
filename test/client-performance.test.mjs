@@ -47,7 +47,8 @@ test('workspace dialogs and native option popups use opaque partner-owned surfac
   assert.match(workspaceComponents, /<dialog[^>]*open aria-modal="true"/)
   assert.doesNotMatch(workspaceComponents, /className=\{`dsh-partner-workspace-dialog[^>]*role="dialog"/)
   assert.match(clientCss, /--partner-solid-panel: #f4f4f4;/)
-  assert.match(clientCss, /--partner-dialog-veil:/)
+  assert.equal((clientCss.match(/--partner-dialog-veil: transparent;/g) ?? []).length, 2)
+  assert.doesNotMatch(workspaceUiCss, /dsh-partner-dialog-veil/)
 })
 
 test('memory graph is fetched only by the graph view', () => {
