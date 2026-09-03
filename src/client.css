@@ -61,11 +61,13 @@
 
 body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   color-scheme: dark;
-  --partner-surface: rgba(8, 10, 12, .19);
-  --partner-pane: rgba(8, 10, 12, .18);
-  --partner-raised: rgba(8, 10, 12, .42);
-  --partner-control: rgba(8, 10, 12, .3);
-  --partner-card-surface: rgba(7, 9, 11, .22);
+  /* Shared DSH plugin dark material: opaque neutral surfaces prevent the host
+     artwork from tinting functional panels and dialogs. */
+  --partner-surface: #1c1c1e;
+  --partner-pane: #2c2c2e;
+  --partner-raised: #323235;
+  --partner-control: #3a3a3c;
+  --partner-card-surface: #323235;
   --partner-card-highlight: rgba(255, 255, 255, .11);
   --partner-solid-panel: #2c2c2e;
   --partner-solid-raised: #323235;
@@ -79,9 +81,9 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   --partner-text: #f5f5f7;
   --partner-text-secondary: #d1d1d6;
   --partner-text-tertiary: #98989d;
-  --partner-accent: #aeaeb2;
-  --partner-accent-strong: #f5f5f7;
-  --partner-on-accent: #1d1d1f;
+  --partner-accent: #69b6ba;
+  --partner-accent-strong: #8aced0;
+  --partner-on-accent: #101819;
   --partner-success: #30d158;
   --partner-weixin: #30c96b;
   --partner-warning: #ff9f0a;
@@ -89,8 +91,8 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   --partner-border: rgba(255, 255, 255, .105);
   --partner-separator: rgba(255, 255, 255, .08);
   --partner-hover: rgba(255, 255, 255, .075);
-  --partner-selected: rgba(255, 255, 255, .09);
-  --partner-focus-ring: rgba(255, 255, 255, .52);
+  --partner-selected: rgb(105 182 186 / 14%);
+  --partner-focus-ring: rgb(105 182 186 / 72%);
   --partner-glass-clear: rgba(0, 0, 0, .1);
   --partner-glass-regular: rgba(0, 0, 0, .16);
   --partner-glass-thick: rgba(0, 0, 0, .26);
