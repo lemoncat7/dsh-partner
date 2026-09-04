@@ -142,8 +142,9 @@ function requireAgent(exec: ToolRunContext): Agent {
 }
 
 function latestUserMessage(agent: Agent): { seq: number; text: string } {
-  for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
-    const event = agent.session.events[index]
+  const events = agent.session.snapshotEvents()
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
     if (event?.type !== 'user/message' || event.data.source.kind !== 'user') continue
     return { seq: event.seq, text: event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() }
   }

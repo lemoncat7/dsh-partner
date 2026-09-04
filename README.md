@@ -4,6 +4,10 @@
 
 伙伴不是一次会话中的临时提示词。每个伙伴拥有独立身份、Agent Preset、模型路由、能力声明，以及按微信联系人隔离的 DSH Session。第一版以微信为主要渠道，使用腾讯微信 iLink Bot API，不模拟个人微信网页版协议。
 
+## 兼容性
+
+正式版 `1.6.0` 针对 DeepSeek Harness `0.1.2-rc.1` 构建并完成部署验证，需要 Node.js `22.19+` 或 `24+`。DSH 官方 Agent、Session、Settings、Tools 与客户端 UI 依赖均锁定到 `0.1.2-rc.1` 接口族。
+
 ## 当前能力
 
 - 伙伴创建、编辑与删除

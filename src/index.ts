@@ -31,7 +31,7 @@ export const Config = ConfigSchema
 export type Config = PartnerConfig
 export * from './domain.js'
 export const name = 'dsh-partner'
-export const inject = ['credentials', 'attachments', 'agents', 'agentDefaultModel', 'agentPresets', 'apiProxy', 'settings', 'systemPrompt', 'tools', 'workspaceRegistry', 'llm']
+export const inject = ['credentials', 'attachments', 'agents', 'agentDefaultModel', 'agentPresets', 'settings', 'systemPrompt', 'tools', 'workspaceRegistry', 'llm']
 
 type RuntimeContext = Context & {
   credentials: CredentialProvider
@@ -79,13 +79,14 @@ export function apply(context: Context, config: PartnerConfig): void {
     const companions = new CompanionService(store)
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
+    const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    agents.setQuestionAnswerer((agentCtx, route) => channels.attachQuestionAnswerer(agentCtx, route))
     collaboration.setAccessChangeNotifier(id => agents.reloadCompanion(id))
     companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
     for (const companion of store.snapshot().companions) await agents.ensureLocalSessionRecord(companion.id)
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })
     await collaboration.start()
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
-    const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     tasks.setProgressNotifier(async (task, previousStatus) => {
       await agents.notifyTaskProgress(task, previousStatus).catch(error => {
         ctx.logger.warn(`dsh-partner task progress notification failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -98,7 +99,6 @@ export function apply(context: Context, config: PartnerConfig): void {
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
-    channels.startInteractionBridge()
     const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, concerns, resolved.timeZone)
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, agents, resolved.timeZone)
     const login = new WeixinLoginManager()

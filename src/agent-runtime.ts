@@ -49,6 +49,8 @@ export interface PartnerAgentComposer {
   compose(ctx: Context & { tools: ToolRuntime }, companion: Companion): (() => void) | Promise<() => void>
 }
 
+export type PartnerQuestionAnswerer = (ctx: Context, route: ChannelSession) => () => void
+
 const HEARTBEAT_TIMEOUT_MS = 115_000
 const HEARTBEAT_DISCOVERY_BUDGET_MS = 72_000
 const HEARTBEAT_TOOL_TIMEOUT_MS = 18_000
@@ -108,6 +110,7 @@ export class PartnerAgentRuntime {
   private readonly restoredCompositions = new Map<string, { agent: Agent; dispose: () => void }>()
   private readonly restoredCompositionJobs = new Map<string, Promise<void>>()
   private readonly disposeAgentListener: () => void
+  private questionAnswerer: PartnerQuestionAnswerer | undefined
 
   constructor(
     private readonly ctx: RuntimeContext,
@@ -126,6 +129,10 @@ export class PartnerAgentRuntime {
         this.restoredCompositions.delete(agent.session.id)
       })
       : () => {}
+  }
+
+  setQuestionAnswerer(answerer: PartnerQuestionAnswerer): void {
+    this.questionAnswerer = answerer
   }
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
@@ -382,7 +389,7 @@ export class PartnerAgentRuntime {
     if (route === undefined) return
     const companion = this.store.snapshot().companions.find(item => item.id === route.companionId)
     if (companion === undefined) return
-    const events = completedTurnEvents(session.events, event)
+    const events = completedTurnEvents(session.snapshotEvents(), event)
     const prompt = events.find(item => item.type === 'user/message' && item.data.source.kind === 'user')
     const replies = events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
     const userText = prompt?.type === 'user/message' ? textContent(prompt.data.content) : ''
@@ -646,6 +653,7 @@ export class PartnerAgentRuntime {
         order: -8,
         text: renderProfile(profile),
       })
+      this.questionAnswerer?.(agentCtx, route)
       await this.composer?.compose(agentCtx as Context & { tools: ToolRuntime }, companion)
     }
     let handle: AgentHandle
@@ -702,6 +710,7 @@ export class PartnerAgentRuntime {
         disposers.push(agentCtx.systemPrompt.section({ name: 'partner-identity', order: -10, text: renderPartnerPersona(companion, route.kind === 'local' ? 'local' : 'conversation') }))
         disposers.push(agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: renderToolProtocol() }))
         if (profile && profile.entries.length > 0) disposers.push(agentCtx.systemPrompt.section({ name: 'partner-user-profile', order: -8, text: renderProfile(profile) }))
+        if (this.questionAnswerer) disposers.push(this.questionAnswerer(agentCtx, route))
         if (this.composer) disposers.push(await this.composer.compose(agentCtx, companion))
       } catch (error) {
         for (let index = disposers.length - 1; index >= 0; index -= 1) disposers[index]?.()

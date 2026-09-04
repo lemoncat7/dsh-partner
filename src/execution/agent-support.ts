@@ -33,7 +33,7 @@ export function renderToolProtocol(): string {
 
 export function assistantTextAfter(agent: Agent, fromSeq: number): string {
   const messages: string[] = []
-  for (const event of agent.session.events) {
+  for (const event of agent.session.snapshotEvents()) {
     if (event.seq < fromSeq || event.type !== 'assistant/message' || event.data.interrupted) continue
     const text = event.data.message.content
       .filter((block): block is { type: 'text'; text: string } => block.type === 'text')

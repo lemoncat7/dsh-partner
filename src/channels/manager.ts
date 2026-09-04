@@ -1,6 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
-import { randomUUID } from 'node:crypto'
 import type { ChannelSession, ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
 import { PartnerStore } from '../store.js'
 import { PartnerCredentialVault } from '../credentials.js'
@@ -8,10 +7,8 @@ import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
 import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
-import { RpcId } from '@deepseek-ai/dsh-host-apiproxy'
-import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
@@ -20,12 +17,14 @@ import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
 
-type ChannelContext = Context & { apiProxy: ApiProxy; settings: SettingsProvider }
+type ChannelContext = Context & { settings: SettingsProvider }
 
 interface PendingQuestion {
-  rpcId: ReturnType<typeof RpcId>
   sessionId: string
   questions: AskUserQuestionItem[]
+  resolve(answer: AskUserQuestionAnswer): void
+  reject(error: unknown): void
+  detachAbort(): void
 }
 
 interface RuntimeState {
@@ -40,8 +39,6 @@ export class ChannelManager {
   private readonly operations = new Map<string, Set<Promise<void>>>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
-  private interactionController: AbortController | undefined
-  private interactionTask: Promise<void> | undefined
 
   constructor(
     private readonly ctx: ChannelContext,
@@ -51,13 +48,8 @@ export class ChannelManager {
     private readonly defaultCwd: string,
   ) {}
 
-  startInteractionBridge(): void {
-    if (this.interactionTask !== undefined) return
-    const controller = new AbortController()
-    this.interactionController = controller
-    this.interactionTask = this.consumeInteractions(controller.signal).catch(error => {
-      if (!controller.signal.aborted) this.ctx.logger.error(`dsh-partner: question bridge stopped: ${error instanceof Error ? error.message : String(error)}`)
-    })
+  attachQuestionAnswerer(agentCtx: Context, route: ChannelSession): () => void {
+    return agentCtx.on('user-questions/request', (request, next) => this.askThroughChannel(route, request, next), { prepend: true })
   }
 
   async views(): Promise<ChannelView[]> {
@@ -104,10 +96,10 @@ export class ChannelManager {
   }
 
   async close(): Promise<void> {
-    this.interactionController?.abort()
-    await this.interactionTask?.catch(() => {})
-    this.interactionController = undefined
-    this.interactionTask = undefined
+    for (const pending of this.pendingQuestions.values()) {
+      pending.detachAbort()
+      pending.reject(new Error('伙伴渠道已停止'))
+    }
     this.pendingQuestions.clear()
     await Promise.all([...this.tasks.keys()].map(id => this.stop(id)))
   }
@@ -158,7 +150,7 @@ export class ChannelManager {
       return
     }
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
-    const events = completedTurnEvents(session.events, event)
+    const events = completedTurnEvents(session.snapshotEvents(), event)
     if (!isAutonomousDeliveryTurn(events)) return
     const text = events
       .filter(item => item.type === 'assistant/message' && !item.data.interrupted)
@@ -291,32 +283,50 @@ export class ChannelManager {
     await this.rememberReceipt(receipt)
   }
 
-  private async consumeInteractions(signal: AbortSignal): Promise<void> {
-    const stream = this.ctx.apiProxy.events.mux({ rpcId: RpcId(randomUUID()), payload: {} }, signal)
-    for await (const frame of stream) {
-      if (signal.aborted) continue
-      if (frame.payload.type === 'question/resolved') {
-        const pending = this.pendingQuestions.get(frame.payload.sessionId)
-        if (pending?.rpcId === frame.payload.questionRpcId) this.pendingQuestions.delete(frame.payload.sessionId)
-        continue
-      }
-      if (frame.payload.type !== 'question/requested') continue
-      const request = frame.payload
-      const route = this.store.snapshot().sessions.find(item => item.sessionId === request.sessionId)
-      if (route === undefined || this.pendingQuestions.get(route.sessionId)?.rpcId === frame.rpcId) continue
-      const channel = this.store.snapshot().channels.find(item => item.id === route.channelId)
-      const pairing = this.store.snapshot().pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
-      if (channel === undefined || !channel.enabled || pairing?.status !== 'approved') continue
-      const pending: PendingQuestion = { rpcId: frame.rpcId, sessionId: route.sessionId, questions: request.questions }
-      this.pendingQuestions.set(route.sessionId, pending)
-      try {
-        const credential = await this.credentials.read(channel.id)
-        const api = new WeixinApi(credential.baseUrl, credential.botToken)
-        await api.sendText(route.userId, renderQuestions(pending.questions), this.contextTokens.get(`${channel.id}:${route.userId}`), signal)
-      } catch (error) {
-        this.pendingQuestions.delete(route.sessionId)
-        this.ctx.logger.warn(`dsh-partner: failed to deliver question for ${route.sessionId}: ${error instanceof Error ? error.message : String(error)}`)
-      }
+  private async askThroughChannel(
+    route: ChannelSession,
+    request: AskUserQuestionRequestEvent,
+    next: () => Promise<AskUserQuestionAnswer>,
+  ): Promise<AskUserQuestionAnswer> {
+    if (route.kind === 'local' || request.signal?.aborted || this.pendingQuestions.has(route.sessionId)) return next()
+    const state = this.store.snapshot()
+    const current = state.sessions.find(item => item.id === route.id && item.sessionId === route.sessionId)
+    const channel = state.channels.find(item => item.id === route.channelId)
+    const pairing = state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
+    if (current === undefined || channel === undefined || !channel.enabled || pairing?.status !== 'approved') return next()
+
+    let resolveAnswer!: (answer: AskUserQuestionAnswer) => void
+    let rejectAnswer!: (error: unknown) => void
+    const answer = new Promise<AskUserQuestionAnswer>((resolve, reject) => {
+      resolveAnswer = resolve
+      rejectAnswer = reject
+    })
+    void answer.catch(() => {})
+    const abort = (): void => rejectAnswer(request.signal?.reason ?? new Error('用户提问已取消'))
+    request.signal?.addEventListener('abort', abort, { once: true })
+    if (request.signal?.aborted) abort()
+    const pending: PendingQuestion = {
+      sessionId: route.sessionId,
+      questions: request.questions,
+      resolve: resolveAnswer,
+      reject: rejectAnswer,
+      detachAbort: () => request.signal?.removeEventListener('abort', abort),
+    }
+    this.pendingQuestions.set(route.sessionId, pending)
+    try {
+      const credential = await this.credentials.read(channel.id)
+      const api = new WeixinApi(credential.baseUrl, credential.botToken)
+      await api.sendText(route.userId, renderQuestions(request.questions), this.contextTokens.get(`${channel.id}:${route.userId}`), request.signal ?? AbortSignal.timeout(30_000))
+    } catch (error) {
+      this.clearPendingQuestion(pending)
+      if (request.signal?.aborted) throw error
+      this.ctx.logger.warn(`dsh-partner: failed to deliver question for ${route.sessionId}: ${error instanceof Error ? error.message : String(error)}`)
+      return next()
+    }
+    try {
+      return await answer
+    } finally {
+      this.clearPendingQuestion(pending)
     }
   }
 
@@ -324,17 +334,14 @@ export class ChannelManager {
     const pending = this.pendingQuestions.get(sessionId)
     if (pending === undefined) return false
     const answer = answerQuestions(pending.questions, text)
-    const receipt = await this.ctx.apiProxy.respond({
-      type: 'client-response', rpcId: pending.rpcId,
-      result: { ok: true, value: { sessionId, answer } },
-    })
-    if (!receipt.accepted) {
-      if (receipt.reason === 'not-pending') this.pendingQuestions.delete(sessionId)
-      else await api.sendText(userId, '这个回答格式没有匹配当前问题，请按选项序号回复。', this.contextTokens.get(`${channel.id}:${userId}`), signal)
-      return true
-    }
-    this.pendingQuestions.delete(sessionId)
+    pending.resolve(answer)
+    this.clearPendingQuestion(pending)
     return true
+  }
+
+  private clearPendingQuestion(pending: PendingQuestion): void {
+    if (this.pendingQuestions.get(pending.sessionId) === pending) this.pendingQuestions.delete(pending.sessionId)
+    pending.detachAbort()
   }
 
   private async rememberReceipt(receipt: string): Promise<void> {
@@ -421,7 +428,7 @@ function shortIdentity(value: string): string {
 }
 
 export function busyEnterMode(settings: Pick<SettingsProvider, 'get'>): 'queue' | 'steer' {
-  const section = settings.get(settingsNamespace('ui-conversation')) as { busyEnter?: unknown } | undefined
+  const section = settings.get('ui-conversation') as { busyEnter?: unknown } | undefined
   return section?.busyEnter === 'steer' ? 'steer' : 'queue'
 }
 
