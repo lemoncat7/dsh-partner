@@ -16,6 +16,8 @@ import { QRCodeSVG } from 'qrcode.react'
 import baseCssText from './client.css'
 import workspaceCssText from './ui/workspace-ui.css'
 import responsiveCssText from './ui/responsive-ui.css'
+import pickerCssText from './ui/companion-picker.css'
+import { CompanionPicker } from './ui/companion-picker.js'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot, type UserProfileSnapshotView } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { futureTime } from './time-format.js'
@@ -31,7 +33,7 @@ import { createPartnerController, type PartnerController as Controller } from '.
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${responsiveCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
@@ -186,13 +188,7 @@ function MobileWorkspaceControls({ companions, selectedId, view, openCompanion, 
 }): JSX.Element {
   return <div className="dsh-partner-mobile-controls">
     <div className="dsh-partner-mobile-companion-row">
-      <label className="dsh-partner-mobile-companion-picker">
-        <span className="sr-only">当前伙伴</span>
-        <select value={selectedId ?? ''} disabled={companions.length === 0} aria-label="切换当前伙伴" onChange={event => openCompanion(event.target.value)}>
-          {companions.length === 0 && <option value="">还没有伙伴</option>}
-          {companions.map(companion => <option value={companion.id} key={companion.id}>{companion.name} · {companion.role}</option>)}
-        </select>
-      </label>
+      <CompanionPicker companions={companions} selectedId={selectedId} onChange={openCompanion} />
       <button type="button" className="dsh-partner-mobile-create" onClick={createCompanion} aria-label="新建伙伴"><IconPlusOutline16 size={17} /></button>
     </div>
     <nav className="dsh-partner-mobile-workspace-nav" aria-label="伙伴工作区快捷入口">

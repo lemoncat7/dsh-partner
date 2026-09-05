@@ -1,0 +1,61 @@
+.dsh-partner-companion-picker { position: relative; min-width: 0; }
+.dsh-partner-companion-trigger,
+.dsh-partner-companion-options > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 10px;
+  border: 1px solid var(--partner-border);
+  border-radius: 10px;
+  color: var(--partner-text);
+  background: var(--partner-control);
+  font: 500 var(--partner-font-body)/1.4 var(--partner-font-family);
+  text-align: left;
+  cursor: pointer;
+}
+.dsh-partner-companion-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.dsh-partner-companion-copy > strong { overflow: hidden; font-size: var(--partner-font-label); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-companion-copy > small { overflow: hidden; color: var(--partner-text-secondary); font-size: var(--partner-font-caption); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-companion-picker .dsh-partner-avatar { flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--partner-selected); box-shadow: none; }
+.dsh-partner-companion-chevron,
+.dsh-partner-companion-check { display: grid; flex: none; width: 16px; place-items: center; color: var(--partner-text-secondary); }
+.dsh-partner-companion-trigger[aria-expanded="true"] .dsh-partner-companion-chevron { transform: rotate(180deg); }
+.dsh-partner-companion-trigger:hover:not(:disabled),
+.dsh-partner-companion-trigger[aria-expanded="true"] { background: var(--partner-control-hover); border-color: var(--partner-text-tertiary); }
+/* Host themes target #root [role=listbox] with !important. Keep this one
+   owned overlay legible without changing the host theme or workspace canvas. */
+:is(#root, .dsh-partner-workspace) .dsh-partner-companion-options[role="listbox"] {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 3px;
+  max-height: min(320px, 45dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 5px;
+  border: 1px solid var(--partner-border) !important;
+  border-radius: 12px !important;
+  background: var(--partner-solid-panel) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--partner-shadow-md) !important;
+}
+:is(#root, .dsh-partner-workspace) .dsh-partner-companion-options > [role="option"] {
+  border-color: transparent;
+  border-radius: 8px;
+  color: var(--partner-text);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+:is(#root, .dsh-partner-workspace) .dsh-partner-companion-options > [role="option"]:is(:hover, :focus-visible) { background: var(--partner-hover); }
+:is(#root, .dsh-partner-workspace) .dsh-partner-companion-options > [role="option"][aria-selected="true"] { background: var(--partner-selected); }
+:is(#root, .dsh-partner-workspace) .dsh-partner-companion-options > [role="option"]:focus-visible { outline: 2px solid var(--partner-focus-ring) !important; outline-offset: -2px !important; }

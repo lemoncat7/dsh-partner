@@ -71,7 +71,7 @@ test('creation flows expose bounded pending and inline error states without brow
 
 test('mobile workspace preserves companion navigation and touch-safe controls', () => {
   assert.match(entry, /function MobileWorkspaceControls/)
-  assert.match(entry, /aria-label="切换当前伙伴"/)
+  assert.match(entry, /<CompanionPicker /)
   assert.match(entry, /aria-label="新建伙伴"/)
   assert.match(responsiveStyles, /@media \(max-width: 760px\)/)
   assert.match(responsiveStyles, /max-height: 100dvh/)
