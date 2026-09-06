@@ -8,6 +8,7 @@ import { createNoticeMotion } from './notice-motion.js'
 import type { PendantSettings } from './settings.js'
 import { loadCardImage } from './card-image.js'
 import { createPendantFrameLoop } from './frame-loop.js'
+import { createBadgeFaceMaterial, BADGE_LIGHTING } from './surface.js'
 
 export interface BadgeMessage { id: string; count: number; name: string; label: string }
 export interface LanyardHandle { setMessage(message?: BadgeMessage): void; setAppearance(settings: PendantSettings): void; relayout(): void; destroy(): void }
@@ -39,8 +40,8 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const environment = pmrem.fromScene(room)
   room.dispose(); pmrem.dispose()
   scene.environment = environment.texture
-  scene.add(new THREE.AmbientLight(0xffffff, 1.2))
-  const light = new THREE.DirectionalLight(0xffffff, 3)
+  scene.add(new THREE.AmbientLight(0xffffff, BADGE_LIGHTING.ambient))
+  const light = new THREE.DirectionalLight(0xffffff, BADGE_LIGHTING.key)
   light.position.set(-3, 4, 5); scene.add(light)
 
   const disposables: Array<{ dispose(): void }> = [environment]
@@ -55,9 +56,9 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const positions = face.getAttribute('position'), uv = face.getAttribute('uv')
   for (let i = 0; i < positions.count; i++) uv.setXY(i, positions.getX(i) / 1.42 + .5, positions.getY(i) / 1.96 + .5)
   const frontTexture = keep(badgeTexture(false)), backTexture = keep(badgeTexture(true))
-  const front = new THREE.Mesh(face, keep(new THREE.MeshPhysicalMaterial({ map: frontTexture, roughness: .64, metalness: .03, clearcoat: .3, clearcoatRoughness: .4, envMapIntensity: .45 })))
+  const front = new THREE.Mesh(face, keep(createBadgeFaceMaterial(frontTexture)))
   front.position.z = .063; card.add(front)
-  const back = new THREE.Mesh(face, keep(new THREE.MeshStandardMaterial({ map: backTexture, roughness: .55 })))
+  const back = new THREE.Mesh(face, keep(createBadgeFaceMaterial(backTexture)))
   back.rotation.y = Math.PI; back.position.z = -.025; card.add(back)
   const sheen = keep(createBadgeSheen(card, face))
   const metal = keep(new THREE.MeshStandardMaterial({ color: 0xc3ced0, metalness: .95, roughness: .24 }))
