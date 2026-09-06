@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -26,6 +26,8 @@ import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
 import { PartnerAgentComposition } from './collaboration/composition.js'
 import { CompanionService } from './companions/service.js'
+import { PartnerInboxStore } from './notifications/store.js'
+import { PartnerNoticeService } from './notifications/service.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -48,6 +50,9 @@ export function apply(context: Context, config: PartnerConfig): void {
   const resolved = resolveConfig(config)
   ctx.effect(async () => {
     const store = await PartnerStore.open(resolved.statePath)
+    const inbox = await PartnerInboxStore.open(join(dirname(resolved.statePath), 'partner-inbox.sqlite'))
+    const notices = new PartnerNoticeService(store, inbox, error => ctx.logger.warn(`dsh-partner inbox: ${error instanceof Error ? error.message : String(error)}`))
+    ctx.effect(() => () => { notices.close(); inbox.close() }, 'dsh-partner.inbox')
     const credentials = new PartnerCredentialVault(ctx.credentials)
     const memory = new PartnerMemoryStore(resolved.defaultCwd, resolved.timeZone)
     const concerns = new PartnerConcernStore(resolved.defaultCwd)
@@ -96,6 +101,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       })
     })
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
+      notices.observeSession(session, event)
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
@@ -107,7 +113,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler, companions })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler, companions, inbox })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

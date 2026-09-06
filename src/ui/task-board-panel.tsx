@@ -10,12 +10,13 @@ const COLUMNS: Array<{ id: BoardTaskStatusView; label: string }> = [
 const LIVE_REFRESH_MS = 4_000
 type BoardStatusFilter = BoardTaskStatusView | 'all'
 
-export function TaskBoardPanel(): JSX.Element {
+export function TaskBoardPanel({ initialTaskId, openRequest }: { initialTaskId?: string | undefined; openRequest?: object | undefined } = {}): JSX.Element {
   const [board, setBoard] = useState<TaskBoardView>({ tasks: [], activities: [] })
   const [directory, setDirectory] = useState<PartnerDirectoryEntryView[]>([])
   const [delegations, setDelegations] = useState<PartnerDelegationView[]>([])
   const [creating, setCreating] = useState(false)
-  const [selectedTaskId, setSelectedTaskId] = useState<string>()
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(initialTaskId)
+  useEffect(() => { if (initialTaskId) setSelectedTaskId(initialTaskId) }, [initialTaskId, openRequest])
   const [busy, setBusy] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()

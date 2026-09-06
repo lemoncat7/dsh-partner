@@ -1,4 +1,5 @@
 .dsh-partner-sidebar,
+.dsh-partner-pendant,
 .dsh-partner-workspace {
   color-scheme: light;
   /* The host remains the canvas. Panes, cards and controls own progressively
@@ -63,7 +64,7 @@
   line-height: 1.5;
 }
 
-body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
+body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-partner-pendant) {
   color-scheme: dark;
   --partner-surface: transparent;
   --partner-pane: rgb(16 23 25 / 18%);
@@ -1389,7 +1390,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace) {
   .dsh-partner-access-list { grid-template-columns: 1fr; }
   .dsh-partner-runtime-fields { grid-template-columns: 1fr; }
   .dsh-partner-topbar { align-items: stretch; flex-direction: column; gap: 7px; padding: 7px 9px; }
-  .dsh-partner-mobile-workspace-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .dsh-partner-mobile-workspace-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
   .dsh-partner-mobile-workspace-nav button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 1px solid transparent; border-radius: 9px; color: var(--partner-text-tertiary); background: transparent; font: 580 var(--partner-font-caption)/1 var(--partner-font-family); cursor: pointer; }
   .dsh-partner-mobile-workspace-nav button.is-active { border-color: var(--partner-border); color: var(--partner-text); background: var(--partner-selected); }
   .dsh-partner-grid { grid-template-columns: 1fr; }

@@ -2,6 +2,8 @@ import { build } from 'esbuild'
 
 const pluginId = '@lemoncat7/dsh-partner'
 
+await build({ entryPoints: ['src/pendant/renderer.ts'], outfile: 'lib/pendant-renderer.js', bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true })
+
 await build({
   entryPoints: ['src/client.tsx'],
   outfile: 'lib/client.js',

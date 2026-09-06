@@ -7,6 +7,7 @@ import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 export class PartnerStore {
   private state: PartnerState
   private writes: Promise<void> = Promise.resolve()
+  private readonly listeners = new Set<{ notify(next: PartnerState, previous: PartnerState): void; onError(error: unknown): void }>()
 
   private constructor(private readonly path: string, state: PartnerState) {
     this.state = state
@@ -37,6 +38,12 @@ export class PartnerStore {
     return structuredClone(this.state)
   }
 
+  subscribe(notify: (next: PartnerState, previous: PartnerState) => void, onError: (error: unknown) => void): () => void {
+    const listener = { notify, onError }
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
   async update(change: (draft: PartnerState) => void): Promise<PartnerState> {
     let resolveResult!: (value: PartnerState) => void
     let rejectResult!: (reason: unknown) => void
@@ -46,7 +53,12 @@ export class PartnerStore {
       change(next)
       validateState(next)
       await this.persist(next)
+      const previous = this.state
       this.state = next
+      // Observers cannot turn an already committed write into an apparent failure.
+      for (const listener of this.listeners) {
+        try { listener.notify(next, previous) } catch (error) { try { listener.onError(error) } catch { /* reporting must not reject a committed write */ } }
+      }
       resolveResult(this.snapshot())
     }).catch(error => { rejectResult(error) })
     return result

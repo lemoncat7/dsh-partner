@@ -1,0 +1,163 @@
+import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
+const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
+const root = fileURLToPath(new URL('../', import.meta.url))
+const result = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {PartnerPendant} from './src/pendant/widget'; const controller={open:(id,destination)=>{window.visited={id,destination}},openSession:async(route,id)=>{window.visited={route,id}}}; const root=createRoot(document.getElementById('app')); window.unmountPendant=()=>root.unmount(); root.render(<PartnerPendant controller={controller}/>);`, loader: 'tsx', resolveDir: root }, bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'text', '.module.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } })
+const renderer = await readFile(new URL('../lib/pendant-renderer.js', import.meta.url))
+const styles = (await Promise.all(['src/client.css', 'src/pendant/widget.css'].map(path => readFile(new URL('../' + path, import.meta.url), 'utf8')))).join('\n')
+let items = [], version = 1, polls = 0
+const server = createServer(async (req, res) => {
+  if (req.url === '/fixture/complete') { items.unshift({ id: 'n' + version++, kind: 'task', companionId: 'one', companionName: '莫殇', title: '已完成 · 整理资料', summary: '已整理三篇文档，完整内容已保存在任务结果中。', taskId: 'task1', createdAt: Date.now() }); res.end('ok'); return }
+  if (req.url === '/partner-local/v1/pendant/inbox') { polls++; if (req.headers['if-none-match'] === String(version)) { res.statusCode = 304; res.end(); return } res.setHeader('etag', String(version)); res.setHeader('content-type','application/json'); res.end(JSON.stringify({ items, unread: items.filter(i => !i.readAt).length })); return }
+  if (req.url === '/partner-local/v1/pendant/read') { let raw=''; for await (const part of req) raw+=part; const {ids}=JSON.parse(raw); for (const i of items) if(ids.includes(i.id)) i.readAt=Date.now(); version++; res.setHeader('content-type','application/json'); res.end(JSON.stringify({items,unread:items.filter(i=>!i.readAt).length})); return }
+  res.setHeader('content-type', req.url?.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
+  res.end(req.url === '/app.js' ? result.outputFiles[0].contents : req.url === '/partner-local/v1/pendant/renderer.js' ? renderer : '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#e8e9eb;font-family:sans-serif}body[data-ds-dark-theme]{background:#1d2328}#underneath{position:fixed;inset:350px 10px auto;padding:20px}#app{height:100vh}</style><button id="underneath">聊天区正常操作</button><div id="app"></div><script src="/app.js"></script>')
+})
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--enable-unsafe-swiftshader'] })
+try {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 850 }, deviceScaleFactor: 2, ...(process.env.PARTNER_PENDANT_VIDEO_DIR ? { recordVideo: { dir: process.env.PARTNER_PENDANT_VIDEO_DIR, size: { width: 1280, height: 850 } } } : {}) })
+  const errors = []; page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error' && /THREE.WebGLProgram|shader error/i.test(message.text())) errors.push(message.text()) })
+  await page.addInitScript(() => { const raf = window.requestAnimationFrame; window.frameCount = 0; window.requestAnimationFrame = fn => raf.call(window, at => { window.frameCount++; fn(at) }) })
+  await page.addInitScript(() => {
+    window.paintTimes = []
+    new MutationObserver(records => { for (const record of records) if (record.attributeName === 'data-facing') window.paintTimes.push(performance.now()) }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-facing'] })
+    window.sheenSeen = false
+    window.sheenFacings = []
+    new MutationObserver(records => { if (records.some(record => record.target.dataset.shining === 'true')) { window.sheenSeen = true; window.sheenFacings.push(Number(document.querySelector('canvas')?.dataset.facing)) } }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-shining'] })
+    window.badgeTextures = []
+    const fill = CanvasRenderingContext2D.prototype.fillRect
+    CanvasRenderingContext2D.prototype.fillRect = function(...args) {
+      if (this.canvas.width === 512 && this.canvas.height === 704 && !window.badgeTextures.includes(this.canvas)) window.badgeTextures.push(this.canvas)
+      return fill.apply(this,args)
+    }
+  })
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.addStyleTag({content: styles})
+  const hit = page.locator('.dsh-partner-pendant-hit')
+  await page.waitForSelector('canvas[data-ready="true"]', {timeout: 40000})
+  await page.waitForTimeout(1000)
+  const originalTextures = await page.evaluate(()=>badgeTextures.map(canvas=>canvas.toDataURL()))
+  const home = await page.locator('.dsh-partner-pendant').boundingBox()
+  const bufferSize = await page.locator('canvas').evaluate(el => [el.width, el.height])
+  assert.ok(bufferSize[0] * bufferSize[1] < 70000, 'high-DPI card uses a small GPU target')
+  const hitSize = await hit.evaluate(el => [el.style.width, el.style.height])
+  const initial = await hit.boundingBox()
+  assert.ok(initial.y >= home.y && initial.y + initial.height <= home.y + home.height, 'idle badge fits the small canvas')
+  await page.screenshot({ path: '/tmp/partner-pendant-light.png' })
+  if (!process.env.PARTNER_PENDANT_UI_ONLY) {
+  const before = await hit.boundingBox()
+  await page.mouse.move(before.x + before.width/2, before.y + before.height/2); await page.mouse.down()
+  assert.equal(await hit.evaluate(el => getComputedStyle(el).outlineStyle), 'none', 'pointer press does not draw a keyboard focus box')
+  assert.equal(await hit.evaluate(el => getComputedStyle(el).boxShadow), 'none', 'drag target has no extra frame')
+  const start = { x: before.x + before.width / 2, y: before.y + before.height / 2 }
+  await page.evaluate(() => { paintTimes = [] })
+  await page.mouse.move(start.x - 350, start.y + 170, {steps: 20}); await page.waitForTimeout(150)
+  const dragged = await hit.boundingBox()
+  assert.ok(Math.abs(dragged.x + dragged.width / 2 - (start.x - 350)) < 12, 'far drag follows pointer without a length clamp')
+  assert.ok(Math.abs(dragged.y + dragged.height / 2 - (start.y + 170)) < 12, 'vertical drag follows pointer')
+  assert.deepEqual(await page.locator('canvas').evaluate(el => [el.width, el.height]), bufferSize, 'far drag does not grow the GPU target')
+  assert.deepEqual(await hit.evaluate(el => [el.style.width, el.style.height]), hitSize, 'far drag does not magnify the hit area')
+  assert.equal(await page.locator('.dsh-partner-pendant-strap').count(), 1, 'strap is rendered separately')
+  const paints = await page.evaluate(() => paintTimes)
+  if (paints.length > 2) assert.ok((paints.length - 1) * 1000 / (paints.at(-1) - paints[0]) <= 32, 'drag drawing is capped near 30 FPS')
+  await page.screenshot({ path: '/tmp/partner-pendant-drag.png' }); await page.mouse.up()
+  assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(), 0, 'drag is not a click')
+  await page.waitForTimeout(450)
+  const rebound = await hit.boundingBox()
+  assert.ok(rebound.x + rebound.width / 2 > start.x - 200, 'release recoils promptly toward the anchor')
+  await page.waitForSelector('canvas[data-sleeping="true"]', {timeout: 45000})
+  assert.deepEqual(await page.locator('canvas').evaluate(el => [el.width, el.height]), bufferSize, 'release keeps GPU allocation constant')
+  const settled = await hit.boundingBox()
+  assert.ok(settled.y >= home.y && settled.y + settled.height <= home.y + home.height, 'rope does not drift down after a large stretch')
+  const count = await page.evaluate(() => frameCount); await page.waitForTimeout(350); assert.equal(await page.evaluate(() => frameCount), count, 'settled badge stops RAF')
+  const rest = await hit.boundingBox(), restY = rest.y + rest.height / 2
+  await page.mouse.move(rest.x + rest.width / 2, restY); await page.mouse.down()
+  await page.mouse.move(rest.x + rest.width / 2, restY + 160, {steps: 16})
+  await page.waitForSelector('canvas[data-sleeping="true"]', {timeout: 45000})
+  const heldFrames = await page.evaluate(() => frameCount)
+  await page.waitForTimeout(350)
+  assert.equal(await page.evaluate(() => frameCount), heldFrames, 'holding a settled stretch stops the frame loop')
+  await page.evaluate(() => {
+    window.recoil = []; const start = performance.now()
+    const sample = now => {
+      const box = document.querySelector('.dsh-partner-pendant-hit').getBoundingClientRect()
+      recoil.push({ at: now - start, y: box.y + box.height / 2 })
+      if (now - start < 2200) requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })
+  await page.mouse.up(); await page.waitForTimeout(2400)
+  const recoil = await page.evaluate(() => recoil), peak = recoil.reduce((best, p, i) => p.y < recoil[best].y ? i : best, 0)
+  assert.ok(recoil[peak].y < restY - 25, 'held stretch rebounds past equilibrium')
+  assert.ok(recoil.slice(peak + 1).some(p => p.y > recoil[peak].y + 35), 'recoil visibly reverses, rather than drifting home')
+  console.log('Held-stretch recoil:', JSON.stringify({restY, peakY:recoil[peak].y, peakAt:recoil[peak].at}))
+  }
+  await page.request.post(`http://127.0.0.1:${server.address().port}/fixture/complete`)
+  await page.waitForSelector('canvas[data-unread="1"]', {timeout: 10000})
+  const noticeTextures = await page.evaluate(()=>badgeTextures.map(canvas=>canvas.toDataURL()))
+  assert.equal(noticeTextures[0], originalTextures[0], 'notifications never repaint the front artwork')
+  assert.notEqual(noticeTextures[1], originalTextures[1], 'only the inner face contains message text')
+  assert.equal(await page.locator('.dsh-partner-pendant-toast, .dsh-partner-pendant-fold, .dsh-partner-pendant-inbox').count(), 0, 'notification stays on the card; no automatic popup or fold button')
+  await page.reload(); await page.addStyleTag({content: styles})
+  await page.waitForSelector('canvas[data-ready="true"][data-unread="1"]', {timeout:40000})
+  await page.waitForFunction(()=>sheenSeen,{},{timeout:5000})
+  assert.ok((await page.evaluate(()=>sheenFacings)).every(value=>value>.95),'flash starts only after the art face turns forward')
+  await page.waitForTimeout(800); await page.screenshot({path:'/tmp/partner-pendant-card-notice.png'})
+  await hit.focus(); await page.keyboard.press('Enter')
+  assert.equal(await page.locator('.dsh-partner-pendant-detail').count(),1,'card opens latest unread directly')
+  assert.equal(await hit.isVisible(),true,'opening messages leaves the card visible')
+  assert.equal(await page.getByRole('button',{name:'移动挂饰位置',exact:true}).isVisible(),true,'hook remains visible')
+  await page.waitForSelector('canvas[data-shining="false"]')
+  const reader = await page.locator('.dsh-partner-pendant-inbox').boundingBox(), cardBox = await hit.boundingBox()
+  assert.ok(reader.x + reader.width <= cardBox.x || reader.x >= cardBox.x + cardBox.width, 'desktop reader sits beside the card')
+  await page.waitForSelector('canvas[data-sleeping="true"]',{timeout:45000})
+  const readingFrames=await page.evaluate(()=>frameCount); await page.waitForTimeout(300)
+  assert.equal(await page.evaluate(()=>frameCount),readingFrames,'visible card still sleeps when calm')
+  await page.waitForTimeout(170); await page.screenshot({path:'/tmp/partner-pendant-reader7-detail.png'})
+  await page.getByRole('button', {name:'查看任务',exact:true}).click()
+  assert.equal((await page.evaluate(() => visited)).destination.taskId, 'task1')
+  await hit.focus(); await page.keyboard.press('Enter')
+  assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(), 1)
+  await page.waitForSelector('canvas[data-sleeping="true"]',{timeout:45000})
+  await hit.click()
+  assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(),0,'pointer click on the visible card closes rather than reopening the reader')
+  await hit.click()
+  assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(),1,'card opens again by pointer')
+  await page.keyboard.press('Escape'); assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(), 0)
+  for (const dark of [false, true]) {
+    await page.evaluate(dark => document.body.toggleAttribute('data-ds-dark-theme', dark), dark)
+    for (const width of [375, 760, 1024]) {
+      await page.setViewportSize({width, height:width===760?390:844}); await hit.focus(); await page.keyboard.press('Enter')
+      const box = await page.locator('.dsh-partner-pendant-inbox').boundingBox()
+      assert.ok(box.x >= 0 && box.x+box.width<=width && box.y>=0 && box.y+box.height<=(width===760?390:844), 'inbox fits viewport')
+      await page.waitForTimeout(200)
+      if (width===375) await page.screenshot({path:`/tmp/partner-pendant-mobile-${dark?'dark':'light'}.png`})
+      await page.keyboard.press('Escape')
+    }
+  }
+  const pendant=page.locator('.dsh-partner-pendant'), hook=page.getByRole('button',{name:'移动挂饰位置',exact:true})
+  const original=await pendant.boundingBox(), hookBox=await hook.boundingBox()
+  await page.mouse.move(hookBox.x+hookBox.width/2,hookBox.y+hookBox.height/2);await page.mouse.down()
+  await page.mouse.move(hookBox.x+hookBox.width/2-260,hookBox.y+hookBox.height/2+50,{steps:12});await page.mouse.up();await page.waitForTimeout(100)
+  const moved=await pendant.boundingBox(); assert.ok(Math.abs(moved.x-original.x+260)<2,'hook moves the entire pendant')
+  assert.equal(await page.locator('.dsh-partner-pendant-inbox').count(),0,'moving the hook does not open messages')
+  await page.reload();await page.addStyleTag({content:styles});await page.waitForSelector('canvas[data-ready="true"]',{timeout:40000})
+  const restored=await pendant.boundingBox();assert.ok(Math.abs(restored.x-moved.x)<2&&Math.abs(restored.y-moved.y)<2,'placement survives reload')
+  await hook.focus();await page.keyboard.press('ArrowRight');assert.ok(Math.abs((await pendant.boundingBox()).x-restored.x-12)<2,'keyboard can reposition the hook')
+  await page.setViewportSize({width:375,height:500});await page.waitForTimeout(100)
+  const narrow=await pendant.boundingBox();assert.ok(narrow.x>=0&&narrow.x+narrow.width<=375&&narrow.y+narrow.height<=500,'placement stays visible after narrowing')
+  await page.emulateMedia({reducedMotion:'reduce'})
+  await page.request.post(`http://127.0.0.1:${server.address().port}/fixture/complete`)
+  await page.waitForSelector('canvas[data-unread="1"]',{timeout:10000})
+  assert.equal(await page.locator('canvas').getAttribute('data-shining'),'false','reduced motion suppresses notification sheen')
+  await page.evaluate(() => { Object.defineProperty(document,'hidden',{value:true,configurable:true}); document.dispatchEvent(new Event('visibilitychange')) })
+  const pausedPolls=polls; await page.waitForTimeout(4500); assert.equal(polls,pausedPolls,'hidden page pauses polling')
+  await page.evaluate(()=>unmountPendant());assert.equal(await page.locator('.dsh-partner-pendant-strap, canvas').count(),0,'unmount cleans vector and GPU surfaces')
+  assert.deepEqual(errors, [])
+  if (page.video()) console.log('Interaction recording:', await page.video().path())
+  console.log('Pendant verified: elastic drag, constant GPU size, brief 3D sheen, card remains visible beside reader, idle sleep, source navigation, mobile/dark, movable persistent hook, narrow viewport bounds, cleanup.')
+} finally { await browser.close(); await new Promise(resolve=>server.close(resolve)) }

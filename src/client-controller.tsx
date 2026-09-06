@@ -6,8 +6,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { api } from './client-api.js'
 import { activatePluginWorkspace } from './workspace-ownership.js'
 
+export interface PartnerDestination { page: 'home' | 'board' | 'schedules'; taskId?: string }
 export interface PartnerController {
-  open(companionId?: string): void
+  open(companionId?: string, destination?: PartnerDestination): void
+  destination(): PartnerDestination | undefined
   close(): void
   toggle(): void
   isOpen(): boolean
@@ -21,10 +23,12 @@ export interface PartnerController {
 export function createPartnerController(ctx: ClientContext, pluginId: string, render: (props: PropsRuntime<'conversation'>, controller: PartnerController) => JSX.Element): PartnerController {
   const listeners = new Set<() => void>()
   let selected: string | undefined
+  let destination: PartnerDestination | undefined
   let dispose: (() => void) | undefined
   const notify = (): void => { for (const listener of listeners) listener() }
   const controller: PartnerController = {
-    open(companionId) {
+    open(companionId, target) {
+      destination = target ?? { page: 'home' }
       if (companionId !== undefined) selected = companionId
       if (dispose === undefined) {
         activatePluginWorkspace(pluginId)
@@ -36,6 +40,7 @@ export function createPartnerController(ctx: ClientContext, pluginId: string, re
     toggle() { if (dispose === undefined) controller.open(); else controller.close() },
     isOpen: () => dispose !== undefined,
     selected: () => selected,
+    destination: () => destination,
     async openSession(routeId, sessionId) {
       const prepared = await api<{ sessionId: string }>(`/sessions/${encodeURIComponent(routeId)}/prepare`, { method: 'POST' })
       if (prepared.sessionId !== sessionId) throw new Error('伙伴会话标识不一致')

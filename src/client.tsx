@@ -17,6 +17,10 @@ import baseCssText from './client.css'
 import workspaceCssText from './ui/workspace-ui.css'
 import responsiveCssText from './ui/responsive-ui.css'
 import pickerCssText from './ui/companion-picker.css'
+import pendantCssText from './pendant/widget.css'
+import pendantSettingsCssText from './pendant/settings-panel.css'
+import { PendantSettingsPanel } from './pendant/settings-panel.js'
+import { PartnerPendant } from './pendant/widget.js'
 import { CompanionPicker } from './ui/companion-picker.js'
 import { api, loadPartner, type AutomationView, type Capability, type ChannelView, type CompanionView, type ConcernActivityView, type ConcernObservationView, type ConcernSourceView, type ConcernView, type DailyReflectionView, type LoginView, type MemoryGraphView, type MemoryRelationView, type MemoryView, type ModelCatalogView, type PartnerSnapshot, type UserProfileSnapshotView } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
@@ -33,20 +37,21 @@ import { createPartnerController, type PartnerController as Controller } from '.
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${pendantCssText}\n${pendantSettingsCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'
-type WorkspacePage = 'skills' | 'board' | 'schedules'
+type WorkspacePage = 'skills' | 'board' | 'schedules' | 'pendant'
 type View = CompanionTab | WorkspacePage
 
-const WORKSPACE_PAGES = new Set<View>(['skills', 'board', 'schedules'])
+const WORKSPACE_PAGES = new Set<View>(['skills', 'board', 'schedules', 'pendant'])
 
 export const inject = ['slots', 'layout', 'sessions']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(installStyles, 'dsh-partner: styles')
   const controller = createPartnerController(ctx, PLUGIN_ID, (props, current) => <PartnerWorkspace {...props} controller={current} />)
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'partner-pendant', order: 30 }, () => <PartnerPendant controller={controller} />))
   ctx.effect(() => observePluginWorkspace(PLUGIN_ID, controller.close), 'dsh-partner: exclusive workspace')
   ctx.effect(() => () => controller.close(), 'dsh-partner: workspace lifecycle')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
@@ -84,7 +89,8 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
 function PartnerWorkspace({ controller }: ConversationProps & { controller: Controller }): JSX.Element {
   const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
   const [selectedId, setSelectedId] = useState(controller.selected())
-  const [view, setView] = useState<View>('home')
+  const [view, setView] = useState<View>(controller.destination()?.page ?? 'home')
+  const [requestedDestination, setRequestedDestination] = useState(controller.destination())
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [creatingCompanion, setCreatingCompanion] = useState(false)
@@ -97,7 +103,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
     } catch (reason) { setError(message(reason)) } finally { setLoading(false) }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
-  useEffect(() => controller.subscribe(() => { const next = controller.selected(); if (next) setSelectedId(next) }), [controller])
+  useEffect(() => controller.subscribe(() => { const next = controller.selected(); if (next) setSelectedId(next); const destination = controller.destination(); if (destination) { setView(destination.page); setRequestedDestination(destination) } }), [controller])
   const selected = snapshot?.companions.find(item => item.id === selectedId)
   const create = async (draft: NewCompanionDraft): Promise<void> => {
     try {
@@ -147,14 +153,16 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
           <button type="button" className={view === 'skills' ? 'is-active' : ''} aria-current={view === 'skills' ? 'page' : undefined} onClick={() => setView('skills')}><span><IconBrowseOutline16 size={16} /></span><strong>Skill 市场</strong><small>安装与管理能力</small></button>
           <button type="button" className={view === 'board' ? 'is-active' : ''} aria-current={view === 'board' ? 'page' : undefined} onClick={() => setView('board')}><span><IconListPenOutline16 size={16} /></span><strong>任务看板</strong><small>协作、委派与验收</small></button>
           <button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-current={view === 'schedules' ? 'page' : undefined} onClick={() => setView('schedules')}><span><IconPlayOutline16 size={16} /></span><strong>定时任务</strong><small>选择伙伴周期执行</small></button>
+          <button type="button" className={view === 'pendant' ? 'is-active' : ''} aria-current={view === 'pendant' ? 'page' : undefined} onClick={() => setView('pendant')}><span><IconEditOutline16 size={16} /></span><strong>卡片设置</strong><small>挂饰、绳子与图案</small></button>
         </nav>
         <div className="dsh-partner-roster-note"><IconLinkOutline16 size={16} /><span><strong>身份与渠道分离</strong><small>微信只负责收发，权限仍由 DSH 工具决定。</small></span></div>
       </aside>
       <section className={`dsh-partner-stage${workspacePage ? ' is-workspace-page' : ''}`}>
         {loading ? <State title="正在读取伙伴…" /> : workspacePage ? <div className="dsh-partner-stage-scroll is-workspace-page">
           {view === 'skills' && <SkillsPanel />}
-          {view === 'board' && <TaskBoardPanel />}
+          {view === 'board' && <TaskBoardPanel initialTaskId={requestedDestination?.taskId} openRequest={requestedDestination} />}
           {view === 'schedules' && <SchedulePanel companions={snapshot?.companions ?? []} />}
+          {view === 'pendant' && <PendantSettingsPanel />}
         </div> : selected === undefined ? <State title="创建第一个伙伴" detail="伙伴会保存独立身份、能力和微信会话。" action={<button onClick={() => setCreatingCompanion(true)}>新建伙伴</button>} /> : <>
           <div className="dsh-partner-identity"><Avatar name={selected.name} /><span><small>ACTIVE COMPANION</small><h1>{selected.name}</h1><p>{selected.description || selected.role}</p></span><Status channel={snapshot?.channels.find(item => item.companionId === selected.id)} /></div>
           <nav className="dsh-partner-tabs" aria-label="伙伴配置">
@@ -195,6 +203,7 @@ function MobileWorkspaceControls({ companions, selectedId, view, openCompanion, 
       <button type="button" className={view === 'skills' ? 'is-active' : ''} aria-pressed={view === 'skills'} onClick={() => openPage('skills')}><IconBrowseOutline16 size={16} /><span>Skill</span></button>
       <button type="button" className={view === 'board' ? 'is-active' : ''} aria-pressed={view === 'board'} onClick={() => openPage('board')}><IconListPenOutline16 size={16} /><span>看板</span></button>
       <button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-pressed={view === 'schedules'} onClick={() => openPage('schedules')}><IconPlayOutline16 size={16} /><span>定时</span></button>
+      <button type="button" className={view === 'pendant' ? 'is-active' : ''} aria-pressed={view === 'pendant'} onClick={() => openPage('pendant')}><IconEditOutline16 size={16} /><span>卡片</span></button>
     </nav>
   </div>
 }
