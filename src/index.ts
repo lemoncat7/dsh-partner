@@ -8,7 +8,7 @@ import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { Config as ConfigSchema, resolveConfig, type Config as PartnerConfig } from './config.js'
 import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
-import { PartnerAgentRuntime } from './agent-runtime.js'
+import { PartnerAgentRuntime, partnerCwd } from './agent-runtime.js'
 import { ChannelManager } from './channels/manager.js'
 import { WeixinLoginManager } from './channels/weixin/login.js'
 import { registerPartnerApi, type WebServerLike } from './api.js'
@@ -26,6 +26,8 @@ import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
 import { PartnerAgentComposition } from './collaboration/composition.js'
 import { CompanionService } from './companions/service.js'
+import { CompanionManagementService } from './companions/management.js'
+import { CompanionKnowledgeMounts } from './companions/knowledge-mounts.js'
 import { PartnerInboxStore } from './notifications/store.js'
 import { PartnerNoticeService } from './notifications/service.js'
 
@@ -82,7 +84,19 @@ export function apply(context: Context, config: PartnerConfig): void {
     const collaboration = new PartnerCollaborationService(store, skills, tasks, executor)
     const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone)
     const companions = new CompanionService(store)
-    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions)
+    const management: CompanionManagementService = new CompanionManagementService(store, {
+      catalog: async () => ({
+        presets: (await ctx.agentPresets.list()).map(item => ({ id: item.id, name: item.name ?? item.id, ...(item.broken ? { broken: item.broken } : {}) })),
+        providers: await Promise.all(ctx.llm.listProviders().map(async item => ({ id: item.id, models: (await ctx.llm.listModels(item.id).catch(() => [])).map(model => ({ id: model.id, name: model.name })) }))),
+      }),
+      isBusy: (id): boolean => agents.isCompanionBusy(id),
+      reload: async id => {
+        if (agents.isCompanionBusy(id)) throw new Error('目标伙伴已开始执行，请结束后重新打开会话')
+        await agents.reloadManagedCompanion(id)
+      },
+    })
+    const knowledgeMounts = new CompanionKnowledgeMounts(store, management, () => ctx.get('dshKnowledgeMountManagement'), id => partnerCwd(resolved.defaultCwd, id))
+    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     agents.setQuestionAnswerer((agentCtx, route) => channels.attachQuestionAnswerer(agentCtx, route))

@@ -11,6 +11,9 @@ import type { TaskBoardService } from '../tasks/service.js'
 import type { PartnerSchedulerService } from '../scheduler/service.js'
 import type { PartnerCollaborationService } from './service.js'
 import type { CompanionService } from '../companions/service.js'
+import type { CompanionManagementService } from '../companions/management.js'
+import type { CompanionKnowledgeMounts } from '../companions/knowledge-mounts.js'
+import { companionManagementTool, COMPANION_MANAGEMENT_PROMPT } from '../companions/management-tool.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
 const MAX_INLINE_SKILLS = 8
@@ -26,6 +29,8 @@ export class PartnerAgentComposition {
     private readonly scheduler: PartnerSchedulerService,
     private readonly executor: EphemeralExecutionService,
     private readonly companions: CompanionService,
+    private readonly management?: CompanionManagementService,
+    private readonly knowledgeMounts?: CompanionKnowledgeMounts,
   ) {}
 
   async compose(ctx: AgentCompositionContext, companion: Companion): Promise<() => void> {
@@ -38,6 +43,10 @@ export class PartnerAgentComposition {
       if (skillsEnabled) disposers.push(ctx.tools.register(skillTool(companion, this.skills, this.executor)))
       if (companion.capabilities.includes('companions')) disposers.push(ctx.tools.register(companionTool(this.companions)))
       if (companion.capabilities.includes('access')) disposers.push(ctx.tools.register(accessGrantTool(companion, this.collaboration)))
+      if (companion.capabilities.includes('administration')) {
+        if (!this.management || !this.knowledgeMounts) throw new Error('伙伴管理服务尚未就绪')
+        disposers.push(ctx.tools.register(companionManagementTool(companion.id, this.management, this.knowledgeMounts)))
+      }
       disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
       disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
       if (companion.capabilities.includes('schedules')) disposers.push(ctx.tools.register(scheduleTool(companion, this.scheduler)))
@@ -46,7 +55,8 @@ export class PartnerAgentComposition {
         name: 'partner-collaboration', order: -7,
         text: [
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
-        companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限，需要用户随后在管理台单独授权。' : '',
+        companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限。若你另获伙伴管理能力，可在创建后按用户明确要求配置身份与能力；否则由用户在管理台单独授权。' : '',
+        companion.capabilities.includes('administration') ? COMPANION_MANAGEMENT_PROMPT : '',
         companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
         companion.capabilities.includes('schedules') ? '你拥有“定时任务”能力。只有用户明确要求未来某个时间或按周期执行时，才创建 partner_schedule；普通待办、当前轮次工作和一次性立即执行不能擅自改成定时任务。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',

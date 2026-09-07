@@ -34,6 +34,7 @@ import { Avatar, ChannelStatus as Status, ContentState as State, FormField as Fi
 import { errorMessage as message } from './ui/workspace-components.js'
 import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
 import { createPartnerController, type PartnerController as Controller } from './client-controller.js'
+import { CAPABILITY_LABELS } from './capabilities.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
@@ -214,7 +215,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
   const localSession = sessions.find(item => item.kind === 'local')
   const pending = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'pending').length : 0
   const approved = channel ? snapshot.pairings.filter(item => item.channelId === channel.id && item.status === 'approved').length : 0
-  const capabilities = companion.capabilities.map(item => ({ knowledge: '知识库', skills: 'Skill', ssh: 'SSH', git: 'Git', companions: '创建伙伴', schedules: '定时任务', access: '伙伴授权' })[item])
+  const capabilities = companion.capabilities.map(item => CAPABILITY_LABELS[item])
   const online = channel?.runtimeStatus === 'running'
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
@@ -307,6 +308,9 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
       { id: 'access', title: '伙伴授权', detail: '按明确要求配置伙伴之间的单向访问关系。' },
       { id: 'schedules', title: '定时任务', detail: '创建并管理由自己执行的周期任务。' },
     ] },
+    { id: 'administration', eyebrow: 'ADMINISTRATION', title: '高权限管理', detail: '仅授予可信的管理伙伴；普通协作授权不包含修改权限。', choices: [
+      { id: 'administration', title: CAPABILITY_LABELS.administration, detail: '修改其他伙伴的身份、能力与 Preset、协作、Skill 和知识库挂载。不共享会话、记忆或凭据；不能自改或转授本权限。' },
+    ] },
   ]
   const selectedProvider = form.provider || modelCatalog?.defaultSelection.provider || ''
   const modelOptions = modelCatalog?.providers.find(item => item.id === selectedProvider)?.models ?? []
@@ -323,7 +327,7 @@ function CapabilityEditor({ companion, presets, onChanged }: { companion: Compan
     {form.capabilities.includes('skills') && companion.capabilities.includes('skills') && <CompanionSkillSettings companionId={companion.id} />}
     {form.capabilities.includes('skills') && !companion.capabilities.includes('skills') && <p className="dsh-partner-inline-note">先应用能力组合，再为当前伙伴选择具体 Skill。</p>}
     <CompanionAccessPanel companionId={companion.id} />
-    {error && <p className="dsh-partner-inline-error">{error}</p>}<div className="dsh-partner-form-actions"><span /><button type="button" disabled={saving} onClick={() => { void save() }}>{saving ? '正在应用…' : '应用能力组合'}</button></div>
+    {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}<div className="dsh-partner-form-actions"><span /><button type="button" disabled={saving} onClick={() => { void save() }}>{saving ? '正在应用…' : '应用能力组合'}</button></div>
   </div>
 }
 

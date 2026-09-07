@@ -3,8 +3,9 @@ import type { BoardTask, TaskActivity } from './tasks/domain.js'
 import type { PartnerDelegation } from './collaboration/domain.js'
 import type { ExecutionRun } from './execution/domain.js'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
+import { isCompanionCapability, type CompanionCapability } from './capabilities.js'
+export type { CompanionCapability } from './capabilities.js'
 
-export type CompanionCapability = 'knowledge' | 'skills' | 'ssh' | 'git' | 'companions' | 'schedules' | 'access'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
@@ -191,7 +192,7 @@ export interface ChannelView extends WeixinChannel {
 export function normalizeCompanionDraft(value: unknown): CompanionDraft {
   const input = object(value, 'companion')
   const capabilities = Array.isArray(input.capabilities)
-    ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCapability)
+    ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCompanionCapability)
     : []
   const draft: CompanionDraft = {
     name: text(input.name, 'name', 60),
@@ -253,8 +254,4 @@ export function text(value: unknown, label: string, max: number): string {
 function optionalText(value: unknown, label: string, max: number): string | undefined {
   if (value === undefined || value === null || value === '') return undefined
   return text(value, label, max)
-}
-
-function isCapability(value: string): value is CompanionCapability {
-  return value === 'knowledge' || value === 'skills' || value === 'ssh' || value === 'git' || value === 'companions' || value === 'schedules' || value === 'access'
 }

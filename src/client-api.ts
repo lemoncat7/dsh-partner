@@ -1,6 +1,7 @@
 export const PARTNER_API = '/partner-local/v1'
 
-export type Capability = 'knowledge' | 'skills' | 'ssh' | 'git' | 'companions' | 'schedules' | 'access'
+export type { CompanionCapability as Capability } from './capabilities.js'
+import type { CompanionCapability as Capability } from './capabilities.js'
 export interface AutomationView {
   memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; dailyReviewEnabled: boolean; dailyReviewHour: number }
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }

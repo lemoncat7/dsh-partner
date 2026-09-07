@@ -19,6 +19,12 @@ client -> HTTP feature routers -> application services -> repositories/store
 - `companions/`: the only owner of companion identity creation and its initial
   local-session transaction. API and model tools share this boundary; failed
   session provisioning rolls the new identity back.
+  `management.ts` owns high-privilege configuration validation, live authority,
+  revision checks and one serialized identity/Skill/access mutation;
+  `management-tool.ts` is the scoped model adapter. `knowledge-mounts.ts` is an
+  optional host-service adapter, not a second knowledge store or HTTP client.
+- `capabilities.ts`: the shared capability identifiers and labels for domain
+  normalization, the client and the management catalog; no duplicate enums.
 - `skills/`: Skill metadata, filesystem loader, atomic installer, market cache,
   bounded proxy-aware network transport, companion bindings and model-facing
   tools. Skill bodies stay on disk; the JSON state only stores indexes,
@@ -86,7 +92,27 @@ client -> HTTP feature routers -> application services -> repositories/store
 - New companions start with no declared capabilities, memory, daily review,
   heartbeat, channels or collaboration grants. The `partner_companions` tool is
   only composed for a companion explicitly granted the `companions` capability,
-  and it may create identity fields only; later permissions remain a user action.
+  and it may create identity fields only. Later permissions require the user or
+  a separately authorized administration companion.
+- `administration` defaults off and can only be granted/revoked by the user UI.
+  The companion-scoped `partner_companion_manage` tool may inspect/change other
+  companions, never itself; directed collaboration access is not administration.
+  Private memory, conversations, channels and credentials are outside its schema.
+  Identity, enabled Skill IDs and outgoing grants commit together. Unknown
+  fields, stale revisions, cancellation, missing resources and busy targets
+  fail closed. Authority is checked again inside the serialized store write.
+  A reload error after commit is reported as saved/reopen-required, not a failed
+  write; browser-owned Agent handles are not forcibly destroyed or reported as
+  hot-reloaded. Unspecified settings, including automation, remain unchanged.
+- Knowledge mount management is a separate provider-backed operation. The
+  adapter derives the target's default project and existing session scopes on
+  the server, never from model-supplied paths. It calls the optional
+  `dshKnowledgeMountManagement` v1 service, retains provider token permissions,
+  and rechecks actor authorization, target activity and scope ownership just
+  before the provider starts writing. A request already accepted by a remote
+  server cannot be retroactively canceled by revoking local capability.
+  Disabled rows prevent accidental inherited reactivation. No package-level
+  dependency, fallback store, new global tool or extra background polling is used.
 - Market Skills execute in a forked temporary session by default.
 - Companion collaboration exposes identity, declared capabilities, enabled
   Skill names, availability and the assigned task envelope only.

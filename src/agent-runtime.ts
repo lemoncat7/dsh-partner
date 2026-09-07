@@ -494,6 +494,21 @@ export class PartnerAgentRuntime {
     await this.releaseCompanion(companionId)
   }
 
+  async reloadManagedCompanion(companionId: string): Promise<void> {
+    await this.reloadCompanion(companionId)
+    // Browser-owned handles cannot be disposed by this plugin. In particular,
+    // their preset/model must not be reported as hot-reloaded successfully.
+    if (this.store.snapshot().sessions.some(route => route.companionId === companionId
+      && this.ctx.agents.get(route.sessionId as SessionId) !== undefined)) {
+      throw new Error('目标伙伴还有由 DSH 管理的活动会话，请重新打开会话使配置生效')
+    }
+  }
+
+  isCompanionBusy(companionId: string): boolean {
+    return this.store.snapshot().sessions.some(route => route.companionId === companionId
+      && (this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId))?.status === 'running')
+  }
+
   private async releaseCompanion(companionId: string): Promise<void> {
     const sessions = this.store.snapshot().sessions.filter(item => item.companionId === companionId)
     await Promise.all(sessions.map(async item => {
