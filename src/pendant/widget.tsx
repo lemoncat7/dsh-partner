@@ -23,6 +23,7 @@ export function PartnerPendant({ controller }: { controller: PartnerController }
 
 function ActivePendant({ controller, settings }: { controller: PartnerController; settings: PendantSettings }): JSX.Element {
   const root = useRef<HTMLElement>(null), canvas = useRef<HTMLCanvasElement>(null), hit = useRef<HTMLButtonElement>(null)
+  const unreadBadge = useRef<HTMLSpanElement>(null)
   const handle = useRef<LanyardHandle>(), toggle = useRef(() => {})
   const [open, setOpen] = useState(false), [ready, setReady] = useState(false), [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string>(), [navigationError, setNavigationError] = useState('')
@@ -50,6 +51,7 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
       if (abort.signal.aborted || !canvas.current || !hit.current) return
       const instance = await module.createLanyard(canvas.current, hit.current, {
         signal: abort.signal, onTap: () => toggle.current(), onFailure: () => { handle.current?.destroy(); handle.current = undefined; setReady(false); setFailed(true) },
+        ...(unreadBadge.current ? { unreadBadge: unreadBadge.current } : {}),
       })
       if (abort.signal.aborted) { instance.destroy(); return }
       handle.current = instance; instance.setAppearance(settingsRef.current); instance.setMessage(messageRef.current); setReady(true)
@@ -73,7 +75,7 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
       {!ready && <span className="dsh-partner-pendant-fallback">伙伴<small>{failed ? inbox.unread ? `${inbox.unread} 条消息` : '消息' : '加载挂饰…'}</small></span>}
     </button>
     <button type="button" className="dsh-partner-pendant-anchor" aria-label="移动挂饰位置" title="拖动挂点移动位置，也可用方向键微调" {...placement}><span aria-hidden="true" /></button>
-    {inbox.unread > 0 && <span className="dsh-partner-pendant-unread" aria-hidden="true">{inbox.unread > 99 ? '99+' : inbox.unread}</span>}
+    <span ref={unreadBadge} className="dsh-partner-pendant-unread" hidden={inbox.unread === 0} aria-hidden="true">{inbox.unread > 99 ? '99+' : inbox.unread}</span>
     <span className="dsh-partner-pendant-announcement" role="status" aria-live="polite" aria-atomic="true">{incoming ? `${incoming.companionName}：${incoming.title}` : ''}</span>
     {open && <PendantReader inbox={inbox} selected={selected} error={error || navigationError} anchor={hit} onSelect={inspect} onClose={close} onVisit={item => { void visit(item) }} onReadAll={() => { void read(inbox.items.filter(item => item.readAt === undefined).map(item => item.id)) }} />}
   </aside>

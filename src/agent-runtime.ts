@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -25,13 +25,15 @@ import { concernObservationPrompt } from './autonomy.js'
 import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import type { BoardTask } from './tasks/domain.js'
-import type { PartnerInboundMessage, PartnerOutboundAttachment, PartnerReply } from './channel-message.js'
+import type { PartnerInboundMessage, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { HEARTBEAT_LOCAL_COMMAND, heartbeatLocalCommandTool } from './heartbeat-command.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
-import { channelReplyTextAfter } from './channels/delivery-policy.js'
+import { channelReplyPartsAfter } from './channels/delivery-policy.js'
+import { prepareChannelReply } from './channels/outbound-media.js'
+export { extractOutboundAttachments } from './channels/outbound-media.js'
 export { renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 
 type RuntimeContext = Context & {
@@ -648,14 +650,13 @@ export class PartnerAgentRuntime {
       source: { kind: 'user' },
     }))
     await agent.whenIdle()
-    const response = channelReplyTextAfter(agent.session.snapshotEvents(), startSeq)
+    const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === session.id)
       if (target) target.lastMessageAt = Date.now()
     })
-    if (!response) throw new Error('伙伴没有生成可发送的文本回复')
     if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
-    return { text: response, attachments: await extractOutboundAttachments(response, session.cwd ?? this.defaultCwd) }
+    return prepareChannelReply(response, session.cwd ?? this.defaultCwd)
   }
 
   private async persistInbound(session: ChannelSession, message: PartnerInboundMessage): Promise<{ content: ContentBlock[]; query: string }> {
@@ -842,51 +843,6 @@ export function selectTaskNotificationRoute(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds))
-}
-
-export async function extractOutboundAttachments(text: string, cwd: string): Promise<PartnerOutboundAttachment[]> {
-  const candidates = new Set<string>()
-  for (const match of text.matchAll(/\[[^\]]*\]\((?:<)?(file:\/\/)?([^)>]+)(?:>)?\)/g)) {
-    const value = decodeURIComponent(match[2] ?? '').trim()
-    if (value) candidates.add(value)
-  }
-  for (const match of text.matchAll(/`([^`\n]+)`/g)) {
-    const value = match[1]?.trim()
-    if (value && mediaTypeFor(value)) candidates.add(value)
-  }
-  for (const line of text.split('\n').map(item => item.trim())) {
-    const value = line.replace(/^`|`$/g, '')
-    if (value.startsWith('/') && !value.includes(' ')) candidates.add(value)
-  }
-  const root = await realpath(cwd)
-  const result: PartnerOutboundAttachment[] = []
-  const included = new Set<string>()
-  for (const candidate of candidates) {
-    if (result.length >= 8) break
-    const target = resolve(root, candidate)
-    let actual: string
-    try { actual = await realpath(target) } catch { continue }
-    if (included.has(actual)) continue
-    const rel = relative(root, actual)
-    if (rel.startsWith('..') || rel === '..' || resolve(root, rel) !== actual) continue
-    const info = await stat(actual)
-    if (!info.isFile() || info.size > PARTNER_MEDIA_MAX_BYTES) continue
-    const mediaType = mediaTypeFor(actual)
-    if (!mediaType) continue
-    included.add(actual)
-    result.push({ path: actual, name: basename(actual), mediaType, kind: mediaType.startsWith('image/') ? 'image' : 'file' })
-  }
-  return result
-}
-
-function mediaTypeFor(path: string): string | undefined {
-  return ({
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
-    '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv', '.json': 'application/json', '.zip': 'application/zip',
-  } as Record<string, string>)[extname(path).toLowerCase()]
 }
 
 export function completedTurnEvents(events: readonly SessionEvent[], end: Extract<SessionEvent, { type: 'turn/end' }>): readonly SessionEvent[] {

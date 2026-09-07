@@ -1,11 +1,11 @@
 import type { MarketSkillEntry } from './domain.js'
-import { TASK_PLANNING_DOCUMENT } from './task-planning.js'
+import { TASK_PLANNING_DESCRIPTION, TASK_PLANNING_DOCUMENT, TASK_PLANNING_VERSION } from './task-planning.js'
 
 export const BUILTIN_SKILL_SOURCE = 'builtin'
 
 export const BUILTIN_SKILLS = new Map<string, { entry: MarketSkillEntry; document: string }>([
   ['task-planning', {
-    entry: { id: 'task-planning', name: '任务拆解与看板推进', description: '主动识别多阶段交付，按授权伙伴专长拆解、安排依赖并提交执行。', version: '1.2.0', tags: ['任务', '看板', '协作'], skillUrl: 'builtin:task-planning', sourceId: BUILTIN_SKILL_SOURCE },
+    entry: { id: 'task-planning', name: '任务拆解与看板推进', description: TASK_PLANNING_DESCRIPTION, version: TASK_PLANNING_VERSION, tags: ['任务', '看板', '协作'], skillUrl: 'builtin:task-planning', sourceId: BUILTIN_SKILL_SOURCE },
     document: TASK_PLANNING_DOCUMENT,
   }],
   ['technical-research', {

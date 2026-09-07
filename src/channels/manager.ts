@@ -16,7 +16,8 @@ import type { PartnerReply } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
-import { isAutonomousDeliveryTurn } from './delivery-policy.js'
+import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
+import { prepareChannelReply } from './outbound-media.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
 type ChannelContext = Context & { settings: SettingsProvider }
@@ -155,14 +156,10 @@ export class ChannelManager {
     const history = session.snapshotEvents().filter(item => item.seq < event.seq)
     const events = completedTurnEvents(history, event)
     if (!isAutonomousDeliveryTurn(events, history)) return
-    const text = events
-      .filter(item => item.type === 'assistant/message' && !item.data.interrupted)
-      .map(item => item.type === 'assistant/message' ? item.data.message.content
-        .filter(block => block.type === 'text').map(block => block.text).join('\n') : '')
-      .filter(Boolean).join('\n\n').trim()
-    if (!text) return
+    const parts = channelReplyPartsAfter(events, 0, true)
+    if (!parts.text && !parts.referenceTexts.length) return
     const receipt = `outbound:${session.id}:${event.data.turn}`
-    await this.queueProactive(route, receipt, { text, attachments: route.cwd ? await extractOutboundAttachments(text, route.cwd) : [] })
+    await this.queueProactive(route, receipt, await prepareChannelReply(parts, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)))
   }
 
   private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply): Promise<void> {
@@ -281,7 +278,10 @@ export class ChannelManager {
     await api.sendText(userId, reply.text, this.contextTokens.get(tokenKey), signal)
     for (const attachment of reply.attachments) {
       try { await api.sendAttachment(userId, attachment, this.contextTokens.get(tokenKey), signal) }
-      catch (error) { this.ctx.logger.warn(`dsh-partner: WeChat outbound attachment ${attachment.path} failed: ${error instanceof Error ? error.message : String(error)}`) }
+      catch (error) {
+        this.ctx.logger.warn(`dsh-partner: WeChat outbound attachment ${attachment.path} failed: ${error instanceof Error ? error.message : String(error)}`)
+        await api.sendText(userId, `附件「${attachment.name}」发送失败，未完成交付。可以稍后要求重新发送该附件，无需重新生成。`, this.contextTokens.get(tokenKey), signal)
+      }
     }
     await this.rememberReceipt(receipt)
   }

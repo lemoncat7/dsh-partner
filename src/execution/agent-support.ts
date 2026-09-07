@@ -27,19 +27,30 @@ export function renderToolProtocol(): string {
     '`run_code` 的程序只返回完成当前任务所需的精简结果。需要顺序依赖时逐个 `await`，互不依赖的只读调用才可并行。',
     '若工具结果提示 “only `run_code` is callable directly”，立即在同一轮改用 `run_code` 重试。只有规范重试也失败时，才说明真正的失败原因。',
     '若当前请求原生暴露了目标工具，则可以直接调用；不要臆造未出现在顶层清单或生成 SDK 中的工具。',
-    '需要交付图片或文档时，最终回复必须用 Markdown 链接明确引用伙伴工作目录中的真实文件。',
+    '需要交付图片或文档时，最终回复必须用 Markdown 链接明确引用伙伴工作目录中的真实文件，使用生成工具返回的原始路径，不擅自改写成 sandbox:/mnt/data 等虚拟地址。渠道适配器负责核验文件并发送附件；远端沙箱中的文件必须先通过可用工具下载到当前工作目录，不能假定一个文本地址就是可交付附件。',
   ].join('\n')
 }
 
 export function assistantTextAfter(agent: Agent, fromSeq: number): string {
   const messages: string[] = []
+  let answer = ''
+  const flush = (): void => { if (answer) messages.push(answer); answer = '' }
   for (const event of agent.session.snapshotEvents()) {
-    if (event.seq < fromSeq || event.type !== 'assistant/message' || event.data.interrupted) continue
+    if (event.seq <= fromSeq) continue
+    if (event.type === 'turn/start') { flush(); continue }
+    if (event.type === 'turn/end') {
+      if (event.data.reason.kind !== 'completed') answer = ''
+      flush(); continue
+    }
+    if (event.type === 'tool/result') { answer = ''; continue }
+    if (event.type !== 'assistant/message' || event.data.interrupted) continue
+    if (event.data.message.content.some(block => block.type === 'tool-call')) { answer = ''; continue }
     const text = event.data.message.content
       .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
       .map(block => block.text.trim()).filter(Boolean).join('\n')
-    if (text) messages.push(text)
+    if (text) answer = text
   }
+  flush()
   return messages.join('\n\n').trim()
 }
 

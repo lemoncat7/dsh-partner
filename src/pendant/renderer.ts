@@ -13,7 +13,7 @@ import { measureFixedLayerOrigin } from './coordinates.js'
 
 export interface BadgeMessage { id: string; count: number; name: string; label: string }
 export interface LanyardHandle { setMessage(message?: BadgeMessage): void; setAppearance(settings: PendantSettings): void; relayout(): void; destroy(): void }
-export interface LanyardOptions { signal: AbortSignal; onTap(): void; onFailure(): void }
+export interface LanyardOptions { signal: AbortSignal; onTap(): void; onFailure(): void; unreadBadge?: HTMLElement }
 let physicsReady: Promise<void> | undefined
 
 /** React Bits-inspired Three + Rapier lanyard, with elastic/spherical joints.
@@ -97,6 +97,9 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     renderer.render(scene, camera)
     euler.setFromQuaternion(card.quaternion)
     hit.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${-euler.z}rad)`
+    // Use the same root-local center without Euler rotation: the count must
+    // stay upright and above the card when its reverse face is showing.
+    if (options.unreadBadge) options.unreadBadge.style.transform = `translate(${x}px, ${y - Math.max(44, scale * 1.99) / 2 - 8}px) translate(-50%, -100%)`
   }
   const loop = createPendantFrameLoop((now, dt) => {
     if (disposed || document.hidden) return false

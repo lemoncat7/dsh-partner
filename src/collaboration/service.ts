@@ -73,7 +73,9 @@ export class PartnerCollaborationService {
     ])
     return state.companions.map(companion => ({
       id: companion.id, name: companion.name, role: companion.role, description: companion.description,
-      capabilities: companion.capabilities, enabledSkills: this.skills.bindings(companion.id, state).map(skill => ({ id: skill.id, name: skill.displayName })),
+      capabilities: companion.capabilities,
+      enabledSkills: companion.capabilities.includes('skills')
+        ? this.skills.bindings(companion.id, state).map(skill => ({ id: skill.id, name: skill.displayName })) : [],
       availability: running.has(companion.id) ? 'busy' : 'available',
     }))
   }

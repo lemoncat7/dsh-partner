@@ -9,9 +9,11 @@ import { ChannelManager, answerQuestions, busyEnterMode, extractText, isAutonomo
 import { extractOutboundAttachments, selectTaskNotificationRoute } from '../lib/agent-runtime.js'
 import { CONCERN_CREATED_NOTICE, concernCreatedNoticeFromEvent } from '../lib/concern-notification.js'
 import { parseTaskExecutionOutput, prepareTaskResultDelivery } from '../lib/tasks/result.js'
-import { channelReplyTextAfter } from '../lib/channels/delivery-policy.js'
+import { channelReplyPartsAfter, channelReplyTextAfter } from '../lib/channels/delivery-policy.js'
+import { prepareChannelReply } from '../lib/channels/outbound-media.js'
 import { PartnerStore } from '../lib/store.js'
 import { TaskBoardService } from '../lib/tasks/service.js'
+import { assistantTextAfter } from '../lib/execution/agent-support.js'
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
@@ -48,6 +50,121 @@ test('channel replies retain creation acknowledgments but omit subsequent intern
   assert.equal(channelReplyTextAfter(events, 0), '已创建任务，玄枢执行、莫殇验收。')
   const directQuestion = [...events, { ...user, seq: 20 }, { ...text('你主动问进展，目前已完成。'), seq: 21 }]
   assert.equal(channelReplyTextAfter(directQuestion, 19), '你主动问进展，目前已完成。')
+})
+
+const channelUser = () => ({ type: 'user/message', data: { source: { kind: 'user' } } })
+const channelAnswer = (text, extra = []) => ({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }, ...extra] } } })
+const numbered = events => events.map((event, index) => ({ ...event, seq: index + 1 }))
+
+test('channel final selection omits preambles and tool results, preserving only assistant attachment references', () => {
+  const events = numbered([
+    { type: 'turn/start' }, channelUser(), channelAnswer('我先查资料。'),
+    channelAnswer('准备生成图片。', [{ type: 'tool-call', id: 'image-call', name: 'generate_image', arguments: {} }]),
+    { type: 'tool/result', data: { message: { content: [{ type: 'text', text: '工具原始内容 /private.png' }] } } },
+    channelAnswer('图片已生成：[图片](sandbox:generated/result.png)'),
+    channelAnswer('最终结论：完成。'),
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+  ])
+  const parts = channelReplyPartsAfter(events, 0)
+  assert.equal(parts.text, '最终结论：完成。')
+  assert.ok(parts.referenceTexts.some(text => text.includes('generated/result.png')))
+  assert.equal(parts.referenceTexts.some(text => text.includes('/private.png')), false)
+  assert.equal(channelReplyPartsAfter(events, 5, true).text, parts.text)
+  assert.equal(channelReplyPartsAfter(events, events.at(-1).seq).text, '')
+})
+
+test('an unanswered tool call or failed turn never promotes a preamble into a final answer', () => {
+  const call = channelAnswer('我马上处理', [{ type: 'tool-call', id: 'pending', name: 'read', arguments: {} }])
+  const events = numbered([{ type: 'turn/start' }, channelUser(), channelAnswer('已经理解'), call])
+  assert.equal(channelReplyTextAfter(events, 0), '')
+  const failed = numbered([{ type: 'turn/start' }, channelUser(), channelAnswer('开始处理'), { type: 'turn/end', data: { reason: { kind: 'failed' } } }])
+  assert.deepEqual(channelReplyPartsAfter(failed, 0), { text: '', referenceTexts: [] })
+  assert.equal(assistantTextAfter({ session: { snapshotEvents: () => failed } }, 0), '')
+  assert.equal(assistantTextAfter({ session: { snapshotEvents: () => events } }, 0), '')
+})
+
+test('board and temporary execution results contain final deliverables, not tool preambles', () => {
+  const events = numbered([
+    { type: 'turn/start' },
+    { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴执行看板任务' } } },
+    channelAnswer('我先查资料。', [{ type: 'tool-call', id: 'read', name: 'read', arguments: {} }]),
+    { type: 'tool/result', data: { message: { content: [] } } },
+    channelAnswer('<partner-deliverable>实际交付</partner-deliverable>'),
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+  ])
+  assert.equal(assistantTextAfter({ session: { snapshotEvents: () => events } }, 0), '<partner-deliverable>实际交付</partner-deliverable>')
+  assert.equal(channelReplyTextAfter(events, 0), '')
+})
+
+test('channel tells the user when an attachment upload fails, without regenerating the answer', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'partner-outbound-error-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const store = await PartnerStore.open(join(root, 'state.json'))
+  await store.update(state => state.pairings.push({ id: 'approved', channelId: 'channel', userId: 'user', displayName: 'User', status: 'approved', createdAt: 1, updatedAt: 1 }))
+  let replies = 0
+  const manager = new ChannelManager({ settings: { get: () => 'queue' }, logger: { warn: () => {} } }, store, {}, {
+    reply: async () => { replies++; return { text: '完成，图片如下。', attachments: [{ path: join(root, 'image.png'), name: 'image.png', kind: 'image', mediaType: 'image/png' }] } },
+  }, root)
+  const messages = []
+  const api = { sendText: async (_user, text) => messages.push(text), sendAttachment: async () => { throw new Error('upload unavailable') } }
+  const channel = { id: 'channel', companionId: 'companion-default' }
+  const incoming = { message_type: 1, from_user_id: 'user', message_id: 'msg-1', item_list: [{ type: 1, text_item: { text: '画图' } }] }
+  await manager.handleInbound(channel, api, incoming, new AbortController().signal)
+  assert.equal(replies, 1)
+  assert.equal(messages.length, 2)
+  assert.match(messages[1], /image.png.*发送失败/)
+  assert.match(messages[1], /无需重新生成/)
+})
+
+test('distinct user turns keep their own finals, and internal review attachments remain private', () => {
+  const events = numbered([
+    { type: 'turn/start' }, channelUser(), channelAnswer('第一轮过程'), channelAnswer('第一轮结论'),
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    { type: 'turn/start' }, { type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '看板任务待验收' } } },
+    channelAnswer('[内部核验](private.md)'),
+    { type: 'turn/start' }, channelUser(), channelAnswer('第二轮结论'),
+  ])
+  const result = channelReplyPartsAfter(events, 0)
+  assert.equal(result.text, '第一轮结论\n\n第二轮结论')
+  assert.equal(result.referenceTexts.some(text => text.includes('private.md')), false)
+})
+
+test('sandbox references send verified files without leaking the virtual URL or progress prose', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'partner-sandbox-media-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(join(root, 'generated'))
+  const path = join(root, 'generated', '结果 图.png')
+  await writeFile(path, 'png')
+  const relativeLink = '[图片](sandbox:generated/%E7%BB%93%E6%9E%9C%20%E5%9B%BE.png)'
+  const reply = await prepareChannelReply({ text: `最终结论。\n${relativeLink}`, referenceTexts: [`我准备发图 ${relativeLink}`, `[重复](<sandbox:${path}>)`] }, root)
+  assert.equal(reply.attachments.length, 1)
+  assert.equal(reply.attachments[0].path, path)
+  assert.match(reply.text, /附件：结果 图.png/)
+  assert.doesNotMatch(reply.text, /sandbox:|准备发图/)
+  const onlyProgressImage = await prepareChannelReply({ text: '最终结论', referenceTexts: [relativeLink] }, root)
+  assert.equal(onlyProgressImage.text, '最终结论')
+  assert.equal(onlyProgressImage.attachments.length, 1)
+})
+
+test('missing, malformed and escaping sandbox references fail visibly without guessing or aborting the answer', async t => {
+  const base = await mkdtemp(join(tmpdir(), 'partner-sandbox-boundary-'))
+  t.after(() => rm(base, { recursive: true, force: true }))
+  const root = join(base, 'workspace')
+  await mkdir(root)
+  await writeFile(join(base, 'secret.png'), 'private')
+  await symlink(join(base, 'secret.png'), join(root, 'escape.png'))
+  for (const reference of ['sandbox:../secret.png', 'sandbox:escape.png', 'sandbox:/mnt/data/missing.png', 'sandbox:%E0%A4%A.png', 'sandbox://outside/secret.png']) {
+    const reply = await prepareChannelReply({ text: `结果说明 [图片](${reference})`, referenceTexts: [] }, root)
+    assert.deepEqual(reply.attachments, [])
+    assert.match(reply.text, /结果说明/)
+    assert.match(reply.text, /未发送该附件/)
+    assert.doesNotMatch(reply.text, /sandbox:/)
+  }
+  const fallback = await prepareChannelReply({ text: '', referenceTexts: [] }, root)
+  assert.match(fallback.text, /未生成可发送的最终答复/)
+  await writeFile(join(root, 'good.png'), 'png')
+  const recovered = await extractOutboundAttachments('[损坏](%XX.png)\n[有效](good.png)', root)
+  assert.deepEqual(recovered.map(file => file.name), ['good.png'])
 })
 
 test('renders short terminal results directly without internal review handoff', async () => {

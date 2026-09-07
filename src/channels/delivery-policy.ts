@@ -25,19 +25,47 @@ export function isAutonomousDeliveryTurn(events: readonly SessionEvent[], histor
     && event.data.source.summary?.startsWith('complete:'))
 }
 
-/** whenIdle may encompass follow-up turns: don't append internal reviews to a user reply. */
-export function channelReplyTextAfter(events: readonly SessionEvent[], fromSeq: number): string {
-  let direct = false
-  const messages: string[] = []
+export interface ChannelReplyParts {
+  text: string
+  /** Assistant-authored file references survive filtering of progress prose. */
+  referenceTexts: string[]
+}
+
+/** Select the last non-tool answer per eligible turn, never tool preambles. */
+export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq: number, autonomous = false): ChannelReplyParts {
+  let direct = autonomous
+  let answer = ''
+  let references: string[] = []
+  const messages: string[] = [], referenceTexts: string[] = []
+  const flush = (): void => {
+    if (direct) {
+      if (answer) messages.push(answer)
+      referenceTexts.push(...references)
+    }
+    answer = ''; references = []
+  }
   for (const event of events) {
     if (event.seq <= fromSeq) continue
-    if (event.type === 'turn/start') direct = false
+    if (event.type === 'turn/start') { flush(); direct = autonomous }
+    else if (event.type === 'turn/end') {
+      if (event.data.reason.kind !== 'completed') { answer = ''; references = [] }
+      flush(); direct = false
+    }
     else if (event.type === 'user/message' && event.data.source.kind === 'user') direct = true
-    else if (isInternalTaskNotice(event)) direct = false
+    else if (isInternalTaskNotice(event)) { answer = ''; references = []; direct = false }
+    else if (direct && event.type === 'tool/result') answer = ''
     else if (direct && event.type === 'assistant/message' && !event.data.interrupted) {
       const text = event.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
-      if (text.trim()) messages.push(text.trim())
+      if (text.trim()) references.push(text.trim())
+      if (event.data.message.content.some(block => block.type === 'tool-call')) answer = ''
+      else if (text.trim()) answer = text.trim()
     }
   }
-  return messages.join('\n\n')
+  flush()
+  return { text: messages.join('\n\n'), referenceTexts }
+}
+
+/** whenIdle may encompass follow-up turns: don't append internal reviews to a user reply. */
+export function channelReplyTextAfter(events: readonly SessionEvent[], fromSeq: number): string {
+  return channelReplyPartsAfter(events, fromSeq).text
 }

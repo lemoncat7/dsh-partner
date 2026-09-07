@@ -9,6 +9,10 @@ import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
 import { SkillService } from '../lib/skills/service.js'
 import { SkillRepository } from '../lib/skills/repository.js'
+import { BUILTIN_SKILLS } from '../lib/skills/builtin.js'
+import { TASK_PLANNING_DOCUMENT, TASK_PLANNING_VERSION } from '../lib/skills/task-planning.js'
+import { parseSkillDocument } from '../lib/skills/loader.js'
+import { SessionConfigurationIndex } from '../lib/companions/session-configuration.js'
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'partner-dispatch-'))
@@ -27,6 +31,84 @@ const waitFor = async predicate => {
 }
 const actor={kind:'companion',companionId:'companion-default'}
 const assigned={assigneeCompanionId:'companion-default',autoRun:true}
+
+test('planning upgrade preserves bindings, refreshes next-turn configuration and injects the installed policy once', async t => {
+  const { store, board, skills, service } = await fixture(t)
+  await skills.initialize()
+  const previous = await skills.repository.install({
+    id: 'task-planning', source: 'builtin', sourceId: 'builtin', trusted: true,
+    document: '---\nname: task-planning\ndescription: 旧版规划\nversion: 1.2.0\ncontext: inline\n---\n旧版规划指令',
+  })
+  await store.update(state => {
+    state.skills.push(previous)
+    state.companions[0].capabilities = ['skills']
+    state.companions.push({ ...structuredClone(state.companions[0]), id: 'disabled', name: '未启用规划' })
+    state.sessions.push({ id: 'local', kind: 'local', channelId: '@local', userId: 'owner', companionId: 'companion-default', sessionId: 'planning-session', lastMessageAt: 1 })
+  })
+  await skills.setBinding('companion-default', 'task-planning', true)
+  await skills.setBinding('disabled', 'task-planning', false)
+  const bindings = structuredClone(store.snapshot().skillBindings)
+  const index = new SessionConfigurationIndex(store)
+  t.after(() => index.close())
+  const before = index.forSession('planning-session').revision
+  await skills.initialize()
+  const loaded = await skills.load('task-planning')
+  assert.equal(loaded.version, TASK_PLANNING_VERSION)
+  assert.equal(loaded.description, BUILTIN_SKILLS.get('task-planning').entry.description)
+  assert.equal(loaded.body, parseSkillDocument(TASK_PLANNING_DOCUMENT).body.trim())
+  assert.deepEqual(store.snapshot().skillBindings, bindings)
+  assert.notEqual(index.forSession('planning-session').revision, before)
+  const after = index.forSession('planning-session').revision
+  await skills.initialize()
+  assert.equal(index.forSession('planning-session').revision, after)
+  const composer = new PartnerAgentComposition(store, skills, board, service, {}, {}, {})
+  for (const companion of store.snapshot().companions) {
+    const sections = []
+    const dispose = await composer.compose({ tools: { register: () => () => {} }, systemPrompt: { section: section => { sections.push(section); return () => {} } } }, companion)
+    const occurrences = sections.map(section => section.text).join('\n').split(loaded.body).length - 1
+    assert.equal(occurrences, companion.id === 'companion-default' ? 1 : 0)
+    dispose()
+  }
+})
+
+test('builtin upgrade does not replace a locally maintained planning skill', async t => {
+  const { skills } = await fixture(t)
+  const installed = await skills.installLocal('---\nname: task-planning\ndescription: 用户自己的分工规则\ncontext: inline\n---\n保留用户自己的策略。', 'task-planning')
+  await skills.initialize()
+  assert.equal((await skills.load(installed.id)).checksum, installed.checksum)
+})
+
+test('one authorized specialist deliverable dispatches without artificial decomposition and hides disabled capabilities', async t => {
+  const { store, board, skills, service, calls } = await fixture(t)
+  await skills.initialize()
+  await skills.installMarket('builtin', 'technical-research')
+  await store.update(state => {
+    state.companions.push({ ...structuredClone(state.companions[0]), id: 'researcher', name: '资料专家', role: '技术调研', description: '整理可追溯资料', capabilities: ['skills'] })
+    state.companions.push({ ...structuredClone(state.companions[0]), id: 'private', name: '未授权专家' })
+  })
+  await skills.setBinding('researcher', 'technical-research', true)
+  await service.replaceAccessTargets('companion-default', ['researcher'])
+  assert.deepEqual(service.directoryFor('companion-default').map(item => item.id), ['researcher'])
+  assert.equal(service.directoryFor('companion-default')[0].enabledSkills.length, 1)
+  const tools = []
+  const composer = new PartnerAgentComposition(store, skills, board, service, {}, {}, {})
+  const dispose = await composer.compose({ tools: { register: tool => { tools.push(tool); return () => {} } }, systemPrompt: { section: () => () => {} } }, store.snapshot().companions[0])
+  t.after(dispose)
+  const tool = tools.find(tool => tool.name === 'partner_task_board')
+  const exec = { agent: { session: { id: 'creator-session' } } }
+  await assert.rejects(tool.execute({ action: 'create', title: '越权分工', assignee: 'private' }, exec), /未获授权/)
+  assert.equal(store.snapshot().tasks.length, 0)
+  const task = JSON.parse(await tool.execute({ action: 'create', title: '整理资料', description: '按现有来源整理资料，交付附出处的文档，不扩大研究范围。', assignee: 'researcher' }, exec))
+  assert.equal(task.execution, 'submitted')
+  await waitFor(() => board.require(task.id).status === 'review')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].companion.id, 'researcher')
+  assert.equal(store.snapshot().tasks.length, 1)
+  assert.equal(board.require(task.id).reviewerCompanionId, 'companion-default')
+  await store.update(state => { state.companions.find(item => item.id === 'researcher').capabilities = [] })
+  assert.deepEqual(service.directoryFor('companion-default')[0].enabledSkills, [])
+  assert.equal(skills.bindings('researcher').length, 1, 'retain saved selection while the skills capability is disabled')
+})
 
 test('assigned create tool submits automatically, reports the Skill protocol, and honors planning-only', async t=>{
   const {store,board,skills,service,calls}=await fixture(t)

@@ -68,9 +68,9 @@ export class PartnerAgentComposition {
         companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
         companion.capabilities.includes('schedules') ? '你拥有“定时任务”能力。只有用户明确要求未来某个时间或按周期执行时，才创建 partner_schedule；普通待办、当前轮次工作和一次性立即执行不能擅自改成定时任务。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
-        '接到工作需求时先主动判断交付结构与所需专长。用户明确要求拆解，或目标包含多个可独立验收的阶段、真实前置依赖、可并行交付、需要授权伙伴的专长时，应主动应用匹配的拆解 Skill、建立看板分工并提交执行，不必等待用户再次说“拆解”或逐个 @。用户只讨论方案、明确只规划或要求等确认时，不启动工作；简单单项回答直接完成，不为凑数量拆分。判断依据是交付物，不是内部推理步骤的多少。',
-        '看板执行协议：先查看现有任务避免重复，按实际授权目录的 id、职责、Skill 选择负责人，不能只按名字猜测或仅在文本里 @。partner_task_board create 指定 assignee 后默认 autoRun=true：任务持久化后进入执行队列；有依赖的任务也一次提交，由系统等待 dependencyTaskIds 全部验收为 done 后自动启动，无需等待前置完成再委派。只规划时传 autoRun=false；自己负责的阶段也可用自己的 id 提交。为已有任务补充执行使用 partner_collaborate delegate，可安全重复查询提交结果。工具返回前没有执行完成，不得声称已完成。',
-        '每个子任务必须有清晰产出与验收条件；结果提交后进入 review，再由指定验收者通过或打回。完成全部分工提交后立即返回任务、负责人、依赖、排队情况和验收安排，不轮询等待后续工作。任务终态会反向通知创建者；已提交的后续任务由系统自动接续，不要重复创建。',
+        '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
+        '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
+        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态反向通知创建者，已提交的后续任务由系统自动接续。执行、重试和验收是内部过程，不向渠道发送中间进展；验收后的最终结果由系统投递。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         `你自己的伙伴 id：${companion.id}。`,
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
@@ -224,7 +224,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'Actively plan and submit multi-deliverable work using enabled planning Skills and authorized companion specialties. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false for planning only. After creating the requested tasks, return one concise assignment summary to the user. Execution, retries, review and accept are internal: do not send progress chatter. The system delivers final results after acceptance. Shared board records are not proof of completion. Accepted dependencies unlock queued tasks automatically.',
+    description: 'List, create, update, comment on, accept or reject board tasks. Assignees and reviewers must be self or authorized companions. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Execution, retries, review and accept are internal; the system delivers final results after acceptance. Accepted dependencies unlock queued tasks automatically.',
     parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
