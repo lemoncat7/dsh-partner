@@ -17,8 +17,10 @@ export class DailyReviewScheduler {
 
   start(): void { if (!this.closed && this.timer === undefined) this.schedule(5_000) }
   async close(): Promise<void> { this.closed = true; if (this.timer) clearTimeout(this.timer); this.timer = undefined }
+  isRunning(id: string): boolean { return this.running.has(id) }
 
   async trigger(companionId: string, force = false): Promise<{ reviewed: number; failed: number; reason?: string }> {
+    if (this.store.isCompanionRemoving(companionId)) return { reviewed: 0, failed: 0, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { reviewed: 0, failed: 0, reason: '每日终审正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (!companion) throw new Error('伙伴不存在')

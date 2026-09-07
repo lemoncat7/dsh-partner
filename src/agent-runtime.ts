@@ -16,6 +16,8 @@ import { createScope, scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { Companion, ChannelSession } from './domain.js'
 import { PartnerStore } from './store.js'
 import { SessionConfigurationIndex } from './companions/session-configuration.js'
+import { removeOwnedWorkspace } from './companions/workspace-cleanup.js'
+import { assertOwnedDirectory, removeOwnedDirectory } from './companions/directory-cleanup.js'
 import type { PartnerMemoryStore } from './memory-store.js'
 import type { MemoryContextConnection, MemoryRelationKind, UserProfileSnapshot } from './memory-domain.js'
 import type { MemoryReflectionService } from './memory-reflection.js'
@@ -114,6 +116,8 @@ export class PartnerAgentRuntime {
   private readonly disposeConfigurationListener: () => void
   private readonly configurations: SessionConfigurationIndex
   private readonly preparedTurns = new WeakMap<Agent, number>()
+  private readonly observationJobs = new Map<string, number>()
+  private readonly agentSetupJobs = new Map<string, number>()
   private closed = false
   private questionAnswerer: PartnerQuestionAnswerer | undefined
 
@@ -200,6 +204,7 @@ export class PartnerAgentRuntime {
   }
 
   async ensureLocalSessionRecord(companionId: string): Promise<ChannelSession> {
+    if (this.store.isCompanionRemoving(companionId)) throw new Error('伙伴正在删除，不能创建会话')
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (companion === undefined) throw new Error('伙伴身份不存在')
     const existing = this.store.snapshot().sessions.find(item => item.companionId === companionId && item.kind === 'local')
@@ -218,6 +223,7 @@ export class PartnerAgentRuntime {
       lastMessageAt: now,
     }
     await this.store.update(state => {
+      if (this.store.isCompanionRemoving(companion.id) || !state.companions.some(item => item.id === companion.id)) throw new Error('伙伴正在删除或已不存在')
       state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
       state.sessions.push(route)
     })
@@ -398,6 +404,16 @@ export class PartnerAgentRuntime {
   async observeSessionEvent(session: Session, event: SessionEvent): Promise<void> {
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
+    if (!route || this.store.isCompanionRemoving(route.companionId)) return
+    const id = route.companionId
+    this.observationJobs.set(id, (this.observationJobs.get(id) ?? 0) + 1)
+    try { await this.processSessionEvent(session, event) }
+    finally { const left = (this.observationJobs.get(id) ?? 1) - 1; if (left) this.observationJobs.set(id, left); else this.observationJobs.delete(id) }
+  }
+
+  private async processSessionEvent(session: Session, event: SessionEvent): Promise<void> {
+    if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
+    const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
     if (route === undefined) return
     const companion = this.store.snapshot().companions.find(item => item.id === route.companionId)
     if (companion === undefined) return
@@ -502,6 +518,31 @@ export class PartnerAgentRuntime {
     await this.store.update(state => { state.sessions = state.sessions.filter(item => item.companionId !== companionId) })
   }
 
+  async removeCompanionWorkspace(companionId: string): Promise<void> {
+    const cwd = partnerCwd(this.defaultCwd, companionId)
+    const sharedPaths = this.store.snapshot().sessions.filter(route => route.companionId !== companionId).map(route => route.cwd ?? this.defaultCwd)
+    await removeOwnedWorkspace(this.ctx.workspaceRegistry, cwd, companionId, sharedPaths)
+    this.workspaces.delete(cwd)
+  }
+
+  private sharedDirectoryPaths(companionId: string): string[] {
+    const state = this.store.snapshot()
+    const cwd = resolve(partnerCwd(this.defaultCwd, companionId))
+    return [
+      ...state.companions.filter(item => item.id !== companionId).map(item => partnerCwd(this.defaultCwd, item.id)),
+      ...state.sessions.filter(route => route.companionId !== companionId).map(route => route.cwd ?? this.defaultCwd),
+      ...this.ctx.workspaceRegistry.list().filter(item => resolve(item.path) !== cwd).map(item => item.path),
+    ]
+  }
+
+  async validateCompanionDirectory(companionId: string): Promise<void> {
+    await assertOwnedDirectory(this.defaultCwd, companionId, this.sharedDirectoryPaths(companionId))
+  }
+
+  async removeCompanionDirectory(companionId: string): Promise<void> {
+    await removeOwnedDirectory(this.defaultCwd, companionId, this.sharedDirectoryPaths(companionId))
+  }
+
   async reloadCompanion(companionId: string): Promise<void> {
     // Compatibility for callers that saved a configuration. The index already
     // observes committed writes; do not tear down or wake any Agent here.
@@ -514,6 +555,7 @@ export class PartnerAgentRuntime {
     if (this.preparedTurns.get(agent) === turn) return
     const configuration = this.configurations.forSession(agent.session.id)
     if (!configuration) return
+    if (this.store.isCompanionRemoving(configuration.companion.id)) throw new Error('伙伴正在删除，不能启动新轮次')
     signal.throwIfAborted()
     const installed = this.restoredCompositions.get(agent.session.id)
     if (installed?.agent !== agent || installed.revision !== configuration.revision) {
@@ -530,7 +572,7 @@ export class PartnerAgentRuntime {
   }
 
   isCompanionBusy(companionId: string): boolean {
-    return this.store.snapshot().sessions.some(route => route.companionId === companionId
+    return this.observationJobs.has(companionId) || this.agentSetupJobs.has(companionId) || this.store.snapshot().sessions.some(route => route.companionId === companionId
       && (this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId))?.status === 'running')
   }
 
@@ -661,6 +703,14 @@ export class PartnerAgentRuntime {
   }
 
   private async ensureAgent(companion: Companion, route: ChannelSession): Promise<Agent> {
+    if (this.store.isCompanionRemoving(companion.id) || !this.store.snapshot().companions.some(item => item.id === companion.id)) throw new Error('伙伴正在删除或已不存在')
+    const id = companion.id
+    this.agentSetupJobs.set(id, (this.agentSetupJobs.get(id) ?? 0) + 1)
+    try { return await this.ensureAgentReady(companion, route) }
+    finally { const left = (this.agentSetupJobs.get(id) ?? 1) - 1; if (left) this.agentSetupJobs.set(id, left); else this.agentSetupJobs.delete(id) }
+  }
+
+  private async ensureAgentReady(companion: Companion, route: ChannelSession): Promise<Agent> {
     const cwd = route.cwd ?? this.defaultCwd
     await mkdir(cwd, { recursive: true, mode: 0o700 })
     const profile = await this.memory?.profileSnapshot(companion.id, memoryScope(route.channelId, route.userId)).catch(() => undefined)

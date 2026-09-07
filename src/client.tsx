@@ -10,7 +10,7 @@ import { observePluginWorkspace } from './workspace-ownership.js'
 import {
   IconAgentPresetOutline16, IconCheckOutline14, IconChevronDownOutline14, IconChevronLeftOutline14,
   IconDataOutline16, IconEditOutline16, IconLinkOutline16, IconPlusOutline16,
-  IconRefreshOutline16, IconTrashOutline16, IconUserOutline16, IconBrowseOutline16, IconListPenOutline16, IconPlayOutline16,
+  IconRefreshOutline16, IconUserOutline16, IconBrowseOutline16, IconListPenOutline16, IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
 import baseCssText from './client.css'
@@ -30,7 +30,7 @@ import { SkillsPanel } from './ui/skills-panel.js'
 import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 import { CapabilityEditor } from './ui/capability-editor.js'
-import { companionDraft } from './ui/companion-draft.js'
+import { IdentityEditor } from './ui/identity-editor.js'
 import { Avatar, ChannelStatus as Status, ContentState as State, FormField as Field, SectionHeading as Section, TabButton, WeixinGlyph, relativeTime } from './ui/partner-components.js'
 import { errorMessage as message } from './ui/workspace-components.js'
 import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
@@ -96,6 +96,9 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [creatingCompanion, setCreatingCompanion] = useState(false)
+  const [notice, setNotice] = useState<string>()
+  const selectionRef = useRef({ selectedId, companions: snapshot?.companions })
+  selectionRef.current = { selectedId, companions: snapshot?.companions }
   const refresh = useCallback(async (throwOnError = false) => {
     try {
       const next = await loadPartner()
@@ -107,6 +110,18 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => controller.subscribe(() => { const next = controller.selected(); if (next) setSelectedId(next); const destination = controller.destination(); if (destination) { setView(destination.page); setRequestedDestination(destination) } }), [controller])
   const selected = snapshot?.companions.find(item => item.id === selectedId)
+  const companionRemoved = async (id: string): Promise<void> => {
+    const current = selectionRef.current
+    const name = current.companions?.find(item => item.id === id)?.name ?? '伙伴'
+    setSnapshot(value => value ? { ...value, companions: value.companions.filter(item => item.id !== id), sessions: value.sessions.filter(item => item.companionId !== id) } : value)
+    if (current.selectedId === id) {
+      setSelectedId(current.companions?.find(item => item.id !== id)?.id)
+      setView('home')
+    }
+    setNotice(`已删除「${name}」，已退出删除确认。`)
+    try { await refresh(true) }
+    catch (reason) { setError(`伙伴已删除，但刷新失败，请刷新页面，无需再次删除：${message(reason)}`) }
+  }
   const create = async (draft: NewCompanionDraft): Promise<void> => {
     try {
       const companion = await api<CompanionView>('/companions', { method: 'POST', body: JSON.stringify({ companion: {
@@ -175,8 +190,9 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             <TabButton active={view === 'memory'} onClick={() => setView('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
           </nav>
           <div className="dsh-partner-stage-scroll">
+            {notice && <p className="dsh-partner-inline-notice" role="status">{notice}</p>}
             {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} />}
-            {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={refresh} />}
+            {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={() => refresh(true)} onRemoved={companionRemoved} />}
             {view === 'capabilities' && <CapabilityEditor key={selected.id} companion={selected} presets={snapshot?.presets ?? []} onChanged={() => refresh(true)} />}
             {view === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
             {view === 'memory' && <MemoryPanel companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
@@ -257,33 +273,6 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
     </div>
   </div>
 }
-
-function IdentityEditor({ companion, count, onChanged }: { companion: CompanionView; count: number; onChanged(): Promise<void> }): JSX.Element {
-  const [form, setForm] = useState(() => companionDraft(companion))
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string>()
-  const [confirmingRemove, setConfirmingRemove] = useState(false)
-  useEffect(() => { setForm(companionDraft(companion)); setSaved(false) }, [companion.id, companion.updatedAt])
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault(); setSaving(true); setError(undefined)
-    try { await api(`/companions/${companion.id}`, { method: 'PUT', body: JSON.stringify({ companion: form }) }); setSaved(true); await onChanged() }
-    catch (reason) { setError(message(reason)) } finally { setSaving(false) }
-  }
-  const remove = async (): Promise<void> => {
-    try { await api(`/companions/${companion.id}`, { method: 'DELETE' }); await onChanged() } catch (reason) { setError(message(reason)) }
-  }
-  return <form className="dsh-partner-form is-identity" onSubmit={event => { void submit(event) }}>
-    <Section eyebrow="IDENTITY" title="工作身份" detail="它不是一次对话的提示词，而是这个伙伴在桌面和微信中的长期行为基线。" />
-    <div className="dsh-partner-fields two"><Field label="名字"><input required maxLength={60} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Field><Field label="角色"><input required maxLength={120} value={form.role} onChange={event => setForm({ ...form, role: event.target.value })} /></Field></div>
-    <Field label="一句话定位" hint="用于名册识别，不会替代完整行为准则。"><textarea rows={2} maxLength={500} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></Field>
-    <Field label="长期行为准则" hint="建议写职责、表达方式与边界；渠道、工具和授权由系统单独控制。"><textarea rows={9} maxLength={12000} value={form.instructions} onChange={event => setForm({ ...form, instructions: event.target.value })} /></Field>
-    {error && <p className="dsh-partner-inline-error">{error}</p>}
-    <div className="dsh-partner-form-actions"><span>{saved && <><IconCheckOutline14 size={14} />已保存，下一轮将使用新身份</>}</span><button disabled={saving}>{saving ? '正在保存…' : '保存身份'}</button></div>
-    <div className="dsh-partner-identity-danger" data-confirming={confirmingRemove}><span><strong>{confirmingRemove ? `确认删除「${companion.name}」？` : '删除伙伴'}</strong><small>{confirmingRemove ? '该伙伴的本地配置会被移除；已有渠道必须先解绑。' : '必须先移除已绑定微信渠道；不会自动把联系人转交给其他伙伴。'}</small></span><div>{confirmingRemove && <button type="button" className="is-secondary" onClick={() => setConfirmingRemove(false)}>取消</button>}<button type="button" className={confirmingRemove ? 'is-danger' : ''} disabled={count <= 1} onClick={() => confirmingRemove ? void remove() : setConfirmingRemove(true)}><IconTrashOutline16 size={16} />{confirmingRemove ? '确认删除' : '删除'}</button></div></div>
-  </form>
-}
-
 
 function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionView; snapshot: PartnerSnapshot; onChanged(): Promise<void> }): JSX.Element {
   const channel = snapshot.channels.find(item => item.companionId === companion.id)

@@ -25,7 +25,7 @@ test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
 })
 
 test('overview cards avoid dynamic glare and per-card SVG observers', () => {
-  const homePanel = clientSource.slice(clientSource.indexOf('function HomePanel('), clientSource.indexOf('function IdentityEditor('))
+  const homePanel = clientSource.slice(clientSource.indexOf('function HomePanel('), clientSource.indexOf('function WeixinPanel('))
 
   assert.doesNotMatch(homePanel, /<GlassSurface/)
   assert.match(homePanel, /<section className=\{`dsh-partner-home-channel/)

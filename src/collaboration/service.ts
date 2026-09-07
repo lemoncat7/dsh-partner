@@ -263,6 +263,7 @@ export class PartnerCollaborationService {
     await this.store.update(state => {
       const item = state.delegations.find(value => value.id === id)
       if (!item || item.status !== 'queued' || (item.nextAttemptAt ?? 0) > Date.now()) return
+      if (this.store.isCompanionRemoving(item.toCompanionId) || (item.fromCompanionId && this.store.isCompanionRemoving(item.fromCompanionId))) return
       const task = state.tasks.find(task => task.id === item.taskId)
       const denied = taskDispatchDenied(state, item)
       const taskWork = delegationKind(item) === 'task'

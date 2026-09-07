@@ -153,6 +153,7 @@ export class EphemeralExecutionService {
 
   private async saveRun(run: ExecutionRun): Promise<void> {
     await this.store.update(state => {
+      if (run.status === 'running' && (this.store.isCompanionRemoving(run.ownerCompanionId) || !state.companions.some(item => item.id === run.ownerCompanionId))) throw new Error('伙伴正在删除或已不存在，不能启动临时任务')
       state.executionRuns = state.executionRuns.filter(item => item.id !== run.id)
       appendBounded(state.executionRuns, structuredClone(run), 500)
     })

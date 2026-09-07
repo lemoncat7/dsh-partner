@@ -62,6 +62,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if (segments[0] === 'companions' && segments[1] && runtime.store.isCompanionRemoving(segments[1]) && !(method === 'DELETE' && segments.length === 2)) throw httpError(409, '伙伴正在删除，请稍后刷新')
   if (await dispatchPendantApi(req, res, segments, runtime.inbox)) return
   if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 14 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
@@ -101,26 +102,17 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && method === 'DELETE' && segments.length === 2) {
       mutation(req)
-      requiredCompanion(runtime.store, id)
-      const current = runtime.store.snapshot()
-      if (current.channels.some(item => item.companionId === id)) throw httpError(409, '请先删除或换绑该伙伴的微信渠道')
-      if (current.companions.length <= 1) throw httpError(409, '至少保留一个伙伴')
-      if (current.executionRuns.some(item => item.ownerCompanionId === id && item.status === 'running')) throw httpError(409, '伙伴仍有正在执行的临时任务，请等待完成后再删除')
-      await runtime.agents.resetCompanion(id)
-      await runtime.store.update(state => {
-        state.companions = state.companions.filter(item => item.id !== id)
-        state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
-        state.companionAccessGrants = state.companionAccessGrants.filter(grant => grant.fromCompanionId !== id && grant.toCompanionId !== id)
-        state.schedules = state.schedules.filter(item => item.companionId !== id)
-        for (const task of state.tasks) {
-          let changed = false
-          if (task.assigneeCompanionId === id) { delete task.assigneeCompanionId; changed = true }
-          if (task.reviewerCompanionId === id) { delete task.reviewerCompanionId; changed = true }
-          if (changed) { task.revision += 1; task.updatedAt = Date.now() }
-        }
+      const removeFiles = url.searchParams.get('removeFiles')
+      if (removeFiles !== null && removeFiles !== '0' && removeFiles !== '1') throw httpError(400, 'removeFiles 必须为 0 或 1')
+      await runtime.companions.remove(id, {
+        isBusy: target => runtime.agents.isCompanionBusy(target) || runtime.heartbeat.isRunning(target) || runtime.dailyReview.isRunning(target),
+        validateDirectory: target => runtime.agents.validateCompanionDirectory(target),
+        ...(removeFiles === '1' ? { removeDirectory: (target: string) => runtime.agents.removeCompanionDirectory(target) } : {}),
+        detachWorkspace: target => runtime.agents.removeCompanionWorkspace(target),
+        resetSessions: target => runtime.agents.resetCompanion(target),
+        clearMemory: target => runtime.memory.clear(target),
+        clearConcerns: target => runtime.concerns.clear(target),
       })
-      await runtime.memory.clear(id)
-      await runtime.concerns.clear(id)
       return sendJson(res, 204, undefined)
     }
     if (id !== undefined && method === 'PUT' && segments[2] === 'automation' && segments.length === 3) {

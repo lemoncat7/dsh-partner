@@ -34,7 +34,10 @@ export class HeartbeatScheduler {
     this.timer = undefined
   }
 
+  isRunning(id: string): boolean { return this.running.has(id) }
+
   async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
+    if (this.store.isCompanionRemoving(companionId)) return { checked: false, sent: false, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { checked: false, sent: false, reason: '心跳正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (companion === undefined) throw new Error('伙伴不存在')

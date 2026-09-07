@@ -1,14 +1,18 @@
 import { randomBytes } from 'node:crypto'
 import { DEFAULT_AUTOMATION, normalizeCompanionDraft, type Companion } from '../domain.js'
 import type { PartnerStore } from '../store.js'
+import { CompanionRemovalService, type CompanionRemovalLifecycle } from './removal.js'
 
 type SessionProvisioner = (companionId: string) => Promise<unknown>
 
 /** Owns the atomic identity + initial local-session creation boundary. */
 export class CompanionService {
   private provisionSession?: SessionProvisioner
+  private readonly removal: CompanionRemovalService
 
-  constructor(private readonly store: PartnerStore) {}
+  constructor(private readonly store: PartnerStore) { this.removal = new CompanionRemovalService(store) }
+
+  remove(id: string, lifecycle: CompanionRemovalLifecycle): Promise<void> { return this.removal.remove(id, lifecycle) }
 
   setSessionProvisioner(provisioner: SessionProvisioner): void {
     this.provisionSession = provisioner

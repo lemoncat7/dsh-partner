@@ -8,6 +8,7 @@ import type { CompanionCapability } from './capabilities.js'
 export class PartnerStore {
   private state: PartnerState
   private writes: Promise<void> = Promise.resolve()
+  private readonly removingCompanions = new Set<string>()
   private readonly listeners = new Set<{ notify(next: PartnerState, previous: PartnerState): void; onError(error: unknown): void }>()
 
   private constructor(private readonly path: string, state: PartnerState) {
@@ -37,6 +38,14 @@ export class PartnerStore {
 
   snapshot(): PartnerState {
     return structuredClone(this.state)
+  }
+
+  isCompanionRemoving(id: string): boolean { return this.removingCompanions.has(id) }
+
+  beginCompanionRemoval(id: string): () => void {
+    if (this.removingCompanions.has(id)) throw new Error('伙伴正在删除')
+    this.removingCompanions.add(id)
+    return () => { this.removingCompanions.delete(id) }
   }
 
   /** A live authorization read without copying task/history state per tool call. */

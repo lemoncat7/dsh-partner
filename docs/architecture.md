@@ -140,6 +140,30 @@ form and save feedback, using the shared companion draft and existing UI tokens.
   assigned-stage instructions forbid recreating the same work recursively.
 - Scheduled jobs default to non-overlapping execution and a disposable session.
 
+## Companion deletion safety
+
+- `companions/removal.ts` serializes removals, binds each operation to one ID,
+  blocks active work/last-companion deletion, and keeps the identity retryable
+  if directory cleanup fails. An in-memory removal guard prevents new partner
+  sessions, task claims, heartbeat and daily-review work during deletion.
+- `companions/directory-cleanup.ts` derives only `<defaultCwd>/partners/<id>`;
+  it rejects traversal, shared/nested workspace paths, symlinked roots and
+  mounted volumes. Nested symlinks are removed without following their targets.
+  Filesystem cleanup finishes before deleting identity. This is not a cross-store
+  transaction: a failed filesystem deletion can have removed some files, and a
+  later state-write failure leaves the identity available for retry.
+- The identity editor sends `DELETE ...?removeFiles=1` only after a named
+  confirmation describing permanent deletion. Older callers without this flag
+  retain file-preserving behavior. Neither path scans historical orphan folders
+  nor purges DSH's global session persistence; the current host has no supported
+  permanent session-log deletion API. `workspace-cleanup.ts` removes only the
+  dedicated workspace registration through the public host API.
+- `ui/identity-editor.tsx` isolates confirmation and async feedback per companion,
+  prevents duplicate clicks and returns the selected deletion to the overview.
+  `test/companion-removal.test.mjs` and `scripts/verify-companion-removal.mjs`
+  use disposable fixtures; physical deletion never runs against live user data
+  as part of these regression tests.
+
 ## Proactive planning and durable task dispatch
 
 - `skills/task-planning.ts` owns the built-in planning instructions (1.2.0).
