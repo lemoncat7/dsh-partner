@@ -30,7 +30,7 @@ export class SessionConfigurationIndex {
       { id, name, role, description, instructions, capabilities },
       bindings, this.state.skills.filter(skill => bindings.some(binding => binding.skillId === skill.id)),
       grants, grants.map(grant => this.companions.get(grant.toCompanionId)).map(target => target && ({
-        id: target.id, name: target.name, role: target.role, capabilities: target.capabilities,
+        id: target.id, name: target.name, role: target.role, description: target.description, capabilities: target.capabilities,
         skills: this.state.skillBindings.filter(binding => binding.companionId === target.id && binding.enabled)
           .map(binding => this.state.skills.find(skill => skill.id === binding.skillId)),
       })),

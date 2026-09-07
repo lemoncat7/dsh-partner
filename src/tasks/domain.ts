@@ -10,6 +10,8 @@ export interface BoardTask {
   status: TaskStatus
   priority: TaskPriority
   assigneeCompanionId?: string
+  /** Explicit durable execution intent. Missing on legacy/planning-only tasks. */
+  autoRun?: boolean
   reviewerCompanionId?: string
   createdBy: 'user' | 'companion' | 'schedule'
   creatorCompanionId?: string

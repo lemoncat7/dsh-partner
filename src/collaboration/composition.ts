@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition, ToolRunContext, ToolRuntime } from '@deepseek-ai/dsh-tools'
-import { record, requiredText } from '../core/validation.js'
+import { optionalBoolean, record, requiredText } from '../core/validation.js'
 import type { Companion } from '../domain.js'
 import type { CompanionCapability } from '../capabilities.js'
 import type { EphemeralExecutionService } from '../execution/service.js'
@@ -68,15 +68,18 @@ export class PartnerAgentComposition {
         companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
         companion.capabilities.includes('schedules') ? '你拥有“定时任务”能力。只有用户明确要求未来某个时间或按周期执行时，才创建 partner_schedule；普通待办、当前轮次工作和一次性立即执行不能擅自改成定时任务。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
-        '是否拆成看板任务由工作形态决定：只有工作跨多步、需要并行、需要等待外部条件、存在明确前置依赖、需要其他伙伴专长，或必须跨会话持续跟踪时才建任务。一次回答内可直接完成的简单事项不要制造看板负担。拆解后每个子任务必须有可验收产出；存在先后关系时写入 dependencyTaskIds，前置任务完成前不得启动后续任务。执行者提交结果后进入 review；指定验收伙伴时由其给出核验意见，最终通过或打回后再推进后续任务。完成全部拆解与委派后，立即向用户返回任务、负责人、依赖和验收安排的看板摘要；不要轮询状态或等待被委派任务执行结束，终态进度会反向通知你。',
-        directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（${item.role}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
+        '接到工作需求时先主动判断交付结构与所需专长。用户明确要求拆解，或目标包含多个可独立验收的阶段、真实前置依赖、可并行交付、需要授权伙伴的专长时，应主动应用匹配的拆解 Skill、建立看板分工并提交执行，不必等待用户再次说“拆解”或逐个 @。用户只讨论方案、明确只规划或要求等确认时，不启动工作；简单单项回答直接完成，不为凑数量拆分。判断依据是交付物，不是内部推理步骤的多少。',
+        '看板执行协议：先查看现有任务避免重复，按实际授权目录的 id、职责、Skill 选择负责人，不能只按名字猜测或仅在文本里 @。partner_task_board create 指定 assignee 后默认 autoRun=true：任务持久化后进入执行队列；有依赖的任务也一次提交，由系统等待 dependencyTaskIds 全部验收为 done 后自动启动，无需等待前置完成再委派。只规划时传 autoRun=false；自己负责的阶段也可用自己的 id 提交。为已有任务补充执行使用 partner_collaborate delegate，可安全重复查询提交结果。工具返回前没有执行完成，不得声称已完成。',
+        '每个子任务必须有清晰产出与验收条件；结果提交后进入 review，再由指定验收者通过或打回。完成全部分工提交后立即返回任务、负责人、依赖、排队情况和验收安排，不轮询等待后续工作。任务终态会反向通知创建者；已提交的后续任务由系统自动接续，不要重复创建。',
+        directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
+        `你自己的伙伴 id：${companion.id}。`,
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
         ].filter(Boolean).join('\n\n'),
       }))
       if (inlineSkills.length > 0) disposers.push(ctx.systemPrompt.section({
         name: 'partner-inline-skills', order: -6,
         text: [
-          '以下是已启用且经校验的可信 inline Skill 指令。当当前需求符合 Skill 的用途时直接遵循，无需再调用 partner_skill load；不匹配时不要强行套用。',
+          '以下是已启用且经校验的可信 inline Skill 指令。每次接到需求先对照其用途；明确点名或用途匹配时必须主动应用，不需要用户再说触发词，也无需重复调用 partner_skill load。采用时用一句话说明所用 Skill 与对应产出，后续落实为真实工具操作；不匹配时不要强行套用。',
           ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
         ].join('\n\n'),
       }))
@@ -221,12 +224,13 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'Read and maintain the shared partner task board. Use it for multi-step, dependent, delegated, or cross-session work; do not create tasks for trivial one-turn answers. Dependencies block execution until done, and completed work must pass review.',
+    description: 'Actively plan and submit multi-deliverable work using enabled planning Skills and authorized companion specialties. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false for planning only. Shared board records are not proof of completion. Accepted dependencies unlock queued tasks automatically.',
     parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
       assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
+      autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). Persist execution intent and start after dependencies are accepted. Set false when user requests planning only; legacy tasks are never auto-started.' },
       dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
       expectedRevision: { type: 'integer' }, message: { type: 'string' },
     }),
@@ -237,12 +241,20 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       if (action === 'create') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
         const reviewer = typeof input.reviewer === 'string' && input.reviewer.trim() ? resolveAssignee(input.reviewer) : undefined
-        return JSON.stringify(await tasks.create({
+        const autoRun = optionalBoolean(input.autoRun, Boolean(assignee) && input.status !== 'backlog')
+        const task = await tasks.create({
           ...input,
+          autoRun,
           creatorSessionId: requireAgent(exec).session.id,
           ...(assignee ? { assigneeCompanionId: assignee } : {}),
           ...(reviewer ? { reviewerCompanionId: reviewer } : {}),
-        }, { kind: 'companion', companionId: companion.id }))
+        }, { kind: 'companion', companionId: companion.id })
+        let dispatchWarning: string | undefined
+        if (autoRun) {
+          try { await collaboration.dispatchReadyTasks() }
+          catch { dispatchWarning = '任务已保存，执行提交将在后台重试；不要重复创建任务' }
+        }
+        return JSON.stringify({ ...tasks.require(task.id), execution: autoRun ? 'submitted' : 'planning-only', ...(dispatchWarning ? { dispatchWarning } : {}) })
       }
       const taskId = requiredText(input.taskId, 'taskId', 160)
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
@@ -270,7 +282,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
 function collaborationTool(companion: Companion, store: PartnerStore, collaboration: PartnerCollaborationService): ToolDefinition {
   return textTool({
     name: 'partner_collaborate',
-    description: 'Inspect the safe companion directory or asynchronously delegate an existing board task to @another companion. Delegate returns as soon as assignment is queued; progress and results flow through the board and notify the creator companion. It never exposes private transcripts or credentials.',
+    description: 'Inspect authorized companion specialties or submit an existing board task to a companion (including yourself). Dependencies may still be pending: the durable queue starts work after accepted prerequisites. Repeated submission to the same assignee returns its pending job. Returns without waiting for execution; progress notifies the creator. Never exposes private transcripts or credentials.',
     parameters: actionParameters(['directory', 'delegate', 'status'], {
       taskId: { type: 'string' }, companion: { type: 'string', description: 'Target companion id or @name.' }, request: { type: 'string' }, delegationId: { type: 'string' },
     }),

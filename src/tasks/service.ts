@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { appendBounded } from '../core/collections.js'
-import { oneOf, optionalText, record, requiredText, stringList } from '../core/validation.js'
+import { oneOf, optionalBoolean, optionalText, record, requiredText, stringList } from '../core/validation.js'
 import type { PartnerStore } from '../store.js'
 import { TASK_PRIORITIES, TASK_STATUSES, type BoardTask, type TaskActivity } from './domain.js'
 import type { TaskExecutionOutput } from './result.js'
@@ -26,6 +26,8 @@ export class TaskBoardService {
     const input = record(value, 'task')
     const now = Date.now()
     const assigneeCompanionId = optionalText(input.assigneeCompanionId, 'assigneeCompanionId', 120)
+    const autoRun = optionalBoolean(input.autoRun, false)
+    if (autoRun && !assigneeCompanionId) throw new Error('提交执行需要指定负责人')
     const requestedReviewerCompanionId = optionalText(input.reviewerCompanionId, 'reviewerCompanionId', 120)
     const reviewerCompanionId = requestedReviewerCompanionId ?? actor.companionId
     this.assertCompanion(assigneeCompanionId)
@@ -34,7 +36,8 @@ export class TaskBoardService {
     this.assertDependencies(undefined, dependencyTaskIds)
     const task: BoardTask = {
       id: `task-${randomUUID()}`, title: requiredText(input.title, 'title', 200), description: typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : '',
-      status: input.status === undefined ? 'backlog' : oneOf(input.status, TASK_STATUSES, 'status'),
+      status: input.status === undefined ? autoRun ? 'ready' : 'backlog' : oneOf(input.status, TASK_STATUSES, 'status'),
+      ...(autoRun ? { autoRun: true } : {}),
       priority: input.priority === undefined ? 'normal' : oneOf(input.priority, TASK_PRIORITIES, 'priority'),
       ...(assigneeCompanionId ? { assigneeCompanionId } : {}), createdBy: actor.kind,
       ...(reviewerCompanionId ? { reviewerCompanionId } : {}),
@@ -43,6 +46,7 @@ export class TaskBoardService {
       skillIds: stringList(input.skillIds, 'skillIds', 20, 120), dependencyTaskIds,
       ...(validTimestamp(input.dueAt) ? { dueAt: input.dueAt } : {}), revision: 1, createdAt: now, updatedAt: now,
     }
+    if (autoRun && task.status !== 'ready') throw new Error('新提交的任务必须从待开始创建；收集箱请使用 autoRun=false，不能跳过执行和验收')
     if (started(task.status)) this.assertDependenciesComplete(task, this.store.snapshot().tasks)
     await this.store.update(state => {
       if (state.tasks.length >= MAX_TASKS) throw new Error(`Task board reached its ${MAX_TASKS} task limit; archive or delete completed tasks first`)
@@ -66,6 +70,14 @@ export class TaskBoardService {
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
       if (input.status !== undefined) task.status = oneOf(input.status, TASK_STATUSES, 'status')
       if (input.priority !== undefined) task.priority = oneOf(input.priority, TASK_PRIORITIES, 'priority')
+      if (input.autoRun !== undefined) {
+        task.autoRun = optionalBoolean(input.autoRun, false)
+        if (!task.autoRun) for (const item of state.delegations) {
+          if (item.taskId !== task.id || item.status !== 'queued' || item.kind === 'review') continue
+          item.status = 'canceled'; item.completedAt = Date.now(); item.error = '任务已改为仅规划，取消尚未开始的执行'
+          delete item.nextAttemptAt
+        }
+      }
       if ('assigneeCompanionId' in input) {
         const assignee = optionalText(input.assigneeCompanionId, 'assigneeCompanionId', 120)
         this.assertCompanion(assignee)
@@ -88,6 +100,7 @@ export class TaskBoardService {
         task.dependencyTaskIds = dependencies
       }
       if ('dueAt' in input) { if (validTimestamp(input.dueAt)) task.dueAt = input.dueAt; else delete task.dueAt }
+      if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
       if (task.status === 'done' && previousStatus !== 'done' && previousStatus !== 'review') throw new Error('任务必须先进入待验收，才能标记为已完成')
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
       task.revision += 1

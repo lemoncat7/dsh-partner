@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, ty
 import { IconCheckOutline16, IconChevronRightOutline14, IconCloseOutline16, IconPlusOutline16, IconSearchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDelegationView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
 import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
+import { TaskBoardStage } from './task-board-stage.js'
 
 const COLUMNS: Array<{ id: BoardTaskStatusView; label: string }> = [
   { id: 'backlog', label: '收集箱' }, { id: 'ready', label: '待开始' }, { id: 'doing', label: '进行中' },
@@ -129,17 +130,17 @@ export function TaskBoardPanel({ initialTaskId, openRequest }: { initialTaskId?:
       <div className="dsh-partner-board-tools">
         <label className="dsh-partner-board-search"><span className="sr-only">搜索任务</span><span aria-hidden="true"><IconSearchOutline16 size={16} /></span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索任务、负责人或前置任务" />{query && <button type="button" onClick={() => setQuery('')} aria-label="清除任务搜索"><IconCloseOutline16 size={14} /></button>}</label>
         <label className="dsh-partner-board-assignee"><span className="sr-only">按负责人筛选</span><select value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)}><option value="all">全部伙伴</option><option value="unassigned">未指派</option>{directory.map(item => <option value={item.id} key={item.id}>@{item.name}</option>)}</select></label>
+        <label className="dsh-partner-board-assignee is-mobile-stage"><span className="sr-only">按任务阶段筛选</span><select value={statusFilter} onChange={event => setStatusFilter(event.target.value as BoardStatusFilter)}><option value="all">全部阶段 · {scopedTasks.length}</option>{COLUMNS.map(column => <option value={column.id} key={column.id}>{column.label} · {statusCounts.get(column.id) ?? 0}</option>)}</select></label>
         <small aria-live="polite">显示 {visibleTaskCount} / {board.tasks.length}</small>
       </div>
       <nav className="dsh-partner-board-statuses" aria-label="按任务状态筛选"><button type="button" className={statusFilter === 'all' ? 'is-active' : ''} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}><span>全部</span><b>{scopedTasks.length}</b></button>{COLUMNS.map(column => <button type="button" key={column.id} className={statusFilter === column.id ? 'is-active' : ''} aria-pressed={statusFilter === column.id} onClick={() => setStatusFilter(column.id)}><span>{column.label}</span><b>{statusCounts.get(column.id) ?? 0}</b></button>)}</nav>
       <div className="dsh-partner-board" data-focused={statusFilter !== 'all'} aria-label="任务看板">{visibleColumns.map(column => {
       const tasks = tasksByStatus.get(column.id) ?? []
-      const columnTitleId = `dsh-partner-board-${column.id}`
-      return <section key={column.id} data-status={column.id} data-empty={tasks.length === 0} aria-labelledby={columnTitleId}><header><strong id={columnTitleId}>{column.label}</strong><b>{tasks.length}</b></header>{tasks.length > 0 ? <div className="dsh-partner-board-column-list">{tasks.map(task => <TaskCard
+      return <TaskBoardStage key={column.id} id={column.id} label={column.label} tasks={tasks} focused={statusFilter !== 'all'} filtered={Boolean(query || assigneeFilter !== 'all')} renderTask={task => <TaskCard
         key={task.id} task={task} tasksById={tasksById} directoryById={directoryById} dependentCount={dependentsById.get(task.id) ?? 0}
         execution={activeDelegationByTaskId.get(task.id)}
         open={() => setSelectedTaskId(task.id)}
-      />)}</div> : <p>{query || assigneeFilter !== 'all' ? '没有匹配任务' : '暂无任务'}</p>}</section>
+      />} />
     })}</div></>}
   </div>
 }
@@ -151,7 +152,7 @@ function TaskCard({ task, tasksById, directoryById, dependentCount, execution, o
   const blockers = dependencies.filter(item => item.status !== 'done')
   const completedDependencies = dependencies.length - blockers.length
   const assignee = directoryById.get(task.assigneeCompanionId ?? '')
-  const executionState = execution ? delegationState(execution) : undefined
+  const executionState = execution ? delegationState(execution, blockers.length) : task.autoRun && task.status === 'ready' ? { label: blockers.length ? '等待前置完成' : '等待调度' } : undefined
   return <article className="dsh-partner-task-card" data-blocked={blockers.length > 0} data-priority={task.priority}>
     <button type="button" className="dsh-partner-task-summary" aria-haspopup="dialog" onClick={open}><span><span className="dsh-partner-task-card-title"><strong title={task.title}>{task.title}</strong><em>{priorityLabel(task.priority)}</em></span><small className="dsh-partner-task-card-owner">{assignee ? `@${assignee.name}` : '未指派'}{task.resultSummary ? ' · 已有结果' : ''}{executionState ? ` · ${executionState.label}` : ''}</small>{(dependencies.length > 0 || dependentCount > 0) && <span className="dsh-partner-task-relations">{dependencies.length > 0 && <small data-blocked={blockers.length > 0}>前置 {completedDependencies}/{dependencies.length}</small>}{dependentCount > 0 && <small>完成后解锁 {dependentCount}</small>}</span>}</span><IconChevronRightOutline14 size={14} /></button>
   </article>
@@ -170,9 +171,9 @@ function TaskDetail({ task, tasks, activities, directory, execution, busy, updat
   const assignee = directory.find(item => item.id === task.assigneeCompanionId)
   const reviewer = directory.find(item => item.id === task.reviewerCompanionId)
   const dependencyCandidates = tasks.filter(item => item.id !== task.id && !task.dependencyTaskIds.includes(item.id) && !dependsOn(item.id, task.id, byId))
-  const canExecute = Boolean(task.assigneeCompanionId) && blockers.length === 0 && !['doing', 'review', 'done'].includes(task.status)
+  const canExecute = Boolean(task.assigneeCompanionId) && !execution && !['doing', 'review', 'done'].includes(task.status)
   const recentActivities = [...activities].sort((left, right) => right.at - left.at).slice(0, 6)
-  const executionState = execution ? delegationState(execution) : undefined
+  const executionState = execution ? delegationState(execution, blockers.length) : undefined
   return <div className="dsh-partner-task-detail">
       <section className="dsh-partner-task-description"><strong>任务说明</strong><p>{task.description || '没有补充说明'}</p></section>
       <div className="dsh-partner-task-fields"><label><span>状态</span><select value={task.status} disabled={busy} onChange={event => update({ status: event.target.value })}>{COLUMNS.map(item => <option key={item.id} value={item.id} disabled={(item.id === 'doing' || item.id === 'review' || item.id === 'done') && blockers.length > 0 || item.id === 'done' && task.status !== 'review' && task.status !== 'done'}>{item.label}</option>)}</select></label><label><span>负责人</span><select value={task.assigneeCompanionId ?? ''} disabled={busy || task.status === 'doing'} onChange={event => update({ assigneeCompanionId: event.target.value })}><option value="">未指派</option>{directory.map(item => <option key={item.id} value={item.id}>@{item.name} · {item.availability === 'busy' ? '忙碌' : '可用'}</option>)}</select></label><label><span>验收伙伴</span><select value={task.reviewerCompanionId ?? ''} disabled={busy} onChange={event => update({ reviewerCompanionId: event.target.value })}><option value="">留空 · 人工验收</option>{directory.map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label></div>
@@ -183,7 +184,7 @@ function TaskDetail({ task, tasks, activities, directory, execution, busy, updat
       {recentActivities.length > 0 && <section className="dsh-partner-task-activity"><strong>最近活动</strong><ol>{recentActivities.map(item => <li key={item.id}><span>{item.message}</span><time>{new Date(item.at).toLocaleString()}</time></li>)}</ol></section>}
       {rejecting && <form className="dsh-partner-task-reject" onSubmit={event => { event.preventDefault(); const reason = rejectReason.trim(); if (!reason) return; reject(reason); setRejecting(false); setRejectReason('') }}><label><span>打回原因</span><textarea autoFocus value={rejectReason} onChange={event => setRejectReason(event.target.value)} rows={3} maxLength={1200} placeholder="说明需要重做或补充的内容" /></label><div><button type="button" onClick={() => { setRejecting(false); setRejectReason('') }}>取消</button><button type="submit" className="is-primary" disabled={busy || !rejectReason.trim()}>确认打回</button></div></form>}
       {confirmingDelete && <div className="dsh-partner-task-delete-confirm" role="alert"><span>删除后，依赖它的任务会解除这条前置关系。</span><div><button type="button" onClick={() => setConfirmingDelete(false)}>取消</button><button type="button" className="is-danger" disabled={busy} onClick={remove}>确认删除</button></div></div>}
-      <footer className="dsh-partner-task-actions"><small>r{task.revision} · {new Date(task.updatedAt).toLocaleString()}</small><span>{task.status === 'review' ? <>{task.reviewerCompanionId && <button type="button" disabled={busy} onClick={review}>{busy ? '核验中…' : `交给 @${reviewer?.name ?? '伙伴'} 核验`}</button>}<button type="button" disabled={busy} onClick={() => setRejecting(true)}>打回重做</button><button type="button" className="is-primary" disabled={busy} onClick={accept}>验收通过</button></> : <button type="button" disabled={busy || !canExecute} title={blockers.length ? '前置任务尚未完成' : !task.assigneeCompanionId ? '请先选择负责人' : undefined} onClick={delegate}>{busy ? '执行中…' : task.status === 'doing' ? '正在执行' : task.status === 'done' ? '已经完成' : `交给 @${assignee?.name ?? '伙伴'}`}</button>}<button type="button" className="is-icon" aria-label={`删除 ${task.title}`} aria-expanded={confirmingDelete} disabled={busy} onClick={() => setConfirmingDelete(true)}><IconTrashOutline16 size={14} /></button></span></footer>
+      <footer className="dsh-partner-task-actions"><small>r{task.revision} · {new Date(task.updatedAt).toLocaleString()}</small><span>{task.status === 'review' ? <>{task.reviewerCompanionId && <button type="button" disabled={busy} onClick={review}>{busy ? '核验中…' : `交给 @${reviewer?.name ?? '伙伴'} 核验`}</button>}<button type="button" disabled={busy} onClick={() => setRejecting(true)}>打回重做</button><button type="button" className="is-primary" disabled={busy} onClick={accept}>验收通过</button></> : <button type="button" disabled={busy || !canExecute} title={blockers.length ? '可提前排队，依赖通过验收后自动执行' : !task.assigneeCompanionId ? '请先选择负责人' : undefined} onClick={delegate}>{busy ? '执行中…' : execution?.status === 'queued' ? '已提交，等待执行' : task.status === 'doing' ? '正在执行' : task.status === 'done' ? '已经完成' : `交给 @${assignee?.name ?? '伙伴'}`}</button>}<button type="button" className="is-icon" aria-label={`删除 ${task.title}`} aria-expanded={confirmingDelete} disabled={busy} onClick={() => setConfirmingDelete(true)}><IconTrashOutline16 size={14} /></button></span></footer>
   </div>
 }
 
@@ -200,14 +201,15 @@ function TaskForm({ companions, tasks, close, changed }: { companions: PartnerDi
     setBusy(true); setError(undefined)
     try {
       await api('/tasks', { method: 'POST', body: JSON.stringify({
-        title: data.get('title'), description: data.get('description'), priority: data.get('priority'), status: 'backlog',
+        title: data.get('title'), description: data.get('description'), priority: data.get('priority'),
+        autoRun: data.get('submission') === 'run' && Boolean(data.get('assignee')),
         assigneeCompanionId: data.get('assignee') || undefined, reviewerCompanionId: data.get('reviewer') || undefined,
         dependencyTaskIds: data.getAll('dependencyTaskId'),
       }) })
       await changed(); close()
     } catch (reason) { setError(errorMessage(reason)) } finally { setBusy(false) }
   }
-  return <form className="dsh-partner-task-form" aria-busy={busy} onSubmit={event => { void submit(event) }}><label><span>任务名称</span><input name="title" maxLength={200} required autoFocus placeholder="一句话说明交付目标" /></label><label><span>负责人</span><select name="assignee" defaultValue=""><option value="">未指派</option>{companions.map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label><label className="is-wide"><span>任务说明</span><textarea name="description" maxLength={8000} rows={5} placeholder="补充背景、交付物和完成条件" /></label><label><span>优先级</span><select name="priority" defaultValue="normal"><option value="low">低</option><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select></label><label><span>验收伙伴</span><select name="reviewer" defaultValue=""><option value="">留空 · 人工验收</option>{companions.map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label><div className="dsh-partner-task-form-dependencies is-wide"><span>依赖任务 <small>可选</small></span>{dependencyOptions.length > 0 ? <div>{dependencyOptions.map(item => <label key={item.id}><input type="checkbox" name="dependencyTaskId" value={item.id} /><i /><span>{item.title}</span><small>{statusLabel(item.status)}</small></label>)}</div> : <p>当前没有可选的未完成任务</p>}<small>可以选择多个；留空表示该任务不依赖其他任务。</small></div>{error && <WorkspaceNotice>{error}</WorkspaceNotice>}<footer><button type="button" disabled={busy} onClick={close}>取消</button><button type="submit" className="is-primary" disabled={busy}><IconPlusOutline16 size={14} />{busy ? '创建中…' : '创建任务'}</button></footer></form>
+  return <form className="dsh-partner-task-form" aria-busy={busy} onSubmit={event => { void submit(event) }}><label><span>任务名称</span><input name="title" maxLength={200} required autoFocus placeholder="一句话说明交付目标" /></label><label><span>负责人</span><select name="assignee" defaultValue=""><option value="">未指派</option>{companions.map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label><label className="is-wide"><span>任务说明</span><textarea name="description" maxLength={8000} rows={5} placeholder="补充背景、交付物和完成条件" /></label><label><span>优先级</span><select name="priority" defaultValue="normal"><option value="low">低</option><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select></label><label><span>验收伙伴</span><select name="reviewer" defaultValue=""><option value="">留空 · 人工验收</option>{companions.map(item => <option key={item.id} value={item.id}>@{item.name}</option>)}</select></label><div className="dsh-partner-task-form-dependencies is-wide"><span>依赖任务 <small>可选</small></span>{dependencyOptions.length > 0 ? <div>{dependencyOptions.map(item => <label key={item.id}><input type="checkbox" name="dependencyTaskId" value={item.id} /><i /><span>{item.title}</span><small>{statusLabel(item.status)}</small></label>)}</div> : <p>当前没有可选的未完成任务</p>}<small>可以选择多个；留空表示该任务不依赖其他任务。</small></div><label className="is-wide"><span>创建后执行</span><select name="submission" defaultValue="run"><option value="run">已指定负责人则自动排队，等待依赖完成后执行</option><option value="plan">仅规划，稍后手动提交</option></select></label>{error && <WorkspaceNotice>{error}</WorkspaceNotice>}<footer><button type="button" disabled={busy} onClick={close}>取消</button><button type="submit" className="is-primary" disabled={busy}><IconPlusOutline16 size={14} />{busy ? '创建中…' : '创建任务'}</button></footer></form>
 }
 
 function dependsOn(candidateId: string, targetId: string, tasks: Map<string, BoardTaskView>, visited = new Set<string>()): boolean {
@@ -222,9 +224,12 @@ function taskDialogSummary(task: BoardTaskView, directory: PartnerDirectoryEntry
   return `${statusLabel(task.status)} · ${assignee ? `负责人 @${assignee.name}` : '尚未指派负责人'} · ${priorityLabel(task.priority)}`
 }
 function priorityLabel(value: BoardTaskView['priority']): string { return ({ low: '低优先级', normal: '普通优先级', high: '高优先级', urgent: '紧急' })[value] }
-function delegationState(value: PartnerDelegationView): { label: string; title: string; detail: string } {
+function delegationState(value: PartnerDelegationView, blockers = 0): { label: string; title: string; detail: string } {
   const review = value.kind === 'review'
   if (value.status === 'queued') {
+    if ((value.attempts ?? 0) === 0) return blockers
+      ? { label: '等待前置完成', title: '任务已提交，等待依赖', detail: `还有 ${blockers} 个前置任务未通过验收；全部完成后自动执行，无需再次指派。` }
+      : { label: '排队中', title: '任务已提交', detail: '正在等待可用执行名额，无需再次指派。' }
     const at = value.nextAttemptAt ? new Date(value.nextAttemptAt).toLocaleString() : '稍后'
     return { label: '等待自动恢复', title: review ? '验收将在连接恢复后继续' : '任务将在连接恢复后继续', detail: `${at} 自动重试${value.error ? ` · ${value.error}` : ''}` }
   }

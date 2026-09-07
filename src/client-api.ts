@@ -71,6 +71,7 @@ export interface SkillMarketNetworkTestView { ok: true; latencyMs: number; sourc
 
 export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
 export interface BoardTaskView {
+  autoRun?: boolean
   id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'
   assigneeCompanionId?: string; reviewerCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
   skillIds: string[]; dependencyTaskIds: string[]; resultAbstract?: string; resultSummary?: string; reviewHandoff?: string; reviewSummary?: string; dueAt?: number

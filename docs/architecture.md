@@ -135,8 +135,50 @@ form and save feedback, using the shared companion draft and existing UI tokens.
   receives only A's granted directory and the service checks the same edge
   again at execution time. User-initiated board delegation is a separate actor
   and may target any created companion without impersonating another partner.
-- Delegation depth is bounded and self-delegation is rejected.
+- A companion may submit its own assigned stage without a cross-companion
+  grant. Other-companion execution always requires the directed grant above;
+  assigned-stage instructions forbid recreating the same work recursively.
 - Scheduled jobs default to non-overlapping execution and a disposable session.
+
+## Proactive planning and durable task dispatch
+
+- `skills/task-planning.ts` owns the built-in planning instructions (1.2.0).
+  Matching multi-deliverable requests proactively use enabled Skills and the
+  authorized directory's stable IDs, roles, descriptions and Skill names.
+  Inline Skills are already injected and do not require a redundant load call.
+  Simple answers and explicit discussion/planning-only requests do not launch
+  work. This is a model instruction contract, not a guarantee of model choices.
+- `collaboration/composition.ts` maps assigned tool-created tasks to explicit
+  `autoRun` intent by default; `autoRun=false` or explicit backlog preserves
+  planning-only behavior. The board creation form exposes the same choice.
+  The storage service itself defaults to planning-only, so legacy records and
+  other callers do not silently acquire execution permission after an upgrade.
+- `tasks/service.ts` persists intent and validates task state/dependencies.
+  `collaboration/task-dispatch.ts` owns pure eligibility, authorization and
+  bounded-queue helpers. `collaboration/service.ts` uses its existing recovery
+  timer to enroll intent and claim work atomically, with at most three running
+  delegations. No additional polling loop or external queue is introduced.
+- Assignment plus explicit delegation commits atomically. Repeat submissions
+  of the same task to the same pending executor return that job, not another
+  execution. Missing or unaccepted dependencies prevent execution; all
+  prerequisites must be `done` after acceptance before downstream work starts.
+  Accepted prerequisite summaries enter the executor prompt with bounded size.
+- The scheduler rechecks directed grants, executor identity and current task
+  state before claiming and again checks authorization before execution.
+  Queued/running jobs are never evicted to retain terminal history. Switching
+  to planning-only cancels waiting task jobs, not already-running work or review.
+  Restart recovery retains submission intent; old tasks without `autoRun=true`
+  are not enrolled automatically. Submission returns without awaiting results.
+- `ui/task-board-stage.tsx` owns stage collapse and progressive disclosure:
+  six cards initially per stage (twelve when focused), then twelve per expansion.
+  Responsive horizontal card grids share the page scroll instead of fixed-height
+  nested scrollboxes. Mobile uses compact stage/assignee filters. Existing
+  semantic colors and dialogs are retained without new card animations.
+- Regression coverage: `test/task-dispatch.test.mjs` exercises real storage,
+  composition tools, dependency chains, restart intent, idempotency, concurrency
+  and permission changes. `scripts/verify-task-board.mjs` tests the actual panel
+  with isolated fixtures across phone, landscape and desktop in both themes.
+
 ## 主界面挂饰与消息
 
 - `pendant/frame-loop.ts` 独立负责可选 24/30/60 FPS 绘制调度（默认 30，旧配置自动兼容）：定时器临近截止时间再进入 RAF，保留非整除刷新率的小数节奏，高频输入合并唤醒；运行时切换只重排唯一待执行回调，不重建 WebGL/物理场景，休眠中切换不启动循环。隐藏/卸载取消计时器和 RAF。物理仍以 120 Hz 固定小步推进，停顿后不追赶后台时间。握持状态不再强制常驻循环，绳子平稳后可休眠，保持弹簧位置和储能，移动/松手重新唤醒。

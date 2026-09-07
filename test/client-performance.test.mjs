@@ -137,7 +137,7 @@ test('task board refreshes while visible and opens full details in an accessible
   assert.match(boardSource, /留空表示该任务不依赖其他任务/)
 })
 
-test('dense task boards filter derived data and bound every status column', () => {
+test('dense task boards use responsive stage grids rather than two-card scroll boxes', async () => {
   assert.match(boardSource, /useDeferredValue/)
   assert.match(boardSource, /const scopedTasks = useMemo/)
   assert.match(boardSource, /const tasksByStatus = useMemo/)
@@ -146,10 +146,13 @@ test('dense task boards filter derived data and bound every status column', () =
   assert.match(boardSource, /aria-label="按任务状态筛选"/)
   assert.match(boardSource, /前置 \{completedDependencies\}\/\{dependencies\.length\}/)
   assert.match(boardSource, /完成后解锁 \{dependentCount\}/)
-  assert.match(clientCss, /\.dsh-partner-board \{[^}]*repeat\(auto-fit, minmax\(min\(240px, 100%\), 1fr\)\)/)
-  assert.match(clientCss, /\.dsh-partner-board > section \{[^}]*height: clamp\(220px, 27vh, 280px\)/)
-  assert.match(clientCss, /\.dsh-partner-board > section\[data-empty="true"\] \{[^}]*height: 132px/)
-  assert.match(clientCss, /\.dsh-partner-board-column-list \{[^}]*grid-auto-rows: max-content;[^}]*overflow-y: auto/)
+  assert.match(clientCss, /\.dsh-partner-board-column-list \{[^}]*repeat\(auto-fill, minmax\(min\(240px, 100%\), 1fr\)\)/)
+  assert.doesNotMatch(clientCss, /\.dsh-partner-board > section \{[^}]*height: clamp/)
+  assert.doesNotMatch(clientCss, /\.dsh-partner-board-column-list \{[^}]*overflow-y: auto/)
+  const stage = await readFile(new URL('../src/ui/task-board-stage.tsx', import.meta.url), 'utf8')
+  assert.match(stage, /tasks\.slice\(0, count\)/)
+  assert.match(stage, /aria-expanded=\{expanded\}/)
+  assert.match(stage, /setLimit\(count \+ 12\)/)
   assert.match(clientCss, /\.dsh-partner-task-card \{[^}]*min-height: 82px/)
   assert.doesNotMatch(clientCss, /\.dsh-partner-board \{[^}]*overflow-x: auto/)
   assert.match(clientCss, /\.dsh-partner-board-statuses \{ display: grid; grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/)

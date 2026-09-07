@@ -52,9 +52,8 @@
 .dsh-partner-schedule-meta > em + em::before { position: absolute; top: 50%; left: -6px; width: 2px; height: 2px; border-radius: 50%; background: var(--partner-text-tertiary); content: ""; }
 .dsh-partner-run-list > article { border-radius: 9px; transition: background-color 140ms ease; }
 .dsh-partner-run-list > article:hover { background: var(--partner-hover); }
-.dsh-partner-board > section { border-radius: 16px; }
-.dsh-partner-task-card { box-shadow: none; }
-.dsh-partner-task-card[data-expanded="true"] { box-shadow: 0 6px 18px color-mix(in srgb, var(--partner-text) 6%, transparent); }
+.dsh-partner-board > section { border-radius: 16px; box-shadow: none; }
+.dsh-partner-board .dsh-partner-task-card { box-shadow: none; }
 
 @media (hover: hover) {
   .dsh-partner-skill-installed .is-icon,

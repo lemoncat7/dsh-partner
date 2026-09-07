@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { appendBounded } from '../core/collections.js'
 import { requiredText } from '../core/validation.js'
 import type { Companion, CompanionAccessGrant } from '../domain.js'
 import type { EphemeralExecutionService } from '../execution/service.js'
@@ -9,6 +8,7 @@ import type { TaskBoardService } from '../tasks/service.js'
 import { parseTaskExecutionOutput } from '../tasks/result.js'
 import { delegationKind, delegationPending, type PartnerDelegation, type PartnerDirectoryEntry } from './domain.js'
 import { canRetryDelegation, delegationRetryDelay, retryDelayLabel } from './retry-policy.js'
+import { appendDelegation, autoRunCandidates, pendingTaskDelegation, taskDelegation, taskDependenciesDone, taskDispatchDenied } from './task-dispatch.js'
 
 const RECOVERY_TICK_MS = 5_000
 const RECOVERY_CONCURRENCY = 3
@@ -25,6 +25,7 @@ export class PartnerCollaborationService {
   private started = false
   private closing = false
   private accessChangeNotifier?: (companionId: string) => Promise<void>
+  private ticking: Promise<void> | undefined
 
   constructor(
     private readonly store: PartnerStore,
@@ -47,7 +48,7 @@ export class PartnerCollaborationService {
     this.closing = false
     await this.reconcileInterruptedWork()
     await this.tick()
-    this.timer = setInterval(() => { void this.tick() }, RECOVERY_TICK_MS)
+    this.timer = setInterval(() => { void this.tick().catch(() => { /* Durable intent remains available for the next tick. */ }) }, RECOVERY_TICK_MS)
     this.timer.unref?.()
   }
 
@@ -134,29 +135,32 @@ export class PartnerCollaborationService {
   }
 
   async delegate(input: { taskId: string; initiatedBy: 'user' | 'companion'; fromCompanionId?: string; to: string; request: string; parentSessionId?: string }): Promise<PartnerDelegation> {
-    const task = this.tasks.assertStartable(input.taskId)
     const from = input.initiatedBy === 'companion' ? this.requireCompanion(input.fromCompanionId ?? '') : undefined
     const to = this.resolveCompanion(input.to)
-    if (from?.id === to.id) throw new Error('伙伴不能把任务委派给自己')
-    if (from && !this.canAccess(from.id, to.id)) throw new Error(`伙伴「${from.name}」未获授权访问 @${to.name}`)
+    if (from && from.id !== to.id && !this.canAccess(from.id, to.id)) throw new Error(`伙伴「${from.name}」未获授权访问 @${to.name}`)
     const request = requiredText(input.request, 'request', 8000)
-    const delegation: PartnerDelegation = {
-      id: `delegation-${randomUUID()}`, kind: 'task', taskId: task.id, initiatedBy: input.initiatedBy,
-      ...(from ? { fromCompanionId: from.id } : {}), toCompanionId: to.id, request, status: 'queued', attempts: 0, nextAttemptAt: Date.now() + 60_000,
-      ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}), createdAt: Date.now(),
-    }
-    await this.saveNew(delegation)
-    try {
-      const current = this.tasks.require(task.id)
-      await this.tasks.update(task.id, { expectedRevision: current.revision, status: 'doing', assigneeCompanionId: to.id }, from ? { kind: 'companion', companionId: from.id } : { kind: 'user' })
-      await this.mutate(delegation.id, item => { item.nextAttemptAt = Date.now() })
-    } catch (error) {
-      await this.cancel(delegation.id, `委派没有完成提交：${errorMessage(error)}`).catch(() => {})
-      throw error
-    }
+    let delegation!: PartnerDelegation
+    // Task assignment and durable queue entry commit together. Repeated calls
+    // return the existing job instead of launching duplicate work.
+    await this.store.update(state => {
+      const task = state.tasks.find(item => item.id === input.taskId)
+      if (!task) throw new Error('Task does not exist')
+      const pending = pendingTaskDelegation(state, task.id)
+      if (pending) {
+        if (pending.toCompanionId !== to.id) throw new Error('任务已提交给其他伙伴，请先处理已有执行')
+        delegation = structuredClone(pending); return
+      }
+      if (['doing', 'review', 'done'].includes(task.status)) throw new Error('任务已经在执行、待验收或已完成，不能重复提交')
+      delegation = taskDelegation(task, { ...input, to: to.id, request })
+      const denied = taskDispatchDenied(state, delegation)
+      if (denied) throw new Error(denied)
+      appendDelegation(state, delegation)
+      task.status = 'ready'; task.assigneeCompanionId = to.id
+      task.revision += 1; task.updatedAt = Date.now()
+    })
     const claimed = await this.claim(delegation.id)
     if (claimed) this.launch(claimed)
-    return structuredClone(claimed ?? delegation)
+    return structuredClone(claimed ?? this.store.snapshot().delegations.find(item => item.id === delegation.id) ?? delegation)
   }
 
   async reviewTask(input: { taskId: string; to: string }): Promise<{ accepted: true }> {
@@ -213,11 +217,38 @@ export class PartnerCollaborationService {
     )
   }
 
-  private async tick(): Promise<void> {
+  /** Also used after a tool creates an assigned task; never awaits execution. */
+  async dispatchReadyTasks(): Promise<void> { await this.tick() }
+
+  private tick(): Promise<void> {
+    if (this.ticking) return this.ticking
+    const job = this.dispatchTick().finally(() => { if (this.ticking === job) this.ticking = undefined })
+    this.ticking = job
+    return job
+  }
+
+  private async dispatchTick(): Promise<void> {
     if (this.closing || this.active.size >= RECOVERY_CONCURRENCY) return
+    // Only explicit new submission intent is scanned. Legacy ready tasks and
+    // planning-only backlog records never start as a side effect of upgrading.
+    if (autoRunCandidates(this.store.snapshot()).length) await this.store.update(state => {
+      for (const task of autoRunCandidates(state)) {
+        appendDelegation(state, taskDelegation(task, {
+          initiatedBy: task.creatorCompanionId ? 'companion' : 'user',
+          ...(task.creatorCompanionId ? { fromCompanionId: task.creatorCompanionId } : {}),
+          to: task.assigneeCompanionId!, request: task.description || task.title,
+          ...(task.creatorSessionId ? { parentSessionId: task.creatorSessionId } : {}),
+        }))
+      }
+    })
     const now = Date.now()
-    const candidates = this.store.snapshot().delegations
+    const snapshot = this.store.snapshot()
+    const candidates = snapshot.delegations
       .filter(item => item.status === 'queued' && (item.nextAttemptAt ?? 0) <= now && !this.active.has(item.id))
+      .filter(item => {
+        const task = snapshot.tasks.find(task => task.id === item.taskId)
+        return !task || taskDispatchDenied(snapshot, item) || delegationKind(item) === 'review' || task.status !== 'ready' || taskDependenciesDone(task, snapshot.tasks)
+      })
       .sort((left, right) => (left.nextAttemptAt ?? left.createdAt) - (right.nextAttemptAt ?? right.createdAt))
       .slice(0, RECOVERY_CONCURRENCY - this.active.size)
     for (const candidate of candidates) {
@@ -227,10 +258,28 @@ export class PartnerCollaborationService {
   }
 
   private async claim(id: string): Promise<PartnerDelegation | undefined> {
+    if (this.closing) return undefined
     let output: PartnerDelegation | undefined
     await this.store.update(state => {
       const item = state.delegations.find(value => value.id === id)
       if (!item || item.status !== 'queued' || (item.nextAttemptAt ?? 0) > Date.now()) return
+      const task = state.tasks.find(task => task.id === item.taskId)
+      const denied = taskDispatchDenied(state, item)
+      const taskWork = delegationKind(item) === 'task'
+      if (!task || denied || (taskWork ? !['ready', 'doing'].includes(task.status) || (task.assigneeCompanionId !== item.toCompanionId && (task.assigneeCompanionId || !item.attempts)) : task.status !== 'review' || (task.reviewerCompanionId && task.reviewerCompanionId !== item.toCompanionId))) {
+        item.status = 'canceled'; item.error = denied ?? '任务或负责人已改变，取消旧执行'; item.completedAt = Date.now()
+        delete item.nextAttemptAt
+        if (task && denied && task.status === 'ready') {
+          task.status = 'blocked'; task.resultSummary = denied; task.updatedAt = Date.now(); task.revision += 1
+        }
+        return
+      }
+      if (taskWork && !taskDependenciesDone(task, state.tasks)) return
+      if (state.delegations.filter(value => value.status === 'running').length >= RECOVERY_CONCURRENCY) return
+      if (taskWork && task.status === 'ready') {
+        task.status = 'doing'; task.updatedAt = Date.now(); task.revision += 1
+        delete task.resultAbstract; delete task.resultSummary; delete task.reviewSummary; delete task.reviewHandoff
+      }
       const now = Date.now()
       item.status = 'running'
       item.attempts = (item.attempts ?? 0) + 1
@@ -258,7 +307,11 @@ export class PartnerCollaborationService {
         return
       }
       const to = this.requireCompanion(delegation.toCompanionId)
-      const prompt = kind === 'review' ? reviewPrompt(task) : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId))
+      const denied = taskDispatchDenied(this.store.snapshot(), delegation)
+      if (denied) throw new Error(denied)
+      const prerequisiteResults = this.tasks.snapshot().tasks.filter(item => task.dependencyTaskIds.includes(item.id))
+        .map(item => `- ${item.title}（${item.id}）：${(item.resultSummary || item.resultAbstract || '没有可见交付物，请先核对看板记录').slice(0, 1800)}`).join('\n').slice(0, 10_000)
+      const prompt = kind === 'review' ? reviewPrompt(task) : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults)
       const result = this.sessionExecutor
         ? await this.sessionExecutor.execute({
             sourceId: kind === 'review' ? `review:${task.id}:${delegation.id}` : delegation.id,
@@ -331,7 +384,7 @@ export class PartnerCollaborationService {
   }
 
   private async saveNew(value: PartnerDelegation): Promise<void> {
-    await this.store.update(state => { appendBounded(state.delegations, structuredClone(value), 500) })
+    await this.store.update(state => { appendDelegation(state, structuredClone(value)) })
   }
 
   private async mutate(id: string, change: (value: PartnerDelegation) => void): Promise<void> {
@@ -342,14 +395,16 @@ export class PartnerCollaborationService {
   }
 }
 
-function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: PartnerDelegation, to: Companion, from?: Companion): string {
+function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: PartnerDelegation, to: Companion, from?: Companion, prerequisiteResults?: string): string {
   const recovery = (delegation.attempts ?? 1) > 1
     ? `这是中断后的第 ${delegation.attempts} 次恢复执行。先检查工作目录、看板和外部目标中是否已有产出，避免重复写入、重复提交、重复发布或重复通知；已经完成的部分只需核验并汇报。`
     : ''
   return [
     from ? `你收到伙伴「${from.name}」委派的看板任务。` : '你收到用户从伙伴任务看板直接委派的任务。',
     `任务：${task.title}`,
+    `看板任务 id：${task.id}。这是已经分配给你的具体阶段，请在该范围内完成交付，不要重复创建同名任务或仅回复分工计划。`,
     task.description ? `任务说明：${task.description}` : '',
+    prerequisiteResults ? `已验收前置任务的公开产出：\n${prerequisiteResults}` : '',
     `委派要求：${delegation.request}`,
     recovery,
     `当前执行伙伴：${to.name}。请真正完成能够完成的工作。最终回复必须用下面三个标签分离渠道摘要、完整交付物和内部验收交接：\n<partner-summary>\n一至三句可直接发给用户的短结论\n</partner-summary>\n<partner-deliverable>\n只写用户最终需要的产出、证据、来源和必要限制\n</partner-deliverable>\n<partner-review-handoff>\n只写给验收者的核验点、待确认项与风险\n</partner-review-handoff>\n不要访问其他伙伴的私有会话或记忆。`,

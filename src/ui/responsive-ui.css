@@ -172,10 +172,12 @@
   .dsh-partner-board-statuses { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
   .dsh-partner-board-statuses > button { min-width: 0; min-height: 44px; justify-content: center; gap: 4px; padding-inline: 5px; }
   .dsh-partner-board { grid-template-columns: 1fr; }
-  .dsh-partner-board > section,
-  .dsh-partner-board[data-focused="true"] > section { height: min(430px, 55dvh); }
-  .dsh-partner-board > section[data-empty="true"],
-  .dsh-partner-board[data-focused="true"] > section[data-empty="true"] { height: 112px; }
+  .dsh-partner-board .dsh-partner-board-stage-toggle, .dsh-partner-board-more { min-height: 44px; }
+  .is-board .dsh-partner-board-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .is-board .dsh-partner-board-search, .is-board .dsh-partner-board-tools > small { grid-column: 1 / -1; }
+  .is-board .dsh-partner-board-assignee { grid-column: auto; }
+  .dsh-partner-board-assignee.is-mobile-stage { display: block; }
+  .is-board .dsh-partner-board-statuses { display: none; }
   .dsh-partner-task-fields label { grid-template-columns: 1fr; gap: 5px; }
   .dsh-partner-task-dependency > div > span { min-height: 44px; grid-template-columns: 18px minmax(0, 1fr) 52px; }
   .dsh-partner-task-dependency > div button { min-height: 44px; }

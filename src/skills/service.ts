@@ -206,7 +206,7 @@ export class SkillService {
 export function renderEnabledSkills(companion: Companion, skills: PartnerSkill[], injectedIds: ReadonlySet<string> = new Set()): string {
   if (!companion.capabilities.includes('skills') || skills.length === 0) return ''
   return [
-    '以下 Skill 已绑定到当前伙伴。已注入的可信 inline Skill 可直接遵循；其他 Skill 必须通过 partner_skill 加载或运行，不要假装已经执行。隔离 Skill 只能缩小既有工具权限。',
+    '以下 Skill 已绑定到当前伙伴。每轮先根据当前需求与 Skill 描述判断适用性；用户明确点名或用途匹配时主动应用，无需用户补充触发词。已注入的可信 inline Skill 直接遵循；其他 Skill 必须通过 partner_skill 加载或运行，不要假装已经执行。简短说明所采用的 Skill；隔离 Skill 只能缩小既有工具权限。',
     ...skills.map(skill => `- ${skill.id}｜${skill.displayName}｜${skill.description}｜${injectedIds.has(skill.id) ? '已注入当前会话' : skill.executionContext === 'fork' ? '按需隔离运行' : '按需加载'}`),
   ].join('\n')
 }
