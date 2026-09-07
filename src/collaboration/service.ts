@@ -9,6 +9,7 @@ import { parseTaskExecutionOutput } from '../tasks/result.js'
 import { delegationKind, delegationPending, type PartnerDelegation, type PartnerDirectoryEntry } from './domain.js'
 import { canRetryDelegation, delegationRetryDelay, retryDelayLabel } from './retry-policy.js'
 import { appendDelegation, autoRunCandidates, pendingTaskDelegation, taskDelegation, taskDependenciesDone, taskDispatchDenied } from './task-dispatch.js'
+import { repairableReviewCancellation, unfinishedReview } from './task-recovery.js'
 
 const RECOVERY_TICK_MS = 5_000
 const RECOVERY_CONCURRENCY = 3
@@ -186,17 +187,11 @@ export class PartnerCollaborationService {
     await this.store.update(state => {
       for (const item of state.delegations) {
         const task = state.tasks.find(value => value.id === item.taskId)
-        const lostResult = delegationKind(item) === 'task' && item.status === 'canceled'
-          && item.error?.includes('忽略旧执行结果') === true && task?.status === 'review' && !task.resultSummary
+        const lostResult = task && repairableReviewCancellation(state, task, item)
         if (lostResult && task) {
-          task.status = 'doing'
-          task.revision += 1
-          task.updatedAt = now
-          delete task.reviewSummary
-          delete task.completedAt
           item.status = 'queued'
           item.nextAttemptAt = now
-          item.error = '旧版协调器丢弃了提前进入待验收的执行结果，任务已重新进入恢复队列'
+          item.error = '旧版协调器取消了尚未保存执行结果的待验收任务，已重新进入恢复队列'
           delete item.completedAt
           recovered.push({ taskId: item.taskId, kind: 'task', repairedLostResult: true })
           continue
@@ -267,7 +262,8 @@ export class PartnerCollaborationService {
       const task = state.tasks.find(task => task.id === item.taskId)
       const denied = taskDispatchDenied(state, item)
       const taskWork = delegationKind(item) === 'task'
-      if (!task || denied || (taskWork ? !['ready', 'doing'].includes(task.status) || (task.assigneeCompanionId !== item.toCompanionId && (task.assigneeCompanionId || !item.attempts)) : task.status !== 'review' || (task.reviewerCompanionId && task.reviewerCompanionId !== item.toCompanionId))) {
+      const resumeReview = task && unfinishedReview(task, item)
+      if (!task || denied || (taskWork ? (!['ready', 'doing'].includes(task.status) && !resumeReview) || (task.assigneeCompanionId !== item.toCompanionId && (task.assigneeCompanionId || !item.attempts)) : task.status !== 'review' || (task.reviewerCompanionId && task.reviewerCompanionId !== item.toCompanionId))) {
         item.status = 'canceled'; item.error = denied ?? '任务或负责人已改变，取消旧执行'; item.completedAt = Date.now()
         delete item.nextAttemptAt
         if (task && denied && task.status === 'ready') {
@@ -277,7 +273,7 @@ export class PartnerCollaborationService {
       }
       if (taskWork && !taskDependenciesDone(task, state.tasks)) return
       if (state.delegations.filter(value => value.status === 'running').length >= RECOVERY_CONCURRENCY) return
-      if (taskWork && task.status === 'ready') {
+      if (taskWork && (task.status === 'ready' || resumeReview)) {
         task.status = 'doing'; task.updatedAt = Date.now(); task.revision += 1
         delete task.resultAbstract; delete task.resultSummary; delete task.reviewSummary; delete task.reviewHandoff
       }
@@ -407,6 +403,7 @@ function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: P
     task.description ? `任务说明：${task.description}` : '',
     prerequisiteResults ? `已验收前置任务的公开产出：\n${prerequisiteResults}` : '',
     `委派要求：${delegation.request}`,
+    '交付摘要只写用户需要的实际结论，不要包含“已提交 review”“等待验收”“调用 accept”等内部流程状态。',
     recovery,
     `当前执行伙伴：${to.name}。请真正完成能够完成的工作。最终回复必须用下面三个标签分离渠道摘要、完整交付物和内部验收交接：\n<partner-summary>\n一至三句可直接发给用户的短结论\n</partner-summary>\n<partner-deliverable>\n只写用户最终需要的产出、证据、来源和必要限制\n</partner-deliverable>\n<partner-review-handoff>\n只写给验收者的核验点、待确认项与风险\n</partner-review-handoff>\n不要访问其他伙伴的私有会话或记忆。`,
   ].filter(Boolean).join('\n\n')

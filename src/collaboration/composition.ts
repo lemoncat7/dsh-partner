@@ -224,7 +224,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'Actively plan and submit multi-deliverable work using enabled planning Skills and authorized companion specialties. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false for planning only. Shared board records are not proof of completion. Accepted dependencies unlock queued tasks automatically.',
+    description: 'Actively plan and submit multi-deliverable work using enabled planning Skills and authorized companion specialties. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false for planning only. After creating the requested tasks, return one concise assignment summary to the user. Execution, retries, review and accept are internal: do not send progress chatter. The system delivers final results after acceptance. Shared board records are not proof of completion. Accepted dependencies unlock queued tasks automatically.',
     parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },

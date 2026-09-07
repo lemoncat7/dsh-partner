@@ -12,6 +12,13 @@ client -> HTTP feature routers -> application services -> repositories/store
 
 ## Module boundaries
 
+`tasks/progress-notifier.ts` orders persisted final-result delivery before internal
+agent follow-ups, with separate error boundaries. Knowledge 2.6.0 owns durable
+writeback snapshots, plans, retries and status; Partner does not copy its queue or
+patch the DSH loop. Channel results do not wait for extraction. Retrying writeback
+does not rerun the partner's turn or resend its channel message. This does not
+make channel delivery and knowledge writes one atomic transaction.
+
 Configuration saves only commit state. The awaited `agent/pre-step` hook compares
 the saved configuration with the installed revision before each new turn, covering
 native history resume as well as local, channel and task-board conversations.
@@ -166,6 +173,19 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 
 ## Proactive planning and durable task dispatch
 
+- `collaboration/task-recovery.ts` distinguishes an early review status from a
+  committed deliverable. Previously started task delegations may resume an empty
+  review after interruption, subject to assignment, access, dependency and
+  concurrency checks. Saved results/reviews are never rerun through this path.
+  Startup repairs only known coordinator cancellations, with shutdown evidence
+  for the status-mismatch bug and no superseding task delegation. Arbitrary user
+  cancellations are not revived. Result notification is wired before recovery
+  starts claiming work.
+- `channels/delivery-policy.ts` keeps internal task/review continuations out of
+  channel replies, including nested goal completion notices. User-origin turns
+  retain creation acknowledgments and explicit progress answers. Accepted task
+  results use the separate deterministic delivery path and persistent receipts;
+  intermediate execution/review notices are not additional channel messages.
 - `skills/task-planning.ts` owns the built-in planning instructions (1.2.0).
   Matching multi-deliverable requests proactively use enabled Skills and the
   authorized directory's stable IDs, roles, descriptions and Skill names.

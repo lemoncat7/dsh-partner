@@ -21,6 +21,7 @@ import { registerPartnerConcernTool } from './concern-tool.js'
 import { SkillRepository } from './skills/repository.js'
 import { SkillService } from './skills/service.js'
 import { TaskBoardService } from './tasks/service.js'
+import { createTaskProgressNotifier } from './tasks/progress-notifier.js'
 import { EphemeralExecutionService } from './execution/service.js'
 import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
@@ -103,16 +104,14 @@ export function apply(context: Context, config: PartnerConfig): void {
     companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
     for (const companion of store.snapshot().companions) await agents.ensureLocalSessionRecord(companion.id)
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })
-    await collaboration.start()
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
-    tasks.setProgressNotifier(async (task, previousStatus) => {
-      await agents.notifyTaskProgress(task, previousStatus).catch(error => {
-        ctx.logger.warn(`dsh-partner task progress notification failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-      await channels.notifyTaskResult(task).catch(error => {
-        ctx.logger.warn(`dsh-partner task result delivery failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-    })
+    tasks.setProgressNotifier(createTaskProgressNotifier(
+      task => channels.notifyTaskResult(task),
+      (task, previousStatus) => agents.notifyTaskProgress(task, previousStatus),
+      message => ctx.logger.warn(message),
+    ))
+    // Recovery can finish immediately; wire result delivery before claiming work.
+    await collaboration.start()
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       notices.observeSession(session, event)
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))

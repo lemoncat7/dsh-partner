@@ -16,6 +16,8 @@ import type { PartnerReply } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
+import { isAutonomousDeliveryTurn } from './delivery-policy.js'
+export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
 type ChannelContext = Context & { settings: SettingsProvider }
 
@@ -150,8 +152,9 @@ export class ChannelManager {
       return
     }
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
-    const events = completedTurnEvents(session.snapshotEvents(), event)
-    if (!isAutonomousDeliveryTurn(events)) return
+    const history = session.snapshotEvents().filter(item => item.seq < event.seq)
+    const events = completedTurnEvents(history, event)
+    if (!isAutonomousDeliveryTurn(events, history)) return
     const text = events
       .filter(item => item.type === 'assistant/message' && !item.data.interrupted)
       .map(item => item.type === 'assistant/message' ? item.data.message.content
@@ -350,14 +353,6 @@ export class ChannelManager {
       if (state.recentReceipts.length > 800) state.recentReceipts.splice(0, state.recentReceipts.length - 800)
     })
   }
-}
-
-export function isAutonomousDeliveryTurn(events: readonly SessionEvent[]): boolean {
-  return events.some(event => event.type === 'user/message'
-    && event.data.source.kind === 'plugin'
-    && event.data.source.plugin === 'tool-goal'
-    && event.data.source.form === 'notice'
-    && event.data.source.summary?.startsWith('complete:'))
 }
 
 export function requiredChannel(store: PartnerStore, id: string): WeixinChannel {

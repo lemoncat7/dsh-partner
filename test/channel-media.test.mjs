@@ -5,10 +5,13 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { receiveWeixinMedia } from '../lib/channels/weixin/media.js'
-import { answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
+import { ChannelManager, answerQuestions, busyEnterMode, extractText, isAutonomousDeliveryTurn, renderQuestions } from '../lib/channels/manager.js'
 import { extractOutboundAttachments, selectTaskNotificationRoute } from '../lib/agent-runtime.js'
 import { CONCERN_CREATED_NOTICE, concernCreatedNoticeFromEvent } from '../lib/concern-notification.js'
 import { parseTaskExecutionOutput, prepareTaskResultDelivery } from '../lib/tasks/result.js'
+import { channelReplyTextAfter } from '../lib/channels/delivery-policy.js'
+import { PartnerStore } from '../lib/store.js'
+import { TaskBoardService } from '../lib/tasks/service.js'
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
@@ -26,6 +29,25 @@ test('routes completed autonomous goals without mirroring ordinary plugin notice
   assert.equal(isAutonomousDeliveryTurn([taskDone]), false)
   assert.equal(isAutonomousDeliveryTurn([taskBlocked]), false)
   assert.equal(isAutonomousDeliveryTurn([heartbeat]), false)
+  for (const internal of [taskReview, taskDone, taskBlocked]) {
+    assert.equal(isAutonomousDeliveryTurn([internal, goal]), false)
+    assert.equal(isAutonomousDeliveryTurn([goal], [internal, goal]), false)
+    assert.equal(isAutonomousDeliveryTurn([goal], [internal, { type: 'user/message', data: { source: { kind: 'user' } } }, goal]), true)
+  }
+})
+
+test('channel replies retain creation acknowledgments but omit subsequent internal review turns', () => {
+  const source = summary => ({ type: 'user/message', data: { source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary } } })
+  const user = { type: 'user/message', data: { source: { kind: 'user' } } }
+  const text = value => ({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: value }] } } })
+  const events = [
+    { type: 'turn/start' }, user, text('已创建任务，玄枢执行、莫殇验收。'),
+    { type: 'turn/start' }, source('看板任务待验收'), text('正在核验，调用 accept。'),
+    { type: 'turn/start' }, source('看板任务已完成'), text('内部继续检查后续依赖。'),
+  ].map((event, i) => ({ ...event, seq: i + 1 }))
+  assert.equal(channelReplyTextAfter(events, 0), '已创建任务，玄枢执行、莫殇验收。')
+  const directQuestion = [...events, { ...user, seq: 20 }, { ...text('你主动问进展，目前已完成。'), seq: 21 }]
+  assert.equal(channelReplyTextAfter(directQuestion, 19), '你主动问进展，目前已完成。')
 })
 
 test('renders short terminal results directly without internal review handoff', async () => {
@@ -39,6 +61,37 @@ test('renders short terminal results directly without internal review handoff', 
   assert.doesNotMatch(done.text, /只给验收者/)
   const blocked = await prepareTaskResultDelivery({ ...base, status: 'blocked', resultSummary: '缺少访问权限' }, '/tmp')
   assert.match(blocked.text, /阻塞说明：\n缺少访问权限/)
+})
+
+test('review remains silent and acceptance sends exactly one terminal result to the creator channel', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'partner-channel-terminal-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const store = await PartnerStore.open(join(root, 'state.json'))
+  const board = new TaskBoardService(store)
+  const actor = { kind: 'companion', companionId: 'companion-default' }
+  await store.update(s => s.sessions.push({ id: 'route', kind: 'channel', companionId: actor.companionId,
+    sessionId: 'creator-session', channelId: 'channel', userId: 'user', cwd: root, lastMessageAt: 1 }))
+  const channels = new ChannelManager({}, store, {}, {}, root)
+  const delivered = []
+  // Mock only transport; keep routing, rendering, queue and persistent receipts real.
+  channels.sendProactiveReply = async (channelId, userId, reply) => delivered.push({ channelId, userId, reply })
+  board.setProgressNotifier(task => channels.notifyTaskResult(task))
+  const task = await board.create({ title: '资料整理', creatorSessionId: 'creator-session' }, actor)
+  const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, actor)
+  await board.completeExecution(doing.id, { deliverable: '完整结论与来源', reviewHandoff: '内部核验点' }, actor)
+  await board.recordReview(task.id, '证据完整', actor)
+  assert.equal(delivered.length, 0)
+  const done = await board.accept(task.id, actor)
+  await Promise.all([channels.notifyTaskResult(done), channels.notifyTaskResult(done)])
+  assert.equal(delivered.length, 1)
+  assert.equal(delivered[0].channelId, 'channel')
+  assert.match(delivered[0].reply.text, /看板任务已完成：资料整理/)
+  assert.match(delivered[0].reply.text, /完整结论与来源/)
+  assert.doesNotMatch(delivered[0].reply.text, /内部核验点/)
+  const restored = await PartnerStore.open(join(root, 'state.json'))
+  const afterRestart = new ChannelManager({}, restored, {}, {}, root)
+  afterRestart.sendProactiveReply = async () => assert.fail('must not redeliver after restart')
+  await afterRestart.notifyTaskResult(done)
 })
 
 test('separates review handoff and writes long deliverables to a private Markdown file', async t => {

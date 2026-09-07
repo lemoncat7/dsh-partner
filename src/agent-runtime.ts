@@ -31,6 +31,7 @@ import { listConcernFileSources, type ConcernSource } from './concern-sources.js
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { HEARTBEAT_LOCAL_COMMAND, heartbeatLocalCommandTool } from './heartbeat-command.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
+import { channelReplyTextAfter } from './channels/delivery-policy.js'
 export { renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 
 type RuntimeContext = Context & {
@@ -250,9 +251,9 @@ export class PartnerAgentRuntime {
     const agent = await this.ensureAgent(companion, route)
     const isReviewer = task.status === 'review' && task.reviewerCompanionId === companion.id
     const instruction = isReviewer
-      ? '这是你创建并分配的看板任务，执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务。'
+      ? '这是伙伴内部验收，不是用户的新消息。执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务，不要向用户播报核验过程或 accept 操作；最终结果由系统直接投递。'
       : task.status === 'review'
-        ? '这是你创建并分配的看板任务进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，请向用户简要说明当前进度。'
+        ? '这是伙伴内部进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，也不要向用户播报中间进度。只在看板中推进必要的协作，最终结果由系统直接投递。'
         : task.status === 'done'
           ? '这是你创建并分配的看板任务终态事件。不要重新执行已完成的工作。请检查依赖它的后续任务是否解锁，需要时继续在看板上分配。对用户的终态结果由系统直接投递，不要只改写成“已完成”或进度摘要。'
           : '这是你创建并分配的看板任务受阻事件。请保留已有产出、检查是否能调整分工或解锁依赖；需要用户介入时，明确说明阻塞原因与所需动作。'
@@ -647,7 +648,7 @@ export class PartnerAgentRuntime {
       source: { kind: 'user' },
     }))
     await agent.whenIdle()
-    const response = assistantTextAfter(agent, startSeq)
+    const response = channelReplyTextAfter(agent.session.snapshotEvents(), startSeq)
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === session.id)
       if (target) target.lastMessageAt = Date.now()
