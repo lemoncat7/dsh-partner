@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8')
+const capabilityEditor = await read('../src/ui/capability-editor.tsx')
 const [entry, controller, shared, skills, board, schedules, companionCreate, workspaceStyles, responsiveStyles] = await Promise.all([
   read('../src/client.tsx'),
   read('../src/client-controller.tsx'),
@@ -45,7 +46,7 @@ test('Skill searches share one accessible command field with result and clear st
 
 test('new companions start empty and creation is exposed as an explicit capability', () => {
   assert.match(entry, /draft, capabilities: \[\]/)
-  assert.match(entry, /id: 'companions', title: '创建伙伴'/)
+  assert.match(capabilityEditor, /id: 'companions', title: '创建伙伴'/)
 })
 
 test('global feature pages share one template and one create-dialog contract', () => {

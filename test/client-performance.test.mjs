@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
+const capabilitySource = await readFile(new URL('../src/ui/capability-editor.tsx', import.meta.url), 'utf8')
 const clientCss = await readFile(new URL('../src/client.css', import.meta.url), 'utf8')
 const workspaceUiCss = await readFile(new URL('../src/ui/workspace-ui.css', import.meta.url), 'utf8')
 const workspaceComponents = await readFile(new URL('../src/ui/workspace-components.tsx', import.meta.url), 'utf8')
@@ -98,7 +99,7 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.doesNotMatch(partnerTabs, />Skill</)
   assert.doesNotMatch(partnerTabs, />看板</)
   assert.doesNotMatch(partnerTabs, />定时</)
-  assert.match(clientSource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
+  assert.match(capabilitySource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
   assert.match(skillSource, /集中安装和维护工作能力/)
   assert.match(scheduleSource, /name="companionId" required/)
 })
@@ -115,10 +116,10 @@ test('companion capabilities keep a four-card Skill overview and disclose select
 })
 
 test('growing companion capabilities use grouped semantic sections instead of one unbounded card row', () => {
-  assert.match(clientSource, /dsh-partner-capability-groups/)
-  assert.match(clientSource, /工作工具/)
-  assert.match(clientSource, /协作与自动化/)
-  assert.match(clientSource, /伙伴授权/)
+  assert.match(capabilitySource, /dsh-partner-capability-groups/)
+  assert.match(capabilitySource, /工作工具/)
+  assert.match(capabilitySource, /协作与自动化/)
+  assert.match(capabilitySource, /伙伴授权/)
   assert.match(clientCss, /\.dsh-partner-capability-group > header/)
   assert.match(clientCss, /repeat\(auto-fit, minmax\(190px, 1fr\)\)/)
 })

@@ -73,6 +73,7 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
       {!ready && <span className="dsh-partner-pendant-fallback">伙伴<small>{failed ? inbox.unread ? `${inbox.unread} 条消息` : '消息' : '加载挂饰…'}</small></span>}
     </button>
     <button type="button" className="dsh-partner-pendant-anchor" aria-label="移动挂饰位置" title="拖动挂点移动位置，也可用方向键微调" {...placement}><span aria-hidden="true" /></button>
+    {inbox.unread > 0 && <span className="dsh-partner-pendant-unread" aria-hidden="true">{inbox.unread > 99 ? '99+' : inbox.unread}</span>}
     <span className="dsh-partner-pendant-announcement" role="status" aria-live="polite" aria-atomic="true">{incoming ? `${incoming.companionName}：${incoming.title}` : ''}</span>
     {open && <PendantReader inbox={inbox} selected={selected} error={error || navigationError} anchor={hit} onSelect={inspect} onClose={close} onVisit={item => { void visit(item) }} onReadAll={() => { void read(inbox.items.filter(item => item.readAt === undefined).map(item => item.id)) }} />}
   </aside>

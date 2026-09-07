@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition, ToolRunContext, ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { record, requiredText } from '../core/validation.js'
 import type { Companion } from '../domain.js'
+import type { CompanionCapability } from '../capabilities.js'
 import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
@@ -39,17 +40,24 @@ export class PartnerAgentComposition {
     const inlineSkills = await loadInlineSkills(this.skills, enabledSkills)
     const injectedSkillIds = new Set(inlineSkills.map(skill => skill.id))
     const disposers: Array<() => void> = []
+    const register = (tool: ToolDefinition, capability: CompanionCapability): void => {
+      disposers.push(ctx.tools.register({ ...tool, execute: async (args, execution) => {
+        // Old schemas must not authorize calls after a saved revocation.
+        if (!this.store.hasCapability(companion.id, capability)) throw new Error(`伙伴的 ${capability} 能力已撤回，当前调用未执行`)
+        return tool.execute(args, execution)
+      } }))
+    }
     try {
-      if (skillsEnabled) disposers.push(ctx.tools.register(skillTool(companion, this.skills, this.executor)))
-      if (companion.capabilities.includes('companions')) disposers.push(ctx.tools.register(companionTool(this.companions)))
-      if (companion.capabilities.includes('access')) disposers.push(ctx.tools.register(accessGrantTool(companion, this.collaboration)))
+      if (skillsEnabled) register(skillTool(companion, this.skills, this.executor), 'skills')
+      if (companion.capabilities.includes('companions')) register(companionTool(this.companions), 'companions')
+      if (companion.capabilities.includes('access')) register(accessGrantTool(companion, this.collaboration), 'access')
       if (companion.capabilities.includes('administration')) {
         if (!this.management || !this.knowledgeMounts) throw new Error('伙伴管理服务尚未就绪')
-        disposers.push(ctx.tools.register(companionManagementTool(companion.id, this.management, this.knowledgeMounts)))
+        register(companionManagementTool(companion.id, this.management, this.knowledgeMounts), 'administration')
       }
       disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
       disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
-      if (companion.capabilities.includes('schedules')) disposers.push(ctx.tools.register(scheduleTool(companion, this.scheduler)))
+      if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler), 'schedules')
       const directory = this.collaboration.directoryFor(companion.id)
       disposers.push(ctx.systemPrompt.section({
         name: 'partner-collaboration', order: -7,

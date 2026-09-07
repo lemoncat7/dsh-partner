@@ -19,15 +19,20 @@ export function createNoticeMotion(badge: RAPIER.RigidBody) {
         badge.applyImpulse({ x: .45, y: .06, z: 0 }, true)
       }
       elapsed += dt
-      const q = badge.rotation(), sign = q.w < 0 ? -1 : 1
-      const angle = 2 * Math.acos(Math.min(1, Math.abs(q.w)))
-      // Inverse quaternion is the shortest world-space rotation to the upright
-      // art face. Angular velocity keeps Rapier and the visible card in sync.
-      const sine = Math.hypot(q.x, q.y, q.z)
+      const q = badge.rotation()
+      // Message face is the back mesh: target = a half-turn about Y, not
+      // identity (artwork). Error = target * inverse(current), in world space.
+      const ex = -q.z, ey = q.w, ez = q.x, ew = q.y
+      const sign = ew < 0 ? -1 : 1
+      const angle = 2 * Math.acos(Math.min(1, Math.abs(ew)))
+      const sine = Math.hypot(ex, ey, ez)
       const speed = sine > .0001 ? Math.min(3.2, angle * 7) * sign / sine : 0
-      badge.setAngvel({ x: -q.x * speed, y: -q.y * speed, z: -q.z * speed }, true)
+      badge.setAngvel({ x: ex * speed, y: ey * speed, z: ez * speed }, true)
       if ((angle < .025 && elapsed >= .5) || elapsed >= 2.5) {
         phase = 'idle'; elapsed = 0
+        // Settle here without a return timer or persistent orientation lock.
+        // Subsequent user gestures remain entirely governed by physics.
+        if (angle < .12) badge.setAngvel({ x: 0, y: 0, z: 0 }, true)
         return angle < .12 // Do not flash the wrong face if physics was disturbed.
       }
       return false

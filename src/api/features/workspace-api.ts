@@ -61,15 +61,8 @@ export async function dispatchPartnerWorkspaceApi(
     if (typeof body.enabled !== 'boolean') throw new Error('enabled must be boolean')
     const companionId = segments[1]
     const skillId = segments[3]
-    const previous = runtime.store.snapshot().skillBindings.find(item => item.companionId === companionId && item.skillId === skillId)?.enabled ?? false
     await runtime.skills.setBinding(companionId, skillId, body.enabled)
-    try { await runtime.agents.reloadCompanion(companionId) }
-    catch (error) {
-      await runtime.skills.setBinding(companionId, skillId, previous)
-      await runtime.agents.reloadCompanion(companionId).catch(() => {})
-      throw error
-    }
-    sendJson(res, 200, { ok: true }); return true
+    sendJson(res, 200, { ok: true, application: 'next-turn' }); return true
   }
   if (segments[0] === 'companions' && segments[1] && segments[2] === 'access' && segments.length === 3) {
     const companionId = segments[1]

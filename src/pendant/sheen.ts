@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-/** Two brief passes over the front art face, never a rectangular DOM
+/** Two brief passes over the message face, never a rectangular DOM
  * overlay or a full-screen bloom pass. Shares geometry; owns only its material.
  */
 export function createBadgeSheen(card: THREE.Group, face: THREE.BufferGeometry) {
@@ -15,20 +15,21 @@ export function createBadgeSheen(card: THREE.Group, face: THREE.BufferGeometry) 
         gl_FragColor = vec4(0.88, 1.0, 0.95, band * fade * 0.38);
       }`,
   })
-  const front = new THREE.Mesh(face, material)
-  front.position.z = .067
-  front.visible = false; card.add(front)
+  const messageFace = new THREE.Mesh(face, material)
+  messageFace.rotation.y = Math.PI
+  messageFace.position.z = -.029
+  messageFace.visible = false; card.add(messageFace)
   let start: number | undefined
   return {
     start(now: number) { start = now },
     update(now: number, reduced: boolean): boolean {
       if (reduced || (start !== undefined && now - start >= 2800)) start = undefined
       const elapsed = start === undefined ? -1 : now - start
-      front.visible = elapsed >= 0 && elapsed % 1400 < 1000
+      messageFace.visible = elapsed >= 0 && elapsed % 1400 < 1000
       material.uniforms.progress!.value = Math.max(0, elapsed % 1400) / 1000
       return start !== undefined
     },
-    clear() { start = undefined; front.visible = false },
-    dispose() { card.remove(front); material.dispose() },
+    clear() { start = undefined; messageFace.visible = false },
+    dispose() { card.remove(messageFace); material.dispose() },
   }
 }

@@ -89,17 +89,14 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && method === 'PUT' && segments.length === 2) {
       mutation(req)
-      if (runtime.agents.isCompanionBusy(id)) throw httpError(409, '伙伴正在执行，请等待当前回复结束后再修改能力')
-      const previous = requiredCompanion(runtime.store, id)
       const draft = normalizeCompanionDraft((await readObject(req)).companion)
-      const next: Companion = { ...draft, automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Date.now() }
-      await runtime.store.update(state => { state.companions = state.companions.map(item => item.id === id ? next : item) })
-      try { await runtime.agents.reloadCompanion(id) }
-      catch (error) {
-        await runtime.store.update(state => { state.companions = state.companions.map(item => item.id === id ? previous : item) })
-        await runtime.agents.reloadCompanion(id).catch(() => {})
-        throw error
-      }
+      const saved = await runtime.store.update(state => {
+        const previous = state.companions.find(item => item.id === id)
+        if (!previous) throw httpError(404, '伙伴不存在')
+        const next: Companion = { ...draft, automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        state.companions = state.companions.map(item => item.id === id ? next : item)
+      })
+      const next = saved.companions.find(item => item.id === id)!
       return sendJson(res, 200, next)
     }
     if (id !== undefined && method === 'DELETE' && segments.length === 2) {

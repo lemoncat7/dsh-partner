@@ -14,6 +14,8 @@
 .dsh-partner-pendant button.dsh-partner-pendant-anchor { position: absolute; left: 50%; top: 2.42%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0 !important; border-radius: 50%; background: transparent !important; box-shadow: none !important; pointer-events: auto; touch-action: none; cursor: grab; }
 .dsh-partner-pendant-anchor > span { width: 14px; height: 6px; border: 1px solid #71817e; border-radius: 4px; background: #c3ced0; }
 .dsh-partner-pendant-anchor:hover > span { background: #e4ece8; }
+.dsh-partner-pendant-unread { position: absolute; left: calc(50% + 10px); top: 2.42%; transform: translateY(-50%); display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid rgb(255 255 255 / 70%); border-radius: 9px; background: #435950; color: #fff; font: 600 11px/1 var(--partner-font-family); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; user-select: none; }
+body[data-ds-dark-theme] .dsh-partner-pendant-unread { border-color: rgb(200 220 213 / 24%); background: #b0c6bd; color: #202e29; }
 .dsh-partner-pendant-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Own the reader's surface even under host-wide important focus rules. */
 .dsh-partner-pendant section#dsh-partner-pendant-inbox.dsh-partner-pendant-inbox {

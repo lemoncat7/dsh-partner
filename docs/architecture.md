@@ -12,13 +12,19 @@ client -> HTTP feature routers -> application services -> repositories/store
 
 ## Module boundaries
 
-Capability saves recompose already-live companion sessions immediately after
-releasing the old composition. Browser-owned agents retain their session and
-receive fresh scoped identity/tools; inactive sessions are not eagerly opened.
-Busy companions reject configuration changes before teardown. Revocation removes
-the tool and management services also recheck live authorization on every call.
-Browser-owned preset/model changes still report that reopening is required;
-this is separate from refreshing scoped companion tools.
+Configuration saves only commit state. The awaited `agent/pre-step` hook compares
+the saved configuration with the installed revision before each new turn, covering
+native history resume as well as local, channel and task-board conversations.
+Unchanged configurations do not re-register tools or read Skill bodies again;
+mid-turn saves never dismantle a running composition. No polling or eager wakeup
+of inactive sessions is needed. Plugin-owned tools recheck capability revocations
+at execution even when an old schema remains in the current turn.
+The UI reports saved/next-turn, separately from request failures and refresh
+failures. Preset and model defaults remain subject to DSH session-selection rules;
+the plugin does not bypass restrictions on changing an existing session's preset.
+`companions/session-configuration.ts` indexes persisted routes and configuration
+revisions without transcript copies. `ui/capability-editor.tsx` owns the capability
+form and save feedback, using the shared companion draft and existing UI tokens.
 
 - `core/`: shared validation, identifiers and bounded collections. It contains
   no partner feature policy.
@@ -109,9 +115,9 @@ this is separate from refreshing scoped companion tools.
   Identity, enabled Skill IDs and outgoing grants commit together. Unknown
   fields, stale revisions, cancellation, missing resources and busy targets
   fail closed. Authority is checked again inside the serialized store write.
-  A reload error after commit is reported as saved/reopen-required, not a failed
-  write; browser-owned Agent handles are not forcibly destroyed or reported as
-  hot-reloaded. Unspecified settings, including automation, remain unchanged.
+  A runtime confirmation error after commit is reported as saved/next-turn with
+  a warning, not a failed write. Browser-owned Agent handles are not destroyed.
+  Unspecified settings, including automation, remain unchanged.
 - Knowledge mount management is a separate provider-backed operation. The
   adapter derives the target's default project and existing session scopes on
   the server, never from model-supplied paths. It calls the optional
@@ -148,7 +154,7 @@ this is separate from refreshing scoped companion tools.
 - 点击层不绘制材质或装饰边框，鼠标拖动不触发键盘聚焦，键盘操作保留可见焦点。卸载时一并清理小画布、绳带节点和物理资源。
 - `pendant/use-placement.ts` 只负责挂点位置：拖动顶部挂点或用方向键移动整件挂饰，与卡牌拉伸手势分离。位置按可用视口比例保存在本地浏览器，刷新恢复，窄屏及旋转时约束到可见范围；逐帧移动不触发 React 状态更新，完成时才写存储，不查询宿主私有 DOM。
 - 卡牌正面只负责图案，消息更新不会重绘或覆盖正面纹理；内侧单独绘制未读数量、伙伴名和简短状态。图案与消息使用独立纹理，不自动弹出消息或额外角标。
-- `pendant/notice-motion.ts` 统一处理新消息提醒：等待被握持或快速甩动的卡牌空闲，轻摆并以短暂的物理角速度辅助转回正面，再由 `pendant/sheen.ts` 在正面轻扫光两次。提醒不修改卡牌的自由拖拽物理结构，多条到达合并一次动作，抓取可中断；后台、全部已读及减少动态效果时取消。效果共用卡面圆角几何，不使用全屏后处理、独立计时器或逐帧纹理重绘。
+- `pendant/notice-motion.ts` 统一处理新消息提醒：等待被握持或快速甩动的卡牌空闲，轻摆并以短暂的物理角速度辅助转向文字面（背面，Y 轴半周），再由 `pendant/sheen.ts` 仅在文字面轻扫光两次。结束或阅读后不自动恢复图案面，也不持续锁定朝向；抓取可中断，用户仍能自由翻面。多条到达合并一次动作；后台、全部已读及减少动态效果时取消。效果共用卡面圆角几何，不使用全屏后处理、独立计时器或逐帧纹理重绘。挂点旁保留静态小数字未读标记（超过 99 显示 99+，全部已读后隐藏），翻面及减少动态效果时仍可见，不拦截拖动、不唤醒渲染循环；读屏复用消息按钮和现有单一播报区。
 - `pendant/reader.tsx` 点击打开最新未读正文（无未读时展示列表），保留可见、可玩的挂饰；桌面优先放在卡牌旁边，窄屏选择卡牌上方或下方的可用空间。正文独立滚动，来源操作留在底部；使用独立冷灰纸面材质，支持 Escape 关闭、键盘焦点返回、卡牌再次点击关闭和来源导航。静止挂卡即使在阅读时也会自然休眠。
 - `notifications/service.ts` 从已提交的任务/定时执行变化和完整伙伴回复生成终态通知；不改变任务执行，不暴露内部验收交接。普通回复按会话和轮次去重，任务按 ID/修订/终态去重。
 - `notifications/store.ts` 在主状态文件同目录保存 `partner-inbox.sqlite`，权限 0600，最多 200 条摘要（每条最多 2000 字符）及已读状态。它不是新的会话历史；完整内容仍在原任务/会话中。

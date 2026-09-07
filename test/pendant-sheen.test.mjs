@@ -7,7 +7,9 @@ test('sheen shares card geometry and ends after two short passes', () => {
   const card = new THREE.Group(), face = new THREE.PlaneGeometry(1, 1)
   const sheen = createBadgeSheen(card, face)
   try {
-    assert.equal(card.children.length, 1, 'only the front art face carries sheen')
+    assert.equal(card.children.length, 1, 'only the message face carries sheen')
+    assert.equal(card.children[0].rotation.y, Math.PI)
+    assert.ok(card.children[0].position.z < -.025, 'sheen sits outside the back message mesh')
     assert.ok(card.children.every(mesh => mesh.geometry === face))
     sheen.start(100)
     assert.equal(sheen.update(600, false), true)

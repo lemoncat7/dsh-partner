@@ -16,6 +16,7 @@ import { EphemeralExecutionService } from '../lib/execution/service.js'
 import { PartnerAgentComposition } from '../lib/collaboration/composition.js'
 import { CompanionService } from '../lib/companions/service.js'
 import { dispatchPartnerWorkspaceApi } from '../lib/api/features/workspace-api.js'
+import { registerPartnerApi } from '../lib/api.js'
 import { parseMarketResponse } from '../lib/skills/markets/adapters.js'
 import { builtinMarketSources } from '../lib/skills/markets/builtin.js'
 import { requestRemoteText } from '../lib/skills/network.js'
@@ -343,7 +344,7 @@ test('stale execution runs are reconciled so companions do not remain busy forev
 })
 
 test('cross-partner delegation uses directed grants while user delegation bypasses partner grants', async t => {
-  const item = await fixture(); t.after(item.close)
+  const item = await fixture()
   await item.store.update(state => state.companions.push({
     ...structuredClone(state.companions[0]), id: 'companion-reviewer', name: '审阅伙伴', createdAt: 2, updatedAt: 2,
   }))
@@ -351,6 +352,7 @@ test('cross-partner delegation uses directed grants while user delegation bypass
   const board = new TaskBoardService(item.store)
   const task = await board.create({ title: '权限边界测试' }, { kind: 'user' })
   const service = new PartnerCollaborationService(item.store, skills, board, { execute: async () => ({ run: { id: 'run-1' }, output: '完成' }) })
+  t.after(async () => { await service.close(); await item.close() })
   await assert.rejects(() => service.delegate({
     taskId: task.id, initiatedBy: 'companion', fromCompanionId: 'companion-default', to: 'companion-reviewer', request: '执行任务',
   }), /未获授权/)
@@ -403,7 +405,8 @@ test('partner collaboration tools are always available, grant-scoped, and inject
   assert.equal(defaultNames.includes('partner_companions'), false)
   assert.equal(defaultNames.includes('partner_schedule'), false)
   assert.equal(defaultComposition.sections.some(section => section.name === 'partner-inline-skills'), false)
-  const authorizedComposition = await compose({ ...companion, capabilities: ['skills', 'companions', 'schedules', 'access'] })
+  await item.store.update(state => { state.companions[0].capabilities = ['skills', 'companions', 'schedules', 'access'] })
+  const authorizedComposition = await compose(item.store.snapshot().companions[0])
   const authorizedTools = authorizedComposition.tools
   const authorizedNames = authorizedTools.map(tool => tool.name)
   assert.ok(authorizedNames.includes('partner_skill'))
@@ -471,7 +474,7 @@ test('companion creation is atomic and starts with identity-only permissions', a
   assert.equal(item.store.snapshot().sessions.length, sessionsBefore)
 })
 
-test('Skill binding reload observes the committed binding state', async t => {
+test('Skill binding commits without tearing down an executing agent', async t => {
   const item = await fixture(); t.after(item.close)
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   await skills.initialize()
@@ -485,7 +488,26 @@ test('Skill binding reload observes the committed binding state', async t => {
     },
   )
   assert.equal(handled, true)
-  assert.equal(observed, true)
+  assert.equal(observed, false)
+  assert.ok(skills.bindings('companion-default').some(skill => skill.id === installed.id))
+})
+
+test('capability API saves while a companion is running, without reload or automation loss', async t => {
+  const item = await fixture(); t.after(item.close)
+  let handler
+  registerPartnerApi({ register(route) { handler = route.handler; return () => {} } }, '/partner', {
+    store: item.store,
+    agents: { isCompanionBusy() { return true }, async reloadCompanion() { throw new Error('must not reload during save') } },
+  })
+  const before = item.store.snapshot().companions[0]
+  const res = response()
+  await handler(request('PUT', '/partner/companions/' + before.id, { companion: { ...before, capabilities: ['administration', 'skills'] } }), res)
+  assert.equal(res.statusCode, 200)
+  const saved = JSON.parse(res.body)
+  assert.deepEqual(saved.capabilities, ['administration', 'skills'])
+  assert.deepEqual(saved.automation, before.automation)
+  assert.ok(saved.updatedAt > before.updatedAt)
+  assert.equal(item.store.hasCapability(before.id, 'administration'), true)
 })
 
 test('companion access API commits directed grants before reloading the source companion', async t => {

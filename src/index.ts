@@ -91,8 +91,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       }),
       isBusy: (id): boolean => agents.isCompanionBusy(id),
       reload: async id => {
-        if (agents.isCompanionBusy(id)) throw new Error('目标伙伴已开始执行，请结束后重新打开会话')
-        await agents.reloadManagedCompanion(id)
+        await agents.reloadCompanion(id)
       },
     })
     const knowledgeMounts = new CompanionKnowledgeMounts(store, management, () => ctx.get('dshKnowledgeMountManagement'), id => partnerCwd(resolved.defaultCwd, id))

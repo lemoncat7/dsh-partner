@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFocus, type PartnerState } from './domain.js'
 import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
+import type { CompanionCapability } from './capabilities.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -36,6 +37,11 @@ export class PartnerStore {
 
   snapshot(): PartnerState {
     return structuredClone(this.state)
+  }
+
+  /** A live authorization read without copying task/history state per tool call. */
+  hasCapability(companionId: string, capability: CompanionCapability): boolean {
+    return this.state.companions.find(item => item.id === companionId)?.capabilities.includes(capability) ?? false
   }
 
   subscribe(notify: (next: PartnerState, previous: PartnerState) => void, onError: (error: unknown) => void): () => void {

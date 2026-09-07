@@ -106,11 +106,11 @@ export class CompanionManagementService {
     const result = managementView(committed.companions.find(item => item.id === before.id)!, committed)
     try {
       await this.runtime.reload(before.id)
-      return { applied: true, companion: result, changedFields: Object.keys(patch), runtime: 'reloaded' as const }
+      return { applied: true, companion: result, changedFields: Object.keys(patch), runtime: 'next-turn' as const, sessionDefaults: 'Preset 和默认模型配置用于新建或重新载入的会话，已有会话仍遵守 DSH 的会话选择规则' }
     } catch {
       // The disk transaction has committed. Never claim it failed or roll back
       // over newer UI edits if refreshing a session happens to fail.
-      return { applied: true, companion: result, changedFields: Object.keys(patch), runtime: 'reopen-required' as const, warning: '配置已保存，会话刷新失败；请重新打开目标伙伴会话后再使用新配置，不要重复提交修改' }
+      return { applied: true, companion: result, changedFields: Object.keys(patch), runtime: 'next-turn' as const, warning: '配置已保存，运行时确认失败；下一轮执行前会重新检查配置，不要重复提交修改' }
     }
   }
 

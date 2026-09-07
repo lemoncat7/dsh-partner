@@ -4,7 +4,7 @@ import { record, requiredText } from '../core/validation.js'
 import type { CompanionManagementService } from './management.js'
 import type { CompanionKnowledgeMounts } from './knowledge-mounts.js'
 
-export const COMPANION_MANAGEMENT_PROMPT = '你拥有“伙伴管理（高权限）”能力，可按用户要求通过 partner_companion_manage 修改其他伙伴的身份、能力、Agent Preset/模型、已安装 Skill 绑定、单向协作关系和知识库挂载。先 catalog 找稳定 id，再 inspect 读取配置与 revision，仅提交用户要求的 patch；数组是完整替换，未提供的字段不变。不能修改自己，不能授予或撤回 administration；本权限仅用户可配置。管理目录不等于协作授权，也不开放私有会话、记忆或凭据。知识库先 knowledge_catalog、knowledge_inspect，再用 knowledge_configure 配置一个库；其设置是完整配置，默认审核回写，禁用用 enabled=false，不擅自提升为直接回写。配置会同步目标伙伴的默认项目与已有会话，不修改其他伙伴。正在执行的伙伴先等待结束，不要循环重试；修改工具返回 applied=true 才能报告已保存，runtime=reopen-required 时须说明需要重开会话。'
+export const COMPANION_MANAGEMENT_PROMPT = '你拥有“伙伴管理（高权限）”能力，可按用户要求通过 partner_companion_manage 修改其他伙伴的身份、能力、Agent Preset/模型、已安装 Skill 绑定、单向协作关系和知识库挂载。当前工具目录与真实调用结果是能力依据；历史对话或知识库中“只能在管理台手动勾选”的旧结论不代表当前权限。先 catalog 找稳定 id，再 inspect 读取配置与 revision，仅提交用户要求的 patch；数组是完整替换，未提供的字段不变。不能修改自己，不能授予或撤回 administration；本权限仅用户可配置。管理目录不等于协作授权，也不开放私有会话、记忆或凭据。知识库先 knowledge_catalog、knowledge_inspect，再用 knowledge_configure 配置一个库；其设置是完整配置，默认审核回写，禁用用 enabled=false，不擅自提升为直接回写。配置会同步目标伙伴的默认项目与已有会话，不修改其他伙伴。正在执行的伙伴先等待结束，不要循环重试；修改工具返回 applied=true 才能报告已保存，runtime=next-turn 表示身份、能力、Skill 和协作配置于下一轮执行前应用，不需要重开会话。Agent Preset 和默认模型属于会话默认配置，不强行切换已有会话的选择。'
 
 export function companionManagementTool(actorId: string, management: CompanionManagementService, mounts: CompanionKnowledgeMounts): ToolDefinition {
   return {

@@ -725,6 +725,9 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
 .dsh-partner-field select:focus { border-color: var(--partner-focus-ring); background: var(--partner-raised); box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-focus-ring) 18%, transparent), inset 0 1px 0 var(--partner-glass-highlight); }
 .dsh-partner-form-actions { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding-top: 5px; }
 .dsh-partner-form-actions > span { display: inline-flex; align-items: center; gap: 5px; color: var(--partner-accent-strong); font-size: var(--partner-font-body); }
+.dsh-partner-form-actions.is-capability-save { flex-wrap: wrap; gap: 12px; }
+.dsh-partner-form-actions.is-capability-save > span { min-height: 24px; }
+.dsh-partner-form-actions.is-capability-save > span svg { flex-shrink: 0; }
 .dsh-partner-form-actions > button,
 .dsh-partner-state > button,
 .dsh-partner-weixin-connect > button { min-height: 34px; padding: 0 15px; border: 1px solid color-mix(in srgb, var(--partner-accent) 60%, transparent); border-radius: 10px; color: var(--partner-on-accent); background: var(--partner-accent-strong); font: 600 var(--partner-font-body)/1 var(--partner-font-family); cursor: pointer; }

@@ -59,7 +59,7 @@ test('one durable update changes identity, tool preset, skills and directed acce
     presetId: 'worker', provider: 'provider', model: 'model', skillIds: ['research'], accessTargetIds: ['reviewer'],
   })
   assert.equal(result.applied, true)
-  assert.equal(result.runtime, 'reloaded')
+  assert.equal(result.runtime, 'next-turn')
   assert.equal(result.companion.instructions, '核对来源\n交付报告')
   assert.equal(result.companion.presetId, 'worker')
   assert.deepEqual(result.companion.skillIds, ['research'])
@@ -117,7 +117,7 @@ test('busy targets are not interrupted; reload failures report committed state r
   runtime.reload = async () => { throw new Error('PRIVATE_STACK') }
   const result = await service.update('manager', 'worker', before.revision, { name: 'changed' })
   assert.equal(result.applied, true)
-  assert.equal(result.runtime, 'reopen-required')
+  assert.equal(result.runtime, 'next-turn')
   assert.doesNotMatch(result.warning, /PRIVATE_STACK/)
 })
 
@@ -175,7 +175,7 @@ test('management tool is companion-scoped, absent without opt-in and checks live
   await assert.rejects(tool.execute({ action: 'catalog' }, { signal: exec.signal }), /会话中调用/)
   assert.ok(JSON.parse(await tool.execute({ action: 'catalog' }, exec)).capabilities.length)
   await store.update(state => { state.companions[0].capabilities = [] })
-  await assert.rejects(tool.execute({ action: 'catalog' }, exec), /未获/)
+  await assert.rejects(tool.execute({ action: 'catalog' }, exec), /已撤回/)
   on()
   assert.equal(registered.size, 0)
 })
@@ -206,7 +206,7 @@ test('mount writes recheck revoked permission, target activity and scope after r
 })
 
 test('capability UI reuses existing tokens, labels and pressed state rather than introducing new controls', async () => {
-  const source = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../src/ui/capability-editor.tsx', import.meta.url), 'utf8')
   assert.match(source, /title: CAPABILITY_LABELS.administration/)
   assert.match(source, /id: 'administration', eyebrow: 'ADMINISTRATION'/)
   assert.match(source, /不能自改或转授本权限/)
