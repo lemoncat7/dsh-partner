@@ -223,6 +223,16 @@ form and save feedback, using the shared companion draft and existing UI tokens.
   and permission changes. `scripts/verify-task-board.mjs` tests the actual panel
   with isolated fixtures across phone, landscape and desktop in both themes.
 
+## 需求看板与整体收尾
+
+- `requirements/domain.ts` 与 `service.ts` 定义需求归属及规划、提交、汇总、归档生命周期。新任务必须有需求归属；兼容旧工具调用时创建单任务需求，旧数据不按标题猜测合并。规划提交后不能直接增加任务，调整范围先重开规划。
+- `requirements/worker.ts` 单并发汇总已提交且全部子任务验收通过的需求。总结及交付快照先持久化，再向原始创建渠道投递；失败指数退避，重启继续，已保存的总结不会因通知失败重新生成。投递复用持久化 receipt，已确认发送不重复发送；网络发送与本地 receipt 写入不是跨系统事务，不承诺绝对 exactly-once。
+- 子任务完成、验收、受阻只反馈给内部创建伙伴；渠道不逐任务播报。人工从看板创建的需求不会自动投递到负责人的其他聊天。汇总输出沿用长结果文档及真实附件投递能力。
+- `tasks/removal.ts` 原子移除任务、活动、委派，取消关联执行；未完成的依赖者暂停，并重新打开需求范围确认。重复删除成功，执行器迟到结果不能重建记录。归档保留不可变交付快照，删除子任务不会抹去最终结论。
+- `ui/requirement-board.tsx` 负责需求总览与归档入口；`requirement-dialog.tsx` 负责需求表单和详情；`requirement-tasks-panel.tsx` 负责需求内的任务阶段和任务详情，`task-board-panel.tsx` 仅保留稳定入口。统一复用工作区表单、字体、色彩与弹窗，次要信息通过折叠区展示，无新增模糊层或卡片动画。
+- `ui/board-refresh.ts` 合并刷新并用版本号丢弃旧响应，页面隐藏暂停轮询；进入需求后停止后台总览轮询。需求列表分批展示，任务阶段只展示非空阶段，避免堆叠空列。
+- `test/requirements.test.mjs` 覆盖范围确认、归档、权限、并发删除、执行取消、持久化重试；`test/channel-media.test.mjs` 验证子任务静默与需求最终通知。
+
 ## 主界面挂饰与消息
 
 - `pendant/frame-loop.ts` 独立负责可选 24/30/60 FPS 绘制调度（默认 30，旧配置自动兼容）：定时器临近截止时间再进入 RAF，保留非整除刷新率的小数节奏，高频输入合并唤醒；运行时切换只重排唯一待执行回调，不重建 WebGL/物理场景，休眠中切换不启动循环。隐藏/卸载取消计时器和 RAF。物理仍以 120 Hz 固定小步推进，停顿后不追赶后台时间。握持状态不再强制常驻循环，绳子平稳后可休眠，保持弹簧位置和储能，移动/松手重新唤醒。

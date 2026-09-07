@@ -16,6 +16,7 @@ import type { PartnerReply } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
+import type { BoardRequirement } from '../requirements/domain.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
 import { prepareChannelReply } from './outbound-media.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
@@ -132,6 +133,7 @@ export class ChannelManager {
   }
 
   async notifyTaskResult(task: BoardTask): Promise<void> {
+    if (task.requirementId) return
     if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
     const routes = this.store.snapshot().sessions.filter(item => item.companionId === task.creatorCompanionId)
     const route = selectTaskNotificationRoute(routes, task.creatorSessionId, () => false)
@@ -142,6 +144,20 @@ export class ChannelManager {
       text: delivery.text,
       attachments: await extractOutboundAttachments(delivery.text, cwd),
     })
+  }
+
+  async notifyRequirementResult(item: BoardRequirement): Promise<void> {
+    if (item.status !== 'done' || !item.summary || !item.creatorSessionId) return
+    // A manually created board requirement must not leak into an unrelated chat.
+    const route = this.store.snapshot().sessions.find(route => route.sessionId === item.creatorSessionId)
+    if (!route || route.kind === 'local') return
+    const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
+    const delivery = await prepareTaskResultDelivery({ id: item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: item.summary }, cwd)
+    const text = delivery.text.replace(/^看板任务已完成：/, '需求已完成：')
+    const latest = this.store.snapshot().requirements?.find(r => r.id === item.id)
+    if (!latest || latest.revision !== item.revision || latest.status !== 'done') return
+    // queueProactive persists a stable receipt; retries do not re-summarize.
+    await this.queueProactive(route, `requirement-result:${item.id}:${item.revision}`, { text, attachments: await extractOutboundAttachments(text, cwd) })
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {

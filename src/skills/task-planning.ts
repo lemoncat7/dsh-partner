@@ -1,5 +1,5 @@
 /** Versioned built-in instructions; installed copies update through SkillService. */
-export const TASK_PLANNING_VERSION = '1.3.0'
+export const TASK_PLANNING_VERSION = '1.4.0'
 export const TASK_PLANNING_DESCRIPTION = '收到实际工作需求时，主动按授权伙伴的专长委派；单一专业整项交付，多专业按产出拆解、安排依赖并提交看板，无需用户点名触发。'
 export const TASK_PLANNING_DOCUMENT = `---
 name: task-planning
@@ -7,7 +7,7 @@ display-name: 任务拆解与看板推进
 description: ${TASK_PLANNING_DESCRIPTION}
 version: ${TASK_PLANNING_VERSION}
 context: inline
-allowed-tools: [partner_task_board, partner_collaborate]
+allowed-tools: [partner_requirements, partner_task_board, partner_collaborate]
 ---
 # 专业分工与看板推进
 
@@ -28,12 +28,19 @@ allowed-tools: [partner_task_board, partner_collaborate]
 - 已收到明确范围的看板子任务时，你已经是该阶段执行者，完成该范围，不把同一任务重新转派或无限递归拆解。若实际缺少能力或发现范围外工作，向创建者说明具体缺口，由其调整分工；验收回调按验收协议处理，不当作新的工作请求。
 - 具备 Skill 或某伙伴可用不代表获得新权限；外部发布、删除等动作仍服从用户授权与 DSH 工具权限。
 
+## 需求归属与收尾
+
+- 一次用户交付目标对应一个需求块。先通过 partner_requirements list/create 复用或创建需求；各专业任务都填写同一个 requirementId，不把每个步骤建成独立需求。不要凭标题相近合并用户不同的需求。
+- 所有任务创建并分配后再 submit 需求，避免尚未完成拆分就提前收尾。已提交需求需要增补工作时，由需求负责人 reopen 后调整，再 submit。子任务执行者只完成受派范围，不另拆一套重复任务。
+- 子任务通过验收不单独通知用户。全部剩余子任务验收完成后，负责人收到整体汇总请求，只返回最终结论、实际交付路径和限制；系统保存并归档需求后统一通知渠道。取消/删除的工作不算成功，不得用删除未完成任务伪造需求完成；改变范围后重新确认提交。
+- 本技能属于伙伴插件，已注入就直接应用；需要读取时使用 partner_skill load，不能调用原生 skill(name="task-planning")。
+
 ## 执行协议
 
 1. 用一句话说明正在应用“任务拆解与看板推进”及采用的专业分工。读取 partner_task_board list，避免重复创建同一工作；根据授权目录中的稳定 id、职责、能力与 Skill 选择执行者，目录缺失、刚更新授权或信息不足时用 partner_collaborate directory 核对，不靠名字猜测。
-2. 按依赖顺序创建任务，前置创建后将返回的真实 id 填入后续 dependencyTaskIds。每个任务写清目标、输入来源、可验收交付物、约束和验收条件；不能只写笼统的一句话让执行者重新猜需求。
+2. 按依赖顺序创建任务，前置创建后将返回的真实 id 填入后续 dependencyTaskIds。每个任务填写所属 requirementId，并写清目标、输入来源、可验收交付物、约束和验收条件；不能只写笼统的一句话让执行者重新猜需求。
 3. 对用户要求真正完成的工作，create 指定 assignee，autoRun 默认开启；依赖未完成也提交执行意图，由队列等待全部前置任务验收为 done 后自动启动。自己的阶段也指定自己的 id，不必把所有任务都交给别人。
 4. 只规划时明确 autoRun=false；没有负责人则保持未提交。已有任务需要执行时用 partner_collaborate delegate，不要重复建任务。工具仅返回 submitted/queued 表示已排队，不代表已经完成。
-5. 没有特殊指定时验收者是创建伙伴。提交全部任务后立即返回精简分工表：任务、负责人、依赖、执行/等待状态、验收安排；不循环查询、不阻塞等待执行结果。
-6. 收到验收回调时核对实际产出，通过调用 accept，不通过调用 reject 并说明具体差距；已提交的后续任务会自动接续。任务完成后按真实结果汇报，不用空泛进展替代结论。
+5. 没有特殊指定时验收者是创建伙伴。提交全部任务并 submit 需求后立即返回精简分工表：任务、负责人、依赖、执行/等待状态、验收安排；不循环查询、不阻塞等待执行结果。
+6. 收到验收回调时核对实际产出，通过调用 accept，不通过调用 reject 并说明具体差距；已提交的后续任务会自动接续。需求完成后按真实结果统一汇报，不用子任务进展替代整体验收结论。
 `

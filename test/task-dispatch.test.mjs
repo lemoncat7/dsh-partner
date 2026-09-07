@@ -78,6 +78,30 @@ test('builtin upgrade does not replace a locally maintained planning skill', asy
   assert.equal((await skills.load(installed.id)).checksum, installed.checksum)
 })
 
+test('tool guidance connects requests, specialists and the planning Skill without a preflight gate', async t => {
+  const { store, board, skills, service } = await fixture(t)
+  await skills.installMarket('builtin', 'task-planning')
+  await skills.setBinding('companion-default', 'task-planning', true)
+  await store.update(state => { state.companions[0].capabilities = ['skills'] })
+  const tools = new Map(), sections = []
+  const composer = new PartnerAgentComposition(store, skills, board, service, {}, {}, {})
+  const dispose = await composer.compose({
+    tools: {
+      register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) },
+      guard() { assert.fail('routing guidance must not add an execution guard') },
+    },
+    systemPrompt: { section(value) { sections.push(value); return () => {} } },
+  }, store.snapshot().companions[0])
+  assert.deepEqual([...tools.keys()].sort(), ['partner_collaborate', 'partner_requirements', 'partner_skill', 'partner_task_board'])
+  for (const name of tools.keys()) assert.match(tools.get(name).description, /enabled task-planning Skill/)
+  assert.match(tools.get('partner_task_board').description, /no explicit @ or board request/)
+  assert.match(tools.get('partner_collaborate').description, /do not duplicate already-assigned work/)
+  assert.equal(sections.some(section => section.name.includes('preflight')), false)
+  assert.equal(parseSkillDocument(TASK_PLANNING_DOCUMENT).metadata.has('phase'), false)
+  dispose()
+  assert.equal(tools.size, 0)
+})
+
 test('one authorized specialist deliverable dispatches without artificial decomposition and hides disabled capabilities', async t => {
   const { store, board, skills, service, calls } = await fixture(t)
   await skills.initialize()

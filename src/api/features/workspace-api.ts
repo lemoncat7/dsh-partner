@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { PartnerStore } from '../../store.js'
 import type { SkillService } from '../../skills/service.js'
 import type { TaskBoardService } from '../../tasks/service.js'
+import type { RequirementService } from '../../requirements/service.js'
 import type { PartnerCollaborationService } from '../../collaboration/service.js'
 import type { PartnerSchedulerService } from '../../scheduler/service.js'
 import { mutation, readObject, sendJson } from '../http.js'
@@ -11,6 +12,7 @@ export interface PartnerWorkspaceApiRuntime {
   agents: { reloadCompanion(companionId: string): Promise<void> }
   skills: SkillService
   tasks: TaskBoardService
+  requirements?: RequirementService
   collaboration: PartnerCollaborationService
   scheduler: PartnerSchedulerService
 }
@@ -23,6 +25,21 @@ export async function dispatchPartnerWorkspaceApi(
   runtime: PartnerWorkspaceApiRuntime,
 ): Promise<boolean> {
   const method = req.method ?? 'GET'
+  if (segments[0] === 'requirements' && runtime.requirements) {
+    const service = runtime.requirements, id = segments[1]
+    if (method === 'GET' && !id) { sendJson(res, 200, { requirements: service.list() }); return true }
+    mutation(req)
+    if (method === 'POST' && !id) { sendJson(res, 201, await service.create(await readObject(req), { kind: 'user' })); return true }
+    if (method === 'DELETE' && id && segments.length === 2) { await runtime.tasks.removeRequirement(id); sendJson(res, 204, undefined); return true }
+    if (method === 'POST' && id && segments.length === 3) {
+      const body = await readObject(req), revision = Number(body.expectedRevision), actor = { kind: 'user' as const }
+      if (segments[2] === 'submit') { sendJson(res, 200, await service.submit(id, revision, actor)); return true }
+      if (segments[2] === 'reopen') { sendJson(res, 200, await service.reopen(id, revision, actor)); return true }
+      if (segments[2] === 'finish') { sendJson(res, 200, await service.finish(id, revision, String(body.summary ?? ''), actor)); return true }
+      if (segments[2] === 'retry') { await service.retry(id); sendJson(res, 200, { ok: true }); return true }
+      if (segments[2] === 'owner') { sendJson(res, 200, await service.assignOwner(id, revision, typeof body.ownerCompanionId === 'string' ? body.ownerCompanionId.trim() || undefined : undefined)); return true }
+    }
+  }
   if (segments[0] === 'skills') {
     if (method === 'GET' && segments.length === 1) {
       const state = runtime.store.snapshot()

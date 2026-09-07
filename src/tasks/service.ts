@@ -4,22 +4,26 @@ import { oneOf, optionalBoolean, optionalText, record, requiredText, stringList 
 import type { PartnerStore } from '../store.js'
 import { TASK_PRIORITIES, TASK_STATUSES, type BoardTask, type TaskActivity } from './domain.js'
 import type { TaskExecutionOutput } from './result.js'
+import { requirementDraft } from '../requirements/service.js'
+import { removeTaskRecords, touchTaskRequirement } from './removal.js'
 
 const MAX_TASKS = 500
 const MAX_ACTIVITIES = 2000
 
 export class TaskBoardService {
   private notifier?: (task: BoardTask, previousStatus: BoardTask['status']) => Promise<void>
+  private removalNotifier?: (ids: string[]) => void
 
   constructor(private readonly store: PartnerStore) {}
+  setRemovalNotifier(notifier: (ids: string[]) => void): void { this.removalNotifier = notifier }
 
   setProgressNotifier(notifier: (task: BoardTask, previousStatus: BoardTask['status']) => Promise<void>): void {
     this.notifier = notifier
   }
 
-  snapshot(): { tasks: BoardTask[]; activities: TaskActivity[] } {
+  snapshot() {
     const state = this.store.snapshot()
-    return { tasks: state.tasks, activities: state.taskActivities }
+    return { tasks: state.tasks, activities: state.taskActivities, requirements: state.requirements ?? [] }
   }
 
   async create(value: unknown, actor: TaskActor): Promise<BoardTask> {
@@ -50,6 +54,21 @@ export class TaskBoardService {
     if (started(task.status)) this.assertDependenciesComplete(task, this.store.snapshot().tasks)
     await this.store.update(state => {
       if (state.tasks.length >= MAX_TASKS) throw new Error(`Task board reached its ${MAX_TASKS} task limit; archive or delete completed tasks first`)
+      this.assertDependencies(undefined, dependencyTaskIds, state.tasks)
+      state.requirements ??= []
+      const requirementId = optionalText(input.requirementId, 'requirementId', 160)
+      if (requirementId) {
+        const requirement = state.requirements.find(r => r.id === requirementId)
+        if (!requirement) throw new TaskNotFoundError('需求已删除或不存在')
+        if (requirement.status !== 'planning') throw new Error('请先将需求重新打开为规划状态，再增加任务')
+        task.requirementId = requirementId
+      } else {
+        if (state.requirements.length >= 500) throw new Error('需求数量已达上限')
+        const requirement = requirementDraft(task.title, task.description, task.creatorCompanionId, task.creatorSessionId)
+        requirement.status = 'active'
+        state.requirements.push(requirement); task.requirementId = requirement.id
+      }
+      touchTaskRequirement(state, task.requirementId)
       state.tasks.push(task)
       appendActivity(state.taskActivities, task.id, actor, 'created', `创建任务：${task.title}`, now)
     })
@@ -62,7 +81,8 @@ export class TaskBoardService {
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
-      if (!task) throw new Error('Task does not exist')
+      if (!task) throw new TaskNotFoundError()
+      if (state.requirements?.some(r => r.id === task.requirementId && r.status === 'done')) throw new Error('已归档需求中的任务不能修改，请创建后续需求')
       const expected = input.expectedRevision
       if (!Number.isInteger(expected) || expected !== task.revision) throw new TaskConflictError(task)
       previousStatus = task.status
@@ -105,6 +125,7 @@ export class TaskBoardService {
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
       task.revision += 1
       task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
       if (task.status === 'done' && previousStatus !== 'done') task.completedAt = task.updatedAt
       if (task.status !== 'done') delete task.completedAt
       if (task.status === 'doing' && previousStatus !== 'doing') {
@@ -123,7 +144,7 @@ export class TaskBoardService {
 
   async comment(taskId: string, message: string, actor: TaskActor): Promise<void> {
     await this.store.update(state => {
-      if (!state.tasks.some(item => item.id === taskId)) throw new Error('Task does not exist')
+      if (!state.tasks.some(item => item.id === taskId)) throw new TaskNotFoundError()
       appendActivity(state.taskActivities, taskId, actor, 'commented', requiredText(message, 'message', 1200), Date.now())
     })
   }
@@ -138,7 +159,7 @@ export class TaskBoardService {
   assertStartable(taskId: string): BoardTask {
     const state = this.store.snapshot()
     const task = state.tasks.find(item => item.id === taskId)
-    if (!task) throw new Error('Task does not exist')
+    if (!task) throw new TaskNotFoundError()
     if (task.status === 'doing') throw new Error('任务已经在执行中')
     if (task.status === 'review') throw new Error('任务正在等待验收，不能重复执行')
     if (task.status === 'done') throw new Error('任务已经完成，如需重做请先打回')
@@ -151,7 +172,7 @@ export class TaskBoardService {
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
-      if (!task) throw new Error('Task does not exist')
+      if (!task) throw new TaskNotFoundError()
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
@@ -166,6 +187,7 @@ export class TaskBoardService {
       if (movedToReview) task.status = 'review'
       task.revision += 1
       task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
       appendActivity(state.taskActivities, task.id, actor, 'result', movedToReview ? '执行结果已提交，等待验收' : '执行结果已补充到待验收任务', task.updatedAt)
       output = structuredClone(task)
     })
@@ -177,12 +199,13 @@ export class TaskBoardService {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
-      if (!task) throw new Error('Task does not exist')
+      if (!task) throw new TaskNotFoundError()
       if (task.status !== 'review') throw new Error('只有待验收任务可以提交核验结果')
       if (task.reviewerCompanionId && actor.companionId !== task.reviewerCompanionId) throw new Error('核验结果必须由任务指定的验收伙伴提交')
       task.reviewSummary = boundedText(result, 'reviewResult', 12_000)
       task.revision += 1
       task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
       appendActivity(state.taskActivities, task.id, actor, 'reviewed', '验收伙伴已提交核验结果', task.updatedAt)
       output = structuredClone(task)
     })
@@ -194,14 +217,16 @@ export class TaskBoardService {
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
-      if (!task) throw new Error('Task does not exist')
+      if (!task) throw new TaskNotFoundError()
       previousStatus = task.status
+      if (task.status !== 'doing') throw new Error('只有进行中的任务可以报告执行失败')
       task.resultSummary = `执行受阻：${boundedText(error, 'error', 4000)}`
       delete task.resultAbstract
       delete task.reviewHandoff
       task.status = 'blocked'
       task.revision += 1
       task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
       appendActivity(state.taskActivities, task.id, actor, 'failed', task.resultSummary, task.updatedAt)
       output = structuredClone(task)
     })
@@ -219,7 +244,7 @@ export class TaskBoardService {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
-      if (!task) throw new Error('Task does not exist')
+      if (!task) throw new TaskNotFoundError()
       if (task.status !== 'review') throw new Error('只有待验收任务可以打回')
       const message = boundedText(reason, 'reason', 1200)
       task.status = 'ready'
@@ -227,6 +252,7 @@ export class TaskBoardService {
       delete task.completedAt
       task.revision += 1
       task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
       appendActivity(state.taskActivities, task.id, actor, 'reopened', `验收打回：${message}`, task.updatedAt)
       output = structuredClone(task)
     })
@@ -234,22 +260,25 @@ export class TaskBoardService {
   }
 
   async remove(taskId: string): Promise<void> {
+    let affected: string[] = []
     await this.store.update(state => {
-      state.tasks = state.tasks.filter(item => item.id !== taskId)
-      for (const task of state.tasks) {
-        if (!task.dependencyTaskIds.includes(taskId)) continue
-        task.dependencyTaskIds = task.dependencyTaskIds.filter(id => id !== taskId)
-        task.revision += 1
-        task.updatedAt = Date.now()
-      }
-      state.taskActivities = state.taskActivities.filter(item => item.taskId !== taskId)
-      state.delegations = state.delegations.filter(item => item.taskId !== taskId)
+      affected = removeTaskRecords(state, new Set([taskId]))
     })
+    this.removalNotifier?.(affected)
+  }
+
+  async removeRequirement(id: string): Promise<void> {
+    let affected: string[] = []
+    await this.store.update(state => {
+      affected = removeTaskRecords(state, new Set(state.tasks.filter(t => t.requirementId === id).map(t => t.id)))
+      state.requirements = (state.requirements ?? []).filter(r => r.id !== id)
+    })
+    this.removalNotifier?.(affected)
   }
 
   require(taskId: string): BoardTask {
     const task = this.store.snapshot().tasks.find(item => item.id === taskId)
-    if (!task) throw new Error('Task does not exist')
+    if (!task) throw new TaskNotFoundError()
     return task
   }
 
@@ -292,8 +321,9 @@ export interface TaskActor { kind: 'user' | 'companion' | 'schedule'; companionI
 
 export class TaskConflictError extends Error {
   readonly status = 409
-  constructor(readonly current: BoardTask) { super('Task changed; refresh it before updating') }
+  constructor(readonly current: BoardTask) { super('任务状态已更新，请刷新后重试（Task changed）') }
 }
+export class TaskNotFoundError extends Error { readonly status = 404; constructor(message = '任务已删除或不存在，无需继续处理') { super(message) } }
 
 function appendActivity(items: TaskActivity[], taskId: string, actor: TaskActor | { kind: 'system' }, kind: TaskActivity['kind'], message: string, at: number): void {
   appendBounded(items, {

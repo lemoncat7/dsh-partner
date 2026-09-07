@@ -1,5 +1,6 @@
 import type { CompanionSkillBinding, PartnerSkill, SkillMarketSource } from './skills/domain.js'
 import type { BoardTask, TaskActivity } from './tasks/domain.js'
+import type { BoardRequirement } from './requirements/domain.js'
 import type { PartnerDelegation } from './collaboration/domain.js'
 import type { ExecutionRun } from './execution/domain.js'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
@@ -100,6 +101,7 @@ export interface PartnerState {
   skillMarketSources: SkillMarketSource[]
   skillMarketNetwork: SkillMarketNetworkSettings
   tasks: BoardTask[]
+  requirements?: BoardRequirement[]
   taskActivities: TaskActivity[]
   delegations: PartnerDelegation[]
   companionAccessGrants: CompanionAccessGrant[]

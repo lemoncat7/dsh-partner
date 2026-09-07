@@ -5,6 +5,7 @@ export type TaskPriority = typeof TASK_PRIORITIES[number]
 
 export interface BoardTask {
   id: string
+  requirementId?: string
   title: string
   description: string
   status: TaskStatus

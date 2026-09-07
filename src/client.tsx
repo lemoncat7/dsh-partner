@@ -15,6 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import baseCssText from './client.css'
 import workspaceCssText from './ui/workspace-ui.css'
+import requirementCssText from './ui/requirement-board.css'
 import responsiveCssText from './ui/responsive-ui.css'
 import pickerCssText from './ui/companion-picker.css'
 import pendantCssText from './pendant/widget.css'
@@ -39,7 +40,7 @@ import { CAPABILITY_LABELS } from './capabilities.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${pendantCssText}\n${pendantSettingsCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory'

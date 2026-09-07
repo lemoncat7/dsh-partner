@@ -10,7 +10,7 @@ const workspaceComponents = await readFile(new URL('../src/ui/workspace-componen
 const glassSource = await readFile(new URL('../src/glass-surface.tsx', import.meta.url), 'utf8')
 const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.meta.url), 'utf8')
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
-const boardSource = await readFile(new URL('../src/ui/task-board-panel.tsx', import.meta.url), 'utf8')
+const boardSource = await readFile(new URL('../src/ui/requirement-tasks-panel.tsx', import.meta.url), 'utf8')
 
 test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
   const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
@@ -124,9 +124,11 @@ test('growing companion capabilities use grouped semantic sections instead of on
   assert.match(clientCss, /repeat\(auto-fit, minmax\(190px, 1fr\)\)/)
 })
 
-test('task board refreshes while visible and opens full details in an accessible dialog', () => {
-  assert.match(boardSource, /LIVE_REFRESH_MS = 4_000/)
-  assert.match(boardSource, /document\.visibilityState === 'visible'/)
+test('task board refreshes while visible and opens full details in an accessible dialog', async () => {
+  const refreshSource = await readFile(new URL('../src/ui/board-refresh.ts', import.meta.url), 'utf8')
+  assert.match(refreshSource, /setInterval\(poll, 4000\)/)
+  assert.match(refreshSource, /document\.visibilityState === 'visible'/)
+  assert.match(refreshSource, /version === epoch.current/)
   assert.match(boardSource, /aria-haspopup="dialog"/)
   assert.match(boardSource, /eyebrow="TASK DETAIL"/)
   assert.match(boardSource, /function TaskDetail/)

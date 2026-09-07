@@ -22,6 +22,8 @@ import { SkillRepository } from './skills/repository.js'
 import { SkillService } from './skills/service.js'
 import { TaskBoardService } from './tasks/service.js'
 import { createTaskProgressNotifier } from './tasks/progress-notifier.js'
+import { RequirementService } from './requirements/service.js'
+import { RequirementWorker, requirementSummaryPrompt } from './requirements/worker.js'
 import { EphemeralExecutionService } from './execution/service.js'
 import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
@@ -79,6 +81,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const skills = new SkillService(store, new SkillRepository(join(resolved.defaultCwd, 'partner-system', 'skills')))
     await skills.initialize()
     const tasks = new TaskBoardService(store)
+    const requirements = new RequirementService(store)
     const executor = new EphemeralExecutionService(ctx, store, resolved.defaultCwd)
     const interruptedRuns = await executor.reconcileInterruptedRuns()
     if (interruptedRuns > 0) ctx.logger.info(`dsh-partner: reconciled ${interruptedRuns} interrupted execution run(s)`)
@@ -96,9 +99,17 @@ export function apply(context: Context, config: PartnerConfig): void {
       },
     })
     const knowledgeMounts = new CompanionKnowledgeMounts(store, management, () => ctx.get('dshKnowledgeMountManagement'), id => partnerCwd(resolved.defaultCwd, id))
-    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts)
+    const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts, requirements)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const requirementWorker = new RequirementWorker(store, requirements, {
+      summarize: async (item, children, signal) => {
+        const companion = store.snapshot().companions.find(c => c.id === item.ownerCompanionId)
+        if (!companion) throw new Error('需求负责人不存在，请在需求中重新选择')
+        return (await agents.executeTask({ sourceId: `requirement:${item.id}`, companion, prompt: requirementSummaryPrompt(item, children), signal })).output
+      },
+      deliver: item => channels.notifyRequirementResult(item), warn: message => ctx.logger.warn(message),
+    })
     agents.setQuestionAnswerer((agentCtx, route) => channels.attachQuestionAnswerer(agentCtx, route))
     collaboration.setAccessChangeNotifier(id => agents.reloadCompanion(id))
     companions.setSessionProvisioner(id => agents.ensureLocalSessionRecord(id))
@@ -106,7 +117,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     collaboration.setSessionExecutor({ execute: input => agents.executeTask(input) })
     const disposeConcernTool = registerPartnerConcernTool(ctx, store, concerns)
     tasks.setProgressNotifier(createTaskProgressNotifier(
-      task => channels.notifyTaskResult(task),
+      async () => { /* Child task delivery is internal; requirements own channel completion. */ },
       (task, previousStatus) => agents.notifyTaskProgress(task, previousStatus),
       message => ctx.logger.warn(message),
     ))
@@ -125,7 +136,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, collaboration, scheduler, companions, inbox })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -134,9 +145,11 @@ export function apply(context: Context, config: PartnerConfig): void {
     heartbeat.start()
     dailyReview.start()
     scheduler.start()
+    requirementWorker.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
     return async () => {
       collaboration.beginShutdown()
+      requirementWorker.beginShutdown()
       disposeApi?.()
       disposeSessionObserver()
       disposeConcernTool()
@@ -147,6 +160,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       await agents.close()
       await executor.close()
       await collaboration.close()
+      await requirementWorker.close()
     }
   }, 'dsh-partner.runtime')
 }

@@ -1,0 +1,52 @@
+.dsh-partner-requirement-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+.dsh-partner-requirement-toolbar .dsh-partner-board-statuses { margin: 0; flex: 1; }
+.dsh-partner-requirement-toolbar .dsh-partner-board-search { flex: 0 1 300px; }
+.dsh-partner-requirement-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.dsh-partner-requirement-card { min-width: 0; border: 1px solid var(--partner-border); border-radius: 16px; overflow: hidden; background: var(--partner-raised); }
+.dsh-partner-feature-page .dsh-partner-requirement-open { display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 100%; min-height: 186px; padding: 18px; border: 0; border-radius: 0; background: transparent; color: var(--partner-text); text-align: left; box-shadow: none; }
+.dsh-partner-requirement-open:hover, .dsh-partner-requirement-open:focus-visible { background: var(--partner-hover); }
+.dsh-partner-requirement-open > strong { font-size: var(--partner-font-label); line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.dsh-partner-requirement-open > p { margin: 0; min-height: 3em; font-size: var(--partner-font-body); color: var(--partner-text-secondary); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.dsh-partner-requirement-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--partner-font-caption); color: var(--partner-text-secondary); }
+.dsh-partner-requirement-meta > span { border-radius: 6px; padding: 3px 7px; background: var(--partner-control); color: var(--partner-text); }
+.dsh-partner-requirement-meta small { font: inherit; overflow-wrap: anywhere; }
+.dsh-partner-requirement-progress { height: 4px; width: 100%; border-radius: 4px; background: var(--partner-border); overflow: hidden; margin-top: auto; }
+.dsh-partner-requirement-progress > i { display: block; height: 100%; border-radius: inherit; background: var(--partner-text-secondary); }
+.dsh-partner-requirement-card > footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 18px; border-top: 1px solid var(--partner-separator); }
+.dsh-partner-requirement-card > footer > small { color: var(--partner-text-secondary); font-size: var(--partner-font-caption); }
+.dsh-partner-requirement-card > footer > button { border: 0; background: transparent; box-shadow: none; }
+.dsh-partner-requirement-legacy { width: 100%; display: flex; gap: 12px; margin-top: 20px; padding: 14px !important; text-align: left; }
+.dsh-partner-requirement-legacy > span { flex: 1; color: var(--partner-text-secondary); }
+.dsh-partner-requirement-breadcrumb { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 12px; font-size: var(--partner-font-body); }
+.dsh-partner-requirement-breadcrumb > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dsh-partner-requirement-breadcrumb > button, .dsh-partner-requirement-breadcrumb > svg { flex-shrink: 0; }
+.dsh-partner-requirement-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-block: 12px; border-block: 1px solid var(--partner-separator); }
+.dsh-partner-requirement-facts > span { display: grid; gap: 6px; color: var(--partner-text-secondary); font-size: var(--partner-font-caption); }
+.dsh-partner-requirement-facts b { color: var(--partner-text); font-weight: 550; overflow-wrap: anywhere; }
+.dsh-partner-requirement-disclosure { border-top: 1px solid var(--partner-separator); padding-top: 8px; }
+.dsh-partner-requirement-disclosure > summary { display: flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; color: var(--partner-text-secondary); font-size: var(--partner-font-body); list-style: none; }
+.dsh-partner-requirement-disclosure > summary::-webkit-details-marker { display: none; }
+.dsh-partner-requirement-disclosure > summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.dsh-partner-requirement-disclosure[open] > summary::before { transform: rotate(45deg); }
+.dsh-partner-requirement-disclosure > p { color: var(--partner-text-secondary); font-size: var(--partner-font-body); line-height: 1.6; }
+.dsh-partner-requirement-disclosure > label { display: grid; gap: 8px; margin-bottom: 12px; }
+.dsh-partner-requirement-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dsh-partner-requirement-owner { display: grid; gap: 8px; font-size: var(--partner-font-body); }
+.dsh-partner-requirement-detail :is(textarea, select) { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--partner-border); border-radius: 9px; background: var(--partner-control); color: var(--partner-text); font: var(--partner-font-body)/1.5 var(--partner-font-family); }
+.dsh-partner-requirement-detail textarea { resize: vertical; }
+.dsh-partner-feature-page.is-board :is(button, summary, textarea):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 2px; }
+.dsh-partner-feature-page.is-board button:not(:disabled):active { transform: none; }
+.dsh-partner-requirement-detail button.is-primary { background: var(--partner-accent-strong); color: var(--partner-on-accent); border-color: var(--partner-accent-strong); }
+.dsh-partner-requirement-detail button.is-danger { color: var(--partner-danger); }
+.dsh-partner-feature-page.is-board > .dsh-partner-feature-page.is-board { padding: 0; }
+.dsh-partner-requirement-detail > footer { display: flex; justify-content: flex-end; gap: 8px; }
+.dsh-partner-requirement-detail .dsh-partner-task-result { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .dsh-partner-requirement-toolbar { align-items: stretch; }
+  .dsh-partner-requirement-toolbar .dsh-partner-board-statuses { display: flex; }
+  .dsh-partner-requirement-toolbar .dsh-partner-board-search { flex-basis: 100%; }
+  .dsh-partner-requirement-facts { grid-template-columns: 1fr 1fr; }
+  .dsh-partner-requirement-legacy { flex-wrap: wrap; }
+  .dsh-partner-requirement-legacy > span { flex-basis: 100%; }
+  .dsh-partner-requirement-detail button, .dsh-partner-requirement-card button, .dsh-partner-requirement-disclosure summary { min-height: 44px; }
+}

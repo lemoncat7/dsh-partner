@@ -13,6 +13,7 @@ import { channelReplyPartsAfter, channelReplyTextAfter } from '../lib/channels/d
 import { prepareChannelReply } from '../lib/channels/outbound-media.js'
 import { PartnerStore } from '../lib/store.js'
 import { TaskBoardService } from '../lib/tasks/service.js'
+import { RequirementService } from '../lib/requirements/service.js'
 import { assistantTextAfter } from '../lib/execution/agent-support.js'
 
 function encrypt(value, key) {
@@ -180,7 +181,7 @@ test('renders short terminal results directly without internal review handoff', 
   assert.match(blocked.text, /阻塞说明：\n缺少访问权限/)
 })
 
-test('review remains silent and acceptance sends exactly one terminal result to the creator channel', async t => {
+test('child acceptance stays silent and requirement summary sends one terminal result to the creator channel', async t => {
   const root = await mkdtemp(join(tmpdir(), 'partner-channel-terminal-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const store = await PartnerStore.open(join(root, 'state.json'))
@@ -200,15 +201,20 @@ test('review remains silent and acceptance sends exactly one terminal result to 
   assert.equal(delivered.length, 0)
   const done = await board.accept(task.id, actor)
   await Promise.all([channels.notifyTaskResult(done), channels.notifyTaskResult(done)])
+  assert.equal(delivered.length, 0)
+  const requirements = new RequirementService(store)
+  const requirement = requirements.require(done.requirementId)
+  const finished = await requirements.finish(requirement.id, requirement.revision, '完整结论与来源', actor)
+  await Promise.all([channels.notifyRequirementResult(finished), channels.notifyRequirementResult(finished)])
   assert.equal(delivered.length, 1)
   assert.equal(delivered[0].channelId, 'channel')
-  assert.match(delivered[0].reply.text, /看板任务已完成：资料整理/)
+  assert.match(delivered[0].reply.text, /需求已完成：资料整理/)
   assert.match(delivered[0].reply.text, /完整结论与来源/)
   assert.doesNotMatch(delivered[0].reply.text, /内部核验点/)
   const restored = await PartnerStore.open(join(root, 'state.json'))
   const afterRestart = new ChannelManager({}, restored, {}, {}, root)
   afterRestart.sendProactiveReply = async () => assert.fail('must not redeliver after restart')
-  await afterRestart.notifyTaskResult(done)
+  await afterRestart.notifyRequirementResult(finished)
 })
 
 test('separates review handoff and writes long deliverables to a private Markdown file', async t => {

@@ -15,6 +15,8 @@ import type { CompanionService } from '../companions/service.js'
 import type { CompanionManagementService } from '../companions/management.js'
 import type { CompanionKnowledgeMounts } from '../companions/knowledge-mounts.js'
 import { companionManagementTool, COMPANION_MANAGEMENT_PROMPT } from '../companions/management-tool.js'
+import { RequirementService } from '../requirements/service.js'
+import { requirementTool } from '../requirements/tool.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
 const MAX_INLINE_SKILLS = 8
@@ -32,6 +34,7 @@ export class PartnerAgentComposition {
     private readonly companions: CompanionService,
     private readonly management?: CompanionManagementService,
     private readonly knowledgeMounts?: CompanionKnowledgeMounts,
+    private readonly requirements = new RequirementService(store),
   ) {}
 
   async compose(ctx: AgentCompositionContext, companion: Companion): Promise<() => void> {
@@ -56,6 +59,7 @@ export class PartnerAgentComposition {
         register(companionManagementTool(companion.id, this.management, this.knowledgeMounts), 'administration')
       }
       disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
+      disposers.push(ctx.tools.register(requirementTool(companion.id, this.requirements, this.tasks)))
       disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
       if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler), 'schedules')
       const directory = this.collaboration.directoryFor(companion.id)
@@ -70,7 +74,7 @@ export class PartnerAgentComposition {
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
         '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
-        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态反向通知创建者，已提交的后续任务由系统自动接续。执行、重试和验收是内部过程，不向渠道发送中间进展；验收后的最终结果由系统投递。',
+        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态反向通知创建者，已提交的后续任务由系统自动接续。执行、重试和子任务验收都是内部过程，不逐项通知渠道；需求全部任务验收完毕后由负责人汇总，需求完成归档后统一投递。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         `你自己的伙伴 id：${companion.id}。`,
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
@@ -79,7 +83,7 @@ export class PartnerAgentComposition {
       if (inlineSkills.length > 0) disposers.push(ctx.systemPrompt.section({
         name: 'partner-inline-skills', order: -6,
         text: [
-          '以下是已启用且经校验的可信 inline Skill 指令。每次接到需求先对照其用途；明确点名或用途匹配时必须主动应用，不需要用户再说触发词，也无需重复调用 partner_skill load。采用时用一句话说明所用 Skill 与对应产出，后续落实为真实工具操作；不匹配时不要强行套用。',
+          '以下是已启用且经校验的可信 inline Skill 指令。每次接到需求先对照其用途；明确点名或用途匹配时必须主动应用，不需要用户再说触发词，也无需重复调用 partner_skill load。采用时用一句话说明所用 Skill 与对应产出，后续落实为真实工具操作；不匹配时不要强行套用。伙伴 Skill 与原生 skill 工具是不同目录，禁止用原生 skill(name=...) 加载这里的技能；需要读取时使用 partner_skill load。',
           ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
         ].join('\n\n'),
       }))
@@ -186,7 +190,7 @@ function companionTool(companions: CompanionService): ToolDefinition {
 function skillTool(companion: Companion, skills: SkillService, executor: EphemeralExecutionService): ToolDefinition {
   return textTool({
     name: 'partner_skill',
-    description: 'List, load, or execute Skills enabled for this companion. Use load only for trusted inline Skills; execute fork Skills in a temporary session. A Skill never grants tools outside current DSH permissions.',
+    description: 'List, load, or execute Skills enabled for this companion. For an actual work request that may match an authorized companion specialty, proactively apply the enabled task-planning Skill to decide assignment and decomposition, then use partner_task_board and partner_collaborate for real delegation; do not wait for the user to name the Skill or @ a companion. Follow already-injected inline instructions directly; use load only when trusted inline instructions are not yet available, and execute fork Skills in a temporary session. Partner Skills belong to partner_skill, not the native skill tool: never call skill(name="task-planning") for this catalog. A Skill never grants tools outside current DSH permissions.',
     parameters: actionParameters(['list', 'load', 'run'], {
       skillId: { type: 'string', description: 'Installed Skill id.' },
       input: { type: 'string', description: 'Concrete task or arguments for the Skill.' },
@@ -224,9 +228,10 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'List, create, update, comment on, accept or reject board tasks. Assignees and reviewers must be self or authorized companions. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Execution, retries, review and accept are internal; the system delivers final results after acceptance. Accepted dependencies unlock queued tasks automatically.',
-    parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject'], {
+    description: 'Turn requested deliverables into actual work assigned to self or authorized specialist companions; this board is not merely a log to fill after doing everything yourself. When the request matches an authorized companion specialty, proactively apply the enabled task-planning Skill and connect the requested outcome, suitable assignee and board task before carrying out the work; no explicit @ or board request is needed. The Skill defines decomposition and exceptions; merely mentioning companions is not a reason to create tasks. List, create, update, comment on, accept or reject tasks. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Create one requirement via partner_requirements and attach related tasks with requirementId. Child execution, retries, review and accept are internal; only requirement completion sends the final channel summary. Remove permanently deletes a task only on explicit user request, stops its execution and pauses dependents. Accepted dependencies unlock queued tasks automatically.',
+    parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject', 'remove'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
+      requirementId: { type: 'string', description: 'Owning requirement id from partner_requirements. Reuse the same id for all tasks of one deliverable. Omission creates a standalone requirement for compatibility.' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
       assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
@@ -257,6 +262,12 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
         return JSON.stringify({ ...tasks.require(task.id), execution: autoRun ? 'submitted' : 'planning-only', ...(dispatchWarning ? { dispatchWarning } : {}) })
       }
       const taskId = requiredText(input.taskId, 'taskId', 160)
+      const existing = tasks.snapshot().tasks.find(task => task.id === taskId)
+      if (!existing) return JSON.stringify({ taskId, status: 'removed', message: '任务已删除或不存在，停止处理旧任务，不要重建' })
+      if (action === 'remove') {
+        if (existing.creatorCompanionId !== companion.id) throw new Error('只能删除自己创建的任务；删除必须有用户明确要求')
+        await tasks.remove(taskId); return JSON.stringify({ taskId, removed: true })
+      }
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
       if (action === 'accept' || action === 'reject') {
         const task = tasks.require(taskId)
@@ -282,7 +293,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
 function collaborationTool(companion: Companion, store: PartnerStore, collaboration: PartnerCollaborationService): ToolDefinition {
   return textTool({
     name: 'partner_collaborate',
-    description: 'Inspect authorized companion specialties or submit an existing board task to a companion (including yourself). Dependencies may still be pending: the durable queue starts work after accepted prerequisites. Repeated submission to the same assignee returns its pending job. Returns without waiting for execution; progress notifies the creator. Never exposes private transcripts or credentials.',
+    description: 'Connect a work request with authorized companion specialties and real board delegation, not just a contact lookup. Use directory when specialty or authorization information is missing or stale; proactively match the requested deliverable to the authorized directory instead of defaulting to doing it yourself because execution tools are available. Apply the enabled task-planning Skill for assignment, decomposition and exceptions. Create assigned work through partner_task_board, or use delegate for an existing task; do not duplicate already-assigned work. Dependencies may still be pending: the durable queue starts work after accepted prerequisites. Repeated submission to the same assignee returns its pending job. Returns without waiting for execution; progress notifies the creator. Never exposes private transcripts or credentials.',
     parameters: actionParameters(['directory', 'delegate', 'status'], {
       taskId: { type: 'string' }, companion: { type: 'string', description: 'Target companion id or @name.' }, request: { type: 'string' }, delegationId: { type: 'string' },
     }),

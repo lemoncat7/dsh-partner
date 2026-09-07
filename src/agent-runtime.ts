@@ -251,13 +251,15 @@ export class PartnerAgentRuntime {
     const route = selectTaskNotificationRoute(routes, task.creatorSessionId, item => this.isArchived(item))
       ?? await this.createLocalSession(companion.id)
     const agent = await this.ensureAgent(companion, route)
+    const latestTask = this.store.snapshot().tasks.find(item => item.id === task.id)
+    if (!latestTask || latestTask.revision !== task.revision) return
     const isReviewer = task.status === 'review' && task.reviewerCompanionId === companion.id
     const instruction = isReviewer
-      ? '这是伙伴内部验收，不是用户的新消息。执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务，不要向用户播报核验过程或 accept 操作；最终结果由系统直接投递。'
+      ? '这是伙伴内部验收，不是用户的新消息。执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务，不要向用户播报核验过程或 accept 操作；子任务不发送渠道通知，需求整体验收和汇总后由系统统一投递。'
       : task.status === 'review'
-        ? '这是伙伴内部进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，也不要向用户播报中间进度。只在看板中推进必要的协作，最终结果由系统直接投递。'
+        ? '这是伙伴内部进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，也不要向用户播报中间进度。只在看板中推进必要的协作，子任务不发送渠道通知，需求整体验收和汇总后由系统统一投递。'
         : task.status === 'done'
-          ? '这是你创建并分配的看板任务终态事件。不要重新执行已完成的工作。请检查依赖它的后续任务是否解锁，需要时继续在看板上分配。对用户的终态结果由系统直接投递，不要只改写成“已完成”或进度摘要。'
+          ? '这是你创建并分配的看板任务终态事件。不要重新执行已完成的工作。请检查依赖它的后续任务是否解锁，需要时继续在看板上分配。不要逐项向渠道通知；全部子任务验收完成后，系统会单独请求需求负责人汇总整个需求。'
           : '这是你创建并分配的看板任务受阻事件。请保留已有产出、检查是否能调整分工或解锁依赖；需要用户介入时，明确说明阻塞原因与所需动作。'
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: [
@@ -273,18 +275,21 @@ export class PartnerAgentRuntime {
     }))
   }
 
-  async executeTask(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string }): Promise<{ run: { id: string }; output: string }> {
+  async executeTask(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string; signal?: AbortSignal }): Promise<{ run: { id: string }; output: string }> {
+    input.signal?.throwIfAborted()
     const route = await this.createLocalSession(input.companion.id)
     const key = route.sessionId
     const previous = this.taskQueues.get(key) ?? Promise.resolve()
     let output = ''
     const current = previous.catch(() => {}).then(async () => {
+      input.signal?.throwIfAborted()
       const agent = await this.ensureAgent(input.companion, route)
       if (agent.status !== 'idle') await agent.whenIdle()
+      input.signal?.throwIfAborted()
       const startSeq = agent.session.seq
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: input.prompt }],
-        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
+        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
       }))
       let timedOut = false
       const timer = setTimeout(() => {
@@ -292,7 +297,10 @@ export class PartnerAgentRuntime {
         agent.cancel({ kind: 'hook', reason: 'partner task execution timed out' })
       }, PARTNER_TASK_TIMEOUT_MS)
       timer.unref?.()
-      try { await agent.whenIdle() } finally { clearTimeout(timer) }
+      const cancel = (): void => { agent.cancel({ kind: 'hook', reason: 'partner task removed' }) }
+      input.signal?.addEventListener('abort', cancel, { once: true })
+      if (input.signal?.aborted) cancel()
+      try { await agent.whenIdle(); input.signal?.throwIfAborted() } finally { clearTimeout(timer); input.signal?.removeEventListener('abort', cancel) }
       if (timedOut) throw new Error('伙伴看板任务执行超时')
       output = assistantTextAfter(agent, startSeq).trim()
       if (!output) throw new Error('伙伴会话没有产生任务结果')

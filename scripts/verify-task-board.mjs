@@ -7,10 +7,12 @@ import { build } from 'esbuild'
 const {chromium}=await import(process.env.PARTNER_PLAYWRIGHT_MODULE?pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href:'playwright-core')
 const root=fileURLToPath(new URL('../',import.meta.url))
 const bundle=await build({stdin:{resolveDir:root,loader:'tsx',contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {TaskBoardPanel} from './src/ui/task-board-panel';createRoot(document.getElementById('app')).render(<main className="dsh-partner-workspace"><div className="dsh-partner-content"><TaskBoardPanel/></div></main>);`},bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'}})
-const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css'].map(path=>readFile(new URL('../'+path,import.meta.url),'utf8')))).join('\n')
+const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css','src/ui/requirement-board.css'].map(path=>readFile(new URL('../'+path,import.meta.url),'utf8')))).join('\n')
 const statuses=['backlog','ready','doing','review','blocked','done']
 const tasks=statuses.flatMap((status,s)=>Array.from({length:10},(_,i)=>({id:`task-${s}-${i}`,title:`阶段任务 ${s}-${i} · 核验来源并整理交付物`,description:'输入来源、可验收文档与完成条件。',status,priority:'normal',assigneeCompanionId:'worker',autoRun:status==='ready',dependencyTaskIds:[],skillIds:[],createdBy:'user',revision:1,createdAt:1,updatedAt:1})))
 const directory=[{id:'worker',name:'资料伙伴',role:'资料收集',description:'收集与核验公开信息',capabilities:[],enabledSkills:[],availability:'available'}]
+const requirements=[{id:'requirement-fixture',title:'完整交付需求',description:'按专业分工，最终统一汇总。',status:'planning',revision:1,createdAt:1,updatedAt:1,ownerCompanionId:'worker'}, {id:'archive-fixture',title:'已归档需求',description:'历史交付',status:'done',revision:1,createdAt:1,updatedAt:1,summary:'完整成果已经交付。',results:[{id:'result',title:'交付文档',resultSummary:'实际产出'}]}]
+for(const task of tasks) task.requirementId='requirement-fixture'
 const server=createServer((req,res)=>{res.setHeader('content-type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].contents:'<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#eceff1}body[data-ds-dark-theme]{background:#202427}</style><div id="app"></div><script src="/app.js"></script>')})
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
@@ -20,12 +22,25 @@ try{
  await page.route('**/partner-local/v1/**',async route=>{
   const req=route.request()
   if(req.method()==='POST'){submitted=req.postDataJSON();await route.fulfill({json:{...submitted,id:'created'}});return}
-  await route.fulfill({json:req.url().endsWith('/tasks')?{tasks,activities:[]}:{companions:directory,delegations:[]}})
+  await route.fulfill({json:req.url().endsWith('/tasks')?{tasks,activities:[],requirements}:{companions:directory,delegations:[]}})
  })
  for(const dark of [false,true])for(const width of [375,844,1440]){
   await page.setViewportSize({width,height:width===844?500:900})
   await page.goto(`http://127.0.0.1:${server.address().port}`);await page.addStyleTag({content:styles})
   await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
+  await page.locator('.dsh-partner-requirement-card').first().waitFor()
+  await page.screenshot({path:`/tmp/partner-requirements-${width}-${dark?'dark':'light'}.png`})
+  await page.getByRole('button',{name:/已归档/}).click()
+  await page.locator('.dsh-partner-requirement-open').click()
+  await page.getByRole('dialog').waitFor()
+  assert.match(await page.getByRole('dialog').textContent(),/完整成果已经交付/)
+  await page.keyboard.press('Escape')
+  await page.locator('.dsh-partner-requirement-toolbar').getByRole('button',{name:/进行中/}).click()
+  await page.getByRole('button',{name:'新需求',exact:true}).click()
+  await page.getByRole('dialog').waitFor()
+  assert.equal(await page.getByRole('dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false)
+  await page.keyboard.press('Escape')
+  await page.locator('.dsh-partner-requirement-open').first().click()
   await page.locator('.dsh-partner-task-card').first().waitFor()
   const ready=page.locator('.dsh-partner-board > section[data-status=ready]')
   assert.equal(await ready.locator('.dsh-partner-task-card').count(),6)
@@ -59,5 +74,6 @@ try{
  await form.getByRole('button',{name:'创建任务',exact:true}).click()
  await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(submitted.autoRun,false)
  assert.deepEqual(errors,[])
- console.log('Task board: 60 tasks, six responsive/theme cases, six cards per stage, horizontal layout, expand/collapse, dialogs, filters and explicit submission mode verified.')
+ assert.equal(submitted.requirementId,'requirement-fixture')
+ console.log('Requirement board: overview/archive dialogs, 60 grouped tasks, six responsive/theme cases, progressive stage grids, filters and explicit submission mode verified.')
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

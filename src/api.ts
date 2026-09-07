@@ -14,6 +14,7 @@ import { DailyReviewScheduler } from './daily-review.js'
 import { PartnerConcernStore } from './concern-store.js'
 import type { SkillService } from './skills/service.js'
 import type { TaskBoardService } from './tasks/service.js'
+import type { RequirementService } from './requirements/service.js'
 import type { PartnerCollaborationService } from './collaboration/service.js'
 import type { PartnerSchedulerService } from './scheduler/service.js'
 import type { CompanionService } from './companions/service.js'
@@ -39,6 +40,7 @@ interface ApiRuntime {
   dailyReview: DailyReviewScheduler
   skills: SkillService
   tasks: TaskBoardService
+  requirements?: RequirementService
   collaboration: PartnerCollaborationService
   scheduler: PartnerSchedulerService
   companions: CompanionService

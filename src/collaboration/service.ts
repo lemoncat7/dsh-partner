@@ -15,13 +15,14 @@ const RECOVERY_TICK_MS = 5_000
 const RECOVERY_CONCURRENCY = 3
 
 interface PartnerSessionExecutor {
-  execute(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string }): Promise<{ run: { id: string }; output: string }>
+  execute(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string; signal?: AbortSignal }): Promise<{ run: { id: string }; output: string }>
 }
 
 /** Owns durable partner work orchestration. Pending records are safe to reclaim after a process restart. */
 export class PartnerCollaborationService {
   private sessionExecutor?: PartnerSessionExecutor
   private readonly active = new Map<string, Promise<void>>()
+  private readonly cancellations = new Map<string, { taskId: string; controller: AbortController }>()
   private timer: NodeJS.Timeout | undefined
   private started = false
   private closing = false
@@ -33,7 +34,9 @@ export class PartnerCollaborationService {
     private readonly skills: SkillService,
     private readonly tasks: TaskBoardService,
     private readonly executor: EphemeralExecutionService,
-  ) {}
+  ) { tasks.setRemovalNotifier(ids => {
+    for (const entry of this.cancellations.values()) if (ids.includes(entry.taskId)) entry.controller.abort(new Error('任务已删除'))
+  }) }
 
   setSessionExecutor(executor: PartnerSessionExecutor): void {
     this.sessionExecutor = executor
@@ -293,11 +296,13 @@ export class PartnerCollaborationService {
 
   private launch(delegation: PartnerDelegation): void {
     if (this.active.has(delegation.id)) return
-    const promise = this.executeClaimed(delegation).catch(() => {}).finally(() => { this.active.delete(delegation.id) })
+    const controller = new AbortController()
+    this.cancellations.set(delegation.id, { taskId: delegation.taskId, controller })
+    const promise = this.executeClaimed(delegation, controller.signal).catch(() => {}).finally(() => { this.active.delete(delegation.id); this.cancellations.delete(delegation.id) })
     this.active.set(delegation.id, promise)
   }
 
-  private async executeClaimed(delegation: PartnerDelegation): Promise<void> {
+  private async executeClaimed(delegation: PartnerDelegation, signal: AbortSignal): Promise<void> {
     try {
       const task = this.tasks.require(delegation.taskId)
       const kind = delegationKind(delegation)
@@ -314,12 +319,13 @@ export class PartnerCollaborationService {
       const result = this.sessionExecutor
         ? await this.sessionExecutor.execute({
             sourceId: kind === 'review' ? `review:${task.id}:${delegation.id}` : delegation.id,
-            companion: to, prompt, ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}),
+            companion: to, prompt, signal, ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}),
           })
         : await this.executor.execute({
-            kind: kind === 'review' ? 'review' : 'delegation', sourceId: delegation.id, companion: to, prompt,
+            kind: kind === 'review' ? 'review' : 'delegation', sourceId: delegation.id, companion: to, prompt, signal,
             ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}), destroyAfterRun: true,
           })
+      if (signal.aborted || !this.store.snapshot().delegations.some(d => d.id === delegation.id && d.status === 'running')) return
       const latest = this.tasks.require(task.id)
       if (kind === 'review') {
         if (latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧验收结果`); return }
@@ -330,6 +336,7 @@ export class PartnerCollaborationService {
       }
       await this.complete(delegation.id, result.run.id, result.output)
     } catch (error) {
+      if (signal.aborted || !this.store.snapshot().tasks.some(t => t.id === delegation.taskId) || !this.store.snapshot().delegations.some(d => d.id === delegation.id)) return
       if (this.closing) await this.retry(delegation, error, true)
       else if (canRetryDelegation(error, delegation.attempts ?? 1)) await this.retry(delegation, error, false)
       else await this.fail(delegation, error)
@@ -364,7 +371,8 @@ export class PartnerCollaborationService {
   private async fail(delegation: PartnerDelegation, error: unknown): Promise<void> {
     const reason = errorMessage(error)
     await this.mutate(delegation.id, item => { item.status = 'failed'; item.completedAt = Date.now(); item.error = reason; delete item.nextAttemptAt })
-    const current = this.tasks.require(delegation.taskId)
+    const current = this.store.snapshot().tasks.find(t => t.id === delegation.taskId)
+    if (!current) return
     if (delegationKind(delegation) === 'task') {
       if (current.status === 'doing') await this.tasks.failExecution(current.id, reason, { kind: 'companion', companionId: delegation.toCompanionId }).catch(() => {})
     } else if (current.status === 'review') {

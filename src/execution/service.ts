@@ -25,6 +25,7 @@ type ExecutionContext = Context & {
 }
 
 export interface EphemeralExecutionRequest {
+  signal?: AbortSignal
   kind: ExecutionKind
   sourceId: string
   companion: Companion
@@ -76,6 +77,7 @@ export class EphemeralExecutionService {
   }
 
   private async run(request: EphemeralExecutionRequest): Promise<EphemeralExecutionResult> {
+    request.signal?.throwIfAborted()
     if (this.closed) throw new Error('Ephemeral execution service is closed')
     const sessionId = `partner-run-${randomUUID()}`
     const runId = `run-${randomUUID()}`
@@ -120,13 +122,17 @@ export class EphemeralExecutionService {
         await workspace.attachSession(sessionId as SessionId)
       }
       const startSeq = handle.agent.session.seq
+      request.signal?.throwIfAborted()
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: request.prompt }],
         source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: executionSummary(request.kind) },
       }))
       const timer = setTimeout(() => { timedOut = true; handle?.agent.cancel({ kind: 'hook', reason: 'partner temporary execution timed out' }) }, timeoutMs)
       timer.unref?.()
-      try { await handle.agent.whenIdle() } finally { clearTimeout(timer) }
+      const cancel = (): void => { handle?.agent.cancel({ kind: 'hook', reason: 'partner task removed' }) }
+      request.signal?.addEventListener('abort', cancel, { once: true })
+      if (request.signal?.aborted) cancel()
+      try { await handle.agent.whenIdle(); request.signal?.throwIfAborted() } finally { clearTimeout(timer); request.signal?.removeEventListener('abort', cancel) }
       output = assistantTextAfter(handle.agent, startSeq)
       if (timedOut) { status = 'timed-out'; error = 'Temporary execution exceeded its time limit' }
       else if (!output) { status = 'failed'; error = 'Temporary execution produced no text result' }

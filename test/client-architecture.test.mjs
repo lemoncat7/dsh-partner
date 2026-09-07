@@ -9,7 +9,7 @@ const [entry, controller, shared, skills, board, schedules, companionCreate, wor
   read('../src/client-controller.tsx'),
   read('../src/ui/workspace-components.tsx'),
   read('../src/ui/skills-panel.tsx'),
-  read('../src/ui/task-board-panel.tsx'),
+  read('../src/ui/requirement-tasks-panel.tsx'),
   read('../src/ui/schedule-panel.tsx'),
   read('../src/ui/companion-create.tsx'),
   read('../src/ui/workspace-ui.css'),

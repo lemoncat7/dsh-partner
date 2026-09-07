@@ -71,13 +71,15 @@ export interface SkillMarketNetworkTestView { ok: true; latencyMs: number; sourc
 
 export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
 export interface BoardTaskView {
+  requirementId?: string
   autoRun?: boolean
   id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'
   assigneeCompanionId?: string; reviewerCompanionId?: string; createdBy: 'user' | 'companion' | 'schedule'; revision: number; createdAt: number; updatedAt: number; completedAt?: number
   skillIds: string[]; dependencyTaskIds: string[]; resultAbstract?: string; resultSummary?: string; reviewHandoff?: string; reviewSummary?: string; dueAt?: number
 }
 export interface TaskActivityView { id: string; taskId: string; actor: 'user' | 'companion' | 'schedule' | 'system'; actorCompanionId?: string; kind: string; message: string; at: number }
-export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[] }
+export type { BoardRequirement as RequirementView } from './requirements/domain.js'
+export interface TaskBoardView { tasks: BoardTaskView[]; activities: TaskActivityView[]; requirements?: import('./requirements/domain.js').BoardRequirement[] }
 export interface PartnerDirectoryEntryView { id: string; name: string; role: string; description: string; capabilities: string[]; enabledSkills: Array<{ id: string; name: string }>; availability: 'available' | 'busy' | 'offline' }
 export interface PartnerDelegationView {
   id: string; kind?: 'task' | 'review'; taskId: string; toCompanionId: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled'

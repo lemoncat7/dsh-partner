@@ -31,7 +31,7 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
   const keyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === 'Escape') { event.preventDefault(); close(); return }
     if (event.key !== 'Tab') return
-    const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])]
+    const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])') ?? [])].filter(node => node.getClientRects().length > 0)
     if (focusable.length === 0) return
     const first = focusable[0]; const last = focusable.at(-1)
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
