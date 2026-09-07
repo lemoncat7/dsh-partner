@@ -89,6 +89,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && method === 'PUT' && segments.length === 2) {
       mutation(req)
+      if (runtime.agents.isCompanionBusy(id)) throw httpError(409, '伙伴正在执行，请等待当前回复结束后再修改能力')
       const previous = requiredCompanion(runtime.store, id)
       const draft = normalizeCompanionDraft((await readObject(req)).companion)
       const next: Companion = { ...draft, automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Date.now() }

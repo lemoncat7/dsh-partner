@@ -12,6 +12,14 @@ client -> HTTP feature routers -> application services -> repositories/store
 
 ## Module boundaries
 
+Capability saves recompose already-live companion sessions immediately after
+releasing the old composition. Browser-owned agents retain their session and
+receive fresh scoped identity/tools; inactive sessions are not eagerly opened.
+Busy companions reject configuration changes before teardown. Revocation removes
+the tool and management services also recheck live authorization on every call.
+Browser-owned preset/model changes still report that reopening is required;
+this is separate from refreshing scoped companion tools.
+
 - `core/`: shared validation, identifiers and bounded collections. It contains
   no partner feature policy.
 - `execution/`: the only owner of short-lived DSH agent sessions. Skill forks,

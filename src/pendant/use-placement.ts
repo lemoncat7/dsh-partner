@@ -59,8 +59,9 @@ export function usePendantPlacement(root: RefObject<HTMLElement>, handle: Mutabl
     handlers.current = {
       down(event) {
         if (!event.isPrimary || event.button !== 0 || drag) return
-        event.preventDefault(); const box = element.getBoundingClientRect()
-        drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: box.left, top: box.top, button: event.currentTarget }
+        event.preventDefault()
+        // CSS left/top are containing-block coordinates, not viewport pixels.
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: element.offsetLeft, top: element.offsetTop, button: event.currentTarget }
         event.currentTarget.setPointerCapture(event.pointerId)
       },
       move(event) {
@@ -72,8 +73,8 @@ export function usePendantPlacement(root: RefObject<HTMLElement>, handle: Mutabl
       key(event) {
         const step = event.shiftKey ? 32 : 12, delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]
         if (!delta) return
-        event.preventDefault(); const box = element.getBoundingClientRect()
-        place({ x: box.left + delta[0]!, y: box.top + delta[1]! }); persist()
+        event.preventDefault()
+        place({ x: element.offsetLeft + delta[0]!, y: element.offsetTop + delta[1]! }); persist()
       },
     }
     const resize = (): void => { finish(); restore() }

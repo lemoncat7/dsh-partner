@@ -9,6 +9,7 @@ import type { PendantSettings } from './settings.js'
 import { loadCardImage } from './card-image.js'
 import { createPendantFrameLoop } from './frame-loop.js'
 import { createBadgeFaceMaterial, BADGE_LIGHTING } from './surface.js'
+import { measureFixedLayerOrigin } from './coordinates.js'
 
 export interface BadgeMessage { id: string; count: number; name: string; label: string }
 export interface LanyardHandle { setMessage(message?: BadgeMessage): void; setAppearance(settings: PendantSettings): void; relayout(): void; destroy(): void }
@@ -76,6 +77,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   let unread = 0, messageIdentity = ''
   let artSource: string | undefined, artRevision = 0
   let home = canvas.parentElement!.getBoundingClientRect()
+  let layerOrigin = { left: 0, top: 0 }
   let gesture: { id: number; x: number; y: number; lastX: number; lastY: number; lastAt: number; moved: boolean; offset: THREE.Vector3; rotation: THREE.Quaternion; target: THREE.Vector3; velocity: THREE.Vector3; spin: THREE.Vector3 } | undefined
   const reduced = matchMedia('(prefers-reduced-motion: reduce)')
   const toWorld = (x: number, y: number): THREE.Vector3 => {
@@ -88,8 +90,10 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     card.quaternion.copy(badge.rotation())
     canvas.dataset.facing = String(1 - 2 * (card.quaternion.x ** 2 + card.quaternion.y ** 2))
     const x = home.width / 2 + position.x * scale, y = home.height / 2 + (1.6 - position.y) * scale
-    canvas.style.transform = `translate3d(${home.left + x - canvasSize / 2}px, ${home.top + y - canvasSize / 2}px, 0)`
-    strap.paint(bodies.map(body => body.translation()), home.left + home.width / 2, home.top + home.height / 2 + 1.6 * scale, scale)
+    canvas.style.transform = `translate3d(${home.left + x - canvasSize / 2 - layerOrigin.left}px, ${home.top + y - canvasSize / 2 - layerOrigin.top}px, 0)`
+    // Canvas and SVG are fixed siblings with left/top = 0, hence share this
+    // containing-block origin. Hit target and hook stay in root-local pixels.
+    strap.paint(bodies.map(body => body.translation()), home.left + home.width / 2 - layerOrigin.left, home.top + home.height / 2 + 1.6 * scale - layerOrigin.top, scale)
     renderer.render(scene, camera)
     euler.setFromQuaternion(card.quaternion)
     hit.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${-euler.z}rad)`
@@ -176,6 +180,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const layout = (): void => {
     home = canvas.parentElement!.getBoundingClientRect()
     if (home.width <= 0 || home.height <= 0) return
+    layerOrigin = measureFixedLayerOrigin(canvas)
     // Preserve the old resting size, without the old perspective projection.
     scale = home.height / (20 * Math.tan(Math.PI / 12))
     const nextSize = Math.ceil(scale * cardViewSize)
@@ -187,7 +192,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     strap.resize(scale)
   }
   const resize = (): void => { layout(); wake() }
-  const hide = (): void => { end(); if (document.hidden) { noticeMotion.cancel(); sheen.clear(); loop.stop(); accumulator = 0 } else wake() }
+  const hide = (): void => { end(); if (document.hidden) { noticeMotion.cancel(); sheen.clear(); loop.stop(); accumulator = 0 } else resize() }
   const blur = (): void => end()
   const lost = (event: Event): void => { event.preventDefault(); options.onFailure() }
   const observer = new ResizeObserver(resize); observer.observe(canvas.parentElement!)

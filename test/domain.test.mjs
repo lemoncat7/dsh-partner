@@ -68,7 +68,7 @@ test('preserves and renews isolated companion sessions correctly', async () => {
     const companion = store.snapshot().companions[0]
     const route = { id: 'route-1', kind: 'channel', channelId: 'weixin-1', userId: 'user-1', companionId: companion.id, sessionId: 'session-1', cwd: '/home/node/partners/a', lastMessageAt: 1 }
     await store.update(state => state.sessions.push(route))
-    await new PartnerAgentRuntime({}, store, '/home/node').reloadCompanion(companion.id)
+    await new PartnerAgentRuntime({ agents: { get: () => undefined } }, store, '/home/node').reloadCompanion(companion.id)
     assert.equal(store.snapshot().sessions[0]?.sessionId, 'session-1')
     assert.equal(canReuseSession(route, companion.id, []), true)
     assert.equal(canReuseSession(route, companion.id, ['session-1']), false)
@@ -171,7 +171,9 @@ test('recomposes one recovered partner agent exactly once and releases its scope
     assert.deepEqual([...sections].sort(), ['partner-identity', 'partner-tool-routing'])
     await runtime.reloadCompanion(companion.id)
     assert.equal(composerDisposals, 1)
-    assert.equal(sections.size, 0)
+    assert.deepEqual([...sections].sort(), ['partner-identity', 'partner-tool-routing'])
+    assert.equal(maintenanceRuns, 2)
+    assert.equal(composerRuns, 2)
     await runtime.prepareSession(route.id)
     assert.equal(maintenanceRuns, 2)
     assert.equal(composerRuns, 2)

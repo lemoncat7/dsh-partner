@@ -491,15 +491,28 @@ export class PartnerAgentRuntime {
   }
 
   async reloadCompanion(companionId: string): Promise<void> {
+    if (this.isCompanionBusy(companionId)) throw new Error('伙伴正在执行，请等待当前回复结束后再修改能力')
+    const activeRoutes = this.store.snapshot().sessions.filter(route => route.companionId === companionId
+      && (this.handles.has(route.sessionId) || this.ctx.agents.get(route.sessionId as SessionId) !== undefined))
     await this.releaseCompanion(companionId)
+    // Releasing a restored composition does not close the browser-owned Agent.
+    // Recompose it now: staying in the same conversation must not leave it with
+    // no partner tools until the user happens to click "open session" again.
+    for (const route of activeRoutes) {
+      const state = this.store.snapshot()
+      const companion = state.companions.find(item => item.id === companionId)
+      const currentRoute = state.sessions.find(item => item.id === route.id && item.companionId === companionId)
+      if (companion && currentRoute) await this.ensureAgent(companion, currentRoute)
+    }
   }
 
   async reloadManagedCompanion(companionId: string): Promise<void> {
+    const externallyOwned = this.store.snapshot().sessions.some(route => route.companionId === companionId
+      && !this.handles.has(route.sessionId) && this.ctx.agents.get(route.sessionId as SessionId) !== undefined)
     await this.reloadCompanion(companionId)
     // Browser-owned handles cannot be disposed by this plugin. In particular,
     // their preset/model must not be reported as hot-reloaded successfully.
-    if (this.store.snapshot().sessions.some(route => route.companionId === companionId
-      && this.ctx.agents.get(route.sessionId as SessionId) !== undefined)) {
+    if (externallyOwned) {
       throw new Error('目标伙伴还有由 DSH 管理的活动会话，请重新打开会话使配置生效')
     }
   }
