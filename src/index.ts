@@ -33,6 +33,8 @@ import { CompanionManagementService } from './companions/management.js'
 import { CompanionKnowledgeMounts } from './companions/knowledge-mounts.js'
 import { PartnerInboxStore } from './notifications/store.js'
 import { PartnerNoticeService } from './notifications/service.js'
+import { AttachmentDeliveryService } from './attachments/service.js'
+import { attachmentTool } from './attachments/tool.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -102,6 +104,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts, requirements)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const deliveries = await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
+    ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
+    composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     const requirementWorker = new RequirementWorker(store, requirements, {
       summarize: async (item, children, signal, stage) => {
         const companion = store.snapshot().companions.find(c => c.id === item.ownerCompanionId)
@@ -137,7 +142,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

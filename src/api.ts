@@ -20,6 +20,8 @@ import type { PartnerSchedulerService } from './scheduler/service.js'
 import type { CompanionService } from './companions/service.js'
 import { dispatchPartnerWorkspaceApi } from './api/features/workspace-api.js'
 import { dispatchPendantApi } from './api/features/pendant-api.js'
+import type { AttachmentDeliveryService } from './attachments/service.js'
+import { dispatchAttachmentsApi } from './api/features/attachments-api.js'
 import type { PartnerInboxStore } from './notifications/store.js'
 import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson } from './api/http.js'
 
@@ -45,6 +47,7 @@ interface ApiRuntime {
   scheduler: PartnerSchedulerService
   companions: CompanionService
   inbox: PartnerInboxStore
+  deliveries?: AttachmentDeliveryService
 }
 
 export function registerPartnerApi(webServer: WebServerLike, prefix: string, runtime: ApiRuntime): () => void {
@@ -66,6 +69,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const method = req.method ?? 'GET'
   if (segments[0] === 'companions' && segments[1] && runtime.store.isCompanionRemoving(segments[1]) && !(method === 'DELETE' && segments.length === 2)) throw httpError(409, '伙伴正在删除，请稍后刷新')
   if (await dispatchPendantApi(req, res, segments, runtime.inbox)) return
+  if (runtime.deliveries && await dispatchAttachmentsApi(req,res,segments,runtime.deliveries,runtime.store)) return
   if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 14 })
   if (method === 'GET' && segments[0] === 'models' && segments.length === 1) {
     const providers = await Promise.all(runtime.ctx.llm.listProviders().map(async provider => ({

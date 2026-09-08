@@ -131,7 +131,7 @@ test('distinct user turns keep their own finals, and internal review attachments
   assert.equal(result.referenceTexts.some(text => text.includes('private.md')), false)
 })
 
-test('sandbox references send verified files without leaking the virtual URL or progress prose', async t => {
+test('Markdown and progress references never implicitly send files', async t => {
   const root = await mkdtemp(join(tmpdir(), 'partner-sandbox-media-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'generated'))
@@ -139,13 +139,12 @@ test('sandbox references send verified files without leaking the virtual URL or 
   await writeFile(path, 'png')
   const relativeLink = '[图片](sandbox:generated/%E7%BB%93%E6%9E%9C%20%E5%9B%BE.png)'
   const reply = await prepareChannelReply({ text: `最终结论。\n${relativeLink}`, referenceTexts: [`我准备发图 ${relativeLink}`, `[重复](<sandbox:${path}>)`] }, root)
-  assert.equal(reply.attachments.length, 1)
-  assert.equal(reply.attachments[0].path, path)
-  assert.match(reply.text, /附件：结果 图.png/)
+  assert.equal(reply.attachments.length, 0)
+  assert.match(reply.text, /partner_send_attachment/)
   assert.doesNotMatch(reply.text, /sandbox:|准备发图/)
   const onlyProgressImage = await prepareChannelReply({ text: '最终结论', referenceTexts: [relativeLink] }, root)
   assert.equal(onlyProgressImage.text, '最终结论')
-  assert.equal(onlyProgressImage.attachments.length, 1)
+  assert.equal(onlyProgressImage.attachments.length, 0)
 })
 
 test('missing, malformed and escaping sandbox references fail visibly without guessing or aborting the answer', async t => {

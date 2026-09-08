@@ -79,20 +79,17 @@ export async function extractOutboundAttachments(text: string, cwd: string): Pro
 }
 
 /** Channel projection only; never rewrites the conversation or guesses virtual paths. */
-export async function prepareChannelReply(parts: ChannelReplyParts, cwd: string): Promise<PartnerReply> {
-  // Final references have priority over progress-only references under the file cap.
-  const resolved = await resolveReferences([parts.text, ...parts.referenceTexts.slice().reverse()], cwd)
-  const attachments = [...new Set(resolved.values())]
+export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string): Promise<PartnerReply> {
+  // A Markdown mention is not delivery intent. Only the explicit tool sends
+  // conversational attachments; backend requirement reports have their own flow.
   let missingSandbox = false
   const label = (raw: string, original: string): string => {
-    const attachment = resolved.get(raw)
-    if (attachment) return `附件：${attachment.name}`
     if (/^sandbox:/i.test(raw)) { missingSandbox = true; return '附件不可用' }
     return original
   }
   let text = parts.text.replace(LINK, (all, angle: string | undefined, plain: string | undefined) => label(angle ?? plain ?? '', all))
   text = text.replace(SANDBOX, raw => label(raw, raw))
-  if (missingSandbox) text += '\n\n有附件引用无法对应当前伙伴目录内的真实文件，未发送该附件。请让伙伴核对生成工具返回的实际路径；sandbox 地址不能直接在渠道打开。'
-  if (!text.trim()) text = attachments.length ? '本轮附件如下。' : '本轮未生成可发送的最终答复，请重试或在会话中查看执行状态。'
-  return { text: text.trim(), attachments }
+  if (missingSandbox) text += '\n\n这里只提供了沙箱引用，未发送该附件。请让伙伴使用 partner_send_attachment 交付真实文件；sandbox 地址不能直接在渠道打开。'
+  if (!text.trim()) text = '本轮未生成可发送的最终答复，请重试或在会话中查看执行状态。'
+  return { text: text.trim(), attachments: [] }
 }

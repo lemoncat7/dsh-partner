@@ -12,7 +12,7 @@ import type { AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-question
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
-import type { PartnerReply } from '../channel-message.js'
+import type { PartnerReply, PartnerOutboundAttachment } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
@@ -131,6 +131,16 @@ export class ChannelManager {
 
   async sendProactive(channelId: string, userId: string, text: string): Promise<void> {
     await this.sendProactiveReply(channelId, userId, { text, attachments: [] })
+  }
+
+  async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal): Promise<void> {
+    const route=this.store.snapshot().sessions.find(s=>s.sessionId===sessionId)
+    if(!route||route.kind==='local')throw new Error('当前会话没有绑定渠道')
+    const channel=requiredChannel(this.store,route.channelId)
+    if(!channel.enabled)throw new Error('渠道已停用')
+    if(this.store.snapshot().pairings.find(p=>p.channelId===route.channelId&&p.userId===route.userId)?.status!=='approved')throw new Error('渠道联系人尚未批准')
+    const credential=await this.credentials.read(route.channelId)
+    await new WeixinApi(credential.baseUrl,credential.botToken).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
   }
 
   async notifyTaskResult(task: BoardTask): Promise<void> {

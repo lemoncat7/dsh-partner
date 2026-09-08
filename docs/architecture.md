@@ -246,6 +246,15 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - `ui/board-refresh.ts` 合并刷新并用版本号丢弃旧响应，页面隐藏暂停轮询；进入需求后停止后台总览轮询。需求列表分批展示，任务阶段只展示非空阶段，避免堆叠空列。
 - `test/requirements.test.mjs` 覆盖范围确认、归档、权限、并发删除、执行取消、持久化重试；`test/channel-media.test.mjs` 验证子任务静默与需求最终通知。
 
+## 明确附件交付
+
+- 每个伙伴作用域注册 `partner_send_attachment`，由伙伴明确指定 `path`，而非自动扫描生成工具或 Markdown 引用。会话普通回复不再通过链接隐式发送附件；需求汇总的既有文档投递流程保持独立。
+- `attachments/service.ts` 校验当前会话目录内的真实文件（包括 realpath/符号链接边界、支持格式、64 MB 上限），保存只读语义的内容快照和 SQLite 交付回执。文件变化时拒绝提交；来源文件移动或删除后仍可按 `deliveryId` 重试。存储位于状态文件同级 `attachment-deliveries/`，权限 0700/0600，累计记录容量上限 512 MB，满后拒绝新交付，不自动删掉仍被会话引用的文件。
+- `attachments/tool.ts` 通过 DSH `deferContext` 返回带来源的附件消息，图片使用原生 `attachments.saveImage` 持久化引用，文档使用已认证伙伴 API 下的下载链接。嵌套 `run_code` 沿用 DSH 的 deferred context 协议，不依赖模型复述 Markdown。`api/features/attachments-api.ts` 只接受交付 ID，核验完整性后强制 attachment 下载、nosniff/private/no-store，不接受任意文件路径、不提供匿名分享。
+- 直接会话仅向自身绑定且已批准的渠道交付；内部看板执行、验收与汇总不逐项外发。服务复用已有微信上传协议，回执区分 sent/failed/none；相同会话同一用户输入下相同文件内容幂等，已确认成功的交付重试不重复发。网络成功但确认丢失或进程恰在外部发送与本地落盘间退出时仍可能重复，不能承诺跨微信 exactly-once。不自动重生成或无限重试。
+- 不自动下载任意 URL、不读取其他伙伴的私有目录、不扫描中间产物。远端文件需由已有授权工具先下载到当前会话目录；无效路径明确报错。伙伴删除后下载入口拒绝其交付，文件保留规则与管理清理应另行明确。
+- 回归：`test/attachment-delivery.test.mjs` 覆盖快照、重启回执、发送失败重试、成功去重、原生图片内容、内部渠道静默、跨伙伴拒绝、路径/符号链接边界、下载响应；`test/channel-media.test.mjs` 确认普通 Markdown 不再隐式交付。
+
 ## 主界面挂饰与消息
 
 - `pendant/frame-loop.ts` 独立负责可选 24/30/60 FPS 绘制调度（默认 30，旧配置自动兼容）：定时器临近截止时间再进入 RAF，保留非整除刷新率的小数节奏，高频输入合并唤醒；运行时切换只重排唯一待执行回调，不重建 WebGL/物理场景，休眠中切换不启动循环。隐藏/卸载取消计时器和 RAF。物理仍以 120 Hz 固定小步推进，停顿后不追赶后台时间。握持状态不再强制常驻循环，绳子平稳后可休眠，保持弹簧位置和储能，移动/松手重新唤醒。
