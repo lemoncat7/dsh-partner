@@ -29,6 +29,9 @@ export interface BoardTask {
   workRevision?: number
   rejectionReason?: string
   rejectedAt?: number
+  /** Consecutive rejected attempts; reset only by an explicit replanning decision. */
+  reworkCount?: number
+  replanRequested?: boolean
   previousAttempt?: { resultSummary?: string; reviewSummary?: string; reviewHandoff?: string }
   dueAt?: number
   revision: number

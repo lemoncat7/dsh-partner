@@ -23,7 +23,9 @@ export function requirementTool(companionId: string, service: RequirementService
       const id = requiredText(input.requirementId, 'requirementId', 160)
       const item = service.list().find(r => r.id === id)
       if (!item) return JSON.stringify({ id, status: 'removed', message: '需求已删除或不存在，不要重建或继续旧任务' })
-      if (item.ownerCompanionId !== companionId) throw new Error('当前伙伴不是此需求负责人')
+      if (item.ownerCompanionId !== companionId) return JSON.stringify({ ok: false, retryable: false, code: 'REQUIREMENT_OWNER_REQUIRED',
+        message: '当前伙伴不是此需求负责人', current: { id: item.id, status: item.status, revision: item.revision, ownerCompanionId: item.ownerCompanionId ?? null },
+        recovery: '不要重复修改需求或另建同名需求。若你是子任务执行者且缺工具、需换人或拆分，调用 partner_task_board request_replan，携带当前 taskId、expectedRevision、message；由需求负责人或用户调整后再执行。' })
       if (action === 'remove') { await tasks.removeRequirement(id); return JSON.stringify({ id, removed: true }) }
       if (action === 'retry') { await service.retry(id); return JSON.stringify({ id, retry: true }) }
       const revision = input.expectedRevision

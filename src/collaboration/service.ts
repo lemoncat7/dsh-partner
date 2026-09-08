@@ -9,6 +9,7 @@ import { parseTaskExecutionOutput } from '../tasks/result.js'
 import { delegationKind, delegationPending, type PartnerDelegation, type PartnerDirectoryEntry } from './domain.js'
 import { canRetryDelegation, delegationRetryDelay, retryDelayLabel } from './retry-policy.js'
 import { appendDelegation, autoRunCandidates, pendingTaskDelegation, taskDelegation, taskDependenciesDone, taskDispatchDenied } from './task-dispatch.js'
+import { TaskWorkflowError } from '../tasks/workflow-error.js'
 import { preserveTaskAttempt, taskWorkContext } from '../tasks/context.js'
 import { TaskConflictError } from '../tasks/service.js'
 import { repairableReviewCancellation, unfinishedReview } from './task-recovery.js'
@@ -163,10 +164,13 @@ export class PartnerCollaborationService {
       if (!task) throw new Error('Task does not exist')
       const pending = pendingTaskDelegation(state, task.id)
       if (pending) {
-        if (pending.toCompanionId !== to.id) throw new Error('任务已提交给其他伙伴，请先处理已有执行')
+        if (pending.toCompanionId !== to.id) throw new TaskWorkflowError('TASK_ALREADY_DELEGATED', '任务已提交给其他伙伴，请先处理已有执行',
+          { taskId: task.id, expectedRevision: task.revision, delegationId: pending.id, assigneeCompanionId: pending.toCompanionId, status: pending.status },
+          '不要把当前正在执行的任务再次转派。当前执行者缺工具或需要拆分时使用 partner_task_board request_replan 后结束本轮；需求负责人随后 update 分工并显式 autoRun=true 恢复。')
         delegation = structuredClone(pending); return
       }
       if (['doing', 'review', 'done'].includes(task.status)) throw new Error('任务已经在执行、待验收或已完成，不能重复提交')
+      if (task.replanRequested) throw new TaskWorkflowError('TASK_REPLAN_REQUIRED', '任务已暂停等待重规划', { taskId: task.id, expectedRevision: task.revision }, '需求负责人或用户先 update 调整任务，再明确 autoRun=true 恢复；不要重复 delegate。')
       delegation = taskDelegation(task, { ...input, to: to.id, request })
       const denied = taskDispatchDenied(state, delegation)
       if (denied) throw new Error(denied)
@@ -424,6 +428,7 @@ function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: P
     from ? `你收到伙伴「${from.name}」委派的看板任务。` : '你收到用户从伙伴任务看板直接委派的任务。',
     `任务：${task.title}`,
     `看板任务 id：${task.id}。这是已经分配给你的具体阶段，请在该范围内完成交付，不要重复创建同名任务或仅回复分工计划。`,
+    '你是本任务执行者，不一定是需求负责人。缺少真实执行工具或需要换人、拆分时，用 partner_task_board request_replan 携带当前 taskId、expectedRevision、message 交回负责人，然后停止本轮；不得把正在执行的本任务再次 delegate，不得直接修改插件 JSON 绕过工具权限。',
     task.description ? `任务说明：${task.description}` : '',
     prerequisiteResults ? `已验收前置任务的公开产出：\n${prerequisiteResults}` : '',
     `最初委派要求（历史快照；若后附最新需求、任务说明或打回理由与其不同，以最新要求为准）：${delegation.request}`,

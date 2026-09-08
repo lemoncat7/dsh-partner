@@ -2,7 +2,10 @@ import { useEffect, useRef, type RefObject, type MutableRefObject, type PointerE
 import type { LanyardHandle } from './renderer.js'
 
 const KEY = 'dsh-partner:pendant-position:v1'
-interface Position { x: number; y: number }
+interface Position { x: number; y: number; docked?: boolean }
+export function snapPendantX(left: number, width: number, edge: number, force = false): number {
+  return force || Math.abs(left + width / 2 - edge) <= 40 ? edge - width / 2 : left
+}
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(value, Math.max(low, high)))
 
 export function readerPlacement(anchor: { x: number; y: number; width: number; height: number }, viewport: { width: number; height: number }) {
@@ -30,30 +33,45 @@ export function usePendantPlacement(root: RefObject<HTMLElement>, handle: Mutabl
     const element = root.current
     if (!element) return
     let saved: Position | undefined, pending: Position | undefined, frame = 0
+    let docked = true
+    const sidebar = document.querySelector<HTMLElement>("#root [data-slot='sidebar'] > div")
+    const edge = () => {
+      const rect = sidebar?.getBoundingClientRect()
+      return rect && rect.width > 0 && rect.right > 0 ? Math.max(48, Math.min(innerWidth - 48, rect.right)) : 48
+    }
     let drag: { id: number; x: number; y: number; left: number; top: number; button: HTMLButtonElement } | undefined
     try {
       const value = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Position | null
-      if (value && Number.isFinite(value.x) && Number.isFinite(value.y)) saved = { x: clamp(value.x, 0, 1), y: clamp(value.y, 0, 1) }
+      if (value && Number.isFinite(value.x) && Number.isFinite(value.y)) {
+        saved = { x: clamp(value.x, -1, 1), y: clamp(value.y, 0, 1) }
+        docked = value.docked ?? false
+      }
     } catch { /* Storage restrictions must not disable the pendant. */ }
     const limits = () => ({ x: Math.max(0, innerWidth - element.offsetWidth), y: Math.max(28, innerHeight - element.offsetHeight - 12) })
     const place = (p: Position): void => {
       const max = limits()
-      element.style.left = `${clamp(p.x, 0, max.x)}px`; element.style.top = `${clamp(p.y, 28, max.y)}px`; element.style.right = 'auto'
+      element.style.left = `${clamp(p.x, 48 - element.offsetWidth / 2, max.x)}px`; element.style.top = `${clamp(p.y, 28, max.y)}px`; element.style.right = 'auto'
+      element.dataset.docked = String(docked)
       handle.current?.relayout()
     }
     const restore = (): void => {
       const max = limits()
-      place(saved ? { x: saved.x * max.x, y: 28 + saved.y * (max.y - 28) } : { x: max.x - 8, y: 46 })
+      const p = saved ? { x: saved.x * max.x, y: 28 + saved.y * (max.y - 28) } : { x: 0, y: 46 }
+      if (docked) p.x = snapPendantX(p.x, element.offsetWidth, edge(), true)
+      place(p)
     }
     const flush = (): void => { cancelAnimationFrame(frame); frame = 0; if (pending) { place(pending); pending = undefined } }
     const persist = (): void => {
       const max = limits()
-      saved = { x: parseFloat(element.style.left) / (max.x || 1), y: (parseFloat(element.style.top) - 28) / (max.y - 28 || 1) }
+      saved = { x: parseFloat(element.style.left) / (max.x || 1), y: (parseFloat(element.style.top) - 28) / (max.y - 28 || 1), docked }
       try { localStorage.setItem(KEY, JSON.stringify(saved)) } catch { /* In-memory movement still works. */ }
     }
     const finish = (): void => {
       if (!drag) return
-      const previous = drag; drag = undefined; flush(); persist()
+      const previous = drag; drag = undefined; flush()
+      const x = element.offsetLeft, snapped = snapPendantX(x, element.offsetWidth, edge())
+      docked = Math.abs(snapped + element.offsetWidth / 2 - edge()) < 1
+      place({ x: snapped, y: element.offsetTop }); persist()
       if (previous.button.hasPointerCapture(previous.id)) previous.button.releasePointerCapture(previous.id)
     }
     handlers.current = {
@@ -71,16 +89,23 @@ export function usePendantPlacement(root: RefObject<HTMLElement>, handle: Mutabl
       },
       end(event) { if (drag?.id === event.pointerId) finish() },
       key(event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault(); docked = true
+          place({ x: snapPendantX(0, element.offsetWidth, edge(), true), y: element.offsetTop }); persist(); return
+        }
         const step = event.shiftKey ? 32 : 12, delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]
         if (!delta) return
         event.preventDefault()
+        docked = false
         place({ x: element.offsetLeft + delta[0]!, y: element.offsetTop + delta[1]! }); persist()
       },
     }
     const resize = (): void => { finish(); restore() }
     const observer = new ResizeObserver(resize); observer.observe(element)
+    const sidebarObserver = new ResizeObserver(() => { if (docked && !drag) restore() })
+    if (sidebar) sidebarObserver.observe(sidebar)
     window.addEventListener('resize', resize); window.addEventListener('blur', finish); restore()
-    return () => { finish(); cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', resize); window.removeEventListener('blur', finish) }
+    return () => { finish(); cancelAnimationFrame(frame); observer.disconnect(); sidebarObserver.disconnect(); window.removeEventListener('resize', resize); window.removeEventListener('blur', finish) }
   }, [root, handle])
   return { onPointerDown: (e: PointerEvent<HTMLButtonElement>) => handlers.current.down(e), onPointerMove: (e: PointerEvent<HTMLButtonElement>) => handlers.current.move(e), onPointerUp: (e: PointerEvent<HTMLButtonElement>) => handlers.current.end(e), onPointerCancel: (e: PointerEvent<HTMLButtonElement>) => handlers.current.end(e), onLostPointerCapture: (e: PointerEvent<HTMLButtonElement>) => handlers.current.end(e), onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => handlers.current.key(e) }
 }

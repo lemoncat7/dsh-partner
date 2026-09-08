@@ -10,6 +10,7 @@ export function taskDependenciesDone(task: BoardTask, tasks: readonly BoardTask[
 }
 
 export function taskDispatchDenied(state: PartnerState, item: PartnerDelegation): string | undefined {
+  if (state.tasks.find(task => task.id === item.taskId)?.replanRequested) return '任务已暂停等待需求负责人重规划'
   if (!state.companions.some(companion => companion.id === item.toCompanionId)) return '执行伙伴已不存在'
   if (item.initiatedBy === 'companion') {
     if (!state.companions.some(companion => companion.id === item.fromCompanionId)) return '创建伙伴已不存在'
@@ -20,7 +21,7 @@ export function taskDispatchDenied(state: PartnerState, item: PartnerDelegation)
 
 export function autoRunCandidates(state: PartnerState): BoardTask[] {
   const pending = new Set(state.delegations.filter(delegationPending).map(item => item.taskId))
-  return state.tasks.filter(task => task.autoRun === true && task.status === 'ready' && task.assigneeCompanionId && !pending.has(task.id))
+  return state.tasks.filter(task => task.autoRun === true && !task.replanRequested && task.status === 'ready' && task.assigneeCompanionId && !pending.has(task.id))
 }
 
 export function taskDelegation(task: BoardTask, input: { initiatedBy: 'user' | 'companion'; fromCompanionId?: string; to: string; request: string; parentSessionId?: string }): PartnerDelegation {

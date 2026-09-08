@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readerPlacement } from '../lib/pendant/use-placement.js'
+import { readerPlacement, snapPendantX } from '../lib/pendant/use-placement.js'
+
+test('snap measures the hook center, with a 40px capture radius and keyboard docking', () => {
+  assert.equal(snapPendantX(150, 260, 300), 170)
+  assert.equal(snapPendantX(500, 260, 300), 500)
+  assert.equal(snapPendantX(500, 260, 56, true), -74)
+  assert.equal(snapPendantX(170, 260, 300), 170)
+})
 
 test('reader stays beside its card when there is room', () => {
   assert.deepEqual(readerPlacement({ x: 500, y: 220, width: 84, height: 116 }, { width: 1440, height: 960 }), {

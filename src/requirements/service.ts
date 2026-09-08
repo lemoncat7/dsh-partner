@@ -60,6 +60,7 @@ export class RequirementService {
         delete item.lastError; delete item.nextAttemptAt
         for (const task of state.tasks.filter(t => t.requirementId === id)) {
           invalidateTaskWork(state, task, '所属需求已更新，请根据最新需求重新执行和验收')
+          task.reworkCount = 0
           task.revision++; task.updatedAt = Date.now()
         }
       }

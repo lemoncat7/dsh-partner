@@ -10,6 +10,7 @@ import { loadCardImage } from './card-image.js'
 import { createPendantFrameLoop } from './frame-loop.js'
 import { createBadgeFaceMaterial, BADGE_LIGHTING } from './surface.js'
 import { measureFixedLayerOrigin } from './coordinates.js'
+import { settleCardFacing } from './facing.js'
 
 export interface BadgeMessage { id: string; count: number; name: string; label: string }
 export interface LanyardHandle { setMessage(message?: BadgeMessage): void; setAppearance(settings: PendantSettings): void; relayout(): void; destroy(): void }
@@ -105,8 +106,10 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     if (disposed || document.hidden) return false
     accumulator += dt
     if (reduced.matches) { noticeMotion.cancel(); sheen.clear() }
+    let orienting = false
     while (accumulator >= LANYARD_STEP) {
       if (noticeMotion.step(LANYARD_STEP, !!gesture)) sheen.start(now)
+      if (noticeMotion.phase === 'idle') orienting = settleCardFacing(badge, unread > 0, !!gesture, reduced.matches) || orienting
       world.step(); accumulator -= LANYARD_STEP
     }
     canvas.dataset.noticeMotion = noticeMotion.phase
@@ -123,7 +126,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     // wakes it again; spring positions and stored stretch remain untouched.
     quietTime = calm ? quietTime + dt : 0
     const moving = quietTime < .8 && movingBodies.some(body => !body.isSleeping())
-    const active = moving || shining || (!gesture && noticeMotion.phase !== 'idle')
+    const active = moving || shining || orienting || (!gesture && noticeMotion.phase !== 'idle')
     canvas.dataset.sleeping = String(!active)
     if (!active) { accumulator = 0; movingBodies.forEach(body => body.sleep()) }
     return active

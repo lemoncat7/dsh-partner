@@ -8,6 +8,7 @@ import { requirementDraft } from '../requirements/service.js'
 import { removeTaskRecords, touchTaskRequirement } from './removal.js'
 import { invalidateTaskWork, preserveTaskAttempt } from './context.js'
 import { requireTaskRequirement } from './requirement-link.js'
+import { TaskWorkflowError } from './workflow-error.js'
 
 const MAX_TASKS = 500
 const MAX_ACTIVITIES = 2000
@@ -63,7 +64,9 @@ export class TaskBoardService {
       if (requirementId) {
         const requirement = state.requirements.find(r => r.id === requirementId)
         if (!requirement) throw new TaskNotFoundError('需求已删除或不存在')
-        if (requirement.status !== 'planning') throw new Error('请先将需求重新打开为规划状态，再增加任务')
+        if (requirement.status !== 'planning') throw new TaskWorkflowError('REQUIREMENT_NOT_PLANNING', '请先将需求重新打开为规划状态，再增加任务',
+          { requirementId, status: requirement.status, ownerCompanionId: requirement.ownerCompanionId, revision: requirement.revision },
+          '只有需求负责人可 reopen 后追加任务。若你是正在执行的子任务负责人且缺工具、需要拆分或换人，使用 partner_task_board request_replan（taskId、expectedRevision、message），随后结束本轮；不要重建需求或重复 create。')
         task.requirementId = requirementId
       } else {
         if (state.requirements.length >= 500) throw new Error('需求数量已达上限')
@@ -89,6 +92,10 @@ export class TaskBoardService {
       const expected = input.expectedRevision
       if (!Number.isInteger(expected) || expected !== task.revision) throw new TaskConflictError(task)
       previousStatus = task.status
+      if (task.replanRequested) {
+        const owner = state.requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
+        if (actor.kind !== 'user' && actor.companionId !== owner) throw new Error('任务已暂停等待重规划，仅需求负责人或用户可以调整和恢复；不要重复执行')
+      }
       const previousSpec = JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
       if (input.title !== undefined) task.title = requiredText(input.title, 'title', 200)
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
@@ -127,6 +134,11 @@ export class TaskBoardService {
       const specChanged = previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
       if (specChanged) {
         invalidateTaskWork(state, task, '任务要求或分配已更新，旧执行/验收失效')
+        task.reworkCount = 0
+      }
+      if (task.replanRequested && input.autoRun === true) {
+        task.replanRequested = false; task.reworkCount = 0
+        if (task.status === 'blocked') task.status = 'ready'
       }
       if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
       if (task.status === 'done' && previousStatus !== 'done' && previousStatus !== 'review') throw new Error('任务必须先进入待验收，才能标记为已完成')
@@ -257,7 +269,7 @@ export class TaskBoardService {
     return this.update(taskId, { expectedRevision: expectedRevision ?? current.revision, status: 'done' }, actor)
   }
 
-  async reject(taskId: string, reason: string, actor: TaskActor, expectedRevision?: number): Promise<BoardTask> {
+  async reject(taskId: string, reason: string, actor: TaskActor, expectedRevision?: number, mode: 'rework' | 'replan' = 'rework'): Promise<BoardTask> {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
@@ -266,8 +278,13 @@ export class TaskBoardService {
       if (expectedRevision !== undefined && expectedRevision !== task.revision) throw new TaskConflictError(task)
       const message = boundedText(reason, 'reason', 1200)
       task.rejectionReason = message; task.rejectedAt = Date.now()
+      task.reworkCount = (task.reworkCount ?? 0) + 1
       invalidateTaskWork(state, task, '验收打回，旧执行/验收已失效')
       task.status = 'ready'
+      if (mode === 'replan' || task.reworkCount >= 3) {
+        task.status = 'blocked'; task.autoRun = false; task.replanRequested = true
+        task.resultSummary = `需要需求负责人重新规划：${message}`
+      }
       delete task.reviewSummary
       delete task.completedAt
       task.revision += 1
@@ -276,6 +293,33 @@ export class TaskBoardService {
       appendActivity(state.taskActivities, task.id, actor, 'reopened', `验收打回：${message}`, task.updatedAt)
       output = structuredClone(task)
     })
+    if (output.replanRequested) await this.notifyProgress(output, 'review')
+    return output
+  }
+
+  /** Atomically relinquish a task before asking its owner to split or reassign it. */
+  async requestReplan(taskId: string, reason: string, actor: TaskActor, revision: number): Promise<BoardTask> {
+    let output!: BoardTask, previous!: BoardTask['status'], changed = false
+    await this.store.update(state => {
+      const task = state.tasks.find(t => t.id === taskId)
+      if (!task) throw new TaskNotFoundError()
+      const owner = state.requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
+      if (actor.kind !== 'user' && actor.companionId !== task.assigneeCompanionId && actor.companionId !== owner)
+        throw new Error('只有当前执行者、需求负责人或用户可以申请重规划')
+      if (task.replanRequested) { output = structuredClone(task); return }
+      if (revision !== task.revision) throw new TaskConflictError(task)
+      if (!['ready', 'doing', 'blocked'].includes(task.status)) throw new Error('仅待开始、执行中或受阻任务可申请重规划；待验收请由验收者 reject，已完成不重跑')
+      const message = boundedText(reason, 'message', 1200)
+      previous = task.status
+      invalidateTaskWork(state, task, `重规划暂停：${message}`)
+      task.status = 'blocked'; task.autoRun = false; task.replanRequested = true
+      task.resultSummary = `需要需求负责人重新规划：${message}`
+      task.revision++; task.updatedAt = Date.now()
+      touchTaskRequirement(state, task.requirementId)
+      appendActivity(state.taskActivities, task.id, actor, 'failed', task.resultSummary, task.updatedAt)
+      output = structuredClone(task); changed = true
+    })
+    if (changed) await this.notifyProgress(output, previous)
     return output
   }
 
@@ -329,6 +373,11 @@ export class TaskBoardService {
   }
 
   private async notifyProgress(task: BoardTask, previousStatus: BoardTask['status'], resultSubmitted = false): Promise<void> {
+    if (task.replanRequested && task.status === 'blocked') {
+      const owner = this.store.snapshot().requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId
+      if (owner || task.creatorCompanionId) await this.notifier?.(task, previousStatus)
+      return
+    }
     if (!task.creatorCompanionId) return
     if (task.status === 'review') {
       if (!task.resultSummary || (!resultSubmitted && task.status === previousStatus)) return

@@ -243,8 +243,11 @@ export class PartnerAgentRuntime {
   }
 
   async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
-    if (!task.creatorCompanionId || (task.status !== 'review' && task.status !== 'done' && task.status !== 'blocked')) return
-    const companion = this.store.snapshot().companions.find(item => item.id === task.creatorCompanionId)
+    if (task.status !== 'review' && task.status !== 'done' && task.status !== 'blocked') return
+    const ownerId = task.replanRequested
+      ? this.store.snapshot().requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
+      : task.creatorCompanionId
+    const companion = this.store.snapshot().companions.find(item => item.id === ownerId)
     if (!companion) return
     const state = this.store.snapshot()
     const routes = state.sessions.filter(item => item.companionId === companion.id)
@@ -255,7 +258,9 @@ export class PartnerAgentRuntime {
     const latestTask = this.store.snapshot().tasks.find(item => item.id === task.id)
     if (!latestTask || latestTask.revision !== task.revision) return
     const isReviewer = task.status === 'review' && task.reviewerCompanionId === companion.id
-    const instruction = isReviewer
+    const instruction = task.replanRequested
+      ? '任务因缺能力、需重新分工或连续打回而暂停，旧执行已取消，不会自动重跑。你是负责协调的伙伴：先核实缺口，调整原任务负责人/要求，或 reopen 原需求后增加必要子任务。只有解决阻塞后，才 update 原任务并显式 autoRun=true 恢复。不要原样恢复并循环打回；无法解决时向用户说明所需授权或输入。'
+      : isReviewer
       ? '这是伙伴内部验收，不是用户的新消息。执行伙伴已提交结果，现在默认由你验收。请根据任务要求真实核验已有产出；通过后必须调用 partner_task_board accept，不通过则调用 reject 并写明原因。不要重新执行该任务，不要向用户播报核验过程或 accept 操作；子任务不发送渠道通知，需求整体验收和汇总后由系统统一投递。'
       : task.status === 'review'
         ? '这是伙伴内部进度事件。执行结果已提交并等待指定伙伴验收；不要重新执行，也不要向用户播报中间进度。只在看板中推进必要的协作，子任务不发送渠道通知，需求整体验收和汇总后由系统统一投递。'

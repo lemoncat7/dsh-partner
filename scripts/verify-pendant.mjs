@@ -24,6 +24,9 @@ try {
   page.on('console', message => { if (message.type() === 'error' && /THREE.WebGLProgram|shader error/i.test(message.text())) errors.push(message.text()) })
   await page.addInitScript(() => { const raf = window.requestAnimationFrame; window.frameCount = 0; window.requestAnimationFrame = fn => raf.call(window, at => { window.frameCount++; fn(at) }) })
   await page.addInitScript(() => {
+    // Keep the historical long leftward throw fixture away from the new
+    // default left-edge dock; the throw must remain inside the viewport.
+    if (!localStorage.getItem('dsh-partner:pendant-position:v1')) localStorage.setItem('dsh-partner:pendant-position:v1', JSON.stringify({ x: .8, y: .04, docked: false }))
     window.paintTimes = []
     new MutationObserver(records => { for (const record of records) if (record.attributeName === 'data-facing') window.paintTimes.push(performance.now()) }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-facing'] })
     window.sheenSeen = false
@@ -117,15 +120,15 @@ try {
   await hit.focus(); await page.keyboard.press('Enter')
   assert.equal(await page.locator('.dsh-partner-pendant-detail').count(),1,'card opens latest unread directly')
   assert.equal(await hit.isVisible(),true,'opening messages leaves the card visible')
-  assert.equal(await page.getByRole('button',{name:'移动挂饰位置',exact:true}).isVisible(),true,'hook remains visible')
+  assert.equal(await page.getByRole('button',{name:'移动挂饰位置，回车吸附侧栏',exact:true}).isVisible(),true,'hook remains visible')
   await page.waitForSelector('canvas[data-shining="false"]')
-  await unreadBadge.waitFor({state:'detached'})
+  await unreadBadge.waitFor({state:'hidden'})
   const reader = await page.locator('.dsh-partner-pendant-inbox').boundingBox(), cardBox = await hit.boundingBox()
   assert.ok(reader.x + reader.width <= cardBox.x || reader.x >= cardBox.x + cardBox.width, 'desktop reader sits beside the card')
   await page.waitForSelector('canvas[data-sleeping="true"]',{timeout:45000})
   const readingFrames=await page.evaluate(()=>frameCount); await page.waitForTimeout(300)
   assert.equal(await page.evaluate(()=>frameCount),readingFrames,'visible card still sleeps when calm')
-  assert.ok(Number(await page.locator('canvas').getAttribute('data-facing')) < -.99, 'reading does not restore artwork')
+  assert.ok(Number(await page.locator('canvas').getAttribute('data-facing')) > .99, 'reading restores the front artwork after settling')
   await page.waitForTimeout(170); await page.screenshot({path:'/tmp/partner-pendant-reader7-detail.png'})
   await page.getByRole('button', {name:'查看任务',exact:true}).click()
   assert.equal((await page.evaluate(() => visited)).destination.taskId, 'task1')
@@ -148,7 +151,7 @@ try {
       await page.keyboard.press('Escape')
     }
   }
-  const pendant=page.locator('.dsh-partner-pendant'), hook=page.getByRole('button',{name:'移动挂饰位置',exact:true})
+  const pendant=page.locator('.dsh-partner-pendant'), hook=page.getByRole('button',{name:'移动挂饰位置，回车吸附侧栏',exact:true})
   const original=await pendant.boundingBox(), hookBox=await hook.boundingBox()
   await page.mouse.move(hookBox.x+hookBox.width/2,hookBox.y+hookBox.height/2);await page.mouse.down()
   await page.mouse.move(hookBox.x+hookBox.width/2-260,hookBox.y+hookBox.height/2+50,{steps:12});await page.mouse.up();await page.waitForTimeout(100)
@@ -159,6 +162,10 @@ try {
   await hook.focus();await page.keyboard.press('ArrowRight');assert.ok(Math.abs((await pendant.boundingBox()).x-restored.x-12)<2,'keyboard can reposition the hook')
   await page.setViewportSize({width:375,height:500});await page.waitForTimeout(100)
   const narrow=await pendant.boundingBox();assert.ok(narrow.x>=0&&narrow.x+narrow.width<=375&&narrow.y+narrow.height<=500,'placement stays visible after narrowing')
+  await hook.focus(); await page.keyboard.press('Enter')
+  const dockHook = await hook.boundingBox()
+  assert.ok(Math.abs(dockHook.x + dockHook.width / 2 - 48) < 2, 'keyboard docks the hook at the safe sidebar fallback edge')
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('dsh-partner:pendant-position:v1')).docked), true)
   await page.emulateMedia({reducedMotion:'reduce'})
   await page.request.post(`http://127.0.0.1:${server.address().port}/fixture/complete`)
   await page.waitForSelector('canvas[data-unread="1"]',{timeout:10000})

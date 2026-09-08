@@ -17,6 +17,7 @@ import type { CompanionKnowledgeMounts } from '../companions/knowledge-mounts.js
 import { companionManagementTool, COMPANION_MANAGEMENT_PROMPT } from '../companions/management-tool.js'
 import { RequirementService } from '../requirements/service.js'
 import { requirementTool } from '../requirements/tool.js'
+import { TaskWorkflowError } from '../tasks/workflow-error.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
 const MAX_INLINE_SKILLS = 8
@@ -229,7 +230,8 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   return textTool({
     name: 'partner_task_board',
     description: 'Turn requested deliverables into actual work assigned to self or authorized specialist companions; this board is not merely a log to fill after doing everything yourself. When the request matches an authorized companion specialty, proactively apply the enabled task-planning Skill and connect the requested outcome, suitable assignee and board task before carrying out the work; no explicit @ or board request is needed. The Skill defines decomposition and exceptions. List, create, update, comment on, accept or reject tasks. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Every create must include requirementId. Continued work uses the original requirement: list to find it, reopen submitted/archived scope if necessary, then append. Never create another requirement merely because a different specialist takes the next phase. dependencyTaskIds controls ordering, not ownership. Only a separate user goal warrants a new requirement. Child execution and review are internal: stage notification waits until only done/blocked tasks remain, and does not require archiving. For changed task specifications use update, not only comment; for changed whole scope use partner_requirements update. reject must state concrete missing items and corrections; accept/reject must use the revision actually reviewed. Executors receive latest scope, recent comments, rejection reasons and previous deliverables on rework. Remove permanently deletes only on explicit user request, stops execution and pauses dependents. Accepted dependencies unlock queued tasks automatically.',
-    parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject', 'remove'], {
+    parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject', 'request_replan', 'remove'], {
+      reworkMode: { type: 'string', enum: ['rework', 'replan'], description: 'reject only: rework continues ordinary corrections; replan pauses for owner reassignment/splitting or missing tools. Three consecutive rejections automatically pause.' },
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       requirementId: { type: 'string', description: 'REQUIRED for create. Reuse the existing requirement for continued work on the same deliverable, including later specialist phases. dependencyTaskIds does not set ownership. Missing id fails without creating anything. Query partner_requirements list; reopen a submitted/archived requirement before appending; create a requirement only for a genuinely separate user goal.' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
@@ -237,7 +239,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
       autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). Persist execution intent and start after dependencies are accepted. Set false when user requests planning only; legacy tasks are never auto-started.' },
       dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
-      expectedRevision: { type: 'integer', description: 'Required for update, accept and reject. Use the revision actually reviewed; if stale, reread the latest requirements and results before making a new decision.' }, message: { type: 'string' },
+      expectedRevision: { type: 'integer', description: 'Required for update, accept, reject and request_replan. Use the revision actually reviewed; if stale, reread latest requirements and results.' }, message: { type: 'string', description: 'For request_replan: concrete missing tools, required reassignment/splitting and preserved output. This pauses/cancels the current task; stop this turn afterward. For reject: missing evidence and corrections; use reworkMode=replan for inability to execute.' },
     }),
     async execute(raw, exec) {
       const input = record(raw, 'arguments')
@@ -270,18 +272,24 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       const taskId = requiredText(input.taskId, 'taskId', 160)
       const existing = tasks.snapshot().tasks.find(task => task.id === taskId)
       if (!existing) return JSON.stringify({ taskId, status: 'removed', message: '任务已删除或不存在，停止处理旧任务，不要重建' })
+      if (action === 'request_replan') {
+        if (!Number.isInteger(input.expectedRevision)) throw new Error('请先 list 读取任务，并提供 expectedRevision')
+        const task = await tasks.requestReplan(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number)
+        return JSON.stringify({ ...task, recovery: '已暂停并取消旧执行，等待需求负责人调整；结束本轮，不要继续转派同一任务或反复重试。' })
+      }
       if (action === 'remove') {
         if (existing.creatorCompanionId !== companion.id) throw new Error('只能删除自己创建的任务；删除必须有用户明确要求')
         await tasks.remove(taskId); return JSON.stringify({ taskId, removed: true })
       }
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
       if (action === 'accept' || action === 'reject') {
+        if (input.reworkMode !== undefined && !['rework', 'replan'].includes(String(input.reworkMode))) throw new Error('reworkMode 无效')
         if (!Number.isInteger(input.expectedRevision)) throw new Error('验收必须提供实际核验的 expectedRevision；请先查询最新任务、补充评论和交付后再决定')
         const task = tasks.require(taskId)
         if (task.reviewerCompanionId && task.reviewerCompanionId !== companion.id) throw new Error('当前伙伴不是这个任务指定的验收伙伴')
         return JSON.stringify(action === 'accept'
           ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id }, input.expectedRevision as number)
-          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number))
+          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number, input.reworkMode as 'rework' | 'replan' | undefined))
       }
       if (action === 'update') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
@@ -355,6 +363,13 @@ function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService):
 function textTool(definition: Omit<ToolDefinition, 'output'>): ToolDefinition {
   return {
     ...definition,
+    async execute(raw, exec) {
+      try { return await definition.execute(raw, exec) }
+      catch (error) {
+        if (error instanceof TaskWorkflowError) return JSON.stringify(error.result())
+        throw error
+      }
+    },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
   }
 }

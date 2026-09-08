@@ -1,5 +1,5 @@
 /** Versioned built-in instructions; installed copies update through SkillService. */
-export const TASK_PLANNING_VERSION = '1.4.1'
+export const TASK_PLANNING_VERSION = '1.4.2'
 export const TASK_PLANNING_DESCRIPTION = '收到实际工作需求时，主动按授权伙伴的专长委派；单一专业整项交付，多专业按产出拆解、安排依赖并提交看板，无需用户点名触发。'
 export const TASK_PLANNING_DOCUMENT = `---
 name: task-planning
@@ -14,6 +14,10 @@ allowed-tools: [partner_requirements, partner_task_board, partner_collaborate]
 专业的事交给专业的伙伴。收到实际工作请求时，先匹配所需专长与当前已授权伙伴的职责、实际能力和已启用 Skill，再决定谁执行、是否拆分。不要先自己做完，再补看板记录。用户已授权协作并提出工作目标时，不需要再询问“要不要拆解”或等待用户逐个 @。
 
 ## 分工决策
+
+- 已收到具体看板任务时，你首先是该任务执行者，不是需求负责人。不要把正在执行的同一 taskId 再 delegate 给别人。发现缺少真实文件工具、需要换人或拆分时，调用 partner_task_board request_replan（taskId、expectedRevision、message），说明缺口与保留的产出，随后结束本轮。不得改 state.json、伪造文件交付或持续重复失败调用。
+- 验收普通缺项用 reject 的 reworkMode=rework；缺工具、需重新拆分/换人用 reworkMode=replan。连续三次打回自动暂停，由需求负责人核实原因并调整。只有负责人可 reopen 原需求追加任务；调整原任务后显式 update autoRun=true 恢复，不能原样重试代替解决问题。
+- 要求真实文件时必须核验路径、实际内容与相关运行结果；文字计划、声称“已经创建”和角色描述均不能代替文件证据。核验工具不可用时明确报阻塞，不猜测通过或原样循环打回。
 
 - 有职责和执行能力匹配的专业伙伴时，优先交给该伙伴，即使你也能完成、工作看起来简单或只有一个交付物。你负责澄清必要输入、分配、验收和最终汇总，不重复执行已经委派的工作。
 - 单一专业即可完成：创建一个完整任务交给该专业伙伴，不为“拆解”凑数量。多个专业、可独立验收的产出或真实前置依赖：按交付边界拆分，独立工作并行、依赖工作串行，不把内部推理步骤拆成任务。

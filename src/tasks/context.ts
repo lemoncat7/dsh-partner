@@ -31,6 +31,8 @@ export function taskWorkContext(state: PartnerState, task: BoardTask): string {
   return [
     `任务 ID：${task.id}；任务版本 expectedRevision=${task.revision}；工作版本=${task.workRevision ?? 1}。验收必须针对所读取的此版本；版本变化后重新核验，不得只刷新版本号继续提交旧结论。`,
     requirement ? `所属需求（最新）：${requirement.title}\n${requirement.description}` : '',
+    requirement ? `需求 ID：${requirement.id}；状态：${requirement.status}；需求负责人：${requirement.ownerCompanionId ?? '未指定（由用户处理）'}；需求 expectedRevision=${requirement.revision}。任务执行者不等于需求负责人，只有负责人可 reopen 后追加任务。` : '',
+    `当前执行者：${task.assigneeCompanionId ?? '未分配'}；连续打回：${task.reworkCount ?? 0}；等待重规划：${Boolean(task.replanRequested)}。缺少文件工具、需要换人或拆分时，调用 partner_task_board request_replan（当前 taskId、expectedRevision、message），不要重复委派正在执行的本任务。`,
     `当前任务：${task.title}\n${task.description}`,
     comments.length ? `最近任务补充/讨论（按时间顺序；进度讨论不自动扩大范围，较新的明确要求优先）：\n${comments.map(a => `- ${a.message}`).join('\n')}` : '',
     task.status !== 'done' && (task.rejectionReason || legacyRejection) ? `最近打回理由（在最新需求范围内逐项回应；用户已撤回的旧范围不应再次追加）：\n${task.rejectionReason ?? legacyRejection}` : '',
