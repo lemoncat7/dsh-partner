@@ -8,26 +8,82 @@ import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import { canonicalProfileSubject } from './profile-domain.js'
 import { dailyReviewPromptInput, reflectionPromptInput } from './memory-prompt-context.js'
+import { groundMemoryCandidates } from './memory-quality.js'
+import { groundExperiences, parseArtifactProposals } from './memory-artifacts.js'
+import { AsyncSemaphore } from './core/semaphore.js'
+import type { MemoryJob } from './memory-journal.js'
 
 type ReflectionContext = Context & { llm: Context['llm']; agentDefaultModel: AgentDefaultModelConfig }
 
 export class MemoryReflectionService {
-  private readonly queues = new Map<string, Promise<PartnerConcern[]>>()
+  private readonly running = new Set<string>()
+  private readonly controllers = new Set<AbortController>()
+  private readonly modelSlots = new AsyncSemaphore(1)
+  private readonly lastPruned = new Map<string, number>()
+  private closed = false
+  close(): void { this.closed = true; for (const controller of this.controllers) controller.abort(); this.lastPruned.clear() }
   constructor(private readonly ctx: ReflectionContext, private readonly store: PartnerMemoryStore, private readonly concerns: PartnerConcernStore) {}
 
   async reflect(companion: Companion, turn: ConversationTurn): Promise<PartnerConcern[]> {
-    const key = `${companion.id}:${turn.scopeId}`
-    const previous = this.queues.get(key) ?? Promise.resolve([])
-    const current = previous.catch(() => {}).then(() => this.run(companion, turn))
-    this.queues.set(key, current)
-    try { return await current } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
+    if (this.closed) throw new Error('memory service is stopping')
+    if (turn.companionId !== companion.id) throw new Error('memory turn owner mismatch')
+    await this.store.enqueue(turn)
+    return []
+  }
+
+  isRunning(companionId: string): boolean { return this.running.has(companionId) }
+
+  async processPending(companion: Companion, notify?: (scopeId: string, created: PartnerConcern[]) => Promise<void>): Promise<{ scopeId: string; created: PartnerConcern[] } | undefined> {
+    if (this.closed || this.running.has(companion.id)) return undefined
+    this.running.add(companion.id)
+    try {
+      return await this.modelSlots.use(async () => {
+        if (this.closed) return undefined
+        const job = await this.store.claimJob(companion.id)
+        return job ? this.processJob(companion, job, notify) : undefined
+      })
+    } finally { this.running.delete(companion.id) }
+  }
+
+  private async processJob(companion: Companion, job: MemoryJob, notify?: (scopeId: string, created: PartnerConcern[]) => Promise<void>): Promise<{ scopeId: string; created: PartnerConcern[] }> {
+    try {
+      const result = job.result ?? await this.extract(companion, job.turn)
+      if (!job.result) await this.store.checkpointJob(job, result)
+      await this.store.consolidate(job.turn, result, job)
+      const created = await this.applyConcerns(companion, job.turn, result)
+      if (created.length && notify) await notify(job.turn.scopeId, created)
+      await this.store.settleJob(job)
+      if (Date.now() - (this.lastPruned.get(companion.id) ?? 0) > 6 * 60 * 60_000) {
+        try {
+          await this.store.prune(companion.id, companion.automation.memory.retentionDays)
+          this.lastPruned.set(companion.id, Date.now())
+        } catch { this.ctx.logger.warn('dsh-partner: memory maintenance failed; will retry on the next completed job') }
+      }
+      return { scopeId: job.turn.scopeId, created }
+    } catch (error) {
+      await this.store.settleJob(job, error instanceof Error ? error.message : String(error))
+      throw error
+    }
   }
 
   async reviewDay(companion: Companion, target: DailyReviewTarget): Promise<PartnerConcern[]> {
+    if (this.closed) throw new Error('memory service is stopping')
+    if (this.running.has(companion.id)) throw new Error('记忆提炼正在执行，稍后重试终审')
+    this.running.add(companion.id)
+    try { return await this.modelSlots.use(() => {
+      if (this.closed) throw new Error('memory service is stopping')
+      return this.runDailyReview(companion, target)
+    }) }
+    finally { this.running.delete(companion.id) }
+  }
+
+  private async runDailyReview(companion: Companion, target: DailyReviewTarget): Promise<PartnerConcern[]> {
+    if (await this.store.hasPendingTurns(companion.id, target.scopeId)) throw new Error('该会话还有待提炼轮次，完成后重试终审')
     const context = await this.store.dailyReviewContext(target)
     const concerns = await this.concerns.list(companion.id, target.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
+    this.controllers.add(controller)
     const timeout = setTimeout(() => controller.abort(), 90_000)
     let output = ''
     try {
@@ -39,8 +95,10 @@ export class MemoryReflectionService {
         if (chunk.type === 'text-delta') output += chunk.text
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`daily review failed: ${chunk.reason.kind}`)
       }
-    } finally { clearTimeout(timeout) }
+    } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseDailyReview(output)
+    result.memories = groundMemoryCandidates(result.memories, context.turns)
+    result.experiences = groundExperiences(result.experiences ?? [], context.turns)
     await this.store.completeDailyReview(target, result)
     return this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit', Date.now(), {
       source: 'daily_review',
@@ -48,13 +106,13 @@ export class MemoryReflectionService {
     })
   }
 
-  private async run(companion: Companion, turn: ConversationTurn): Promise<PartnerConcern[]> {
-    await this.store.archive(turn)
-    const existing = await this.store.recall(companion.id, turn.scopeId, turn.user, 16)
+  private async extract(companion: Companion, turn: ConversationTurn): Promise<ReflectionResult> {
+    const existing = await this.store.candidateMemories(companion.id, turn.scopeId, turn.user)
     const diaries = await this.store.recentReflectionsForScope(companion.id, turn.scopeId, 1)
     const concerns = await this.concerns.list(companion.id, turn.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
+    this.controllers.add(controller)
     const timeout = setTimeout(() => controller.abort(), 60_000)
     let output = ''
     try {
@@ -69,19 +127,25 @@ export class MemoryReflectionService {
         if (chunk.type === 'text-delta') output += chunk.text
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`memory reflection failed: ${chunk.reason.kind}`)
       }
-    } finally { clearTimeout(timeout) }
+    } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseReflection(output)
-    await this.store.consolidate(turn, result)
+    result.memories = groundMemoryCandidates(result.memories, [turn])
+    return result
+  }
+
+  private async applyConcerns(companion: Companion, turn: ConversationTurn, result: ReflectionResult): Promise<PartnerConcern[]> {
     const resources = extractConcernResources(turn.user)
     const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
     const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
     const origin = explicitConcernDirective(turn.user) ? 'explicit' : 'implicit'
     const created = await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, origin, turn.at, {
-      source: 'reflection', sessionId: turn.sessionId, evidence: turn.user,
+      source: 'reflection', sessionId: turn.sessionId, evidence: turn.user, batchId: turn.id,
     })
-    if (turn.concernDirective !== undefined) await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
-    await this.store.prune(companion.id, companion.automation.memory.retentionDays)
-    return origin === 'implicit' ? created : []
+    const current = await this.concerns.list(companion.id, turn.scopeId, true, 1000)
+    if (turn.concernDirective !== undefined && current.some(item => item.id === turn.concernDirective?.concernId)) {
+      await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
+    }
+    return origin === 'implicit' ? created.filter(item => current.some(latest => latest.id === item.id && ['watching', 'active'].includes(latest.state))) : []
   }
 }
 
@@ -113,7 +177,10 @@ function modelSelection(ctx: ReflectionContext, companion: Companion): { provide
   }
 }
 
+const MEMORY_QUALITY_RULES = `记忆写入契约：每个 memories 候选（包括 complete/remove）必须附 evidenceQuote（用户原话的连续引用，2-300 字）和 sourceTurnId（该原话所在轮次 id），不能引用助手回答或日记摘要；无证据则不输出。更新同义旧记忆时附 targetMemoryId，必须是输入中的同类型记忆 id，并沿用原 subject；不要凭标题相似合并不同项目或相反偏好。纠错时 confidence 应反映新证据，允许降低。一次性执行请求和过程细节只进 daily，不新增 task；task 仅保留明确跨轮次未完承诺，已有任务完成仍应 complete。持续观察交 concerns，项目技术正文交知识库，记忆不复制整篇资料。emotion 仅限用户明确自述感受，不得把催促、设计反馈或工作要求当情绪。长期偏好、画像默认不设 expiresInDays，只有用户明确有效期时才设置。`
+
 const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答用户，只从有证据的对话中维护每日回顾和结构化记忆。
+${MEMORY_QUALITY_RULES}
 只输出一个 JSON 对象，不要 Markdown。格式：
 {"daily":{"summary":"当天截至当前的简洁总结","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[{"kind":"profile|preference|task|event|relationship|emotion","subject":"稳定且简短的索引主题","content":"带场景边界的准确内容","confidence":0.0,"importance":0.0,"operation":"upsert|complete|remove","expiresInDays":3}],"concerns":[{"subject":"尚未闭环的具体事情","reason":"为什么伙伴应该继续惦记","operation":"upsert|resolve|dismiss","priority":0.0,"confidence":0.0,"watchKind":"auto|knowledge|workspace|web","watchQuery":"用于观察变化的具体对象或问题"}]}
 规则：
@@ -128,6 +195,9 @@ const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答�
 9. daily 应综合已有当日日记与新对话，不能只复述最后一句。数组每类最多 20 条，记忆候选最多 12 条。`
 
 const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天每一轮对话的双向代表片段、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
+${MEMORY_QUALITY_RULES}
+还可输出 scenes:[{"title":"具体项目或场景名称","memoryIds":["输入中已有的记忆 id"]}]，每个场景只关联同一项目的有效事实，最多 8 个，不把不同项目因名称相似而混在一起；无可靠关联返回空数组。
+还可输出 experiences:[{"title":"可复用方法","steps":["带适用条件的操作步骤"],"evidence":[{"turnId":"原始轮次 id","quote":"用户明确确认成功的连续原话"}]}]。只有至少两个不同会话均有用户明确确认成功，且方法确实可复用时才提出，最多 3 个；重复尝试、反复失败、助手自称成功均不算。这里只生成待人工审核的草稿，不安装、不授权、不修改现有 Skill。没有足够证据返回空数组。
 只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","sourceKind":"profile|preference|task|event|relationship|emotion","targetSubject":"必须等于已有或候选记忆主题","targetKind":"同上","kind":"supports|depends_on|about|conflicts_with|follows","label":"有证据的简短关系说明","confidence":0.0,"operation":"upsert|remove"}]}
 要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；结合所有轮次片段纠正逐轮偏差，对被压缩而证据不足的细节保持原状而非猜测；明确任务完成状态；复核并关闭已经完成或失效的挂念；只有对话原文证明事情会延续到当前轮次之后时才能新增挂念，一次性资料收集、搜索、总结、写作、即时执行和普通问答不得新增挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
 
@@ -179,7 +249,7 @@ export function parseDailyReview(raw: string): DailyReviewResult {
     const targetKind = isKind(relation.targetKind) ? relation.targetKind : undefined
     return [{ sourceSubject, ...(sourceKind ? { sourceKind } : {}), targetSubject, ...(targetKind ? { targetKind } : {}), kind, label, confidence: number(relation.confidence), operation }]
   }).slice(0, 80) : []
-  return { ...base, relations }
+  return { ...base, relations, ...parseArtifactProposals(value) }
 }
 
 function isRelationKind(value: unknown): value is MemoryRelationKind { return value === 'supports' || value === 'depends_on' || value === 'about' || value === 'conflicts_with' || value === 'follows' }
@@ -195,10 +265,13 @@ function parseCandidate(value: unknown): MemoryCandidate | undefined {
   if (!subject || (operation === 'upsert' && !content)) return undefined
   const candidate: MemoryCandidate = {
     kind, operation, subject, content,
+    ...(string(item.targetMemoryId, 160) ? { targetMemoryId: string(item.targetMemoryId, 160) } : {}),
+    evidenceQuote: string(item.evidenceQuote, 300), sourceTurnId: string(item.sourceTurnId, 160),
     confidence: number(item.confidence), importance: number(item.importance),
   }
   if (kind === 'emotion') candidate.expiresInDays = Math.min(7, Math.max(1, Math.round(finite(item.expiresInDays, 3))))
   else if (typeof item.expiresInDays === 'number' && item.expiresInDays > 0) candidate.expiresInDays = Math.min(3650, Math.round(item.expiresInDays))
+  else if (kind === 'task' || kind === 'event') candidate.expiresInDays = 30
   return candidate
 }
 

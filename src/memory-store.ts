@@ -4,6 +4,10 @@ import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryContextConnection, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryRelationReviewContext, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
 import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
+import { initializeMemoryJournal, enqueueMemoryJob, claimMemoryJob, checkpointMemoryJob, settleMemoryJob, assertMemoryLease, type MemoryJob } from './memory-journal.js'
+import type { ReflectionResult } from './memory-domain.js'
+import { rankMemories, memoryRelevance, memoryTerms } from './memory-retrieval.js'
+import { initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[] }
@@ -17,6 +21,79 @@ export class PartnerMemoryStore {
 
   day(at: number): string { return localDay(at, this.timeZone) }
 
+  async enqueue(turn: ConversationTurn): Promise<void> {
+    await this.journal(turn.companionId, db => enqueueMemoryJob(db, turn))
+  }
+
+  async hasPendingTurns(companionId: string, scopeId: string): Promise<boolean> {
+    return this.journal(companionId, db => Boolean(db.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND done=0 LIMIT 1').get(scopeId)))
+  }
+
+  async memoryLayers(companionId: string, scopeId: string): Promise<{
+    scenes: ReturnType<typeof readScenes>; experiences: ReturnType<typeof readExperienceDrafts>;
+    jobs: Array<{ id: string; attempts: number; nextAt: number; status: string }>;
+  }> {
+    return this.journal(companionId, db => ({
+      scenes: readScenes(db, scopeId, this.memoriesForScope(db, companionId, scopeId)),
+      experiences: readExperienceDrafts(db, scopeId),
+      jobs: db.prepare('SELECT id, attempts, next_at, lease_until FROM memory_jobs WHERE scope_id=? AND done=0 ORDER BY at LIMIT 100')
+        .all(scopeId).map(row => ({ id: String(row.id), attempts: Number(row.attempts), nextAt: Number(row.next_at),
+          status: Number(row.lease_until) > Date.now() ? 'processing' : Number(row.attempts) > 0 ? 'retrying' : 'pending' })),
+    }))
+  }
+
+  async reviewExperience(companionId: string, scopeId: string, id: string, version: string, action: 'approved' | 'rejected'): Promise<void> {
+    await this.journal(companionId, db => reviewExperienceDraft(db, scopeId, id, version, action))
+  }
+
+  async exportExperience(companionId: string, scopeId: string, id: string): Promise<string> {
+    return this.journal(companionId, db => {
+      const draft = readExperienceDraft(db, scopeId, id)
+      if (!draft || draft.status !== 'approved') throw new Error('只能导出已审核通过的经验草稿')
+      return experienceMarkdown(draft)
+    })
+  }
+
+  async history(companionId: string, scopeId: string, before = Date.now() + 1, limit = 30, beforeId = '\uffff'): Promise<ConversationTurn[]> {
+    return this.journal(companionId, db => db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND (at<? OR (at=? AND id<?)) ORDER BY at DESC, id DESC LIMIT ?')
+      .all(scopeId, before, before, beforeId, Math.max(1, Math.min(100, limit))).map(row => JSON.parse(String(row.turn_json)) as ConversationTurn))
+  }
+
+  async retryJob(companionId: string, scopeId: string, id: string): Promise<void> {
+    await this.journal(companionId, db => {
+      const result = db.prepare('UPDATE memory_jobs SET next_at=0 WHERE id=? AND scope_id=? AND done=0 AND lease_until<=?').run(id, scopeId, Date.now())
+      if (!result.changes) throw new Error('任务不存在、已完成或正在处理')
+    })
+  }
+
+  async claimJob(companionId: string, now = Date.now()): Promise<MemoryJob | undefined> {
+    return this.journal(companionId, db => claimMemoryJob(db, now))
+  }
+
+  async candidateMemories(companionId: string, scopeId: string, query: string): Promise<PartnerMemory[]> {
+    return this.journal(companionId, db => {
+      const items = this.memoriesForScope(db, companionId, scopeId).filter(item => item.status !== 'superseded')
+      const relevant = rankMemories(items, query, Date.now()).slice(0, 12)
+      const recent = [...items].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 4)
+      return [...new Map([...relevant, ...recent].map(item => [item.id, item])).values()]
+    })
+  }
+
+  async checkpointJob(job: MemoryJob, result: ReflectionResult): Promise<void> {
+    await this.journal(job.turn.companionId, db => checkpointMemoryJob(db, job, result))
+  }
+
+  async settleJob(job: MemoryJob, error?: string): Promise<void> {
+    await this.journal(job.turn.companionId, db => settleMemoryJob(db, job, error))
+  }
+
+  private async journal<T>(companionId: string, action: (db: DatabaseSync) => T): Promise<T> {
+    return this.serialValue(this.databasePath(companionId), async () => {
+      const db = await this.open(companionId)
+      try { return action(db) } finally { db.close() }
+    })
+  }
+
   async archive(turn: ConversationTurn): Promise<void> {
     const directory = this.scopeDirectory(turn.companionId, turn.scopeId)
     const path = join(directory, 'conversations', `${localDay(turn.at, this.timeZone)}.jsonl`)
@@ -26,11 +103,16 @@ export class PartnerMemoryStore {
     })
   }
 
-  async consolidate(turn: ConversationTurn, result: ReflectionResultLike): Promise<void> {
+  async consolidate(turn: ConversationTurn, result: ReflectionResultLike, job?: MemoryJob): Promise<void> {
     await this.serial(this.databasePath(turn.companionId), async () => {
       const database = await this.open(turn.companionId)
       try {
         database.exec('BEGIN IMMEDIATE')
+        if (job) {
+          assertMemoryLease(database, job)
+          const row = database.prepare('SELECT committed FROM memory_jobs WHERE id=?').get(turn.id)
+          if (row?.committed) { database.exec('COMMIT'); return }
+        }
         const existing = this.memoriesForScope(database, turn.companionId, turn.scopeId)
         for (const memory of mergeMemories(existing, result.memories, turn)) this.upsertMemory(database, memory)
         const date = localDay(turn.at, this.timeZone)
@@ -45,6 +127,7 @@ export class PartnerMemoryStore {
           json(strings(result.daily.openTasks, 20, 240)), json(strings(result.daily.completedTasks, 20, 240)),
           json(strings(result.daily.learnings, 20, 240)), Date.now(), number(previous?.turn_count) + 1,
         )
+        if (job) database.prepare('UPDATE memory_jobs SET committed=1 WHERE id=?').run(turn.id)
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
     })
@@ -57,10 +140,7 @@ export class PartnerMemoryStore {
       const rows = database.prepare(`SELECT * FROM memories
         WHERE scope_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY updated_at DESC`).all(scopeId, now) as SqlRow[]
-      const terms = tokenize(query)
-      return rows.map(memoryFromRow).map(item => ({ item, score: recallScore(item, terms, now) }))
-        .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
-        .slice(0, limit).map(entry => entry.item)
+      return rankMemories(rows.map(memoryFromRow), query, now).slice(0, Math.max(0, Math.min(100, limit)))
     } finally { database.close() }
   }
 
@@ -72,14 +152,20 @@ export class PartnerMemoryStore {
         WHERE companion_id = ? AND scope_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY updated_at DESC`).all(companionId, scopeId, now) as SqlRow[]).map(memoryFromRow)
       const profile = buildProfileSnapshot(companionId, scopeId, memories)
-      const baselineIds = new Set(profile.entries.map(entry => entry.id))
-      const terms = tokenize(query)
-      const scored = memories
-        .filter(item => !baselineIds.has(item.id) && (item.kind !== 'profile' || isProfileBaselineEntry(item)))
-        .map(item => ({ item, score: recallScore(item, terms, now) }))
-        .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
-      const recall = expandRecallWithRelations(database, companionId, scopeId, memories, scored.map(entry => entry.item), baselineIds, limit)
-      return { profile, ...recall }
+      const baselineIds = new Set([...profile.entries, ...(profile.preferences ?? [])].map(entry => entry.id))
+      const scored = rankMemories(memories.filter(item => !baselineIds.has(item.id) && (item.kind !== 'profile' || isProfileBaselineEntry(item))), query, now)
+      const recall = expandRecallWithRelations(database, companionId, scopeId, memories, scored, baselineIds, Math.max(0, Math.min(100, limit)))
+      const terms = memoryTerms(query)
+      const scenes = readScenes(database, scopeId, memories).filter(scene =>
+        memoryRelevance({ subject: scene.title, content: scene.summary }, terms) > 0).slice(0, 2)
+      const history = (database.prepare(`SELECT id, at, substr(json_extract(turn_json, '$.user'), 1, 4000) AS user,
+        substr(json_extract(turn_json, '$.assistant'), 1, 700) AS assistant
+        FROM memory_jobs WHERE scope_id=? ORDER BY at DESC LIMIT 100`).all(scopeId))
+        .map(row => ({ id: String(row.id), at: Number(row.at), user: String(row.user), assistant: String(row.assistant) }))
+        .map(turn => ({ turn, score: memoryRelevance({ subject: '', content: turn.user }, terms) }))
+        .filter(item => item.score >= .2).sort((a, b) => b.score - a.score || b.turn.at - a.turn.at).slice(0, 2)
+        .map(({ turn }) => ({ id: turn.id, at: turn.at, user: compact(turn.user, 500), assistant: compact(turn.assistant, 700) }))
+      return { profile, ...recall, scenes, history }
     } finally { database.close() }
   }
 
@@ -87,7 +173,7 @@ export class PartnerMemoryStore {
     const database = await this.open(companionId)
     try {
       const rows = database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND scope_id = ?
-        AND kind = 'profile' AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
+        AND kind IN ('profile', 'preference') AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY updated_at DESC`).all(companionId, scopeId, Date.now()) as SqlRow[]
       return buildProfileSnapshot(companionId, scopeId, rows.map(memoryFromRow))
     } finally { database.close() }
@@ -96,7 +182,7 @@ export class PartnerMemoryStore {
   async profileSnapshots(companionId: string, knownScopeIds: string[] = []): Promise<UserProfileSnapshot[]> {
     const database = await this.open(companionId)
     try {
-      const rows = (database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND kind = 'profile'
+      const rows = (database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND kind IN ('profile', 'preference')
         AND status = 'active' AND (expires_at IS NULL OR expires_at > ?) ORDER BY updated_at DESC`)
         .all(companionId, Date.now()) as SqlRow[]).map(memoryFromRow)
       const grouped = new Map<string, PartnerMemory[]>()
@@ -107,9 +193,12 @@ export class PartnerMemoryStore {
     } finally { database.close() }
   }
 
-  async recentMemories(companionId: string, limit = 100): Promise<PartnerMemory[]> {
+  async recentMemories(companionId: string, limit = 100, scopeId?: string): Promise<PartnerMemory[]> {
     const database = await this.open(companionId)
-    try { return (database.prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?').all(limit) as SqlRow[]).map(memoryFromRow) }
+    try { return (scopeId === undefined
+      ? database.prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?').all(limit)
+      : database.prepare('SELECT * FROM memories WHERE scope_id=? ORDER BY updated_at DESC LIMIT ?').all(scopeId, limit) as SqlRow[]).map(memoryFromRow).map(item =>
+      item.status === 'active' && item.expiresAt !== undefined && item.expiresAt <= Date.now() ? { ...item, status: 'expired' as const } : item) }
     finally { database.close() }
   }
 
@@ -185,7 +274,7 @@ export class PartnerMemoryStore {
       const row = database.prepare('SELECT * FROM daily_reflections WHERE scope_id = ? AND date = ?').get(target.scopeId, target.date) as SqlRow | undefined
       if (!row) throw new Error('daily reflection was not found')
       reflection = reflectionFromRow(row)
-      memories = this.memoriesForScope(database, target.companionId, target.scopeId).filter(item => item.status === 'active')
+      memories = this.memoriesForScope(database, target.companionId, target.scopeId).filter(item => item.status === 'active' && (item.expiresAt === undefined || item.expiresAt > Date.now()))
       const byId = new Map(memories.map(memory => [memory.id, memory]))
       existingRelations = (database.prepare('SELECT * FROM memory_relations WHERE companion_id = ? AND scope_id = ? ORDER BY updated_at DESC, confidence DESC')
         .all(target.companionId, target.scopeId) as SqlRow[]).map(relationFromRow).flatMap(relation => {
@@ -197,7 +286,10 @@ export class PartnerMemoryStore {
     const turns = (await readFile(path, 'utf8').catch(error => missing(error) ? '' : Promise.reject(error))).split('\n').filter(Boolean).flatMap(line => {
       try { return [JSON.parse(line) as ConversationTurn] } catch { return [] }
     })
-    return { reflection, memories, existingRelations, turns }
+    const dateAt = Date.parse(target.date)
+    const durable = await this.journal(target.companionId, db => (db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND at>=? AND at<? ORDER BY at, rowid')
+      .all(target.scopeId, dateAt - 86_400_000, dateAt + 2 * 86_400_000)).map(row => JSON.parse(String(row.turn_json)) as ConversationTurn).filter(turn => this.day(turn.at) === target.date))
+    return { reflection, memories, existingRelations, turns: [...new Map([...turns, ...durable].map(turn => [turn.id, turn])).values()].sort((a, b) => a.at - b.at) }
   }
 
   async completeDailyReview(target: DailyReviewTarget, result: DailyReviewResult): Promise<void> {
@@ -205,11 +297,15 @@ export class PartnerMemoryStore {
       const database = await this.open(target.companionId)
       try {
         database.exec('BEGIN IMMEDIATE')
+        if (database.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND done=0 LIMIT 1').get(target.scopeId)) {
+          throw new Error('终审期间有新的待提炼轮次，稍后重试')
+        }
         const existing = this.memoriesForScope(database, target.companionId, target.scopeId)
         const at = Date.now()
         const synthetic: ConversationTurn = { id: `daily-review-${target.date}`, companionId: target.companionId, scopeId: target.scopeId, sessionId: 'daily-review', at, user: `每日终审 ${target.date}`, assistant: result.daily.summary }
         const merged = mergeMemories(existing, result.memories, synthetic)
         for (const memory of merged) this.upsertMemory(database, memory)
+        applyMemoryArtifacts(database, target.scopeId, merged, result.scenes ?? [], result.experiences ?? [], at)
         database.prepare(`UPDATE daily_reflections SET summary=?, events_json=?, open_tasks_json=?, completed_tasks_json=?,
           learnings_json=?, updated_at=?, reviewed_at=?, review_attempts=0, review_error=NULL, next_review_at=0
           WHERE scope_id=? AND date=?`).run(compact(result.daily.summary, 1200), json(strings(result.daily.events, 20, 240)),
@@ -296,8 +392,12 @@ export class PartnerMemoryStore {
       const database = await this.open(companionId)
       try {
         database.exec('BEGIN IMMEDIATE')
-        database.prepare('DELETE FROM daily_reflections WHERE companion_id = ? AND updated_at < ?').run(companionId, cutoff)
-        database.prepare('DELETE FROM memories WHERE companion_id = ? AND updated_at < ?').run(companionId, cutoff)
+        database.prepare(`DELETE FROM daily_reflections WHERE companion_id = ? AND updated_at < ? AND reviewed_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM memory_jobs WHERE done=0 AND scope_id=daily_reflections.scope_id)`).run(companionId, cutoff)
+        // Retention is for history, not a silent TTL for confirmed durable facts.
+        database.prepare(`DELETE FROM memories WHERE companion_id = ? AND updated_at < ? AND locked=0
+          AND (status!='active' OR (expires_at IS NOT NULL AND expires_at<=?))`).run(companionId, cutoff, Date.now())
+        database.prepare('DELETE FROM memory_jobs WHERE done=1 AND at<?').run(cutoff)
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
     })
@@ -306,6 +406,7 @@ export class PartnerMemoryStore {
   private async open(companionId: string): Promise<DatabaseSync> {
     await mkdir(this.memoryRoot(companionId), { recursive: true, mode: 0o700 })
     const database = new DatabaseSync(this.databasePath(companionId))
+    try {
     database.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY, companion_id TEXT NOT NULL, scope_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -334,7 +435,10 @@ export class PartnerMemoryStore {
     ensureColumn(database, 'daily_reflections', 'review_attempts', 'INTEGER NOT NULL DEFAULT 0')
     ensureColumn(database, 'daily_reflections', 'review_error', 'TEXT')
     ensureColumn(database, 'daily_reflections', 'next_review_at', 'INTEGER NOT NULL DEFAULT 0')
+    initializeMemoryJournal(database)
+    initializeMemoryArtifacts(database)
     return database
+    } catch (error) { database.close(); throw error }
   }
 
   private memoriesForScope(database: DatabaseSync, companionId: string, scopeId: string): PartnerMemory[] {
@@ -446,16 +550,25 @@ function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[],
   const memories = existing.map(item => ({ ...item, evidence: [...item.evidence] }))
   for (const candidate of candidates.slice(0, 12)) {
     const subject = candidate.kind === 'profile' ? canonicalProfileSubject(candidate.subject) ?? candidate.subject : candidate.subject
-    const match = memories.find(item => item.kind === candidate.kind && sameMemorySubject(item, candidate.kind, subject) && item.status !== 'superseded')
+    const match = memories.find(item => item.kind === candidate.kind && item.companionId === turn.companionId && item.scopeId === turn.scopeId
+      && (candidate.targetMemoryId ? item.id === candidate.targetMemoryId : sameMemorySubject(item, candidate.kind, subject)) && item.status !== 'superseded')
+    // A stale or foreign explicit target must never silently create another memory.
+    if (candidate.targetMemoryId && !match) continue
     if (match?.locked) continue
-    if (candidate.operation === 'remove') { if (match) { match.status = 'superseded'; match.updatedAt = turn.at }; continue }
-    if (candidate.operation === 'complete') { if (match) { match.status = 'completed'; match.updatedAt = turn.at }; continue }
-    const evidence = { turnId: turn.id, at: turn.at, excerpt: compact(turn.user, 300) }
+    const evidence = candidate.sourceEvidence ?? { turnId: turn.id, at: turn.at, excerpt: compact(turn.user, 300) }
+    if (candidate.operation === 'remove' || candidate.operation === 'complete') {
+      if (match) {
+        match.status = candidate.operation === 'remove' ? 'superseded' : 'completed'; match.updatedAt = turn.at
+        match.evidence = [...match.evidence.filter(item => item.turnId !== evidence.turnId), evidence].slice(-8)
+      }
+      continue
+    }
     if (match) {
       if (!match.locked) match.content = compact(candidate.content, 800)
-      match.confidence = Math.max(match.confidence, bounded(candidate.confidence)); match.importance = Math.max(match.importance, bounded(candidate.importance))
-      match.updatedAt = turn.at; match.status = 'active'; match.evidence = [...match.evidence.filter(item => item.turnId !== turn.id), evidence].slice(-8)
+      match.confidence = bounded(candidate.confidence); match.importance = bounded(candidate.importance)
+      match.updatedAt = turn.at; match.status = 'active'; match.evidence = [...match.evidence.filter(item => item.turnId !== evidence.turnId), evidence].slice(-8)
       if (candidate.expiresInDays) match.expiresAt = turn.at + candidate.expiresInDays * 86_400_000
+      else if (candidate.kind === 'profile' || candidate.kind === 'preference' || candidate.kind === 'relationship') delete match.expiresAt
     } else memories.push({
       id: `memory-${randomUUID()}`, companionId: turn.companionId, scopeId: turn.scopeId, kind: candidate.kind,
       subject: compact(subject, 120), content: compact(candidate.content, 800), status: 'active',
@@ -552,13 +665,6 @@ function relationFromRow(row: SqlRow): MemoryRelation {
   }
 }
 
-function recallScore(memory: PartnerMemory, terms: string[], now: number): number {
-  const haystack = normalize(`${memory.subject} ${memory.content}`)
-  const lexical = terms.length === 0 ? 0 : terms.filter(term => haystack.includes(term)).length / terms.length
-  const recency = Math.max(0, 1 - (now - memory.updatedAt) / (180 * 86_400_000))
-  return lexical * 0.5 + memory.importance * 0.22 + memory.confidence * 0.18 + recency * 0.1
-}
-
 function rollback(database: DatabaseSync): void { try { database.exec('ROLLBACK') } catch { /* No active transaction. */ } }
 function ensureColumn(database: DatabaseSync, table: string, column: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[]
@@ -567,7 +673,6 @@ function ensureColumn(database: DatabaseSync, table: string, column: string, def
 function tableExists(database: DatabaseSync, table: string): boolean {
   return database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined
 }
-function tokenize(value: string): string[] { return [...new Set(normalize(value).match(/[\p{L}\p{N}]{2,}/gu) ?? [])].slice(0, 40) }
 function normalize(value: string): string { return value.toLocaleLowerCase().replace(/\s+/g, '') }
 function bounded(value: number): number { return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.5 }
 function strings(value: string[], limit: number, max: number): string[] { return [...new Set(value.map(item => compact(item, max)).filter(Boolean))].slice(0, limit) }

@@ -12,11 +12,11 @@ const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
 const boardSource = await readFile(new URL('../src/ui/requirement-tasks-panel.tsx', import.meta.url), 'utf8')
 
-test('memory workspace keeps dynamic glass off data-heavy surfaces', () => {
-  const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
-  const concernBoard = clientSource.slice(clientSource.indexOf('function ConcernBoard('), clientSource.indexOf('function activeMention('))
-  const memoryLibrary = clientSource.slice(clientSource.indexOf('function MemoryLibrary('), clientSource.indexOf('function ProfileLibrary('))
-  const graphMemory = clientSource.slice(clientSource.indexOf('function GraphMemory('), clientSource.indexOf('function relationLabel('))
+test('memory workspace keeps dynamic glass off data-heavy surfaces', async () => {
+  const memoryPanel = await readFile(new URL('../src/ui/memory/memory-panel.tsx', import.meta.url), 'utf8')
+  const concernBoard = await readFile(new URL('../src/ui/memory/concern-board.tsx', import.meta.url), 'utf8')
+  const memoryLibrary = await readFile(new URL('../src/ui/memory/memory-library.tsx', import.meta.url), 'utf8')
+  const graphMemory = await readFile(new URL('../src/ui/memory/memory-graph.tsx', import.meta.url), 'utf8')
 
   assert.doesNotMatch(memoryPanel, /<GlassSurface/)
   assert.doesNotMatch(concernBoard, /<GlassSurface/)
@@ -66,14 +66,14 @@ test('workspace follows the knowledge glass hierarchy while dialogs and option p
   assert.doesNotMatch(workspaceUiCss, /dsh-partner-dialog-veil/)
 })
 
-test('memory graph is fetched only by the graph view', () => {
-  const memoryPanel = clientSource.slice(clientSource.indexOf('function MemoryPanel('), clientSource.indexOf('function ConcernBoard('))
-  const memoryLibrary = clientSource.slice(clientSource.indexOf('function MemoryLibrary('), clientSource.indexOf('function ProfileLibrary('))
+test('memory graph is fetched only by the graph view', async () => {
+  const memoryPanel = await readFile(new URL('../src/ui/memory/memory-panel.tsx', import.meta.url), 'utf8')
+  const memoryLibrary = await readFile(new URL('../src/ui/memory/memory-library.tsx', import.meta.url), 'utf8')
 
   assert.doesNotMatch(memoryPanel, /memory\/graph/)
-  assert.match(memoryLibrary, /if \(mode !== 'graph' \|\| graph !== undefined\) return/)
+  assert.match(memoryLibrary, /mode === 'graph' \? .*memory\/graph.* : undefined/)
   assert.match(memoryLibrary, /memory\/graph/)
-  assert.match(memoryLibrary, /AbortController/)
+  assert.match(await readFile(new URL('../src/ui/memory/use-memory-resource.ts', import.meta.url), 'utf8'), /AbortController/)
 })
 
 test('glass distortion work runs only when SVG backdrop filters are supported', () => {

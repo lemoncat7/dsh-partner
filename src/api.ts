@@ -20,6 +20,7 @@ import type { PartnerSchedulerService } from './scheduler/service.js'
 import type { CompanionService } from './companions/service.js'
 import { dispatchPartnerWorkspaceApi } from './api/features/workspace-api.js'
 import { dispatchPendantApi } from './api/features/pendant-api.js'
+import { dispatchMemoryLayersApi } from './api/features/memory-layers-api.js'
 import type { AttachmentDeliveryService } from './attachments/service.js'
 import { dispatchAttachmentsApi } from './api/features/attachments-api.js'
 import type { PartnerInboxStore } from './notifications/store.js'
@@ -139,12 +140,14 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && segments[2] === 'memory') {
       requiredCompanion(runtime.store, id)
+      if (await dispatchMemoryLayersApi(req, res, url, segments, runtime.memory, id)) return
       if (method === 'GET' && segments.length === 3) {
         const state = runtime.store.snapshot()
         const routes = state.sessions.filter(item => item.companionId === id)
         const scopes = routes.map(item => memoryScope(item.channelId, item.userId))
+        const scopeId = url.searchParams.get('scopeId') ?? undefined
         const [memories, reflections, profiles] = await Promise.all([
-          runtime.memory.recentMemories(id, 100), runtime.memory.recentReflections(id, 30), runtime.memory.profileSnapshots(id, scopes),
+          runtime.memory.recentMemories(id, 100, scopeId), scopeId === undefined ? runtime.memory.recentReflections(id, 30) : runtime.memory.recentReflectionsForScope(id, scopeId, 30), runtime.memory.profileSnapshots(id, scopes),
         ])
         return sendJson(res, 200, {
           memories, reflections,

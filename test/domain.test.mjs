@@ -795,8 +795,9 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-life-'))
   try {
     const store = new PartnerConcernStore(directory)
-    const now = Date.now()
     const explicit = await store.createExplicit('companion-1', '*', '关注 OpenAI 新模型')
+    // A new action must not predate the asynchronous creation it acts on.
+    const now = Date.now()
     assert.equal((await store.due('companion-1', 'any-scope', { now, limit: 12, includeFuture: true }))[0]?.id, explicit.id)
     await store.act('companion-1', explicit.id, 'prioritize', now)
     assert.equal((await store.list('companion-1')).find(item => item.id === explicit.id)?.priority, 1)

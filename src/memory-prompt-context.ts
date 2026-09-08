@@ -55,6 +55,7 @@ export function compactMemories(memories: PartnerMemory[], limit: number, charBu
       id: memory.id,
       kind: memory.kind,
       subject: clip(memory.subject, 120),
+      status: memory.status,
       confidence: precision(memory.confidence),
       importance: precision(memory.importance),
       evidenceCount: memory.evidence.length,
@@ -74,7 +75,7 @@ export function compactTurns(turns: ConversationTurn[], charBudget: number): Arr
   const minimumTurnBudget = 48
   const completeTurnBudget = Math.max(charBudget, turns.length * minimumTurnBudget + turns.length + 1)
   return fitEntries(turns, completeTurnBudget, (turn, entryBudget) => {
-    const base: Record<string, unknown> = { at: turn.at }
+    const base: Record<string, unknown> = { id: turn.id, sessionId: turn.sessionId, at: turn.at }
     if (turn.concernDirective !== undefined) base.concernDirective = {
       action: turn.concernDirective.action,
       subject: clip(turn.concernDirective.subject, 100),

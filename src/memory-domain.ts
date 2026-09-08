@@ -1,4 +1,5 @@
 import type { AppliedConcernLifecycleDirective, ConcernCandidate } from './concern-domain.js'
+import type { SceneProposal, ExperienceProposal, SceneView } from './memory-artifacts.js'
 
 export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
@@ -38,6 +39,7 @@ export interface PartnerMemory {
 }
 
 export interface UserProfileSnapshot {
+  preferences?: PartnerMemory[]
   companionId: string
   scopeId: string
   version: string
@@ -48,6 +50,8 @@ export interface UserProfileSnapshot {
 }
 
 export interface MemoryRecallContext {
+  history?: Array<Pick<ConversationTurn, 'id' | 'at' | 'user' | 'assistant'>>
+  scenes?: SceneView[]
   profile: UserProfileSnapshot
   relevant: PartnerMemory[]
   connections: MemoryContextConnection[]
@@ -67,6 +71,10 @@ export interface DailyReflection {
 }
 
 export interface MemoryCandidate {
+  targetMemoryId?: string
+  evidenceQuote?: string
+  sourceTurnId?: string
+  sourceEvidence?: MemoryEvidence
   kind: MemoryKind
   subject: string
   content: string
@@ -119,5 +127,7 @@ export interface MemoryRelationReviewContext extends MemoryRelation {
   targetKind: MemoryKind
 }
 export interface DailyReviewResult extends ReflectionResult {
+  scenes?: SceneProposal[]
+  experiences?: ExperienceProposal[]
   relations: MemoryRelationCandidate[]
 }

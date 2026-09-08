@@ -26,6 +26,9 @@ export function isProfileBaselineEntry(memory: PartnerMemory): boolean {
 }
 
 export function buildProfileSnapshot(companionId: string, scopeId: string, memories: PartnerMemory[]): UserProfileSnapshot {
+  const now = Date.now()
+  memories = memories.filter(item => item.companionId === companionId && item.scopeId === scopeId
+    && (item.expiresAt === undefined || item.expiresAt > now))
   const entries: PartnerMemory[] = []
   const subjects = new Set<string>()
   for (const memory of memories.filter(isProfileBaselineEntry).sort(compareProfileEntries)) {
@@ -35,17 +38,22 @@ export function buildProfileSnapshot(companionId: string, scopeId: string, memor
     entries.push(memory)
     if (entries.length >= PROFILE_ENTRY_LIMIT) break
   }
-  const version = createHash('sha256').update(entries.map(entry => [
+  const preferences = memories.filter(item => item.kind === 'preference' && item.status === 'active'
+    && (item.locked || (item.confidence >= .8 && item.importance >= .65 && new Set(item.evidence.map(source => source.turnId)).size >= 2)))
+    .sort((a, b) => Number(Boolean(b.locked)) - Number(Boolean(a.locked)) || b.importance - a.importance || b.updatedAt - a.updatedAt).slice(0, 4)
+  const baseline = [...entries, ...preferences]
+  const version = createHash('sha256').update(baseline.map(entry => [
     entry.id, canonicalProfileSubject(entry.subject) ?? entry.subject, entry.content, entry.locked ? 1 : 0,
   ].join('\u0000')).join('\u0001')).digest('hex').slice(0, 12)
   return {
     companionId,
     scopeId,
     version,
-    ...(entries[0] ? { updatedAt: Math.max(...entries.map(entry => entry.updatedAt)) } : {}),
+    ...(baseline[0] ? { updatedAt: Math.max(...baseline.map(entry => entry.updatedAt)) } : {}),
     entries,
-    evidenceCount: new Set(entries.flatMap(entry => entry.evidence.map(evidence => evidence.turnId))).size,
-    lockedCount: entries.filter(entry => entry.locked).length,
+    preferences,
+    evidenceCount: new Set(baseline.flatMap(entry => entry.evidence.map(evidence => evidence.turnId))).size,
+    lockedCount: baseline.filter(entry => entry.locked).length,
   }
 }
 

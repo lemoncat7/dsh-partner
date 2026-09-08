@@ -16,6 +16,7 @@ export interface ConcernDueOptions { now?: number; limit?: number; includeFuture
 export type ConcernCandidateSource = 'reflection' | 'daily_review' | 'tool' | 'ui'
 export type ConcernAuditDecision = 'created' | 'updated' | 'resolved' | 'dismissed' | 'rejected' | 'ignored'
 export interface ConcernApplyOptions {
+  batchId?: string
   source?: ConcernCandidateSource
   sessionId?: string
   evidence?: string
@@ -90,9 +91,17 @@ export class PartnerConcernStore {
       )
       try {
         database.exec('BEGIN IMMEDIATE')
+        if (options.batchId) {
+          const prior = database.prepare('SELECT result_json FROM concern_batches WHERE scope_id=? AND id=?').get(scopeId, options.batchId)
+          if (prior) { database.exec('COMMIT'); return JSON.parse(String(prior.result_json)) as ConcernApplyResult }
+        }
         for (const candidate of candidates.slice(0, 12)) {
           const normalized = normalizeConcernSubject(compact(candidate.subject, 300))
           const existing = normalized ? this.existing(database, companionId, scopeId, normalized) : undefined
+          if (options.batchId && existing && existing.updatedAt > at) {
+            entries.push({ subject: candidate.subject, decision: 'ignored', reason: '已有更新的关注状态，不重放旧轮次' })
+            continue
+          }
           const directEvidence = source === 'tool' || source === 'reflection' ? options.evidence : undefined
           const rejection = origin === 'implicit' ? implicitConcernRejection(candidate, directEvidence) : undefined
           if (rejection !== undefined || (origin === 'implicit' && candidate.operation === 'upsert' && existing === undefined && created.length >= maxImplicitCreates)) {
@@ -120,6 +129,8 @@ export class PartnerConcernStore {
           this.audit(database, companionId, scopeId, origin, candidate, entry, at, options)
         }
         database.prepare('DELETE FROM concern_audit WHERE companion_id = ? AND created_at < ?').run(companionId, at - 90 * 86_400_000)
+        if (options.batchId) database.prepare('INSERT INTO concern_batches (scope_id, id, result_json) VALUES (?, ?, ?)')
+          .run(scopeId, options.batchId, JSON.stringify({ created, entries }))
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
       return { created, entries }
@@ -354,6 +365,7 @@ export class PartnerConcernStore {
       try {
         const concern = database.prepare('SELECT * FROM concerns WHERE companion_id = ? AND id = ?').get(companionId, concernId) as SqlRow | undefined
         if (!concern) throw new Error('concern was not found')
+        if (number(concern.updated_at) > now) return
         if (action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', updated_at = ? WHERE id = ?").run(now, concernId)
         if (action === 'resolve') database.prepare("UPDATE concerns SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").run(now, now, concernId)
         if (action === 'watch') database.prepare("UPDATE concerns SET state = 'watching', score = MAX(score, .72), last_activity_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?").run(now, now, now, concernId)
@@ -444,6 +456,7 @@ export class PartnerConcernStore {
     const database = new DatabaseSync(this.path(companionId))
     database.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS concern_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS concern_batches (scope_id TEXT NOT NULL, id TEXT NOT NULL, result_json TEXT NOT NULL, PRIMARY KEY(scope_id, id));
       CREATE TABLE IF NOT EXISTS concerns (
         id TEXT PRIMARY KEY, companion_id TEXT NOT NULL, scope_id TEXT NOT NULL, normalized_subject TEXT NOT NULL,
         subject TEXT NOT NULL, reason TEXT NOT NULL, origin TEXT NOT NULL, state TEXT NOT NULL,

@@ -12,6 +12,17 @@ const turn = (id, at, user = '用户说明了自己的长期情况') => ({
 })
 const memory = (kind, subject, content, confidence, importance) => ({ kind, subject, content, confidence, importance, operation: 'upsert' })
 
+test('recent memory limits apply within a contact rather than hiding other contacts', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-partner-scope-'))
+  t.after(async () => rm(root, {recursive: true, force: true}))
+  const store = new PartnerMemoryStore(root)
+  await store.consolidate(turn('first', 1000), {daily, memories: [memory('profile', '早期联系人', '明确背景', .95, .8)]})
+  await store.consolidate({...turn('second', 2000), scopeId: 'other'}, {daily, memories: [memory('profile', '另一联系人', '新的背景', .95, .8)]})
+  assert.equal((await store.recentMemories('companion-1', 1))[0].scopeId, 'other')
+  assert.equal((await store.recentMemories('companion-1', 1, 'weixin-1:user-1'))[0].subject, '早期联系人')
+  assert.deepEqual(await store.recentMemories('companion-1', 1, 'missing'), [])
+})
+
 test('builds a stable user profile separately from topic recall', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-partner-profile-'))
   t.after(async () => rm(root, { recursive: true, force: true }))

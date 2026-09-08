@@ -11,22 +11,29 @@ export class DailyReviewScheduler {
   private timer: ReturnType<typeof setTimeout> | undefined
   private closed = false
   private readonly running = new Set<string>()
+  private readonly jobs = new Set<Promise<{ reviewed: number; failed: number; reason?: string }>>()
 
   constructor(private readonly ctx: Context, private readonly store: PartnerStore, private readonly memory: PartnerMemoryStore,
     private readonly reflection: MemoryReflectionService, private readonly agents: PartnerAgentRuntime, private readonly timeZone = 'Asia/Shanghai') {}
 
   start(): void { if (!this.closed && this.timer === undefined) this.schedule(5_000) }
-  async close(): Promise<void> { this.closed = true; if (this.timer) clearTimeout(this.timer); this.timer = undefined }
+  async close(): Promise<void> {
+    this.closed = true; if (this.timer) clearTimeout(this.timer); this.timer = undefined
+    await Promise.allSettled([...this.jobs])
+  }
   isRunning(id: string): boolean { return this.running.has(id) }
 
   async trigger(companionId: string, force = false): Promise<{ reviewed: number; failed: number; reason?: string }> {
+    if (this.closed) return { reviewed: 0, failed: 0, reason: '记忆服务正在停止' }
     if (this.store.isCompanionRemoving(companionId)) return { reviewed: 0, failed: 0, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { reviewed: 0, failed: 0, reason: '每日终审正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (!companion) throw new Error('伙伴不存在')
     if (!force && (!companion.automation.memory.enabled || !companion.automation.memory.dailyReviewEnabled)) return { reviewed: 0, failed: 0, reason: '每日终审未启用' }
     this.running.add(companionId)
-    try { return await this.run(companion, force) } finally { this.running.delete(companionId) }
+    const job = this.run(companion, force)
+    this.jobs.add(job)
+    try { return await job } finally { this.running.delete(companionId); this.jobs.delete(job) }
   }
 
   private schedule(delay: number): void {

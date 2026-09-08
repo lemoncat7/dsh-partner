@@ -15,6 +15,7 @@ import { registerPartnerApi, type WebServerLike } from './api.js'
 import { HeartbeatScheduler } from './heartbeat.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { MemoryReflectionService } from './memory-reflection.js'
+import { MemoryWorker } from './memory-worker.js'
 import { DailyReviewScheduler } from './daily-review.js'
 import { PartnerConcernStore, type LegacyConcernSeed } from './concern-store.js'
 import { registerPartnerConcernTool } from './concern-tool.js'
@@ -104,6 +105,14 @@ export function apply(context: Context, config: PartnerConfig): void {
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts, requirements)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const memoryWorker = new MemoryWorker({
+      companions: () => store.snapshot().companions,
+      removing: id => store.isCompanionRemoving(id),
+      process: companion => reflection.processPending(companion, async (scopeId, created) => {
+        if (!await agents.recordConcernCreatedNotice(companion, scopeId, created)) throw new Error('关注通知未送达，稍后重试')
+      }),
+      warn: message => ctx.logger.warn(`dsh-partner: ${message}`),
+    })
     const deliveries = await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
@@ -150,6 +159,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     if (resolved.autoStartChannels) await channels.startEnabled()
     heartbeat.start()
     dailyReview.start()
+    memoryWorker.start()
     scheduler.start()
     requirementWorker.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
@@ -159,6 +169,8 @@ export function apply(context: Context, config: PartnerConfig): void {
       disposeApi?.()
       disposeSessionObserver()
       disposeConcernTool()
+      reflection.close()
+      await memoryWorker.close()
       await scheduler.close()
       await heartbeat.close()
       await dailyReview.close()
