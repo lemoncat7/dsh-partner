@@ -52,7 +52,7 @@ try{
   assert.equal(await page.locator('.dsh-partner-pendant').count(),0)
   await page.evaluate(()=>{Storage.prototype.setItem=window.originalSet});await save.click()
   await page.waitForSelector('canvas[data-ready="true"]',{timeout:40000})
-  const file=page.locator('input[type=file]')
+  const file=page.getByLabel('上传卡片图片')
   await file.setInputFiles({name:'bad.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg/>')})
   assert.match(await page.getByRole('alert').innerText(),/PNG/)
   await file.setInputFiles({name:'broken.png',mimeType:'image/png',buffer:Buffer.from('not an image')})
@@ -79,13 +79,21 @@ try{
       assert.equal(await page.locator('img[alt="自定义卡片正面预览"]').evaluate(el=>getComputedStyle(el).objectFit),fit)
       const pixels=await page.evaluate(async()=>{const s=JSON.parse(localStorage.getItem('dsh-partner:pendant-settings:v1')),image=new Image();image.src=s.image;await image.decode();const c=document.createElement('canvas');c.width=512;c.height=704;window.drawCardImage(c,image,s.imageFit);const x=c.getContext('2d');return{source:s.image,width:image.width,height:image.height,left:[...x.getImageData(5,352,1,1).data],top:[...x.getImageData(256,5,1,1).data]} })
       assert.equal(pixels.source,original,'changing fit never crops or re-encodes the saved source')
-      assert.ok(pixels.width<=1024&&pixels.height<=1024)
+      assert.ok(pixels.width<=1536&&pixels.height<=1536)
       assert.equal(pixels.width/pixels.height,width/height)
       if(width===1600&&fit==='contain') {assert.ok(pixels.left[0]>200&&pixels.left[1]<60,'complete left edge is retained');assert.deepEqual(pixels.top,[37,50,53,255],'letterbox uses the card background')}
       if(width===1600&&fit==='cover') assert.ok(pixels.left[2]>120&&pixels.left[0]<60,'cover crops the side markers without stretching')
     }
   }
   await page.reload();await page.waitForSelector('canvas[data-art="custom"]',{timeout:40000})
+  await page.getByRole('slider',{name:'绳子长度'}).fill('160'); await save.click()
+  await page.waitForSelector('canvas[data-strap-length="160"]')
+  await page.getByRole('slider',{name:'卡片清晰度'}).fill('45'); await save.click()
+  await page.waitForSelector('canvas[data-quality="45"]')
+  await page.getByLabel('上传绳子纹理').setInputFiles({name:'texture.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')})
+  await page.getByRole('button',{name:'更换绳子纹理'}).waitFor(); await save.click()
+  await page.waitForSelector('.dsh-partner-pendant-strap[data-custom-texture="true"]')
+  await page.reload(); await page.waitForSelector('canvas[data-strap-length="160"][data-quality="45"]',{timeout:40000})
   assert.equal(await page.getByRole('button',{name:/^完整显示/}).getAttribute('aria-pressed'),'true')
   await page.screenshot({path:'/tmp/partner-pendant-settings-desktop.png',fullPage:true})
   for(const dark of [false,true]){

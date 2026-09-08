@@ -14,6 +14,8 @@ export function drawCardImage(canvas: HTMLCanvasElement, image: HTMLImageElement
   if (!context) throw new Error('当前浏览器无法处理图片。')
   const rect = cardImageRect(image.naturalWidth, image.naturalHeight, canvas.width, canvas.height, fit)
   context.fillStyle = CARD_IMAGE_BACKGROUND
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.drawImage(image, rect.x, rect.y, rect.width, rect.height)
 }
@@ -30,23 +32,30 @@ export function loadCardImage(source: string): Promise<HTMLImageElement> {
 /** Persist a bounded source with its aspect ratio intact, so fitting remains
  * reversible. No remote URLs, SVG execution, server upload or full-size GPU textures.
  */
-export async function prepareCardImage(file: File): Promise<string> {
+export async function prepareCardImage(file: File, maxDimension = 1536): Promise<string> {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('请选择 PNG、JPEG 或 WebP 图片。')
   if (file.size > 5 * 1024 * 1024) throw new Error('图片不能超过 5 MB。')
   const url = URL.createObjectURL(file)
   try {
     const image = await loadCardImage(url)
     if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 25_000_000) throw new Error('图片分辨率过大，请缩小至 2500 万像素以内。')
-    const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight))
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight))
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
     const context = canvas.getContext('2d')
     if (!context) throw new Error('当前浏览器无法处理图片。')
+    context.imageSmoothingQuality = 'high'
     context.fillStyle = CARD_IMAGE_BACKGROUND; context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(image, 0, 0, canvas.width, canvas.height)
-    const result = canvas.toDataURL('image/jpeg', .9)
-    if (result.length > MAX_CARD_IMAGE_LENGTH) throw new Error('图片压缩后仍然过大，请换一张图片。')
-    return result
+    // Prefer lossless for text/illustrations; bounded high-quality compression
+    // for photos avoids silently consuming the browser's storage quota.
+    const png = canvas.toDataURL('image/png')
+    if (png.length <= MAX_CARD_IMAGE_LENGTH) return png
+    for (const quality of [.94, .88, .8]) {
+      const result = canvas.toDataURL('image/webp', quality)
+      if (result.length <= MAX_CARD_IMAGE_LENGTH) return result
+    }
+    throw new Error('图片压缩后仍然过大，请缩小图片或使用更简洁的图案。')
   } finally { URL.revokeObjectURL(url) }
 }

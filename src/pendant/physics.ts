@@ -1,4 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat'
+import { normalizeStrapLength } from './settings.js'
 
 export const LANYARD_STEP = 1 / 120
 
@@ -23,10 +24,26 @@ export function createLanyardPhysics() {
   // static extension keeps the loaded strap at 3 world units as stiffness is
   // tuned. Underdamping preserves recoil, without launching ordinary pulls.
   const stiffness = 220, restLength = 1 - 60 / stiffness
-  for (let i = 0; i < 3; i++) world.createImpulseJoint(
+  const springs: RAPIER.ImpulseJoint[] = []
+  for (let i = 0; i < 3; i++) springs.push(world.createImpulseJoint(
     RAPIER.JointData.spring(restLength, stiffness, 6, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }),
     bodies[i]!, bodies[i + 1]!, true,
-  )
+  ))
   world.createImpulseJoint(RAPIER.JointData.spherical({ x: 0, y: 0, z: 0 }, { x: 0, y: 1.1, z: 0 }), beads[2]!, badge, true)
-  return { world, anchor, beads, badge, bodies }
+  let length = 100
+  const setLength = (value: number): void => {
+    const next = normalizeStrapLength(value)
+    if (next === length) return
+    length = next
+    const segment = next / 100
+    for (const joint of springs) world.removeImpulseJoint(joint, true)
+    springs.length = 0
+    for (let i = 0; i < 3; i++) {
+      beads[i]!.setTranslation({ x: .015, y: 4.15 - segment * (i + 1), z: 0 }, true)
+      springs.push(world.createImpulseJoint(RAPIER.JointData.spring(segment - 60 / stiffness, stiffness, 6, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), bodies[i]!, bodies[i + 1]!, true))
+    }
+    badge.setTranslation({ x: .015, y: 4.15 - 3 * segment - 1.1, z: 0 }, true)
+    for (const body of [...beads, badge]) { body.setLinvel({ x: 0, y: 0, z: 0 }, true); body.setAngvel({ x: 0, y: 0, z: 0 }, true) }
+  }
+  return { world, anchor, beads, badge, bodies, setLength }
 }

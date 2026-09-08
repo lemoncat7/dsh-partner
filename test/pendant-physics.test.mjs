@@ -6,6 +6,19 @@ import { createLanyardPhysics, LANYARD_STEP } from '../lib/pendant/physics.js'
 await RAPIER.init()
 const run = (world, seconds) => { for (let i = 0; i < Math.round(seconds / LANYARD_STEP); i++) world.step() }
 
+test('length changes reuse bodies and remain stable at both ends of the range', () => {
+  const { world, badge, setLength } = createLanyardPhysics()
+  try {
+    for (const length of [60, 160, 100, 60, 160]) {
+      setLength(length)
+      run(world, 20)
+      assert.ok(Math.abs(badge.translation().y - (.05 + 3 * (1 - length / 100))) < .08)
+      assert.equal(world.impulseJoints.len(), 4, 'changing length does not leak joints')
+      assert.ok(badge.isSleeping())
+    }
+  } finally { world.free() }
+})
+
 test('held stretch stores energy and visibly overshoots on release without a throw impulse', () => {
   const { world, badge } = createLanyardPhysics()
   try {

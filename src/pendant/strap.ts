@@ -2,11 +2,19 @@ import { CatmullRomCurve3, Vector3 } from 'three'
 import { strapGeometry, type StrapPoint } from './strap-geometry.js'
 import { DEFAULT_PENDANT_SETTINGS, type PendantSettings } from './settings.js'
 
+let strapSequence = 0
+
 /** Fixed SVG layer pool, separate from the bounded WebGL card buffer. */
 export function createLanyardStrap(canvas: HTMLCanvasElement) {
   const ns = 'http://www.w3.org/2000/svg'
   const svg = document.createElementNS(ns, 'svg')
   svg.classList.add('dsh-partner-pendant-strap'); svg.setAttribute('aria-hidden', 'true')
+  const patternId = `partner-strap-${++strapSequence}`
+  const defs = document.createElementNS(ns, 'defs'), pattern = document.createElementNS(ns, 'pattern'), image = document.createElementNS(ns, 'image')
+  pattern.id = patternId; pattern.setAttribute('patternUnits', 'userSpaceOnUse'); pattern.setAttribute('width', '24'); pattern.setAttribute('height', '24')
+  image.setAttribute('width', '24'); image.setAttribute('height', '24'); image.setAttribute('preserveAspectRatio', 'xMidYMid slice')
+  pattern.append(image); defs.append(pattern); svg.append(defs)
+  let customImage = ''
   const paths = Array.from({ length: 8 }, () => {
     const path = document.createElementNS(ns, 'path')
     path.setAttribute('fill', 'none'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round')
@@ -27,7 +35,7 @@ export function createLanyardStrap(canvas: HTMLCanvasElement) {
       if (!layer) return
       path.setAttribute('d', layer.d)
       if (stylesDirty) {
-        path.dataset.layer = layer.id; path.setAttribute('stroke', layer.stroke)
+        path.dataset.layer = layer.id; path.setAttribute('stroke', customImage && layer.id === 'surface' ? `url(#${patternId})` : layer.stroke)
         path.setAttribute('stroke-width', String(layer.width)); path.setAttribute('opacity', String(layer.opacity))
       }
     })
@@ -36,7 +44,10 @@ export function createLanyardStrap(canvas: HTMLCanvasElement) {
   return {
     resize(scale: number) { currentScale = scale; stylesDirty = true; stud.setAttribute('r', String(scale * .06)); redraw() },
     setAppearance(settings: PendantSettings) {
-      if (appearance.material === settings.material && appearance.color === settings.color && svg.dataset.material) return
+      if (appearance.material === settings.material && appearance.color === settings.color && customImage === settings.strapImage && svg.dataset.material) return
+      customImage = settings.strapImage
+      if (customImage) image.setAttribute('href', customImage); else image.removeAttribute('href')
+      svg.dataset.customTexture = String(Boolean(customImage))
       appearance = { material: settings.material, color: settings.color }
       stylesDirty = true
       svg.dataset.material = settings.material; svg.dataset.color = settings.color; redraw()

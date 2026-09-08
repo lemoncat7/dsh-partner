@@ -74,7 +74,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   clip.position.set(0, .94, .03); card.add(clip)
   scene.add(card)
 
-  const { world, beads, badge, bodies } = createLanyardPhysics()
+  const { world, beads, badge, bodies, setLength } = createLanyardPhysics()
   const noticeMotion = createNoticeMotion(badge)
   const strap = createLanyardStrap(canvas), euler = new THREE.Euler()
   const movingBodies = [badge, ...beads]
@@ -82,6 +82,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   let unread = 0, messageIdentity = ''
   let artSource: string | undefined, artRevision = 0
   let artFit: PendantSettings['imageFit'] | undefined
+  let quality: PendantSettings['quality'] = 100, strapLength = 100
   let home = canvas.parentElement!.getBoundingClientRect()
   let layerOrigin = { left: 0, top: 0 }
   let gesture: { id: number; x: number; y: number; lastX: number; lastY: number; lastAt: number; moved: boolean; offset: THREE.Vector3; rotation: THREE.Quaternion; target: THREE.Vector3; velocity: THREE.Vector3; spin: THREE.Vector3 } | undefined
@@ -198,7 +199,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     // Preserve the old resting size, without the old perspective projection.
     scale = home.height / (20 * Math.tan(Math.PI / 12))
     const nextSize = Math.ceil(scale * cardViewSize)
-    const nextPixelRatio = badgePixelRatio(devicePixelRatio)
+    const nextPixelRatio = 1 + (Math.min(3, Math.max(2, devicePixelRatio || 1)) - 1) * quality / 100
     if (renderer.getPixelRatio() !== nextPixelRatio) renderer.setPixelRatio(nextPixelRatio)
     if (nextSize !== canvasSize) {
       canvasSize = nextSize; renderer.setSize(canvasSize, canvasSize, false)
@@ -221,6 +222,9 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     setAppearance(settings) {
       if (disposed) return
       loop.setFps(settings.fps); canvas.dataset.fps = String(settings.fps)
+      if (strapLength !== settings.strapLength) { end(); strapLength = settings.strapLength; setLength(strapLength); wake() }
+      if (quality !== settings.quality) { quality = settings.quality; resize() }
+      canvas.dataset.quality = String(quality); canvas.dataset.strapLength = String(strapLength)
       strap.setAppearance(settings)
       if (settings.image === artSource && settings.imageFit === artFit) return
       artSource = settings.image; artFit = settings.imageFit
@@ -274,12 +278,13 @@ function roundedRectangle(width: number, height: number, radius: number): THREE.
 }
 
 function badgeTexture(back: boolean): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 704
+  const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 1408
   drawBadge(canvas, back)
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; return texture
 }
 function drawBadge(canvas: HTMLCanvasElement, back: boolean, message?: BadgeMessage): void {
   const c = canvas.getContext('2d')!
+  c.save(); c.scale(canvas.width / 512, canvas.height / 704)
   c.textAlign = 'left'
   c.fillStyle = back ? '#cbd2d5' : '#253235'; c.fillRect(0, 0, 512, 704)
   if (back && message?.count) {
@@ -293,7 +298,7 @@ function drawBadge(canvas: HTMLCanvasElement, back: boolean, message?: BadgeMess
     c.fillText(chars.join('') + (chars.length < originalLength ? '…' : ''), 256, 411)
     c.font = '500 74px sans-serif'; c.fillText(message.label, 256, 514)
     c.fillStyle = muted; c.font = '500 52px sans-serif'; c.fillText('点击查看', 256, 628)
-    return
+    c.restore(); return
   }
   c.fillStyle = back ? '#536a65' : '#b6cbc2'; c.font = '500 28px sans-serif'; c.fillText('DSH / PARTNER', 49, 90)
   c.beginPath(); c.arc(256, 305, 116, 0, Math.PI * 2); c.fillStyle = back ? '#d5dcda' : '#334749'; c.fill()
@@ -303,4 +308,5 @@ function drawBadge(canvas: HTMLCanvasElement, back: boolean, message?: BadgeMess
   c.textAlign = 'center'; c.fillStyle = back ? '#253235' : '#f1f3ec'; c.font = '600 48px sans-serif'; c.fillText(back ? 'TAKE A BREAK' : 'WITH YOU', 256, 515)
   c.fillStyle = back ? '#536663' : '#b6c5c1'; c.font = '24px sans-serif'; c.fillText(back ? 'A little pause. A little play.' : 'Always a little closer.', 256, 559)
   c.fillStyle = back ? '#b3beb8' : '#6d8b80'; c.fillRect(213, 608, 86, 5)
+  c.restore()
 }
