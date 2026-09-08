@@ -253,10 +253,11 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - 绳子材质由 `strap-style.ts`（色阶与宽度）、`strap-geometry.ts`（沿曲线的织纹/交错绳股/双侧缝线）和 `strap.ts`（固定 SVG 节点池）分层负责。设置预览和材质小样用 `strap-preview.tsx` 复用同一几何；纹理沿弧长和切线排布，最多 256 个采样、8 层路径，不使用模糊滤镜、逐根绳股 DOM 或额外 GPU 贴图。颜色、线宽等属性只在外观或尺寸变化时更新，静止时沿用渲染器休眠。
 
 - “卡片设置”位于定时任务之后，是独立工作区页面。`pendant/settings.ts` 负责设置校验，`use-settings.ts` 通过外部存储订阅统一管理当前浏览器的开关、材质、颜色和正面图片；跨标签同步，存储失败不覆盖已生效配置，未保存草稿不被其他标签覆盖。关闭会卸载挂饰、轮询和 GPU/物理资源，不影响服务端消息保留。
-- `pendant/settings-panel.tsx` 复用工作区表单、提示与按钮；预览使用静态 SVG，不额外创建 WebGL。`strap-style.ts` 为预览与实际绳子提供同一套视觉参数，不改变物理参数。`card-image.ts` 本地验证和解码 PNG/JPEG/WebP（5 MB、2500 万像素上限），裁切为 512×704 JPEG（最多 700000 字符）再保存到 localStorage；不接收外链/SVG，不上传图片。替换纹理复用原画布，异步解码使用修订号避免旧图片覆盖新设置或卸载后更新。
+- `pendant/settings-panel.tsx` 复用工作区表单、提示与按钮；预览使用静态 SVG，不额外创建 WebGL。`strap-style.ts` 为预览与实际绳子提供同一套视觉参数，不改变物理参数。`card-image.ts` 本地验证和解码 PNG/JPEG/WebP（5 MB、2500 万像素上限），保留完整比例、最长边不超过 1024 的 JPEG（最多 700000 字符）到 localStorage；不接收外链/SVG，不上传图片。`imageFit` 默认 `contain` 完整显示，可切换 `cover` 居中铺满；CSS 预览与 Canvas 均等比缩放，空余部分统一使用卡面底色，切换不重编码或裁掉源图。旧版已裁切的图片无法恢复缺失像素，需重新上传。绘制仍复用 512×704 纹理和原画布，异步解码使用修订号避免旧图片覆盖新设置或卸载后更新。
 
 - `pendant/widget.tsx` 通过 DSH `shell.overlay` 加法插槽提供单一挂饰，独立于会话和伙伴面板；不修改宿主布局或 DSH 源码。
 - `pendant/renderer.ts` 是单独构建的同源 ESM 资源。使用 Three.js + Rapier 实现 React Bits Lanyard 风格交互，不是原组件的逐字移植；卡牌与纹理由插件生成，无外部模型/图片请求。渲染库打进独立资源，不成为用户安装时额外解析的运行时依赖。
+- `pendant/surface.ts` 与 `image-coating.ts` 分开合成源图与光效，源图不参与照明/曝光映射，背面物理反射保持不变。正面的 `motion-glare.ts` 保留 React Bits GlareHover 斜向渐变形状，但取消时间进度、速度触发、淡出和循环：将固定世界光源/视线半角向量投影到卡片局部坐标，用实际四元数确定光带位置与强度（上限 38%）。同一角度输出完全一致，反向旋转沿原路返回，停住时保持反光；正反面过渡按朝向平滑衰减，减少动态效果时关闭。不改源图、法线、几何和背面通知，也不增加绘制、画布、计时器或 RAF；可见高光不阻止静止休眠。来源许可见 THIRD_PARTY_LICENSES.md。
 - 六像素拖动阈值隔离点击与拖动；取消、失焦和卸载释放指针捕获。静止后停止 RAF，后台暂停，卸载时销毁 GPU 与物理资源。WebGL 不可用时保留普通消息入口。
 - `pendant/physics.ts` 独立负责物理连接：三个弹性关节储存拉伸能量，球形关节允许卡牌翻面，固定 120Hz 物理步进与绘制帧率解耦。握持时停顿也能回弹，不靠松手时注入假的回弹冲量。拖动转向与实际时间采样的释放速度提供翻转惯性。
 - 拖动不施加人为坐标/长度限制。卡牌使用固定比例的正交视图，在独立的小 WebGL 画布中绘制，用 CSS transform 移动；拖动距离和物理深度不再改变绘制尺寸或放大卡牌。`pendant/strap.ts` 独立绘制矢量绳带，不分配全屏 GPU 缓冲。布局只在容器/窗口尺寸变化时读取，指针事件使用缓存的线性坐标映射。静止后休眠，不以固定时长截断回摆。
@@ -269,3 +270,4 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - `notifications/store.ts` 在主状态文件同目录保存 `partner-inbox.sqlite`，权限 0600，最多 200 条摘要（每条最多 2000 字符）及已读状态。它不是新的会话历史；完整内容仍在原任务/会话中。
 - `api/features/pendant-api.ts` 沿用原有 API 同源和写操作校验，只提供固定渲染资源、消息查询和批量已读。前端可见时每 4 秒条件查询（ETag）；无变化不传正文，失败退避至 30 秒，隐藏或卸载时取消请求。
 - 验证：`test/pendant-inbox.test.mjs`、`test/pendant-physics.test.mjs`；构建后设置 `PARTNER_PLAYWRIGHT_MODULE` 并运行 `node scripts/verify-pendant.mjs`，使用隔离假数据检查 WebGL、真实拖拽、拉住停顿后的回弹与反向振荡、休眠、键盘、通知导航、移动端和清理。可设置 `PARTNER_PENDANT_VIDEO_DIR` 保存连续交互录像。
+- 卡面验证：`test/pendant-motion-glare.test.mjs` 覆盖角度往返、固定姿态十秒不漂移、四元数等价、强度边界、减少动态效果和背面关闭；`test/pendant-surface.test.mjs` 覆盖共享 uniform 与背面不变。`scripts/verify-pendant-gloss.mjs` 检查 162 组原色误差、渐变参考对照、不同倾角的光带位移与对比度保护及无额外绘制。浏览器测试覆盖 hover 不改变反光、拖拽改变角度时更新、握持静止高光不循环并正常休眠。

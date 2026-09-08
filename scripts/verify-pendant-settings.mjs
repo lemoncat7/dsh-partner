@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const root = fileURLToPath(new URL('../', import.meta.url))
-const app = await build({ stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import{PartnerPendant}from'./src/pendant/widget';import{PendantSettingsPanel}from'./src/pendant/settings-panel';createRoot(document.getElementById('app')).render(<><div className="dsh-partner-workspace"><PendantSettingsPanel/></div><PartnerPendant controller={{}}/></>);`, loader:'tsx',resolveDir:root },bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'},define:{'process.env.NODE_ENV':'"production"'}})
+const app = await build({ stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import{PartnerPendant}from'./src/pendant/widget';import{PendantSettingsPanel}from'./src/pendant/settings-panel';import{drawCardImage}from'./src/pendant/card-image';window.drawCardImage=drawCardImage;createRoot(document.getElementById('app')).render(<><div className="dsh-partner-workspace"><PendantSettingsPanel/></div><PartnerPendant controller={{}}/></>);`, loader:'tsx',resolveDir:root },bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'},define:{'process.env.NODE_ENV':'"production"'}})
 const renderer=await readFile(new URL('../lib/pendant-renderer.js',import.meta.url))
 const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css','src/pendant/widget.css','src/pendant/settings-panel.css'].map(p=>readFile(new URL('../'+p,import.meta.url),'utf8')))).join('\n')
 let polls=0
@@ -62,8 +62,31 @@ try{
   await page.waitForSelector('img[alt="自定义卡片正面预览"]');await save.click()
   await page.waitForSelector('canvas[data-art="custom"]')
   const dimensions=await page.evaluate(async()=>{const s=JSON.parse(localStorage.getItem('dsh-partner:pendant-settings:v1'));const image=new Image();image.src=s.image;await image.decode();return[image.width,image.height,s.image.length]})
-  assert.deepEqual(dimensions.slice(0,2),[512,704]);assert.ok(dimensions[2]<=700000)
+  assert.deepEqual(dimensions.slice(0,2),[200,300]);assert.ok(dimensions[2]<=700000)
+  // New uploads retain the full source; fitting is reversible and only repaints
+  // the existing GPU texture. Verify horizontal, vertical and square sources.
+  await page.locator('.dsh-partner-pendant-canvas').evaluate(el=>{window.fitCanvas=el})
+  for(const [width,height] of [[1600,800],[800,1600],[900,900]]){
+    const data=await page.evaluate(([w,h])=>{const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#2244aa';x.fillRect(0,0,w,h);x.fillStyle='#ee2222';x.fillRect(0,0,w*.1,h);x.fillStyle='#22ee22';x.fillRect(w*.9,0,w*.1,h);return c.toDataURL('image/png').split(',')[1]},[width,height])
+    await file.setInputFiles({name:'proportions.png',mimeType:'image/png',buffer:Buffer.from(data,'base64')})
+    await page.getByRole('button',{name:'更换图片',exact:true}).waitFor();await save.click()
+    await page.waitForSelector('canvas[data-art="custom"]')
+    const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('dsh-partner:pendant-settings:v1')).image)
+    for(const [fit,name] of [['cover','铺满裁切'],['contain','完整显示']]){
+      await page.getByRole('button',{name:new RegExp('^'+name)}).click();await save.click()
+      await page.waitForSelector('canvas[data-image-fit="'+fit+'"]')
+      assert.equal(await page.locator('.dsh-partner-pendant-canvas').evaluate(el=>el===window.fitCanvas),true,'image fitting does not rebuild the renderer')
+      assert.equal(await page.locator('img[alt="自定义卡片正面预览"]').evaluate(el=>getComputedStyle(el).objectFit),fit)
+      const pixels=await page.evaluate(async()=>{const s=JSON.parse(localStorage.getItem('dsh-partner:pendant-settings:v1')),image=new Image();image.src=s.image;await image.decode();const c=document.createElement('canvas');c.width=512;c.height=704;window.drawCardImage(c,image,s.imageFit);const x=c.getContext('2d');return{source:s.image,width:image.width,height:image.height,left:[...x.getImageData(5,352,1,1).data],top:[...x.getImageData(256,5,1,1).data]} })
+      assert.equal(pixels.source,original,'changing fit never crops or re-encodes the saved source')
+      assert.ok(pixels.width<=1024&&pixels.height<=1024)
+      assert.equal(pixels.width/pixels.height,width/height)
+      if(width===1600&&fit==='contain') {assert.ok(pixels.left[0]>200&&pixels.left[1]<60,'complete left edge is retained');assert.deepEqual(pixels.top,[37,50,53,255],'letterbox uses the card background')}
+      if(width===1600&&fit==='cover') assert.ok(pixels.left[2]>120&&pixels.left[0]<60,'cover crops the side markers without stretching')
+    }
+  }
   await page.reload();await page.waitForSelector('canvas[data-art="custom"]',{timeout:40000})
+  assert.equal(await page.getByRole('button',{name:/^完整显示/}).getAttribute('aria-pressed'),'true')
   await page.screenshot({path:'/tmp/partner-pendant-settings-desktop.png',fullPage:true})
   for(const dark of [false,true]){
     await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
@@ -71,6 +94,7 @@ try{
       await page.setViewportSize({width,height:844})
       assert.ok(await page.locator('.dsh-partner-pendant-settings').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'settings fit narrow viewport')
       assert.equal(await file.isVisible(),false,'native file control remains hidden')
+      await page.getByRole('group',{name:'图片适应方式'}).scrollIntoViewIfNeeded()
       if(width===375)await page.screenshot({path:`/tmp/partner-pendant-settings-mobile-${dark?'dark':'light'}.png`,fullPage:true})
     }
   }
@@ -84,5 +108,5 @@ try{
   await page.waitForSelector('.dsh-partner-pendant-strap[data-color="#222222"]')
   assert.equal(await page.getByRole('textbox',{name:'自定义绳子颜色'}).inputValue(),'#111111')
   assert.deepEqual(errors,[])
-  console.log('Settings verified: persisted appearance, disable cleanup/poll stop, storage failure, image validation/crop/reset, mobile/dark, cross-tab draft protection.')
+  console.log('Settings verified: persisted appearance, disable cleanup/poll stop, storage failure, image validation/contain/cover/reset, reversible bounded source, stable GPU canvas, mobile/dark, cross-tab draft protection.')
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

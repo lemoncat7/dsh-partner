@@ -6,11 +6,12 @@ import { createLanyardStrap } from './strap.js'
 import { createBadgeSheen } from './sheen.js'
 import { createNoticeMotion } from './notice-motion.js'
 import type { PendantSettings } from './settings.js'
-import { loadCardImage } from './card-image.js'
+import { drawCardImage, loadCardImage } from './card-image.js'
 import { createPendantFrameLoop } from './frame-loop.js'
-import { createBadgeFaceMaterial, BADGE_LIGHTING } from './surface.js'
+import { createBadgeFaceMaterial, BADGE_LIGHTING, badgePixelRatio, configureBadgeTexture } from './surface.js'
 import { measureFixedLayerOrigin } from './coordinates.js'
 import { settleCardFacing } from './facing.js'
+import { createMotionGlare } from './motion-glare.js'
 
 export interface BadgeMessage { id: string; count: number; name: string; label: string }
 export interface LanyardHandle { setMessage(message?: BadgeMessage): void; setAppearance(settings: PendantSettings): void; relayout(): void; destroy(): void }
@@ -27,7 +28,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   options.signal.throwIfAborted()
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' })
   renderer.setClearColor(0x000000, 0)
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))
+  renderer.setPixelRatio(badgePixelRatio(devicePixelRatio))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = .95
@@ -40,7 +41,8 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const pmrem = new THREE.PMREMGenerator(renderer)
   const room = new RoomEnvironment()
   const environment = pmrem.fromScene(room)
-  room.dispose(); pmrem.dispose()
+  room.dispose()
+  pmrem.dispose()
   scene.environment = environment.texture
   scene.add(new THREE.AmbientLight(0xffffff, BADGE_LIGHTING.ambient))
   const light = new THREE.DirectionalLight(0xffffff, BADGE_LIGHTING.key)
@@ -58,9 +60,11 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const positions = face.getAttribute('position'), uv = face.getAttribute('uv')
   for (let i = 0; i < positions.count; i++) uv.setXY(i, positions.getX(i) / 1.42 + .5, positions.getY(i) / 1.96 + .5)
   const frontTexture = keep(badgeTexture(false)), backTexture = keep(badgeTexture(true))
-  const front = new THREE.Mesh(face, keep(createBadgeFaceMaterial(frontTexture)))
+  for (const texture of [frontTexture, backTexture]) configureBadgeTexture(texture, renderer.capabilities.getMaxAnisotropy())
+  const glare = createMotionGlare()
+  const front = new THREE.Mesh(face, keep(createBadgeFaceMaterial(frontTexture, environment.texture, glare.uniforms)))
   front.position.z = .063; card.add(front)
-  const back = new THREE.Mesh(face, keep(createBadgeFaceMaterial(backTexture)))
+  const back = new THREE.Mesh(face, keep(createBadgeFaceMaterial(backTexture, environment.texture)))
   back.rotation.y = Math.PI; back.position.z = -.025; card.add(back)
   const sheen = keep(createBadgeSheen(card, face))
   const metal = keep(new THREE.MeshStandardMaterial({ color: 0xc3ced0, metalness: .95, roughness: .24 }))
@@ -77,6 +81,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   let quietTime = 0, accumulator = 0, disposed = false, scale = 58, canvasSize = 0, messageKey = ''
   let unread = 0, messageIdentity = ''
   let artSource: string | undefined, artRevision = 0
+  let artFit: PendantSettings['imageFit'] | undefined
   let home = canvas.parentElement!.getBoundingClientRect()
   let layerOrigin = { left: 0, top: 0 }
   let gesture: { id: number; x: number; y: number; lastX: number; lastY: number; lastAt: number; moved: boolean; offset: THREE.Vector3; rotation: THREE.Quaternion; target: THREE.Vector3; velocity: THREE.Vector3; spin: THREE.Vector3 } | undefined
@@ -115,6 +120,9 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     canvas.dataset.noticeMotion = noticeMotion.phase
     const shining = sheen.update(now, reduced.matches)
     canvas.dataset.shining = String(shining)
+    glare.update(badge.rotation(), reduced.matches)
+    canvas.dataset.glare = String(glare.uniforms.badgeGlareOpacity.value)
+    canvas.dataset.glareProgress = String(glare.uniforms.badgeGlareProgress.value)
     paint()
     const calm = movingBodies.every(body => {
       const v = body.linvel(), a = body.angvel()
@@ -190,6 +198,8 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     // Preserve the old resting size, without the old perspective projection.
     scale = home.height / (20 * Math.tan(Math.PI / 12))
     const nextSize = Math.ceil(scale * cardViewSize)
+    const nextPixelRatio = badgePixelRatio(devicePixelRatio)
+    if (renderer.getPixelRatio() !== nextPixelRatio) renderer.setPixelRatio(nextPixelRatio)
     if (nextSize !== canvasSize) {
       canvasSize = nextSize; renderer.setSize(canvasSize, canvasSize, false)
       canvas.style.width = `${canvasSize}px`; canvas.style.height = `${canvasSize}px`
@@ -198,7 +208,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     strap.resize(scale)
   }
   const resize = (): void => { layout(); wake() }
-  const hide = (): void => { end(); if (document.hidden) { noticeMotion.cancel(); sheen.clear(); loop.stop(); accumulator = 0 } else resize() }
+  const hide = (): void => { end(); if (document.hidden) { noticeMotion.cancel(); sheen.clear(); glare.clear(); loop.stop(); accumulator = 0 } else resize() }
   const blur = (): void => end()
   const lost = (event: Event): void => { event.preventDefault(); options.onFailure() }
   const observer = new ResizeObserver(resize); observer.observe(canvas.parentElement!)
@@ -212,15 +222,16 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
       if (disposed) return
       loop.setFps(settings.fps); canvas.dataset.fps = String(settings.fps)
       strap.setAppearance(settings)
-      if (settings.image === artSource) return
-      artSource = settings.image
+      if (settings.image === artSource && settings.imageFit === artFit) return
+      artSource = settings.image; artFit = settings.imageFit
+      const imageFit = settings.imageFit
       const revision = ++artRevision, target = frontTexture.image as HTMLCanvasElement
       const restore = (): void => { drawBadge(target, false); frontTexture.needsUpdate = true; canvas.dataset.art = 'default'; wake() }
       if (!settings.image) { restore(); return }
       void loadCardImage(settings.image).then(image => {
         if (disposed || revision !== artRevision) return
-        target.getContext('2d')!.drawImage(image, 0, 0, target.width, target.height)
-        frontTexture.needsUpdate = true; canvas.dataset.art = 'custom'; wake()
+        drawCardImage(target, image, imageFit)
+        frontTexture.needsUpdate = true; canvas.dataset.art = 'custom'; canvas.dataset.imageFit = imageFit; wake()
       }).catch(() => { if (!disposed && revision === artRevision) restore() })
     },
     setMessage(message) {
@@ -242,7 +253,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
     relayout() { if (!disposed) resize() },
     destroy() {
       if (disposed) return
-      end(); disposed = true; loop.stop(); observer.disconnect()
+      end(); disposed = true; glare.clear(); loop.stop(); observer.disconnect()
       reduced.removeEventListener('change', wake)
       hit.removeEventListener('pointerdown', down); hit.removeEventListener('pointermove', move); hit.removeEventListener('pointerup', end); hit.removeEventListener('pointercancel', end); hit.removeEventListener('lostpointercapture', end); hit.removeEventListener('click', click)
       window.removeEventListener('blur', blur); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', hide); canvas.removeEventListener('webglcontextlost', lost)
@@ -270,11 +281,11 @@ function badgeTexture(back: boolean): THREE.CanvasTexture {
 function drawBadge(canvas: HTMLCanvasElement, back: boolean, message?: BadgeMessage): void {
   const c = canvas.getContext('2d')!
   c.textAlign = 'left'
-  c.fillStyle = back ? '#e7e9e6' : '#253235'; c.fillRect(0, 0, 512, 704)
+  c.fillStyle = back ? '#cbd2d5' : '#253235'; c.fillRect(0, 0, 512, 704)
   if (back && message?.count) {
-    const ink = back ? '#253235' : '#f1f3ec', muted = back ? '#405953' : '#b6cbc2'
+    const ink = '#253235', muted = '#43525a'
     c.textAlign = 'center'; c.fillStyle = muted; c.font = '600 56px sans-serif'; c.fillText('伙伴消息', 256, 104)
-    c.fillStyle = back ? '#d0dcd5' : '#405c51'; c.beginPath(); c.roundRect(164, 154, 184, 132, 34); c.fill()
+    c.fillStyle = '#b8c3c8'; c.beginPath(); c.roundRect(164, 154, 184, 132, 34); c.fill()
     c.fillStyle = ink; c.font = '600 90px sans-serif'; c.fillText(message.count > 99 ? '99+' : String(message.count), 256, 252)
     c.font = '600 76px sans-serif'
     const chars = Array.from(message.name), originalLength = chars.length

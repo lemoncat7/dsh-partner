@@ -3,7 +3,7 @@
 .dsh-partner-pendant button { appearance: none; -webkit-appearance: none; margin: 0; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation; }
 .dsh-partner-pendant button:focus-visible { outline: 2px solid var(--partner-focus-ring) !important; outline-offset: 2px !important; }
 .dsh-partner-pendant button:disabled { opacity: .45; cursor: default; }
-.dsh-partner-pendant .dsh-partner-pendant-canvas { position: fixed; left: 0; top: 0; display: block; width: 164px; height: 164px; pointer-events: none; transition: none !important; }
+.dsh-partner-pendant .dsh-partner-pendant-canvas { position: fixed; left: 0; top: 0; display: block; width: 164px; height: 164px; pointer-events: none; transition: none !important; background: transparent !important; opacity: 1 !important; filter: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 .dsh-partner-pendant .dsh-partner-pendant-strap { position: fixed; left: 0; top: 0; width: 100vw; height: 100dvh; overflow: hidden; pointer-events: none; }
 .dsh-partner-pendant-hit { position: absolute; top: 0; left: 0; width: 84px; height: 116px; transform: translate(130px, 210px) translate(-50%, -50%); padding: 0; border: 0; border-radius: 12px; background: var(--partner-solid-panel); pointer-events: auto; touch-action: none !important; user-select: none; -webkit-user-select: none; cursor: grab !important; }
 .dsh-partner-pendant-hit:active, .dsh-partner-pendant-anchor:active { cursor: grabbing !important; }

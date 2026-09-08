@@ -8,13 +8,18 @@ test('pendant settings validate local data without accepting external image URLs
     assert.deepEqual(normalizePendantSettings(input), DEFAULT_PENDANT_SETTINGS)
   }
   const image = 'data:image/jpeg;base64,YWJj'
-  assert.deepEqual(normalizePendantSettings({ enabled: false, material: 'leather', color: '#AABBCC', image }), { enabled: false, fps: 30, material: 'leather', color: '#aabbcc', image })
+  assert.deepEqual(normalizePendantSettings({ enabled: false, material: 'leather', color: '#AABBCC', image }), { enabled: false, fps: 30, material: 'leather', color: '#aabbcc', image, imageFit: 'contain' })
   for (const image of ['https://example.com/a.jpg', 'javascript:alert(1)', 'data:image/svg+xml,<svg/>', 'data:image/jpeg;base64,' + 'a'.repeat(MAX_CARD_IMAGE_LENGTH)]) assert.equal(normalizePendantSettings({ image }).image, '')
 })
 
 test('appearance comparison includes each field without serializing images', () => {
   assert.equal(samePendantSettings(DEFAULT_PENDANT_SETTINGS, { ...DEFAULT_PENDANT_SETTINGS }), true)
-  for (const patch of [{ enabled: false }, { fps: 24 }, { material: 'braided' }, { color: '#112233' }, { image: 'changed' }]) assert.equal(samePendantSettings(DEFAULT_PENDANT_SETTINGS, { ...DEFAULT_PENDANT_SETTINGS, ...patch }), false)
+  for (const patch of [{ enabled: false }, { fps: 24 }, { material: 'braided' }, { color: '#112233' }, { image: 'changed' }, { imageFit: 'cover' }]) assert.equal(samePendantSettings(DEFAULT_PENDANT_SETTINGS, { ...DEFAULT_PENDANT_SETTINGS, ...patch }), false)
+})
+
+test('image fit defaults to contain and safely migrates old or invalid preferences', () => {
+  assert.equal(normalizePendantSettings({ imageFit: 'cover' }).imageFit, 'cover')
+  for (const imageFit of [undefined, null, 'stretch', true, 'contain']) assert.equal(normalizePendantSettings({ imageFit }).imageFit, 'contain')
 })
 
 test('frame rate migrates old settings to 30 and accepts only supported numeric choices', () => {
