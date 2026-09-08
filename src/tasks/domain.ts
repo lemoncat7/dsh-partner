@@ -20,6 +20,10 @@ export interface BoardTask {
   skillIds: string[]
   /** Tasks that must reach done before this task can start. */
   dependencyTaskIds: string[]
+  acceptanceCriteria?: string[]
+  resourceKeys?: string[]
+  evidence?: import('./contract.js').TaskEvidence[]
+  reviewChecks?: import('./contract.js').TaskReviewCheck[]
   resultAbstract?: string
   resultSummary?: string
   /** Internal execution notes for the reviewer; never included in user-facing result delivery. */
@@ -32,7 +36,7 @@ export interface BoardTask {
   /** Consecutive rejected attempts; reset only by an explicit replanning decision. */
   reworkCount?: number
   replanRequested?: boolean
-  previousAttempt?: { resultSummary?: string; reviewSummary?: string; reviewHandoff?: string }
+  previousAttempt?: { resultSummary?: string; reviewSummary?: string; reviewHandoff?: string; evidence?: import('./contract.js').TaskEvidence[]; reviewChecks?: import('./contract.js').TaskReviewCheck[] }
   dueAt?: number
   revision: number
   createdAt: number

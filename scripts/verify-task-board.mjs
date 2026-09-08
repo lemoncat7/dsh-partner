@@ -11,17 +11,19 @@ const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src
 const statuses=['backlog','ready','doing','review','blocked','done']
 const tasks=statuses.flatMap((status,s)=>Array.from({length:10},(_,i)=>({id:`task-${s}-${i}`,title:`阶段任务 ${s}-${i} · 核验来源并整理交付物`,description:'输入来源、可验收文档与完成条件。',status,priority:'normal',assigneeCompanionId:'worker',autoRun:status==='ready',dependencyTaskIds:[],skillIds:[],createdBy:'user',revision:1,createdAt:1,updatedAt:1})))
 const directory=[{id:'worker',name:'资料伙伴',role:'资料收集',description:'收集与核验公开信息',capabilities:[],enabledSkills:[],availability:'available'}]
+Object.assign(tasks.find(t=>t.id==='task-1-0'),{resourceKeys:['repo:team/api'],scheduling:{code:'resource_busy',message:'等待共享资源释放',taskIds:['task-2-0']}})
+Object.assign(tasks.find(t=>t.id==='task-3-0'),{acceptanceCriteria:['报告中的来源可以实际核验','报告包含明确结论'],resourceKeys:['repo:team/api'],evidence:[{criterion:1,reference:'/session/reports/'+ 'long-filename-'.repeat(25)+'.md',note:'执行者提供的文件'}],previousAttempt:{reviewChecks:[{criterion:2,verdict:'failed',reason:'结论缺少对照说明'}]}})
 const requirements=[{id:'requirement-fixture',title:'完整交付需求',description:'按专业分工，最终统一汇总。',status:'planning',revision:1,createdAt:1,updatedAt:1,ownerCompanionId:'worker'}, {id:'archive-fixture',title:'已归档需求',description:'历史交付',status:'done',revision:1,createdAt:1,updatedAt:1,summary:'完整成果已经交付。',results:[{id:'result',title:'交付文档',resultSummary:'实际产出'}]}]
 for(const task of tasks) task.requirementId='requirement-fixture'
 const server=createServer((req,res)=>{res.setHeader('content-type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].contents:'<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#eceff1}body[data-ds-dark-theme]{background:#202427}</style><div id="app"></div><script src="/app.js"></script>')})
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
 try{
- const page=await browser.newPage({reducedMotion:'reduce'}),errors=[];let submitted
+ const page=await browser.newPage({reducedMotion:'reduce'}),errors=[];let submitted,failReject=false
  page.on('pageerror',e=>errors.push(e.message))
  await page.route('**/partner-local/v1/**',async route=>{
   const req=route.request()
-  if(req.method()==='POST'){submitted=req.postDataJSON();await route.fulfill({json:{...submitted,id:'created'}});return}
+  if(req.method()==='POST'){submitted=req.postDataJSON();if(failReject&&req.url().endsWith('/reject')){await route.fulfill({status:409,json:{error:'任务已更新，请核对最新内容'}});return}await route.fulfill({json:{...submitted,id:'created'}});return}
   await route.fulfill({json:req.url().endsWith('/tasks')?{tasks,activities:[],requirements}:{companions:directory,delegations:[]}})
  })
  for(const dark of [false,true])for(const width of [375,844,1440]){
@@ -54,7 +56,26 @@ try{
   await ready.locator('.dsh-partner-board-stage-toggle').click();assert.equal(await list.isVisible(),false)
   await ready.locator('.dsh-partner-board-stage-toggle').click();assert.equal(await list.isVisible(),true)
   await ready.locator('.dsh-partner-task-summary').first().click();await page.getByRole('dialog').waitFor()
+  assert.match(await page.getByRole('dialog').textContent(),/等待共享资源释放/)
+  await page.getByText('独占资源声明 · 1',{exact:true}).click()
+  assert.equal(await page.getByText('repo:team/api',{exact:true}).isVisible(),true)
   await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'})
+  await page.locator('.dsh-partner-board > section[data-status=review] .dsh-partner-task-summary').first().click()
+  const contract=page.locator('.dsh-partner-task-contract'),accept=page.getByRole('button',{name:'验收通过',exact:true})
+  await contract.waitFor();assert.equal(await accept.isDisabled(),true)
+  assert.match(await contract.textContent(),/不等于程序验证/)
+  assert.match(await contract.textContent(),/结论缺少对照说明/)
+  await contract.getByText('执行证据 · 1 · 尚需核验',{exact:true}).click()
+  assert.equal(await page.getByRole('dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false,'long evidence must not overflow')
+  await contract.getByText('执行证据 · 1 · 尚需核验',{exact:true}).click()
+  await contract.getByRole('combobox',{name:'第 1 项结论'}).selectOption('passed')
+  await contract.getByRole('textbox',{name:'实际核验证据',exact:true}).fill('已读取报告及来源')
+  assert.equal(await accept.isDisabled(),true)
+  await contract.getByRole('combobox',{name:'第 2 项结论'}).selectOption('passed')
+  await contract.getByRole('textbox',{name:'实际核验证据',exact:true}).nth(1).fill('已核对报告结论')
+  assert.equal(await accept.isEnabled(),true)
+  await page.screenshot({path:`/tmp/partner-contract-${width}-${dark?'dark':'light'}.png`})
+  await page.keyboard.press('Escape')
   if(width<=760) await page.getByRole('combobox',{name:'按任务阶段筛选'}).selectOption('ready')
   else await page.locator('.dsh-partner-board-statuses').getByRole('button',{name:/^待开始/}).click()
   assert.equal(await page.locator('.dsh-partner-board > section').count(),1)
@@ -65,8 +86,11 @@ try{
  const form=page.locator('.dsh-partner-task-form')
  await form.locator('[name=title]').fill('立即提交')
  await form.locator('[name=assignee]').selectOption('worker')
+ await form.locator('[name=acceptanceCriteria]').fill('来源可核验\n包含结论')
+ await form.locator('[name=resourceKeys]').fill('repo:team/api')
  await form.getByRole('button',{name:'创建任务',exact:true}).click()
  await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(submitted.autoRun,true)
+ assert.deepEqual(submitted.acceptanceCriteria,['来源可核验','包含结论']);assert.deepEqual(submitted.resourceKeys,['repo:team/api'])
  await page.getByRole('button',{name:'新任务',exact:true}).click()
  await form.locator('[name=title]').fill('只规划')
  await form.locator('[name=assignee]').selectOption('worker')
@@ -75,5 +99,14 @@ try{
  await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(submitted.autoRun,false)
  assert.deepEqual(errors,[])
  assert.equal(submitted.requirementId,'requirement-fixture')
- console.log('Requirement board: overview/archive dialogs, 60 grouped tasks, six responsive/theme cases, progressive stage grids, filters and explicit submission mode verified.')
+ await page.locator('.dsh-partner-board-statuses').getByRole('button',{name:/^待验收/}).click()
+ await page.locator('.dsh-partner-task-summary').first().click()
+ await page.getByRole('button',{name:'打回重做',exact:true}).click()
+ await page.getByRole('textbox',{name:'打回原因',exact:true}).fill('补齐原文引用')
+ failReject=true
+ await page.getByRole('button',{name:'确认打回',exact:true}).click()
+ await page.getByRole('dialog').getByText('任务已更新，请核对最新内容',{exact:true}).waitFor()
+ assert.equal(await page.getByRole('textbox',{name:'打回原因',exact:true}).inputValue(),'补齐原文引用')
+ assert.deepEqual(errors,[])
+ console.log('Requirement board: 60 tasks, six responsive/theme cases, resource waits, evidence wrapping, acceptance gating, submission fields and failed-review draft retention verified.')
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

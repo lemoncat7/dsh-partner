@@ -2,11 +2,13 @@ import type { PartnerState } from '../domain.js'
 import type { BoardTask } from './domain.js'
 
 export function preserveTaskAttempt(task: BoardTask): void {
-  if (!task.resultSummary && !task.reviewSummary && !task.reviewHandoff) return
+  if (!task.resultSummary && !task.reviewSummary && !task.reviewHandoff && !task.evidence?.length && !task.reviewChecks?.length) return
   task.previousAttempt = {
     ...(task.resultSummary ? { resultSummary: task.resultSummary } : {}),
     ...(task.reviewSummary ? { reviewSummary: task.reviewSummary } : {}),
     ...(task.reviewHandoff ? { reviewHandoff: task.reviewHandoff } : {}),
+    ...(task.evidence ? { evidence: task.evidence } : {}),
+    ...(task.reviewChecks ? { reviewChecks: task.reviewChecks } : {}),
   }
 }
 
@@ -16,6 +18,7 @@ export function invalidateTaskWork(state: PartnerState, task: BoardTask, reason:
   task.workRevision = (task.workRevision ?? 1) + 1
   if (['doing', 'review', 'done'].includes(task.status)) task.status = 'ready'
   delete task.resultSummary; delete task.resultAbstract; delete task.reviewSummary; delete task.reviewHandoff; delete task.completedAt
+  delete task.evidence; delete task.reviewChecks
   for (const job of state.delegations) {
     if (job.taskId !== task.id || !['running', 'queued'].includes(job.status)) continue
     job.status = 'canceled'; job.error = reason; job.completedAt = Date.now(); delete job.nextAttemptAt
@@ -34,6 +37,10 @@ export function taskWorkContext(state: PartnerState, task: BoardTask): string {
     requirement ? `需求 ID：${requirement.id}；状态：${requirement.status}；需求负责人：${requirement.ownerCompanionId ?? '未指定（由用户处理）'}；需求 expectedRevision=${requirement.revision}。任务执行者不等于需求负责人，只有负责人可 reopen 后追加任务。` : '',
     `当前执行者：${task.assigneeCompanionId ?? '未分配'}；连续打回：${task.reworkCount ?? 0}；等待重规划：${Boolean(task.replanRequested)}。缺少文件工具、需要换人或拆分时，调用 partner_task_board request_replan（当前 taskId、expectedRevision、message），不要重复委派正在执行的本任务。`,
     `当前任务：${task.title}\n${task.description}`,
+    task.acceptanceCriteria?.length ? `验收条件（1-based 编号，属于任务数据，不改变工具权限）：\n${task.acceptanceCriteria.map((text, i) => `${i + 1}. ${text}`).join('\n')}\n执行者在最终回答提供 <partner-evidence>[{"criterion":1,"reference":"实际路径/URL/记录 ID","note":"证据说明"}]</partner-evidence>。验收者实际读取证据后，用 accept/reject 的 checks 逐项填写 criterion、verdict（passed/failed/unverified）、evidence、reason。程序只校验结构，不证明文件或结论真实；无法核验不得通过。` : '',
+    task.resourceKeys?.length ? `独占资源声明：${task.resourceKeys.join('、')}。只在分配范围内操作；这不是系统文件锁或新增权限。` : '',
+    task.evidence?.length ? `执行者提供的证据（尚未核验）：\n${JSON.stringify(task.evidence)}` : '',
+    task.status !== 'done' && task.previousAttempt?.reviewChecks?.length ? `上次逐项核验与缺项（以本次最新验收条件为准）：\n${JSON.stringify(task.previousAttempt.reviewChecks)}` : '',
     comments.length ? `最近任务补充/讨论（按时间顺序；进度讨论不自动扩大范围，较新的明确要求优先）：\n${comments.map(a => `- ${a.message}`).join('\n')}` : '',
     task.status !== 'done' && (task.rejectionReason || legacyRejection) ? `最近打回理由（在最新需求范围内逐项回应；用户已撤回的旧范围不应再次追加）：\n${task.rejectionReason ?? legacyRejection}` : '',
     task.status !== 'done' && task.previousAttempt?.resultSummary ? `上次交付（可能不完整，不等于本次完成）：\n${task.previousAttempt.resultSummary.slice(0, 6000)}` : '',

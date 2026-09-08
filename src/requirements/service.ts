@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type { PartnerStore } from '../store.js'
 import type { TaskActor } from '../tasks/service.js'
 import { optionalText, record, requiredText } from '../core/validation.js'
@@ -8,16 +7,14 @@ import { invalidateTaskWork } from '../tasks/context.js'
 import { retainRequirementArchive } from './archive.js'
 import { requirementProgressKey } from './progress.js'
 import { advanceRequirementRevision, assertRequirementRevision, RequirementError } from './revisions.js'
+import { submitRequirementPlan } from './plan.js'
+import { requirementDraft } from './draft.js'
+export { requirementDraft } from './draft.js'
 export { RequirementError } from './revisions.js'
-
-export function requirementDraft(title: string, description: string, ownerCompanionId?: string, creatorSessionId?: string): BoardRequirement {
-  const now = Date.now()
-  return { id: `requirement-${randomUUID()}`, title, description, status: 'planning', revision: 1, controlRevision: 1, createdAt: now, updatedAt: now,
-    ...(ownerCompanionId ? { ownerCompanionId } : {}), ...(creatorSessionId ? { creatorSessionId } : {}) }
-}
 
 export class RequirementService {
   constructor(private readonly store: PartnerStore) {}
+  submitPlan(value: unknown, actor: TaskActor, sessionId?: string) { return submitRequirementPlan(this.store, value, actor, sessionId) }
   list(): BoardRequirement[] { return this.store.snapshot().requirements ?? [] }
   require(id: string): BoardRequirement {
     const item = this.list().find(item => item.id === id)

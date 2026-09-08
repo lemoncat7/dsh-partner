@@ -8,12 +8,15 @@ const SUMMARY_LIMIT = 480
 const SUMMARY_TAG = /<partner-summary>\s*([\s\S]*?)\s*<\/partner-summary>/iu
 const DELIVERABLE_TAG = /<partner-deliverable>\s*([\s\S]*?)\s*<\/partner-deliverable>/iu
 const REVIEW_TAG = /<partner-review-handoff>\s*([\s\S]*?)\s*<\/partner-review-handoff>/iu
+const EVIDENCE_TAG = /<partner-evidence>\s*([\s\S]*?)\s*<\/partner-evidence>/iu
 const LEGACY_REVIEW_SECTION = /(?:^|\n)#{1,6}\s*(?:需要验收的内容|验收交接|验收说明)\s*\n/iu
 
 export interface TaskExecutionOutput {
   summary?: string
   deliverable: string
   reviewHandoff?: string
+  evidence?: unknown
+  evidenceWarning?: string
 }
 
 export interface TaskResultDelivery {
@@ -22,7 +25,14 @@ export interface TaskResultDelivery {
 }
 
 export function parseTaskExecutionOutput(value: string): TaskExecutionOutput {
-  const raw = value.trim()
+  const evidenceText = value.match(EVIDENCE_TAG)?.[1]
+  let evidence: unknown
+  let evidenceWarning: string | undefined
+  if (evidenceText) {
+    try { evidence = JSON.parse(evidenceText) }
+    catch { evidenceWarning = '证据 JSON 格式无效：交付已保留，验收者需实际核验或打回补证，不要重跑已完成的外部操作。' }
+  }
+  const raw = value.replace(EVIDENCE_TAG, '').trim()
   const taggedDeliverable = raw.match(DELIVERABLE_TAG)?.[1]?.trim()
   if (taggedDeliverable) {
     const summary = raw.match(SUMMARY_TAG)?.[1]?.trim()
@@ -31,13 +41,15 @@ export function parseTaskExecutionOutput(value: string): TaskExecutionOutput {
       ...(summary ? { summary: boundedSummary(summary) } : {}),
       deliverable: taggedDeliverable,
       ...(reviewHandoff ? { reviewHandoff } : {}),
+      ...(evidence !== undefined ? { evidence } : {}),
+      ...(evidenceWarning ? { evidenceWarning } : {}),
     }
   }
   const legacyReview = LEGACY_REVIEW_SECTION.exec(raw)
-  if (!legacyReview || legacyReview.index <= 0) return { deliverable: raw }
+  if (!legacyReview || legacyReview.index <= 0) return { deliverable: raw, ...(evidence !== undefined ? { evidence } : {}), ...(evidenceWarning ? { evidenceWarning } : {}) }
   const deliverable = raw.slice(0, legacyReview.index).trim()
   const reviewHandoff = raw.slice(legacyReview.index + legacyReview[0].length).trim()
-  return { deliverable: deliverable || raw, ...(reviewHandoff ? { reviewHandoff } : {}) }
+  return { deliverable: deliverable || raw, ...(reviewHandoff ? { reviewHandoff } : {}), ...(evidence !== undefined ? { evidence } : {}), ...(evidenceWarning ? { evidenceWarning } : {}) }
 }
 
 export function publicTaskDeliverable(value: string): string {

@@ -4,11 +4,14 @@ import { oneOf, optionalBoolean, optionalText, record, requiredText, stringList 
 import type { PartnerStore } from '../store.js'
 import { TASK_PRIORITIES, TASK_STATUSES, type BoardTask, type TaskActivity } from './domain.js'
 import type { TaskExecutionOutput } from './result.js'
-import { requirementDraft } from '../requirements/service.js'
+import { requirementDraft } from '../requirements/draft.js'
 import { removeTaskRecords, touchTaskRequirement } from './removal.js'
 import { invalidateTaskWork, preserveTaskAttempt } from './context.js'
 import { requireTaskRequirement } from './requirement-link.js'
 import { TaskWorkflowError } from './workflow-error.js'
+import { taskDraft, assertTaskDependencies } from './draft.js'
+import { acceptanceCriteria, resourceKeys, taskEvidence, reviewChecks } from './contract.js'
+import { taskScheduling, executionWait } from './scheduling.js'
 
 const MAX_TASKS = 500
 const MAX_ACTIVITIES = 2000
@@ -16,6 +19,8 @@ const MAX_ACTIVITIES = 2000
 export class TaskBoardService {
   private notifier?: (task: BoardTask, previousStatus: BoardTask['status']) => Promise<void>
   private removalNotifier?: (ids: string[]) => void
+  private liveClaims: () => readonly import('../collaboration/domain.js').PartnerDelegation[] = () => []
+  setLiveClaims(provider: typeof this.liveClaims): void { this.liveClaims = provider }
 
   constructor(private readonly store: PartnerStore) {}
   setRemovalNotifier(notifier: (ids: string[]) => void): void { this.removalNotifier = notifier }
@@ -26,37 +31,20 @@ export class TaskBoardService {
 
   snapshot() {
     const state = this.store.snapshot()
-    return { tasks: state.tasks, activities: state.taskActivities, requirements: state.requirements ?? [] }
+    const active = this.liveClaims()
+    return { tasks: state.tasks.map(task => ({ ...task, scheduling: taskScheduling(state, task, active) })), activities: state.taskActivities, requirements: state.requirements ?? [] }
   }
 
   async create(value: unknown, actor: TaskActor, requireOwnership = false): Promise<BoardTask> {
     const input = record(value, 'task')
-    const now = Date.now()
-    const assigneeCompanionId = optionalText(input.assigneeCompanionId, 'assigneeCompanionId', 120)
-    const autoRun = optionalBoolean(input.autoRun, false)
-    if (autoRun && !assigneeCompanionId) throw new Error('提交执行需要指定负责人')
-    const requestedReviewerCompanionId = optionalText(input.reviewerCompanionId, 'reviewerCompanionId', 120)
-    const reviewerCompanionId = requestedReviewerCompanionId ?? actor.companionId
-    this.assertCompanion(assigneeCompanionId)
-    this.assertCompanion(reviewerCompanionId)
-    const dependencyTaskIds = stringList(input.dependencyTaskIds, 'dependencyTaskIds', 20, 120)
-    if (requireOwnership) requireTaskRequirement(input.requirementId, dependencyTaskIds, this.store.snapshot().tasks)
-    this.assertDependencies(undefined, dependencyTaskIds)
-    const task: BoardTask = {
-      id: `task-${randomUUID()}`, title: requiredText(input.title, 'title', 200), description: typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : '',
-      status: input.status === undefined ? autoRun ? 'ready' : 'backlog' : oneOf(input.status, TASK_STATUSES, 'status'),
-      ...(autoRun ? { autoRun: true } : {}),
-      priority: input.priority === undefined ? 'normal' : oneOf(input.priority, TASK_PRIORITIES, 'priority'),
-      ...(assigneeCompanionId ? { assigneeCompanionId } : {}), createdBy: actor.kind,
-      ...(reviewerCompanionId ? { reviewerCompanionId } : {}),
-      ...(actor.companionId ? { creatorCompanionId: actor.companionId } : {}),
-      ...(typeof input.creatorSessionId === 'string' && input.creatorSessionId.trim() ? { creatorSessionId: input.creatorSessionId.trim().slice(0, 180) } : {}),
-      skillIds: stringList(input.skillIds, 'skillIds', 20, 120), dependencyTaskIds,
-      ...(validTimestamp(input.dueAt) ? { dueAt: input.dueAt } : {}), revision: 1, createdAt: now, updatedAt: now,
-    }
-    if (autoRun && task.status !== 'ready') throw new Error('新提交的任务必须从待开始创建；收集箱请使用 autoRun=false，不能跳过执行和验收')
-    if (started(task.status)) this.assertDependenciesComplete(task, this.store.snapshot().tasks)
+    let task!: BoardTask
     await this.store.update(state => {
+      task = taskDraft(input, actor, state)
+      const dependencyTaskIds = task.dependencyTaskIds
+      if (requireOwnership) requireTaskRequirement(input.requirementId, dependencyTaskIds, state.tasks)
+      if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
+      if (task.status === 'done' && task.acceptanceCriteria?.length) throw new Error('有验收清单的任务必须先执行并逐项验收，不能直接创建为已完成')
+      if (task.status === 'doing' && executionWait(state, task, this.liveClaims())?.code === 'resource_busy') throw new Error('共享资源正被其他任务使用，请等待释放后启动')
       if (state.tasks.length >= MAX_TASKS) throw new Error(`Task board reached its ${MAX_TASKS} task limit; archive or delete completed tasks first`)
       this.assertDependencies(undefined, dependencyTaskIds, state.tasks)
       state.requirements ??= []
@@ -76,7 +64,7 @@ export class TaskBoardService {
       }
       touchTaskRequirement(state, task.requirementId)
       state.tasks.push(task)
-      appendActivity(state.taskActivities, task.id, actor, 'created', `创建任务：${task.title}`, now)
+      appendActivity(state.taskActivities, task.id, actor, 'created', `创建任务：${task.title}`, task.createdAt)
     })
     return task
   }
@@ -92,11 +80,12 @@ export class TaskBoardService {
       const expected = input.expectedRevision
       if (!Number.isInteger(expected) || expected !== task.revision) throw new TaskConflictError(task)
       previousStatus = task.status
+      const originalReviewer = task.reviewerCompanionId ?? task.creatorCompanionId
       if (task.replanRequested) {
         const owner = state.requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
         if (actor.kind !== 'user' && actor.companionId !== owner) throw new Error('任务已暂停等待重规划，仅需求负责人或用户可以调整和恢复；不要重复执行')
       }
-      const previousSpec = JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
+      const previousSpec = JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds, task.acceptanceCriteria, task.resourceKeys])
       if (input.title !== undefined) task.title = requiredText(input.title, 'title', 200)
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
       if (input.status !== undefined) task.status = oneOf(input.status, TASK_STATUSES, 'status')
@@ -125,13 +114,15 @@ export class TaskBoardService {
         task.reviewerCompanionId = task.creatorCompanionId
       }
       if (input.skillIds !== undefined) task.skillIds = stringList(input.skillIds, 'skillIds', 20, 120)
+      if (input.acceptanceCriteria !== undefined) task.acceptanceCriteria = acceptanceCriteria(input.acceptanceCriteria)
+      if (input.resourceKeys !== undefined) task.resourceKeys = resourceKeys(input.resourceKeys)
       if (input.dependencyTaskIds !== undefined) {
         const dependencies = stringList(input.dependencyTaskIds, 'dependencyTaskIds', 20, 120)
         this.assertDependencies(task.id, dependencies, state.tasks)
         task.dependencyTaskIds = dependencies
       }
       if ('dueAt' in input) { if (validTimestamp(input.dueAt)) task.dueAt = input.dueAt; else delete task.dueAt }
-      const specChanged = previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
+      const specChanged = previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds, task.acceptanceCriteria, task.resourceKeys])
       if (specChanged) {
         invalidateTaskWork(state, task, '任务要求或分配已更新，旧执行/验收失效')
         task.reworkCount = 0
@@ -142,7 +133,12 @@ export class TaskBoardService {
       }
       if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
       if (task.status === 'done' && previousStatus !== 'done' && previousStatus !== 'review') throw new Error('任务必须先进入待验收，才能标记为已完成')
+      if (task.status === 'done' && previousStatus !== 'done') {
+        if (actor.kind !== 'user' && originalReviewer && originalReviewer !== actor.companionId) throw new Error('当前伙伴不是这个任务的验收者')
+        task.reviewChecks = reviewChecks(input.checks, task.acceptanceCriteria ?? [], true)
+      }
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
+      if (task.status === 'doing' && previousStatus !== 'doing' && executionWait(state, task, this.liveClaims())?.code === 'resource_busy') throw new Error('共享资源正被其他任务使用，请等待释放后启动')
       task.revision += 1
       task.updatedAt = Date.now()
       touchTaskRequirement(state, task.requirementId, specChanged)
@@ -154,6 +150,8 @@ export class TaskBoardService {
         delete task.resultSummary
         delete task.reviewHandoff
         delete task.reviewSummary
+        delete task.evidence
+        delete task.reviewChecks
       }
       const kind: TaskActivity['kind'] = task.status !== previousStatus ? (task.status === 'done' ? 'completed' : previousStatus === 'done' ? 'reopened' : 'moved') : 'updated'
       appendActivity(state.taskActivities, task.id, actor, kind, task.status !== previousStatus ? `${previousStatus} → ${task.status}` : '更新任务', task.updatedAt)
@@ -205,10 +203,15 @@ export class TaskBoardService {
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
       const execution = typeof result === 'string' ? { deliverable: result } : result
+      let evidenceWarning = execution.evidenceWarning
+      try { task.evidence = taskEvidence(execution.evidence, task.acceptanceCriteria ?? []) }
+      catch { task.evidence = []; evidenceWarning = '证据结构或编号无效：交付已保留，验收者需实际核验或打回补证，不要重跑已完成的外部操作。' }
+      delete task.reviewChecks
       task.resultSummary = boundedText(execution.deliverable, 'result', 12_000)
       if (execution.summary?.trim()) task.resultAbstract = execution.summary.trim().slice(0, 600)
       else delete task.resultAbstract
-      if (execution.reviewHandoff?.trim()) task.reviewHandoff = execution.reviewHandoff.trim().slice(0, 4_000)
+      const handoff = [evidenceWarning, execution.reviewHandoff?.trim()].filter(Boolean).join('\n\n')
+      if (handoff) task.reviewHandoff = handoff.slice(0, 4_000)
       else delete task.reviewHandoff
       delete task.reviewSummary
       const movedToReview = task.status === 'doing'
@@ -263,13 +266,13 @@ export class TaskBoardService {
     return output
   }
 
-  async accept(taskId: string, actor: TaskActor, expectedRevision?: number): Promise<BoardTask> {
+  async accept(taskId: string, actor: TaskActor, expectedRevision?: number, checks?: unknown): Promise<BoardTask> {
     const current = this.require(taskId)
     if (current.status !== 'review') throw new Error('只有待验收任务可以通过验收')
-    return this.update(taskId, { expectedRevision: expectedRevision ?? current.revision, status: 'done' }, actor)
+    return this.update(taskId, { expectedRevision: expectedRevision ?? current.revision, status: 'done', checks }, actor)
   }
 
-  async reject(taskId: string, reason: string, actor: TaskActor, expectedRevision?: number, mode: 'rework' | 'replan' = 'rework'): Promise<BoardTask> {
+  async reject(taskId: string, reason: string, actor: TaskActor, expectedRevision?: number, mode: 'rework' | 'replan' = 'rework', checks?: unknown): Promise<BoardTask> {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
@@ -277,6 +280,8 @@ export class TaskBoardService {
       if (task.status !== 'review') throw new Error('只有待验收任务可以打回')
       if (expectedRevision !== undefined && expectedRevision !== task.revision) throw new TaskConflictError(task)
       const message = boundedText(reason, 'reason', 1200)
+      if (actor.kind !== 'user' && task.reviewerCompanionId && task.reviewerCompanionId !== actor.companionId) throw new Error('当前伙伴不是这个任务的验收者')
+      task.reviewChecks = reviewChecks(checks, task.acceptanceCriteria ?? [], false)
       task.rejectionReason = message; task.rejectedAt = Date.now()
       task.reworkCount = (task.reworkCount ?? 0) + 1
       invalidateTaskWork(state, task, '验收打回，旧执行/验收已失效')
@@ -351,19 +356,7 @@ export class TaskBoardService {
   }
 
   private assertDependencies(taskId: string | undefined, ids: string[], tasks = this.store.snapshot().tasks): void {
-    const byId = new Map(tasks.map(task => [task.id, task]))
-    for (const id of ids) {
-      if (id === taskId) throw new Error('任务不能依赖自己')
-      if (!byId.has(id)) throw new Error(`前置任务不存在：${id}`)
-    }
-    if (!taskId) return
-    const reaches = (currentId: string, visited: Set<string>): boolean => {
-      if (currentId === taskId) return true
-      if (visited.has(currentId)) return false
-      visited.add(currentId)
-      return (byId.get(currentId)?.dependencyTaskIds ?? []).some(id => reaches(id, visited))
-    }
-    if (ids.some(id => reaches(id, new Set()))) throw new Error('任务依赖不能形成循环')
+    assertTaskDependencies(taskId, ids, tasks)
   }
 
   private assertDependenciesComplete(task: BoardTask, tasks: BoardTask[]): void {

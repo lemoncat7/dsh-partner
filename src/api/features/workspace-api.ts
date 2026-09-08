@@ -102,11 +102,11 @@ export async function dispatchPartnerWorkspaceApi(
       mutation(req); const body = await readObject(req); await runtime.tasks.comment(id, String(body.message ?? ''), { kind: 'user' }); sendJson(res, 200, { ok: true }); return true
     }
     if (id && method === 'POST' && segments[2] === 'accept' && segments.length === 3) {
-      mutation(req); const body = await readObject(req); sendJson(res, 200, await runtime.tasks.accept(id, { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined)); return true
+      mutation(req); const body = await readObject(req); sendJson(res, 200, await runtime.tasks.accept(id, { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined, body.checks)); return true
     }
     if (id && method === 'POST' && segments[2] === 'reject' && segments.length === 3) {
       mutation(req); const body = await readObject(req)
-      sendJson(res, 200, await runtime.tasks.reject(id, String(body.reason ?? ''), { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined)); return true
+      sendJson(res, 200, await runtime.tasks.reject(id, String(body.reason ?? ''), { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined, undefined, body.checks)); return true
     }
     if (id && method === 'POST' && segments[2] === 'review' && segments.length === 3) {
       mutation(req); const body = await readObject(req)

@@ -1,5 +1,5 @@
 /** Versioned built-in instructions; installed copies update through SkillService. */
-export const TASK_PLANNING_VERSION = '1.4.3'
+export const TASK_PLANNING_VERSION = '1.5.0'
 export const TASK_PLANNING_DESCRIPTION = '收到实际工作需求时，主动按授权伙伴的专长委派；单一专业整项交付，多专业按产出拆解、安排依赖并提交看板，无需用户点名触发。'
 export const TASK_PLANNING_DOCUMENT = `---
 name: task-planning
@@ -43,6 +43,15 @@ allowed-tools: [partner_requirements, partner_task_board, partner_collaborate]
 - 本技能属于伙伴插件，已注入就直接应用；需要读取时使用 partner_skill load，不能调用原生 skill(name="task-planning")。
 
 ## 执行协议
+
+整份分工已经明确时，优先用 partner_requirements submit_plan 一次保存并提交，不再逐个 create 凑齐计划。仍由本 Skill 决定专业分工，工具不新增固定行业流程或强制前置步骤。
+
+- 用稳定 submissionKey 标识这次提交；网络超时重试复用原 key 和原计划，不换 key、不重复创建。返回 replayed 表示取回原提交，不是再次执行；removed 表示相关工作已被删除，不能借重试重建。
+- 新目标填写 title/description；同一目标续做填写原 requirementId/expectedRevision，必要时先由负责人 reopen。每项用局部 key，dependsOn 引用本计划 key，dependencyTaskIds 引用原需求已有任务 ID；不必提前知道系统生成的任务 ID。整批授权、依赖、字段和容量校验通过才保存。
+- 每项明确 assigneeCompanionId（真正执行者的稳定 ID），reviewerCompanionId 默认自己。按交付边界填写 acceptanceCriteria，避免把研究结论或美观程度伪装成程序能自动验证的事实。实际执行 autoRun=true；只规划 false。完整范围确认才 completeScope=true，后续待决定则 false，不把阶段完成当整体完成。
+- 会修改相同代码库、文件或服务时填写一致的 resourceKeys，例如 repo:team/api、service:staging；独立只读工作不为凑并行限制而乱加锁。相同资源在看板内串行，这不覆盖其他会话或操作系统，也不授予访问权限。依赖关系和资源冲突是两回事。
+- 验收有清单的任务时，accept/reject 的 checks 使用 1-based criterion 编号，逐项填写 passed/failed/unverified，以及实际 evidence 或缺项 reason。执行者提供的证据不是自动通过凭证；无法实际核验必须明确 unverified，不得为了让流程继续编造通过。打回只修具体缺项；缺工具或范围需要调整仍走 replan。
+- 调度反馈 scheduling 区分前置未验收、资源占用、等待执行空位、等待重试、仅规划和重规划；正常等待不重复提交或重建任务。没有整份计划时，下面的逐项创建协议仍可用于小范围追加和旧任务维护。
 
 1. 用一句话说明正在应用“任务拆解与看板推进”及采用的专业分工。读取 partner_task_board list，避免重复创建同一工作；根据授权目录中的稳定 id、职责、能力与 Skill 选择执行者，目录缺失、刚更新授权或信息不足时用 partner_collaborate directory 核对，不靠名字猜测。
 2. 按依赖顺序创建任务，前置创建后将返回的真实 id 填入后续 dependencyTaskIds。每个任务填写所属 requirementId，并写清目标、输入来源、可验收交付物、约束和验收条件；不能只写笼统的一句话让执行者重新猜需求。

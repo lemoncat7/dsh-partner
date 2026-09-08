@@ -13,9 +13,10 @@ import { TaskWorkflowError } from '../tasks/workflow-error.js'
 import { preserveTaskAttempt, taskWorkContext } from '../tasks/context.js'
 import { TaskConflictError } from '../tasks/service.js'
 import { repairableReviewCancellation, unfinishedReview } from './task-recovery.js'
+import { BOARD_CONCURRENCY, executionWait } from '../tasks/scheduling.js'
 
 const RECOVERY_TICK_MS = 5_000
-const RECOVERY_CONCURRENCY = 3
+const RECOVERY_CONCURRENCY = BOARD_CONCURRENCY
 
 interface PartnerSessionExecutor {
   execute(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string; signal?: AbortSignal }): Promise<{ run: { id: string }; output: string }>
@@ -25,6 +26,7 @@ interface PartnerSessionExecutor {
 export class PartnerCollaborationService {
   private sessionExecutor?: PartnerSessionExecutor
   private readonly active = new Map<string, Promise<void>>()
+  private readonly liveClaims = new Map<string, PartnerDelegation>()
   private readonly cancellations = new Map<string, { taskId: string; controller: AbortController }>()
   private timer: NodeJS.Timeout | undefined
   private started = false
@@ -38,9 +40,11 @@ export class PartnerCollaborationService {
     private readonly skills: SkillService,
     private readonly tasks: TaskBoardService,
     private readonly executor: EphemeralExecutionService,
-  ) { tasks.setRemovalNotifier(ids => {
-    for (const entry of this.cancellations.values()) if (ids.includes(entry.taskId)) entry.controller.abort(new Error('任务已删除'))
-  })
+  ) {
+    tasks.setLiveClaims(() => [...this.liveClaims.values()])
+    tasks.setRemovalNotifier(ids => {
+      for (const entry of this.cancellations.values()) if (ids.includes(entry.taskId)) entry.controller.abort(new Error('任务已删除'))
+    })
     this.stopWorkObserver = store.subscribe(state => {
       for (const [id, entry] of this.cancellations) {
         if (!state.delegations.some(d => d.id === id && d.status === 'running')) entry.controller.abort(new Error('任务执行已取消或被新版本替代'))
@@ -264,8 +268,10 @@ export class PartnerCollaborationService {
         return !task || taskDispatchDenied(snapshot, item) || delegationKind(item) === 'review' || task.status !== 'ready' || taskDependenciesDone(task, snapshot.tasks)
       })
       .sort((left, right) => (left.nextAttemptAt ?? left.createdAt) - (right.nextAttemptAt ?? right.createdAt))
-      .slice(0, RECOVERY_CONCURRENCY - this.active.size)
     for (const candidate of candidates) {
+      if (this.active.size >= RECOVERY_CONCURRENCY) break
+      const task = snapshot.tasks.find(t => t.id === candidate.taskId)
+      if (task && !taskDispatchDenied(snapshot, candidate) && executionWait(snapshot, task, [...this.liveClaims.values()])) continue
       const claimed = await this.claim(candidate.id)
       if (claimed) this.launch(claimed)
     }
@@ -291,6 +297,7 @@ export class PartnerCollaborationService {
         return
       }
       if (taskWork && !taskDependenciesDone(task, state.tasks)) return
+      if (executionWait(state, task, [...this.liveClaims.values()])) return
       if (state.delegations.filter(value => value.status === 'running').length >= RECOVERY_CONCURRENCY) return
       if (taskWork && (task.status === 'ready' || resumeReview)) {
         preserveTaskAttempt(task)
@@ -299,6 +306,7 @@ export class PartnerCollaborationService {
       }
       const now = Date.now()
       item.status = 'running'
+      item.resourceKeys = [...(task.resourceKeys ?? [])]
       item.attempts = (item.attempts ?? 0) + 1
       item.lastAttemptAt = now
       item.startedAt ??= now
@@ -313,7 +321,8 @@ export class PartnerCollaborationService {
     if (this.active.has(delegation.id)) return
     const controller = new AbortController()
     this.cancellations.set(delegation.id, { taskId: delegation.taskId, controller })
-    const promise = this.executeClaimed(delegation, controller.signal).catch(() => {}).finally(() => { this.active.delete(delegation.id); this.cancellations.delete(delegation.id) })
+    this.liveClaims.set(delegation.id, structuredClone(delegation))
+    const promise = this.executeClaimed(delegation, controller.signal).catch(() => {}).finally(() => { this.active.delete(delegation.id); this.liveClaims.delete(delegation.id); this.cancellations.delete(delegation.id) })
     this.active.set(delegation.id, promise)
   }
 

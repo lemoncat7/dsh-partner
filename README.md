@@ -4,6 +4,34 @@
 
 伙伴不是一次会话中的临时提示词。每个伙伴拥有独立身份、Agent Preset、模型路由、能力声明，以及按微信联系人隔离的 DSH Session。第一版以微信为主要渠道，使用腾讯微信 iLink Bot API，不模拟个人微信网页版协议。
 
+## 开发中：整份计划与逐项验收
+
+分工策略仍由“任务拆解与看板推进” Skill 定义；没有额外前置 Skill，也不强制所有问题都拆解。
+
+- `partner_requirements · submit_plan` 一次保存并提交整组任务：依赖、授权或参数任一不合法，整份不保存。网络重试使用同一 `submissionKey` 和同一载荷，不重复创建。
+- 任务可选填写验收清单，执行者提供证据，验收者逐项核验；打回缺项进入下一次执行上下文。这里的“核验通过”是伙伴/人工判断，不是程序自动证明。
+- 相同资源声明在看板内互斥，独立任务保持并发；列表显示具体等待原因，详情查看证据。旧任务和逐项创建方式继续兼容。
+
+工具调用示例（伙伴 ID 替换为授权目录中的真实 ID）：
+
+```json
+{
+  "action": "submit_plan",
+  "submissionKey": "research-delivery-01",
+  "title": "整理调研并交付结论",
+  "autoRun": true,
+  "completeScope": true,
+  "tasks": [
+    { "key": "research", "title": "整理来源", "assigneeCompanionId": "researcher-id", "acceptanceCriteria": ["文档保留原始来源链接"] },
+    { "key": "summary", "title": "汇总结论", "assigneeCompanionId": "writer-id", "dependsOn": ["research"], "acceptanceCriteria": ["结论可追溯至已验收资料"] }
+  ]
+}
+```
+
+验收伙伴省略时默认创建伙伴。`autoRun` 默认 true；仅规划设 false。`completeScope` 默认 false，只在整个目标范围都已安排时设 true；阶段工作不等于整个需求完成。续做原需求使用 `requirementId/expectedRevision`，必要时先由负责人 `reopen`，不要另建同名需求。
+
+回执返回 `replayed=true`、`execution=unchanged` 表示取回现有任务而非重启；`removed` 表示旧工作已删除。资源键如 `repo:team/api` 仅约束本看板内一致的声明，不是操作系统锁或额外权限。详见 [架构说明](docs/architecture.md)。
+
 ## 兼容性
 
 正式版 `1.10.6` 适配 DeepSeek Harness `0.1.2-rc.1`，需要 Node.js `22.19+` 或 `24+`。DSH 官方 Agent、Session、Settings、Tools 与客户端 UI 依赖均锁定到 `0.1.2-rc.1` 接口族。

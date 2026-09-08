@@ -17,6 +17,7 @@ import type { CompanionKnowledgeMounts } from '../companions/knowledge-mounts.js
 import { companionManagementTool, COMPANION_MANAGEMENT_PROMPT } from '../companions/management-tool.js'
 import { RequirementService } from '../requirements/service.js'
 import { requirementTool } from '../requirements/tool.js'
+import { contractParameters, checksParameter } from '../tasks/contract.js'
 import { TaskWorkflowError } from '../tasks/workflow-error.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
@@ -63,7 +64,7 @@ export class PartnerAgentComposition {
         register(companionManagementTool(companion.id, this.management, this.knowledgeMounts), 'administration')
       }
       disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
-      disposers.push(ctx.tools.register(requirementTool(companion.id, this.requirements, this.tasks)))
+      disposers.push(ctx.tools.register(requirementTool(companion.id, this.requirements, this.tasks, () => this.collaboration.dispatchReadyTasks())))
       disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
       if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler), 'schedules')
       const directory = this.collaboration.directoryFor(companion.id)
@@ -249,6 +250,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
     name: 'partner_task_board',
     description: 'Turn requested deliverables into actual work assigned to self or authorized specialist companions; this board is not merely a log to fill after doing everything yourself. When the request matches an authorized companion specialty, proactively apply the enabled task-planning Skill and connect the requested outcome, suitable assignee and board task before carrying out the work; no explicit @ or board request is needed. The Skill defines decomposition and exceptions. List, create, update, comment on, accept or reject tasks. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Every create must include requirementId. Continued work uses the original requirement: list to find it, reopen submitted/archived scope if necessary, then append. Never create another requirement merely because a different specialist takes the next phase. dependencyTaskIds controls ordering, not ownership. Only a separate user goal warrants a new requirement. Child execution and review are internal: stage notification waits until only done/blocked tasks remain, and does not require archiving. For changed task specifications use update, not only comment; for changed whole scope use partner_requirements update. reject must state concrete missing items and corrections; accept/reject must use the revision actually reviewed. Executors receive latest scope, recent comments, rejection reasons and previous deliverables on rework. Remove permanently deletes only on explicit user request, stops execution and pauses dependents. Accepted dependencies unlock queued tasks automatically.',
     parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject', 'request_replan', 'remove'], {
+      ...contractParameters, checks: checksParameter,
       reworkMode: { type: 'string', enum: ['rework', 'replan'], description: 'reject only: rework continues ordinary corrections; replan pauses for owner reassignment/splitting or missing tools. Three consecutive rejections automatically pause.' },
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       requirementId: { type: 'string', description: 'REQUIRED for create. Reuse the existing requirement for continued work on the same deliverable, including later specialist phases. dependencyTaskIds does not set ownership. Missing id fails without creating anything. Query partner_requirements list; reopen a submitted/archived requirement before appending; create a requirement only for a genuinely separate user goal.' },
@@ -307,8 +309,8 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
         const task = tasks.require(taskId)
         if (task.reviewerCompanionId && task.reviewerCompanionId !== companion.id) throw new Error('当前伙伴不是这个任务指定的验收伙伴')
         return JSON.stringify(action === 'accept'
-          ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id }, input.expectedRevision as number)
-          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number, input.reworkMode as 'rework' | 'replan' | undefined))
+          ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id }, input.expectedRevision as number, input.checks)
+          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number, input.reworkMode as 'rework' | 'replan' | undefined, input.checks))
       }
       if (action === 'update') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined

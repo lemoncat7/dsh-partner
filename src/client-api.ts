@@ -71,6 +71,10 @@ export interface SkillMarketNetworkTestView { ok: true; latencyMs: number; sourc
 
 export type BoardTaskStatusView = 'backlog' | 'ready' | 'doing' | 'review' | 'done' | 'blocked'
 export interface BoardTaskView {
+  acceptanceCriteria?: string[]; resourceKeys?: string[]
+  evidence?: import('./tasks/contract.js').TaskEvidence[]; reviewChecks?: import('./tasks/contract.js').TaskReviewCheck[]
+  previousAttempt?: { reviewChecks?: import('./tasks/contract.js').TaskReviewCheck[] }
+  scheduling?: import('./tasks/scheduling.js').TaskScheduling
   requirementId?: string
   autoRun?: boolean
   id: string; title: string; description: string; status: BoardTaskStatusView; priority: 'low' | 'normal' | 'high' | 'urgent'

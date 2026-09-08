@@ -372,6 +372,18 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
 .dsh-partner-task-description strong { font-size: var(--partner-font-body); font-weight: 620; }
 .dsh-partner-task-description p { margin: 0; color: var(--partner-text-secondary); font-size: var(--partner-font-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dsh-partner-task-fields { display: grid; gap: 7px; }
+.dsh-partner-task-contract { display: grid; gap: 12px; min-width: 0; color: var(--partner-text); font: var(--partner-font-body)/1.6 var(--partner-font-family); }
+.dsh-partner-task-contract header, .dsh-partner-task-contract li, .dsh-partner-task-contract li > div { display: grid; gap: 6px; min-width: 0; }
+.dsh-partner-task-contract ol { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: criterion; }
+.dsh-partner-task-contract li { counter-increment: criterion; border-top: 1px solid var(--partner-border); padding-top: 10px; }
+.dsh-partner-task-contract li > p { margin: 0; overflow-wrap: anywhere; }
+.dsh-partner-task-contract li > p::before { content: counter(criterion) '. '; color: var(--partner-text-tertiary); }
+.dsh-partner-task-contract small { font-size: var(--partner-font-caption); color: var(--partner-text-secondary); overflow-wrap: anywhere; }
+.dsh-partner-task-contract code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--partner-font-caption); }
+.dsh-partner-task-contract .dsh-partner-task-fields label { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+.dsh-partner-task-contract :is(select, textarea) { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--partner-border); border-radius: 10px; color: var(--partner-text); background: var(--partner-control); font: var(--partner-font-label)/1.5 var(--partner-font-family); }
+.dsh-partner-task-contract textarea { resize: vertical; }
+.dsh-partner-task-contract :is(select, textarea):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 2px; }
 .dsh-partner-task-fields label { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); }
 .dsh-partner-task-detail select { width: 100%; height: 34px; padding: 0 28px 0 9px; border: 1px solid var(--partner-border); border-radius: 8px; color: var(--partner-text-secondary); background-color: var(--partner-control); font: var(--partner-font-body)/1 var(--partner-font-family); }
 .dsh-partner-task-detail select:focus { border-color: var(--partner-focus-ring); background-color: var(--partner-raised); box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-focus-ring) 14%, transparent); }

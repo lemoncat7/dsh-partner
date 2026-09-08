@@ -102,6 +102,7 @@ export interface PartnerState {
   skillMarketNetwork: SkillMarketNetworkSettings
   tasks: BoardTask[]
   requirements?: BoardRequirement[]
+  planReceipts?: import('./requirements/plan.js').PlanReceipt[]
   taskActivities: TaskActivity[]
   delegations: PartnerDelegation[]
   companionAccessGrants: CompanionAccessGrant[]

@@ -21,6 +21,8 @@ export interface PartnerDelegation {
   resultSummary?: string
   executionRunId?: string
   error?: string
+  /** Resource snapshot at claim time; retained until the actual executor exits. */
+  resourceKeys?: string[]
 }
 
 export function delegationKind(value: PartnerDelegation): DelegationKind { return value.kind ?? 'task' }

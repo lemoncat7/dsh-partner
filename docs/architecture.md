@@ -246,6 +246,20 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - `ui/board-refresh.ts` 合并刷新并用版本号丢弃旧响应，页面隐藏暂停轮询；进入需求后停止后台总览轮询。需求列表分批展示，任务阶段只展示非空阶段，避免堆叠空列。
 - `test/requirements.test.mjs` 覆盖范围确认、归档、权限、并发删除、执行取消、持久化重试；`test/channel-media.test.mjs` 验证子任务静默与需求最终通知。
 
+## 整份计划、验收契约与资源调度
+
+- 分工策略仍属于内置 `task-planning` Skill（1.5.0），工具只提供执行协议，不新增前置 Skill、行业硬编码流程或工具拦截器。升级不覆盖用户自行维护的同名 Skill。
+- `requirements/plan.ts` 在一次串行 `PartnerStore.update` 中校验并保存需求、1–40 项任务、活动与幂等回执；网络/Agent 执行只发生在提交之后。`requirements/draft.ts` 与 `tasks/draft.ts` 共享纯创建逻辑，避免服务循环引用。
+- `submit_plan` 使用局部 `key/dependsOn` 解析前向引用；校验全图循环、同需求已有依赖、执行者/验收者授权、执行者 Skill 绑定及容量，任一失败不留下半份计划。追加仍要求原需求处于 planning 且控制版本有效，不隐式 reopen 或覆盖原需求。
+- `submissionKey` 按提交伙伴隔离，规范化载荷摘要识别重复；重试返回既有 ID 与当前状态，`execution=unchanged` 不代表再次启动。回执持久化，删除任务/需求不会删除回执或借重试复活工作。最多 2000 份回执，达到上限拒绝新计划、保留旧键而非自动淘汰；历史维护必须显式处理，普通重试仍可使用。
+- `autoRun` 表示执行意图（默认 true），`completeScope` 表示整个需求范围已规划完整（默认 false），两者独立。沿用原调度器、恢复机制与需求级通知，不新增第二套运行队列，也不改变验收中间步骤不通知渠道的规则。
+- `tasks/contract.ts` 集中校验有序验收清单、执行证据和逐项核验结果。accept 必须全部 passed 且有核验证据；reject 必须包含具体失败/未验证原因。这里只验证报告结构，不运行检查、不证明模型声明为真。旧任务不带清单仍兼容旧协议。
+- 证据通过 `<partner-evidence>` JSON 解析并与公开交付分离；格式错误保留交付、记录内部核验警告，不因元数据错误重跑外部动作。打回保留逐项缺口，范围变化使旧工作版本与旧证据失效。
+- `tasks/scheduling.ts` 共用调度判定和只读等待说明。相同 `resourceKeys` 在看板内互斥；claim 时保存声明快照，取消/删除后保留进程内占用直到执行器退出。没有冲突的任务维持最多 3 路并发，不把同一伙伴一律串行化；跳过资源等待项继续寻找可运行任务，避免队首阻塞。
+- 资源声明不是操作系统锁，也不约束其他会话或插件；Skill 必须给重叠写操作填写一致标识。重启恢复依赖原持久化队列；外部命令是否中止、产出是否已存在仍由恢复执行者核对，不能承诺外部副作用 exactly-once。
+- `ui/task-contract-panel.tsx` 独立展示证据与人工核验表单，复用现有主题控件；卡片只显示简短等待原因，详情显示前置/冲突任务与重试时间。无新增依赖、轮询器、背景材质或动画。
+- 专项回归：`test/board-plan-contracts.test.mjs`；隔离浏览器验证：`scripts/verify-task-board.mjs`（手机/平板横屏/桌面、明暗主题、长证据换行、验收按钮状态、错误后保留表单）。
+
 ## 明确附件交付
 
 - 每个伙伴作用域注册 `partner_send_attachment`，由伙伴明确指定 `path`，而非自动扫描生成工具或 Markdown 引用。会话普通回复不再通过链接隐式发送附件；需求汇总的既有文档投递流程保持独立。

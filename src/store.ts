@@ -268,6 +268,7 @@ function validateState(value: unknown): asserts value is PartnerState {
   const state = value as Partial<PartnerState>
   if (state.schemaVersion !== 14) throw new Error('unsupported partner state schema')
   if (state.requirements !== undefined && !Array.isArray(state.requirements)) throw new Error('partner requirements must be an array')
+  if (state.planReceipts !== undefined && (!Array.isArray(state.planReceipts) || state.planReceipts.length > 2000)) throw new Error('partner planReceipts must be a bounded array')
   for (const key of [
     'companions', 'channels', 'pairings', 'sessions', 'recentReceipts', 'heartbeatStates',
     'skills', 'skillBindings', 'skillMarketSources', 'tasks', 'taskActivities', 'delegations', 'companionAccessGrants', 'schedules', 'executionRuns',
