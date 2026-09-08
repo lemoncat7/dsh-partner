@@ -60,7 +60,7 @@ export function PendantSettingsPanel(): JSX.Element {
           {!validColor && <p className="dsh-partner-pendant-color-error">请输入 # 开头的六位颜色值。</p>}
           <input ref={strapFile} type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="上传绳子纹理" onChange={event => { void upload(event, 'strapImage') }} />
           <div className="dsh-partner-pendant-image-actions"><button type="button" disabled={processing} onClick={() => strapFile.current?.click()}><IconPlusOutline16 size={15} />{draft.strapImage ? '更换绳子纹理' : '自定义绳子纹理'}</button><button type="button" disabled={processing || !draft.strapImage} onClick={() => update({ strapImage: '' })}>移除纹理</button></div>
-          <p className="dsh-partner-pendant-setting-hint">纹理平铺在绳子表面，建议使用无缝图案；保留所选材质的边缘和编织细节。</p>
+          <p className="dsh-partner-pendant-setting-hint">纹理沿绳子重复贴合，跟随移动、弯曲和拉伸；建议使用无缝图案，保留所选材质的边缘和编织细节。</p>
         </WorkspaceBlock>
         <WorkspaceBlock title="正面图案" detail="支持 PNG、JPEG、WebP，最大 5 MB。保留图片比例，只在本机处理。">
           <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="上传卡片图片" onChange={event => { void upload(event) }} />

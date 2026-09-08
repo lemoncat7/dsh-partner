@@ -1,6 +1,7 @@
 import { CatmullRomCurve3, Vector3 } from 'three'
 import { strapGeometry, type StrapPoint } from './strap-geometry.js'
 import { DEFAULT_PENDANT_SETTINGS, type PendantSettings } from './settings.js'
+import { STRAP_TEXTURE_SEGMENTS, strapTextureTransform } from './strap-texture.js'
 
 let strapSequence = 0
 
@@ -11,8 +12,8 @@ export function createLanyardStrap(canvas: HTMLCanvasElement) {
   svg.classList.add('dsh-partner-pendant-strap'); svg.setAttribute('aria-hidden', 'true')
   const patternId = `partner-strap-${++strapSequence}`
   const defs = document.createElementNS(ns, 'defs'), pattern = document.createElementNS(ns, 'pattern'), image = document.createElementNS(ns, 'image')
-  pattern.id = patternId; pattern.setAttribute('patternUnits', 'userSpaceOnUse'); pattern.setAttribute('width', '24'); pattern.setAttribute('height', '24')
-  image.setAttribute('width', '24'); image.setAttribute('height', '24'); image.setAttribute('preserveAspectRatio', 'xMidYMid slice')
+  pattern.id = patternId; pattern.setAttribute('patternUnits', 'userSpaceOnUse'); pattern.setAttribute('width', '1'); pattern.setAttribute('height', '4')
+  image.setAttribute('width', '1'); image.setAttribute('height', '4'); image.setAttribute('preserveAspectRatio', 'none')
   pattern.append(image); defs.append(pattern); svg.append(defs)
   let customImage = ''
   const paths = Array.from({ length: 8 }, () => {
@@ -20,22 +21,33 @@ export function createLanyardStrap(canvas: HTMLCanvasElement) {
     path.setAttribute('fill', 'none'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round')
     svg.append(path); return path
   })
+  const texture = document.createElementNS(ns, 'g')
+  texture.dataset.textureMapping = 'material'
+  paths[1]!.after(texture)
+  const strips = Array.from({ length: STRAP_TEXTURE_SEGMENTS }, (_, i) => {
+    const rect = document.createElementNS(ns, 'rect')
+    rect.setAttribute('x', '0'); rect.setAttribute('y', String(i - .005))
+    rect.setAttribute('width', '1'); rect.setAttribute('height', '1.01')
+    rect.setAttribute('fill', `url(#${patternId})`); texture.append(rect); return rect
+  })
   const stud = document.createElementNS(ns, 'circle')
   stud.setAttribute('fill', '#c3ced0'); stud.setAttribute('stroke', '#667578'); stud.setAttribute('stroke-width', '1')
   svg.append(stud); canvas.before(svg)
   const curve = new CatmullRomCurve3(Array.from({ length: 4 }, () => new Vector3())), point = new Vector3()
-  const projected: StrapPoint[] = Array.from({ length: 49 }, () => ({ x: 0, y: 0 }))
+  const projected: StrapPoint[] = Array.from({ length: STRAP_TEXTURE_SEGMENTS + 1 }, () => ({ x: 0, y: 0 }))
   let appearance: Pick<PendantSettings, 'material' | 'color'> = DEFAULT_PENDANT_SETTINGS, currentScale = 58
   let stylesDirty = true
   const redraw = (): void => {
     const layers = strapGeometry(projected, appearance, currentScale)
+    texture.style.display = customImage && layers.length ? '' : 'none'
+    if (customImage && layers.length) strips.forEach((strip, i) => strip.setAttribute('transform', strapTextureTransform(projected[i]!, projected[i + 1]!, layers[1]!.width, i)))
     paths.forEach((path, i) => {
       const layer = layers[i]
       if (stylesDirty) path.style.display = layer ? '' : 'none'
       if (!layer) return
       path.setAttribute('d', layer.d)
       if (stylesDirty) {
-        path.dataset.layer = layer.id; path.setAttribute('stroke', customImage && layer.id === 'surface' ? `url(#${patternId})` : layer.stroke)
+        path.dataset.layer = layer.id; path.setAttribute('stroke', layer.stroke)
         path.setAttribute('stroke-width', String(layer.width)); path.setAttribute('opacity', String(layer.opacity))
       }
     })
