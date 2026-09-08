@@ -83,6 +83,15 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - Task activity, delegation and execution histories are bounded before commit.
 - Every state mutation is serialized by `PartnerStore`; task edits additionally
   use a revision to reject stale concurrent updates.
+- Requirements retain `revision` for full snapshot/summary/delivery invalidation.
+  `controlRevision` records the last scope or lifecycle edit in that same sequence.
+  Ordinary requirement commands accept observed revisions between that boundary
+  and the current revision; child creation, progress and comments do not force a
+  new read. Child specification edits, removals, owner/scope edits and lifecycle
+  commands move the boundary. `finish` and task review remain exact-version checks.
+  Legacy records start conservatively at their current revision on their first
+  change. Conflicts return current requirement content and explicit reconciliation
+  guidance, never silently retry stale edits or regenerate a requirement.
 - Market downloads are bounded, checksum-verified when supplied, written into a
   temporary directory and atomically renamed.
 - Market discovery and package installation share one bounded transport. The

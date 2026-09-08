@@ -259,7 +259,13 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
           try { await collaboration.dispatchReadyTasks() }
           catch { dispatchWarning = '任务已保存，执行提交将在后台重试；不要重复创建任务' }
         }
-        return JSON.stringify({ ...tasks.require(task.id), execution: autoRun ? 'submitted' : 'planning-only', ...(dispatchWarning ? { dispatchWarning } : {}) })
+        const snapshot = tasks.snapshot()
+        const requirement = snapshot.requirements?.find(item => item.id === task.requirementId)
+        const currentTask = snapshot.tasks.find(item => item.id === task.id)
+        if (!currentTask) return JSON.stringify({ taskId: task.id, status: 'removed', message: '任务已删除，不要重复创建' })
+        return JSON.stringify({ ...currentTask, execution: autoRun ? 'submitted' : 'planning-only',
+          ...(requirement ? { requirement: { id: requirement.id, revision: requirement.revision, controlRevision: requirement.controlRevision, status: requirement.status } } : {}),
+          ...(dispatchWarning ? { dispatchWarning } : {}) })
       }
       const taskId = requiredText(input.taskId, 'taskId', 160)
       const existing = tasks.snapshot().tasks.find(task => task.id === taskId)

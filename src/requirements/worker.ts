@@ -3,6 +3,7 @@ import type { BoardTask } from '../tasks/domain.js'
 import type { BoardRequirement } from './domain.js'
 import { RequirementService } from './service.js'
 import { requirementIsIdle, requirementProgressKey } from './progress.js'
+import { advanceRequirementRevision } from './revisions.js'
 
 interface RequirementEffects {
   summarize(item: BoardRequirement, tasks: BoardTask[], signal: AbortSignal, stage?: boolean): Promise<string>
@@ -82,7 +83,7 @@ export class RequirementWorker {
           await this.store.update(state => {
             const latest = state.requirements?.find(r => r.id === item.id)
             if (!latest || latest.revision !== revision || !['active', 'review'].includes(latest.status)) throw new Error('需求内容已改变')
-            latest.status = 'review'; latest.revision++; revision = latest.revision
+            latest.status = 'review'; advanceRequirementRevision(latest); revision = latest.revision
           })
           current = this.service.require(item.id)
           this.controller = new AbortController()

@@ -8,6 +8,8 @@ export interface BoardRequirement {
   creatorSessionId?: string
   status: 'planning' | 'active' | 'review' | 'done'
   revision: number
+  /** Last scope/control edit in the revision sequence; progress alone does not move this boundary. */
+  controlRevision?: number
   createdAt: number
   updatedAt: number
   summary?: string

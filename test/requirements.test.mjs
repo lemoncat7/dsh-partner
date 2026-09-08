@@ -11,6 +11,7 @@ import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 import { taskWorkContext } from '../lib/tasks/context.js'
 import { requirementIsIdle, requirementProgressKey } from '../lib/requirements/progress.js'
 import { consolidateCompletedRequirements } from '../lib/requirements/consolidation.js'
+import { requirementTool } from '../lib/requirements/tool.js'
 
 const actor = { kind: 'companion', companionId: 'companion-default' }
 test('large requirement summary includes every child within a bounded prompt', () => {
@@ -55,11 +56,127 @@ test('scope revisions and owner permission reject stale and unauthorized complet
   const { service, requirement, add, current } = await fixture(t)
   const stale = current().revision
   await add('工作')
+  await service.update(requirement.id, current().revision, { description: '真正的范围变化' }, actor)
   await assert.rejects(service.submit(requirement.id, stale, actor), /内容已更新/)
   await assert.rejects(service.submit(requirement.id, current().revision, { kind: 'companion', companionId: 'other' }), /只有需求负责人/)
   await assert.rejects(service.assignOwner(requirement.id, current().revision, 'missing'), /不存在/)
   await service.assignOwner(requirement.id, current().revision, undefined)
   assert.equal(current().ownerCompanionId, undefined)
+})
+
+test('creating children and background progress do not stale the planning revision', async t => {
+  const { tasks, service, requirement, add, current } = await fixture(t)
+  const children = await Promise.all(['一', '二', '三', '四'].map(add))
+  await tasks.comment(children[0].id, '执行进度', actor)
+  await tasks.update(children[0].id, { expectedRevision: tasks.require(children[0].id).revision, status: 'doing' }, actor)
+  assert.ok(current().revision > requirement.revision)
+  assert.equal(current().controlRevision, requirement.revision)
+  const submitted = await service.submit(requirement.id, requirement.revision, actor)
+  assert.equal(submitted.status, 'active')
+  await tasks.completeExecution(children[0].id, '结果', actor)
+  const before = current().revision
+  assert.equal((await service.submit(requirement.id, submitted.revision, actor)).revision, before, 'repeat submit is a no-op')
+  const reopened = await service.reopen(requirement.id, submitted.revision, actor)
+  assert.equal(reopened.status, 'planning')
+  await tasks.comment(children[0].id, '新进度', actor)
+  const updated = await service.update(requirement.id, reopened.revision, { description: '新要求' }, actor)
+  assert.equal(updated.description, '新要求')
+  assert.equal(tasks.require(children[0].id).status, 'ready', 'real edits still invalidate old work')
+})
+
+test('child specification edits and deletion require a fresh scope read, but not child progress', async t => {
+  const { tasks, service, requirement, add, current } = await fixture(t)
+  const task = await add('工作'), old = current().revision
+  await tasks.update(task.id, { expectedRevision: task.revision, title: '用户修改子任务目标' }, actor)
+  await assert.rejects(service.submit(requirement.id, old, actor), e => e.status === 409 && e.current.id === requirement.id)
+  const beforeRemoval = current().revision
+  await tasks.remove(task.id)
+  await add('替代任务')
+  await assert.rejects(service.submit(requirement.id, beforeRemoval, actor), /内容已更新/)
+  await service.submit(requirement.id, current().revision, actor)
+})
+
+test('only one concurrent content edit wins and conflict returns current content', async t => {
+  const { service, requirement, current } = await fixture(t)
+  const outcomes = await Promise.allSettled([
+    service.update(requirement.id, requirement.revision, { description: '方案甲' }, actor),
+    service.update(requirement.id, requirement.revision, { description: '方案乙' }, actor),
+  ])
+  assert.equal(outcomes.filter(o => o.status === 'fulfilled').length, 1)
+  const error = outcomes.find(o => o.status === 'rejected').reason
+  assert.equal(error.code, 'REQUIREMENT_REVISION_CONFLICT')
+  assert.equal(error.current.description, current().description)
+  assert.match(error.recovery, /不要重复创建/)
+  await assert.rejects(service.update(requirement.id, current().revision + 1, { title: '未来版本' }, actor), e => e.status === 409)
+  await assert.rejects(service.reopen(requirement.id, 0, actor), e => e.status === 409)
+})
+
+test('requirement tools return actionable conflicts; list never needs a revision', async t => {
+  const { tasks, service, requirement, add, current } = await fixture(t)
+  const tool = requirementTool(actor.companionId, service, tasks), exec = {}
+  await add('工作')
+  await service.update(requirement.id, current().revision, { description: '最新范围' }, actor)
+  const response = JSON.parse(await tool.execute({ action: 'submit', requirementId: requirement.id, expectedRevision: requirement.revision }, exec))
+  assert.equal(response.ok, false)
+  assert.equal(response.code, 'REQUIREMENT_REVISION_CONFLICT')
+  assert.equal(response.current.description, '最新范围')
+  const listed = JSON.parse(await tool.execute({ action: 'list', expectedRevision: -1 }, exec))
+  assert.equal(listed.requirements[0].revision, response.current.revision)
+  const result = JSON.parse(await tool.execute({ action: 'submit', requirementId: requirement.id, expectedRevision: response.current.revision }, exec))
+  assert.equal(result.status, 'active')
+})
+
+test('changing the owner invalidates an older user revision and preserves companion authorization', async t => {
+  const { service, requirement, add, current } = await fixture(t)
+  await add('工作')
+  const old = current().revision
+  await service.assignOwner(requirement.id, old, undefined)
+  await assert.rejects(service.submit(requirement.id, old, { kind: 'user' }), e => e.status === 409)
+  await assert.rejects(service.submit(requirement.id, current().revision, actor), e => e.status === 403)
+  assert.equal((await service.submit(requirement.id, current().revision, { kind: 'user' })).status, 'active')
+})
+
+test('legacy version boundary survives progress and a store restart without trusting unknown old revisions', async t => {
+  const { root, store, tasks, service, requirement, add, current } = await fixture(t)
+  const task = await add('旧版本任务')
+  await store.update(state => { delete state.requirements[0].controlRevision })
+  const known = current().revision
+  await tasks.comment(task.id, '升级后的进度', actor)
+  const restored = await PartnerStore.open(join(root, 'state.json'))
+  const next = new RequirementService(restored)
+  assert.equal(next.require(requirement.id).controlRevision, known)
+  await assert.rejects(next.submit(requirement.id, known - 1, actor), /内容已更新/)
+  assert.equal((await next.submit(requirement.id, known, actor)).status, 'active')
+})
+
+test('finish still requires the exact reviewed snapshot after a child comment', async t => {
+  const { tasks, service, requirement, add, accept, current } = await fixture(t)
+  const task = await add('工作'); await accept(task)
+  const reviewed = current().revision
+  await tasks.comment(task.id, '补充结果证据', actor)
+  await assert.rejects(service.finish(requirement.id, reviewed, '旧总结', actor), e => {
+    assert.match(e.recovery, /不要只替换版本号/)
+    return e.status === 409
+  })
+  assert.notEqual(current().status, 'done')
+  assert.equal((await service.finish(requirement.id, current().revision, '基于新证据汇总', actor)).status, 'done')
+})
+
+test('progress during automatic summary still aborts and cannot archive stale output', async t => {
+  const { store, tasks, service, requirement, add, accept, current } = await fixture(t)
+  const task = await add('工作'); await accept(task)
+  await service.submit(requirement.id, current().revision, actor)
+  let release, began, signal
+  const started = new Promise(resolve => { began = resolve })
+  const worker = new RequirementWorker(store, service, {
+    summarize: async (_r, _t, s) => { signal = s; began(); return new Promise(resolve => { release = resolve }) },
+    deliver: async () => assert.fail('must not deliver stale summary'), warn() {},
+  })
+  const pending = worker.tick(); await started
+  await tasks.comment(task.id, '新结果信息', actor)
+  assert.ok(signal.aborted)
+  release('旧总结'); await pending; await worker.close()
+  assert.equal(current().status, 'active'); assert.equal(current().summary, undefined)
 })
 
 test('removal is idempotent, pauses dependents, removes queue records and reopens requirement scope', async t => {

@@ -1,4 +1,5 @@
 import type { PartnerState } from '../domain.js'
+import { advanceRequirementRevision } from '../requirements/revisions.js'
 
 /** Atomic removal. Missing prerequisites pause dependents instead of auto-unlocking. */
 export function removeTaskRecords(state: PartnerState, ids: ReadonlySet<string>): string[] {
@@ -19,16 +20,16 @@ export function removeTaskRecords(state: PartnerState, ids: ReadonlySet<string>)
   state.delegations = state.delegations.filter(item => !affected.has(item.taskId))
   for (const item of state.requirements ?? []) {
     if (!requirementIds.has(item.id) || item.status === 'done') continue
-    item.revision++; item.updatedAt = Date.now(); item.status = 'planning'
+    advanceRequirementRevision(item, true); item.status = 'planning'
     delete item.nextAttemptAt; delete item.lastError
   }
   return [...affected]
 }
 
-export function touchTaskRequirement(state: PartnerState, requirementId?: string): void {
+export function touchTaskRequirement(state: PartnerState, requirementId?: string, control = false): void {
   const item = state.requirements?.find(r => r.id === requirementId)
   if (!item || item.status === 'done') return
-  item.revision++; item.updatedAt = Date.now()
+  advanceRequirementRevision(item, control)
   if (item.status === 'review') item.status = 'active'
   delete item.nextAttemptAt; delete item.lastError
 }

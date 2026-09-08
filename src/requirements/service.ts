@@ -7,10 +7,12 @@ import type { BoardTask } from '../tasks/domain.js'
 import { invalidateTaskWork } from '../tasks/context.js'
 import { retainRequirementArchive } from './archive.js'
 import { requirementProgressKey } from './progress.js'
+import { advanceRequirementRevision, assertRequirementRevision, RequirementError } from './revisions.js'
+export { RequirementError } from './revisions.js'
 
 export function requirementDraft(title: string, description: string, ownerCompanionId?: string, creatorSessionId?: string): BoardRequirement {
   const now = Date.now()
-  return { id: `requirement-${randomUUID()}`, title, description, status: 'planning', revision: 1, createdAt: now, updatedAt: now,
+  return { id: `requirement-${randomUUID()}`, title, description, status: 'planning', revision: 1, controlRevision: 1, createdAt: now, updatedAt: now,
     ...(ownerCompanionId ? { ownerCompanionId } : {}), ...(creatorSessionId ? { creatorSessionId } : {}) }
 }
 
@@ -36,7 +38,8 @@ export class RequirementService {
   }
   async submit(id: string, revision: number, actor: TaskActor): Promise<BoardRequirement> {
     return this.change(id, revision, actor, (item, tasks) => {
-      if (item.status !== 'planning') throw new RequirementError(409, '该需求已经提交，请刷新查看')
+      if (item.status === 'active' || item.status === 'review') return false
+      if (item.status !== 'planning') throw new RequirementError(409, '该需求已归档；同一目标续做请 reopen')
       if (!tasks.length) throw new RequirementError(409, '请先安排子任务，再提交规划')
       item.status = 'active'
     })
@@ -48,12 +51,12 @@ export class RequirementService {
       const item = state.requirements?.find(r => r.id === id)
       if (!item) throw new RequirementError(404, '需求不存在')
       if (actor.kind !== 'user' && item.ownerCompanionId !== actor.companionId) throw new RequirementError(403, '只有需求负责人可以修改需求')
-      if (revision !== item.revision) throw new RequirementError(409, '需求内容已更新，请重新读取')
+      assertRequirementRevision(item, revision)
       if (item.status === 'done') throw new RequirementError(409, '已归档需求不能直接改写；同一目标续做请 reopen 保留历史后追加任务')
       const title = input.title === undefined ? item.title : requiredText(input.title, 'title', 200)
       const description = input.description === undefined ? item.description : optionalText(input.description, 'description', 8000) ?? ''
       if (title !== item.title || description !== item.description) {
-        item.title = title; item.description = description; item.status = 'planning'; item.revision++; item.updatedAt = Date.now()
+        item.title = title; item.description = description; item.status = 'planning'; advanceRequirementRevision(item, true)
         delete item.lastError; delete item.nextAttemptAt
         for (const task of state.tasks.filter(t => t.requirementId === id)) {
           invalidateTaskWork(state, task, '所属需求已更新，请根据最新需求重新执行和验收')
@@ -95,7 +98,7 @@ export class RequirementService {
       item.summary = text; item.status = 'done'; item.archivedAt = Date.now()
       item.results = tasks.map(({ id, title, assigneeCompanionId, resultSummary, resultAbstract }) => ({ id, title, ...(assigneeCompanionId ? { assigneeCompanionId } : {}), ...(resultSummary ? { resultSummary } : {}), ...(resultAbstract ? { resultAbstract } : {}) }))
       delete item.lastError; delete item.nextAttemptAt
-    })
+    }, true)
   }
   async retry(id: string): Promise<void> {
     await this.store.update(state => {
@@ -104,17 +107,16 @@ export class RequirementService {
       delete item.nextAttemptAt; delete item.lastError
     })
   }
-  private async change(id: string, revision: number, actor: TaskActor, change: (item: BoardRequirement, tasks: BoardTask[]) => void): Promise<BoardRequirement> {
+  private async change(id: string, revision: number, actor: TaskActor, change: (item: BoardRequirement, tasks: BoardTask[]) => void | false, snapshot = false): Promise<BoardRequirement> {
     let result!: BoardRequirement
     await this.store.update(state => {
       const item = state.requirements?.find(r => r.id === id)
       if (!item) throw new RequirementError(404, '需求已删除或不存在，请刷新看板')
       if (actor.kind !== 'user' && item.ownerCompanionId !== actor.companionId) throw new RequirementError(403, '只有需求负责人可以提交、调整或完成需求')
-      if (revision !== item.revision) throw new RequirementError(409, '需求内容已更新，请刷新后重试')
-      change(item, state.tasks.filter(t => t.requirementId === id))
-      item.revision++; item.updatedAt = Date.now(); result = structuredClone(item)
+      assertRequirementRevision(item, revision, snapshot)
+      if (change(item, state.tasks.filter(t => t.requirementId === id)) !== false) advanceRequirementRevision(item, true)
+      result = structuredClone(item)
     })
     return result
   }
 }
-export class RequirementError extends Error { constructor(readonly status: number, message: string) { super(message) } }

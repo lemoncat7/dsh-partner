@@ -124,7 +124,8 @@ export class TaskBoardService {
         task.dependencyTaskIds = dependencies
       }
       if ('dueAt' in input) { if (validTimestamp(input.dueAt)) task.dueAt = input.dueAt; else delete task.dueAt }
-      if (previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])) {
+      const specChanged = previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
+      if (specChanged) {
         invalidateTaskWork(state, task, '任务要求或分配已更新，旧执行/验收失效')
       }
       if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
@@ -132,7 +133,7 @@ export class TaskBoardService {
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
       task.revision += 1
       task.updatedAt = Date.now()
-      touchTaskRequirement(state, task.requirementId)
+      touchTaskRequirement(state, task.requirementId, specChanged)
       if (task.status === 'done' && previousStatus !== 'done') task.completedAt = task.updatedAt
       if (task.status !== 'done') delete task.completedAt
       if (task.status === 'doing' && previousStatus !== 'doing') {
@@ -340,7 +341,9 @@ export interface TaskActor { kind: 'user' | 'companion' | 'schedule'; companionI
 
 export class TaskConflictError extends Error {
   readonly status = 409
-  constructor(readonly current: BoardTask) { super('任务状态已更新，请刷新后重试（Task changed）') }
+  constructor(readonly current: BoardTask) {
+    super(`任务状态已更新（Task changed；${current.id}，当前版本 ${current.revision}，状态 ${current.status}）。请通过 partner_task_board list 核对最新任务、评论和交付后再操作；验收不得仅替换 expectedRevision 重交旧意见，也不要重复创建任务。`)
+  }
 }
 export class TaskNotFoundError extends Error { readonly status = 404; constructor(message = '任务已删除或不存在，无需继续处理') { super(message) } }
 

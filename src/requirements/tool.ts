@@ -2,6 +2,7 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { record, requiredText } from '../core/validation.js'
 import type { RequirementService } from './service.js'
 import type { TaskBoardService } from '../tasks/service.js'
+import { RequirementConflictError } from './revisions.js'
 
 export function requirementTool(companionId: string, service: RequirementService, tasks: TaskBoardService): ToolDefinition {
   return {
@@ -10,7 +11,7 @@ export function requirementTool(companionId: string, service: RequirementService
     parameters: { type: 'object', additionalProperties: false, required: ['action'], properties: {
       action: { type: 'string', enum: ['list', 'create', 'update', 'submit', 'reopen', 'finish', 'retry', 'remove'] },
       requirementId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
-      expectedRevision: { type: 'integer' }, summary: { type: 'string' },
+      expectedRevision: { type: 'integer', description: 'Use revision returned by create/list or a board response requirement. submit/update/reopen tolerate child creation and progress since that read, but not intervening scope/control edits or task removal. finish requires the exact snapshot reviewed. A conflict returns current content and recovery instructions: reconcile before retrying, never repeatedly list or recreate the requirement.' }, summary: { type: 'string' },
     } },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
     presentCall: args => ({ card: 'generic', title: `需求 · ${String((args as { action?: string }).action ?? '操作')}` }),
@@ -27,11 +28,17 @@ export function requirementTool(companionId: string, service: RequirementService
       if (action === 'retry') { await service.retry(id); return JSON.stringify({ id, retry: true }) }
       const revision = input.expectedRevision
       if (!Number.isInteger(revision)) throw new Error('请先查询需求并提供 expectedRevision')
-      if (action === 'update') return JSON.stringify(await service.update(id, revision as number, input, actor))
-      if (action === 'submit') return JSON.stringify(await service.submit(id, revision as number, actor))
-      if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor, input))
-      if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredText(input.summary, 'summary', 12000), actor))
-      throw new Error('需求操作无效')
+      try {
+        if (action === 'update') return JSON.stringify(await service.update(id, revision as number, input, actor))
+        if (action === 'submit') return JSON.stringify(await service.submit(id, revision as number, actor))
+        if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor, input))
+        if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredText(input.summary, 'summary', 12000), actor))
+        throw new Error('需求操作无效')
+      } catch (error) {
+        if (!(error instanceof RequirementConflictError)) throw error
+        return JSON.stringify({ ok: false, code: error.code, action, expectedRevision: error.expectedRevision,
+          message: error.message, current: error.current, recovery: error.recovery })
+      }
     },
   }
 }

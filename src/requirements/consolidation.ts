@@ -3,6 +3,7 @@ import { appendBounded } from '../core/collections.js'
 import { randomUUID } from 'node:crypto'
 import { retainRequirementArchive } from './archive.js'
 import { requirementProgressKey } from './progress.js'
+import { advanceRequirementRevision } from './revisions.js'
 
 /** Explicit maintenance only, never a title-based startup migration or an agent tool. */
 export function consolidateCompletedRequirements(state: PartnerState, input: {
@@ -31,7 +32,7 @@ export function consolidateCompletedRequirements(state: PartnerState, input: {
       message: `修正续做归属：${source.id} → ${target.id}；保留已验收成果，不重新执行`, at: now }, 2000)
   }
   target.title = input.title.trim(); target.description = input.description
-  target.revision++; target.updatedAt = now
+  advanceRequirementRevision(target, true)
   delete target.lastError; delete target.nextAttemptAt; delete target.attempts
   if (oldBatchWasDelivered) target.reportBaselineKey = requirementProgressKey(state, target)
   state.requirements = state.requirements!.filter(r => r.id !== source.id)
