@@ -6,9 +6,9 @@ import type { TaskBoardService } from '../tasks/service.js'
 export function requirementTool(companionId: string, service: RequirementService, tasks: TaskBoardService): ToolDefinition {
   return {
     name: 'partner_requirements',
-    description: 'Manage one requirement containing all tasks for a user deliverable. Create a requirement, use its id on child board tasks, then submit after the plan is fully assigned. All children must be accepted before the owner summarizes and the system archives and sends ONE final channel notification. reopen permits planning changes; finish saves an actual final summary only when all children are done. Never finish merely because tasks were submitted. remove permanently deletes a requirement and its tasks only when explicitly requested; retries of removal are idempotent. Use the enabled task-planning Skill for decomposition, not a separate workflow gate.',
+    description: 'Manage one requirement containing all tasks for a user deliverable. Create a requirement and attach child board tasks. submit confirms the complete scope: when all children are accepted the system summarizes and archives automatically. A requirement containing only done/blocked tasks sends one stage result per changed batch even without submit. Any backlog, ready, doing, review or queued execution suppresses stage delivery. Never report individual review/rework steps. Stage delivery does NOT require archiving and permits further tasks. When the owner confirms the whole requirement is complete, finish saves a real final summary and archives if all children are done, including planning requirements. Never finish merely because work is queued or blocked. update changes the authoritative requirement and invalidates old child execution/reviews; use it for changed scope, not a comment alone. For continued work on the same user goal, list and reuse the original requirement instead of creating another per specialist phase. reopen supports submitted AND archived requirements, preserving previous archives and accepted tasks; optional title/description extends the overall scope for NEW work without invalidating old deliverables. Use update only when changing acceptance requirements for existing work. remove permanently deletes only on explicit user request and is idempotent. Use the enabled task-planning Skill for decomposition.',
     parameters: { type: 'object', additionalProperties: false, required: ['action'], properties: {
-      action: { type: 'string', enum: ['list', 'create', 'submit', 'reopen', 'finish', 'retry', 'remove'] },
+      action: { type: 'string', enum: ['list', 'create', 'update', 'submit', 'reopen', 'finish', 'retry', 'remove'] },
       requirementId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       expectedRevision: { type: 'integer' }, summary: { type: 'string' },
     } },
@@ -27,8 +27,9 @@ export function requirementTool(companionId: string, service: RequirementService
       if (action === 'retry') { await service.retry(id); return JSON.stringify({ id, retry: true }) }
       const revision = input.expectedRevision
       if (!Number.isInteger(revision)) throw new Error('请先查询需求并提供 expectedRevision')
+      if (action === 'update') return JSON.stringify(await service.update(id, revision as number, input, actor))
       if (action === 'submit') return JSON.stringify(await service.submit(id, revision as number, actor))
-      if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor))
+      if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor, input))
       if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredText(input.summary, 'summary', 12000), actor))
       throw new Error('需求操作无效')
     },

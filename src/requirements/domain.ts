@@ -18,4 +18,20 @@ export interface BoardRequirement {
   attempts?: number
   lastError?: string
   notifiedAt?: number
+  /** Durable stage receipt, independent of final archiving. */
+  stageReport?: { key: string; summary: string; createdAt: number; notifiedAt?: number }
+  /** Explicit continuation/migration must not announce the same delivered batch again. */
+  reportBaselineKey?: string
+  archiveHistory?: RequirementArchive[]
+}
+
+export interface RequirementArchive {
+  requirementId: string
+  title: string
+  description: string
+  revision: number
+  summary?: string
+  results?: BoardRequirement['results']
+  archivedAt: number
+  notifiedAt?: number
 }

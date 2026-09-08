@@ -103,12 +103,13 @@ export function apply(context: Context, config: PartnerConfig): void {
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     const requirementWorker = new RequirementWorker(store, requirements, {
-      summarize: async (item, children, signal) => {
+      summarize: async (item, children, signal, stage) => {
         const companion = store.snapshot().companions.find(c => c.id === item.ownerCompanionId)
         if (!companion) throw new Error('需求负责人不存在，请在需求中重新选择')
-        return (await agents.executeTask({ sourceId: `requirement:${item.id}`, companion, prompt: requirementSummaryPrompt(item, children), signal })).output
+        return (await agents.executeTask({ sourceId: `requirement:${item.id}`, companion, prompt: requirementSummaryPrompt(item, children, stage), signal })).output
       },
       deliver: item => channels.notifyRequirementResult(item), warn: message => ctx.logger.warn(message),
+      isBusy: id => agents.isCompanionBusy(id),
     })
     agents.setQuestionAnswerer((agentCtx, route) => channels.attachQuestionAnswerer(agentCtx, route))
     collaboration.setAccessChangeNotifier(id => agents.reloadCompanion(id))

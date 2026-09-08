@@ -29,12 +29,13 @@ export async function dispatchPartnerWorkspaceApi(
     const service = runtime.requirements, id = segments[1]
     if (method === 'GET' && !id) { sendJson(res, 200, { requirements: service.list() }); return true }
     mutation(req)
+    if (method === 'PUT' && id && segments.length === 2) { const body = await readObject(req); sendJson(res, 200, await service.update(id, Number(body.expectedRevision), body, { kind: 'user' })); return true }
     if (method === 'POST' && !id) { sendJson(res, 201, await service.create(await readObject(req), { kind: 'user' })); return true }
     if (method === 'DELETE' && id && segments.length === 2) { await runtime.tasks.removeRequirement(id); sendJson(res, 204, undefined); return true }
     if (method === 'POST' && id && segments.length === 3) {
       const body = await readObject(req), revision = Number(body.expectedRevision), actor = { kind: 'user' as const }
       if (segments[2] === 'submit') { sendJson(res, 200, await service.submit(id, revision, actor)); return true }
-      if (segments[2] === 'reopen') { sendJson(res, 200, await service.reopen(id, revision, actor)); return true }
+      if (segments[2] === 'reopen') { sendJson(res, 200, await service.reopen(id, revision, actor, body)); return true }
       if (segments[2] === 'finish') { sendJson(res, 200, await service.finish(id, revision, String(body.summary ?? ''), actor)); return true }
       if (segments[2] === 'retry') { await service.retry(id); sendJson(res, 200, { ok: true }); return true }
       if (segments[2] === 'owner') { sendJson(res, 200, await service.assignOwner(id, revision, typeof body.ownerCompanionId === 'string' ? body.ownerCompanionId.trim() || undefined : undefined)); return true }
@@ -101,11 +102,11 @@ export async function dispatchPartnerWorkspaceApi(
       mutation(req); const body = await readObject(req); await runtime.tasks.comment(id, String(body.message ?? ''), { kind: 'user' }); sendJson(res, 200, { ok: true }); return true
     }
     if (id && method === 'POST' && segments[2] === 'accept' && segments.length === 3) {
-      mutation(req); sendJson(res, 200, await runtime.tasks.accept(id, { kind: 'user' })); return true
+      mutation(req); const body = await readObject(req); sendJson(res, 200, await runtime.tasks.accept(id, { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined)); return true
     }
     if (id && method === 'POST' && segments[2] === 'reject' && segments.length === 3) {
       mutation(req); const body = await readObject(req)
-      sendJson(res, 200, await runtime.tasks.reject(id, String(body.reason ?? ''), { kind: 'user' })); return true
+      sendJson(res, 200, await runtime.tasks.reject(id, String(body.reason ?? ''), { kind: 'user' }, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined)); return true
     }
     if (id && method === 'POST' && segments[2] === 'review' && segments.length === 3) {
       mutation(req); const body = await readObject(req)

@@ -14,6 +14,7 @@ import { prepareChannelReply } from '../lib/channels/outbound-media.js'
 import { PartnerStore } from '../lib/store.js'
 import { TaskBoardService } from '../lib/tasks/service.js'
 import { RequirementService } from '../lib/requirements/service.js'
+import { RequirementWorker } from '../lib/requirements/worker.js'
 import { assistantTextAfter } from '../lib/execution/agent-support.js'
 
 function encrypt(value, key) {
@@ -215,6 +216,33 @@ test('child acceptance stays silent and requirement summary sends one terminal r
   const afterRestart = new ChannelManager({}, restored, {}, {}, root)
   afterRestart.sendProactiveReply = async () => assert.fail('must not redeliver after restart')
   await afterRestart.notifyRequirementResult(finished)
+})
+
+test('stage reports route once before archiving; waiting/review suppresses delivery and changed results notify again', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'partner-channel-stage-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const store = await PartnerStore.open(join(root, 'state.json')), board = new TaskBoardService(store), requirements = new RequirementService(store)
+  const actor = { kind: 'companion', companionId: 'companion-default' }
+  await store.update(s => s.sessions.push({ id: 'route', kind: 'channel', companionId: actor.companionId, sessionId: 'creator-session', channelId: 'channel', userId: 'user', cwd: root, lastMessageAt: 1 }))
+  const req = await requirements.create({ title: '阶段交付' }, actor, 'creator-session')
+  const task = await board.create({ title: '原型', requirementId: req.id }, actor)
+  const channels = new ChannelManager({}, store, {}, {}, root), delivered = []
+  channels.sendProactiveReply = async (_c, _u, reply) => delivered.push(reply)
+  const worker = new RequirementWorker(store, requirements, { summarize: async () => '当前成果和阻塞说明', deliver: item => channels.notifyRequirementResult(item), warn() {} })
+  const stateTo = async status => store.update(s => {
+    s.tasks.find(t => t.id === task.id).status = status
+    s.requirements[0].updatedAt = Date.now() - 30_000; s.requirements[0].revision++
+  })
+  for (const status of ['backlog', 'ready', 'doing', 'review']) { await stateTo(status); await worker.tick(); assert.equal(delivered.length, 0) }
+  await stateTo('blocked'); await worker.tick(); await worker.tick()
+  assert.equal(delivered.length, 1); assert.match(delivered[0].text, /需求阶段结果：阶段交付/)
+  assert.doesNotMatch(delivered[0].text, /需求已完成|待验收/)
+  assert.equal(requirements.require(req.id).status, 'planning')
+  await stateTo('done'); await worker.tick(); await worker.tick(); await worker.close()
+  assert.equal(delivered.length, 2)
+  const restored = await PartnerStore.open(join(root, 'state.json')), resumed = new ChannelManager({}, restored, {}, {}, root)
+  resumed.sendProactiveReply = async () => assert.fail('stage receipt survives restart')
+  await resumed.notifyRequirementResult(requirements.require(req.id))
 })
 
 test('separates review handoff and writes long deliverables to a private Markdown file', async t => {

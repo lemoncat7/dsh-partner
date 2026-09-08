@@ -94,13 +94,13 @@ export function RequirementTasksPanel({ initialTaskId, openRequest, requirementI
   }
   const accept = async (task: BoardTaskView): Promise<void> => {
     setBusy(task.id); setError(undefined)
-    try { await api(`/tasks/${task.id}/accept`, { method: 'POST' }); await load() }
+    try { await api(`/tasks/${task.id}/accept`, { method: 'POST', body: JSON.stringify({ expectedRevision: task.revision }) }); await load() }
     catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
   }
   const reject = async (task: BoardTaskView, reason: string): Promise<void> => {
     if (!reason) return
     setBusy(task.id); setError(undefined)
-    try { await api(`/tasks/${task.id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); await load() }
+    try { await api(`/tasks/${task.id}/reject`, { method: 'POST', body: JSON.stringify({ reason, expectedRevision: task.revision }) }); await load() }
     catch (cause) { setError(errorMessage(cause)) } finally { setBusy(undefined) }
   }
   const remove = async (task: BoardTaskView): Promise<void> => {

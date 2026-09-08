@@ -4,6 +4,9 @@ import type { TaskActor } from '../tasks/service.js'
 import { optionalText, record, requiredText } from '../core/validation.js'
 import type { BoardRequirement } from './domain.js'
 import type { BoardTask } from '../tasks/domain.js'
+import { invalidateTaskWork } from '../tasks/context.js'
+import { retainRequirementArchive } from './archive.js'
+import { requirementProgressKey } from './progress.js'
 
 export function requirementDraft(title: string, description: string, ownerCompanionId?: string, creatorSessionId?: string): BoardRequirement {
   const now = Date.now()
@@ -38,6 +41,29 @@ export class RequirementService {
       item.status = 'active'
     })
   }
+  async update(id: string, revision: number, value: unknown, actor: TaskActor): Promise<BoardRequirement> {
+    const input = record(value, 'requirement')
+    let result!: BoardRequirement
+    await this.store.update(state => {
+      const item = state.requirements?.find(r => r.id === id)
+      if (!item) throw new RequirementError(404, '需求不存在')
+      if (actor.kind !== 'user' && item.ownerCompanionId !== actor.companionId) throw new RequirementError(403, '只有需求负责人可以修改需求')
+      if (revision !== item.revision) throw new RequirementError(409, '需求内容已更新，请重新读取')
+      if (item.status === 'done') throw new RequirementError(409, '已归档需求不能直接改写；同一目标续做请 reopen 保留历史后追加任务')
+      const title = input.title === undefined ? item.title : requiredText(input.title, 'title', 200)
+      const description = input.description === undefined ? item.description : optionalText(input.description, 'description', 8000) ?? ''
+      if (title !== item.title || description !== item.description) {
+        item.title = title; item.description = description; item.status = 'planning'; item.revision++; item.updatedAt = Date.now()
+        delete item.lastError; delete item.nextAttemptAt
+        for (const task of state.tasks.filter(t => t.requirementId === id)) {
+          invalidateTaskWork(state, task, '所属需求已更新，请根据最新需求重新执行和验收')
+          task.revision++; task.updatedAt = Date.now()
+        }
+      }
+      result = structuredClone(item)
+    })
+    return result
+  }
   async assignOwner(id: string, revision: number, owner: string | undefined): Promise<BoardRequirement> {
     return this.change(id, revision, { kind: 'user' }, item => {
       if (item.status === 'done') throw new RequirementError(409, '已归档需求不能更改负责人')
@@ -48,16 +74,24 @@ export class RequirementService {
       delete item.lastError; delete item.nextAttemptAt
     })
   }
-  async reopen(id: string, revision: number, actor: TaskActor): Promise<BoardRequirement> {
+  async reopen(id: string, revision: number, actor: TaskActor, value?: unknown): Promise<BoardRequirement> {
+    const input = value === undefined ? {} : record(value, 'continuation')
     return this.change(id, revision, actor, item => {
-      if (item.status === 'done') throw new RequirementError(409, '已归档需求不能重开，请创建后续需求')
+      if (item.status === 'done') {
+        retainRequirementArchive(item, item)
+        delete item.summary; delete item.results; delete item.archivedAt; delete item.notifiedAt
+      }
+      if (input.title !== undefined) item.title = requiredText(input.title, 'title', 200)
+      if (input.description !== undefined) item.description = optionalText(input.description, 'description', 8000) ?? ''
+      item.reportBaselineKey = requirementProgressKey(this.store.snapshot(), item)
       item.status = 'planning'; delete item.lastError; delete item.nextAttemptAt
+      delete item.attempts
     })
   }
   async finish(id: string, revision: number, summary: string, actor: TaskActor): Promise<BoardRequirement> {
     const text = requiredText(summary, 'summary', 12000)
     return this.change(id, revision, actor, (item, tasks) => {
-      if (!['active', 'review'].includes(item.status) || !tasks.length || tasks.some(t => t.status !== 'done')) throw new RequirementError(409, '需求尚未提交或仍有未验收任务，不能完成归档')
+      if (item.status === 'done' || !tasks.length || tasks.some(t => t.status !== 'done')) throw new RequirementError(409, '需求已归档或仍有未验收任务，不能完成归档')
       item.summary = text; item.status = 'done'; item.archivedAt = Date.now()
       item.results = tasks.map(({ id, title, assigneeCompanionId, resultSummary, resultAbstract }) => ({ id, title, ...(assigneeCompanionId ? { assigneeCompanionId } : {}), ...(resultSummary ? { resultSummary } : {}), ...(resultAbstract ? { resultAbstract } : {}) }))
       delete item.lastError; delete item.nextAttemptAt

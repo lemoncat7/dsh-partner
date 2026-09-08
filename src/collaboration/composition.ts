@@ -74,7 +74,7 @@ export class PartnerAgentComposition {
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
         '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
-        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态反向通知创建者，已提交的后续任务由系统自动接续。执行、重试和子任务验收都是内部过程，不逐项通知渠道；需求全部任务验收完毕后由负责人汇总，需求完成归档后统一投递。',
+        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态内部通知创建者，后续任务自动接续。执行、重试、待验收和返工不逐项通知渠道。仅当需求只剩已完成/受阻任务且没有排队执行时统一汇报成果和阻塞，不以归档为前提；只要还有收集箱、待开始、执行中或待验收就不发阶段通知。确认完整范围且全部任务完成后汇总归档。需求变更用 partner_requirements update，具体任务变更用 partner_task_board update；打回必须填写明确缺项和修正要求，并针对实际读取的 expectedRevision 决策。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         `你自己的伙伴 id：${companion.id}。`,
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
@@ -228,16 +228,16 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
   }
   return textTool({
     name: 'partner_task_board',
-    description: 'Turn requested deliverables into actual work assigned to self or authorized specialist companions; this board is not merely a log to fill after doing everything yourself. When the request matches an authorized companion specialty, proactively apply the enabled task-planning Skill and connect the requested outcome, suitable assignee and board task before carrying out the work; no explicit @ or board request is needed. The Skill defines decomposition and exceptions; merely mentioning companions is not a reason to create tasks. List, create, update, comment on, accept or reject tasks. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Create one requirement via partner_requirements and attach related tasks with requirementId. Child execution, retries, review and accept are internal; only requirement completion sends the final channel summary. Remove permanently deletes a task only on explicit user request, stops its execution and pauses dependents. Accepted dependencies unlock queued tasks automatically.',
+    description: 'Turn requested deliverables into actual work assigned to self or authorized specialist companions; this board is not merely a log to fill after doing everything yourself. When the request matches an authorized companion specialty, proactively apply the enabled task-planning Skill and connect the requested outcome, suitable assignee and board task before carrying out the work; no explicit @ or board request is needed. The Skill defines decomposition and exceptions. List, create, update, comment on, accept or reject tasks. Creating with assignee submits execution automatically, including dependency waiting; set autoRun=false to save without execution. Submitted/queued is not completion. Every create must include requirementId. Continued work uses the original requirement: list to find it, reopen submitted/archived scope if necessary, then append. Never create another requirement merely because a different specialist takes the next phase. dependencyTaskIds controls ordering, not ownership. Only a separate user goal warrants a new requirement. Child execution and review are internal: stage notification waits until only done/blocked tasks remain, and does not require archiving. For changed task specifications use update, not only comment; for changed whole scope use partner_requirements update. reject must state concrete missing items and corrections; accept/reject must use the revision actually reviewed. Executors receive latest scope, recent comments, rejection reasons and previous deliverables on rework. Remove permanently deletes only on explicit user request, stops execution and pauses dependents. Accepted dependencies unlock queued tasks automatically.',
     parameters: actionParameters(['list', 'create', 'update', 'comment', 'accept', 'reject', 'remove'], {
       taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
-      requirementId: { type: 'string', description: 'Owning requirement id from partner_requirements. Reuse the same id for all tasks of one deliverable. Omission creates a standalone requirement for compatibility.' },
+      requirementId: { type: 'string', description: 'REQUIRED for create. Reuse the existing requirement for continued work on the same deliverable, including later specialist phases. dependencyTaskIds does not set ownership. Missing id fails without creating anything. Query partner_requirements list; reopen a submitted/archived requirement before appending; create a requirement only for a genuinely separate user goal.' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
       assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
       autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). Persist execution intent and start after dependencies are accepted. Set false when user requests planning only; legacy tasks are never auto-started.' },
       dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
-      expectedRevision: { type: 'integer' }, message: { type: 'string' },
+      expectedRevision: { type: 'integer', description: 'Required for update, accept and reject. Use the revision actually reviewed; if stale, reread the latest requirements and results before making a new decision.' }, message: { type: 'string' },
     }),
     async execute(raw, exec) {
       const input = record(raw, 'arguments')
@@ -253,7 +253,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
           creatorSessionId: requireAgent(exec).session.id,
           ...(assignee ? { assigneeCompanionId: assignee } : {}),
           ...(reviewer ? { reviewerCompanionId: reviewer } : {}),
-        }, { kind: 'companion', companionId: companion.id })
+        }, { kind: 'companion', companionId: companion.id }, true)
         let dispatchWarning: string | undefined
         if (autoRun) {
           try { await collaboration.dispatchReadyTasks() }
@@ -270,11 +270,12 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       }
       if (action === 'comment') { await tasks.comment(taskId, requiredText(input.message, 'message', 2000), { kind: 'companion', companionId: companion.id }); return JSON.stringify({ ok: true }) }
       if (action === 'accept' || action === 'reject') {
+        if (!Number.isInteger(input.expectedRevision)) throw new Error('验收必须提供实际核验的 expectedRevision；请先查询最新任务、补充评论和交付后再决定')
         const task = tasks.require(taskId)
         if (task.reviewerCompanionId && task.reviewerCompanionId !== companion.id) throw new Error('当前伙伴不是这个任务指定的验收伙伴')
         return JSON.stringify(action === 'accept'
-          ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id })
-          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }))
+          ? await tasks.accept(taskId, { kind: 'companion', companionId: companion.id }, input.expectedRevision as number)
+          : await tasks.reject(taskId, requiredText(input.message, 'message', 1200), { kind: 'companion', companionId: companion.id }, input.expectedRevision as number))
       }
       if (action === 'update') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined

@@ -9,6 +9,8 @@ import { parseTaskExecutionOutput } from '../tasks/result.js'
 import { delegationKind, delegationPending, type PartnerDelegation, type PartnerDirectoryEntry } from './domain.js'
 import { canRetryDelegation, delegationRetryDelay, retryDelayLabel } from './retry-policy.js'
 import { appendDelegation, autoRunCandidates, pendingTaskDelegation, taskDelegation, taskDependenciesDone, taskDispatchDenied } from './task-dispatch.js'
+import { preserveTaskAttempt, taskWorkContext } from '../tasks/context.js'
+import { TaskConflictError } from '../tasks/service.js'
 import { repairableReviewCancellation, unfinishedReview } from './task-recovery.js'
 
 const RECOVERY_TICK_MS = 5_000
@@ -28,6 +30,7 @@ export class PartnerCollaborationService {
   private closing = false
   private accessChangeNotifier?: (companionId: string) => Promise<void>
   private ticking: Promise<void> | undefined
+  private readonly stopWorkObserver: () => void
 
   constructor(
     private readonly store: PartnerStore,
@@ -36,7 +39,13 @@ export class PartnerCollaborationService {
     private readonly executor: EphemeralExecutionService,
   ) { tasks.setRemovalNotifier(ids => {
     for (const entry of this.cancellations.values()) if (ids.includes(entry.taskId)) entry.controller.abort(new Error('任务已删除'))
-  }) }
+  })
+    this.stopWorkObserver = store.subscribe(state => {
+      for (const [id, entry] of this.cancellations) {
+        if (!state.delegations.some(d => d.id === id && d.status === 'running')) entry.controller.abort(new Error('任务执行已取消或被新版本替代'))
+      }
+    }, () => {})
+  }
 
   setSessionExecutor(executor: PartnerSessionExecutor): void {
     this.sessionExecutor = executor
@@ -66,6 +75,7 @@ export class PartnerCollaborationService {
     this.beginShutdown()
     await Promise.allSettled([...this.active.values()])
     this.active.clear()
+    this.stopWorkObserver()
   }
 
   directory(): PartnerDirectoryEntry[] {
@@ -279,6 +289,7 @@ export class PartnerCollaborationService {
       if (taskWork && !taskDependenciesDone(task, state.tasks)) return
       if (state.delegations.filter(value => value.status === 'running').length >= RECOVERY_CONCURRENCY) return
       if (taskWork && (task.status === 'ready' || resumeReview)) {
+        preserveTaskAttempt(task)
         task.status = 'doing'; task.updatedAt = Date.now(); task.revision += 1
         delete task.resultAbstract; delete task.resultSummary; delete task.reviewSummary; delete task.reviewHandoff
       }
@@ -315,7 +326,8 @@ export class PartnerCollaborationService {
       if (denied) throw new Error(denied)
       const prerequisiteResults = this.tasks.snapshot().tasks.filter(item => task.dependencyTaskIds.includes(item.id))
         .map(item => `- ${item.title}（${item.id}）：${(item.resultSummary || item.resultAbstract || '没有可见交付物，请先核对看板记录').slice(0, 1800)}`).join('\n').slice(0, 10_000)
-      const prompt = kind === 'review' ? reviewPrompt(task) : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults)
+      const context = taskWorkContext(this.store.snapshot(), task)
+      const prompt = kind === 'review' ? reviewPrompt(task) + '\n\n' + context : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults) + '\n\n' + context
       const result = this.sessionExecutor
         ? await this.sessionExecutor.execute({
             sourceId: kind === 'review' ? `review:${task.id}:${delegation.id}` : delegation.id,
@@ -329,14 +341,16 @@ export class PartnerCollaborationService {
       const latest = this.tasks.require(task.id)
       if (kind === 'review') {
         if (latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧验收结果`); return }
-        await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id })
+        if (latest.revision !== task.revision) { await this.cancel(delegation.id, '核验期间任务已更新，忽略旧意见；请重新核验最新版本'); return }
+        await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id }, task.revision)
       } else {
         if (latest.status !== 'doing' && latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
-        await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(result.output), { kind: 'companion', companionId: to.id })
+        await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(result.output), { kind: 'companion', companionId: to.id }, task.workRevision ?? 1)
       }
       await this.complete(delegation.id, result.run.id, result.output)
     } catch (error) {
-      if (signal.aborted || !this.store.snapshot().tasks.some(t => t.id === delegation.taskId) || !this.store.snapshot().delegations.some(d => d.id === delegation.id)) return
+      if (signal.aborted || !this.store.snapshot().tasks.some(t => t.id === delegation.taskId) || !this.store.snapshot().delegations.some(d => d.id === delegation.id && d.status === 'running')) return
+      if (error instanceof TaskConflictError) { await this.cancel(delegation.id, '任务版本已更新，忽略旧执行/核验结论'); return }
       if (this.closing) await this.retry(delegation, error, true)
       else if (canRetryDelegation(error, delegation.attempts ?? 1)) await this.retry(delegation, error, false)
       else await this.fail(delegation, error)
@@ -412,7 +426,7 @@ function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: P
     `看板任务 id：${task.id}。这是已经分配给你的具体阶段，请在该范围内完成交付，不要重复创建同名任务或仅回复分工计划。`,
     task.description ? `任务说明：${task.description}` : '',
     prerequisiteResults ? `已验收前置任务的公开产出：\n${prerequisiteResults}` : '',
-    `委派要求：${delegation.request}`,
+    `最初委派要求（历史快照；若后附最新需求、任务说明或打回理由与其不同，以最新要求为准）：${delegation.request}`,
     '交付摘要只写用户需要的实际结论，不要包含“已提交 review”“等待验收”“调用 accept”等内部流程状态。',
     recovery,
     `当前执行伙伴：${to.name}。请真正完成能够完成的工作。最终回复必须用下面三个标签分离渠道摘要、完整交付物和内部验收交接：\n<partner-summary>\n一至三句可直接发给用户的短结论\n</partner-summary>\n<partner-deliverable>\n只写用户最终需要的产出、证据、来源和必要限制\n</partner-deliverable>\n<partner-review-handoff>\n只写给验收者的核验点、待确认项与风险\n</partner-review-handoff>\n不要访问其他伙伴的私有会话或记忆。`,

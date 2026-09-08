@@ -25,6 +25,7 @@ import { concernObservationPrompt } from './autonomy.js'
 import { boundedConcernCheckMinutes, type ConcernObservation, type ConcernObservationCandidate, type PartnerConcern } from './concern-domain.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import type { BoardTask } from './tasks/domain.js'
+import { taskWorkContext } from './tasks/context.js'
 import type { PartnerInboundMessage, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
@@ -265,6 +266,7 @@ export class PartnerAgentRuntime {
       content: [{ type: 'text', text: [
         instruction,
         `任务：${task.title}`,
+        taskWorkContext(this.store.snapshot(), task),
         `状态：${previousStatus} → ${task.status}`,
         task.resultSummary ? `结果：\n${task.resultSummary.slice(0, 3000)}` : '',
         task.status === 'review' && task.reviewHandoff ? `验收交接：\n${task.reviewHandoff.slice(0, 2000)}` : '',

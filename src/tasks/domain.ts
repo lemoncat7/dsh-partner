@@ -25,6 +25,11 @@ export interface BoardTask {
   /** Internal execution notes for the reviewer; never included in user-facing result delivery. */
   reviewHandoff?: string
   reviewSummary?: string
+  /** Changes only when the actual work specification changes, not on status updates. */
+  workRevision?: number
+  rejectionReason?: string
+  rejectedAt?: number
+  previousAttempt?: { resultSummary?: string; reviewSummary?: string; reviewHandoff?: string }
   dueAt?: number
   revision: number
   createdAt: number

@@ -17,6 +17,7 @@ import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
 import type { BoardRequirement } from '../requirements/domain.js'
+import { requirementIsIdle, requirementProgressKey } from '../requirements/progress.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
 import { prepareChannelReply } from './outbound-media.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
@@ -147,17 +148,25 @@ export class ChannelManager {
   }
 
   async notifyRequirementResult(item: BoardRequirement): Promise<void> {
-    if (item.status !== 'done' || !item.summary || !item.creatorSessionId) return
+    const stage = item.status !== 'done'
+    const summary = stage ? item.stageReport?.summary : item.summary
+    if (!summary || !item.creatorSessionId) return
     // A manually created board requirement must not leak into an unrelated chat.
     const route = this.store.snapshot().sessions.find(route => route.sessionId === item.creatorSessionId)
     if (!route || route.kind === 'local') return
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
-    const delivery = await prepareTaskResultDelivery({ id: item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: item.summary }, cwd)
-    const text = delivery.text.replace(/^看板任务已完成：/, '需求已完成：')
-    const latest = this.store.snapshot().requirements?.find(r => r.id === item.id)
-    if (!latest || latest.revision !== item.revision || latest.status !== 'done') return
+    const delivery = await prepareTaskResultDelivery({ id: stage ? `${item.id}-stage-${item.stageReport!.key.slice(0, 16)}` : item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: summary }, cwd)
+    const text = delivery.text.replace(/^看板任务已完成：/, stage ? '需求阶段结果：' : '需求已完成：')
+    const state = this.store.snapshot()
+    const latest = state.requirements?.find(r => r.id === item.id)
+    if (!latest || latest.revision !== item.revision || latest.status !== item.status ||
+      (stage && (!requirementIsIdle(state, latest) || requirementProgressKey(state, latest) !== item.stageReport!.key))) throw new Error('需求已调整，取消旧结果投递')
     // queueProactive persists a stable receipt; retries do not re-summarize.
-    await this.queueProactive(route, `requirement-result:${item.id}:${item.revision}`, { text, attachments: await extractOutboundAttachments(text, cwd) })
+    await this.queueProactive(route, stage ? `requirement-stage:${item.id}:${item.stageReport!.key}` : `requirement-result:${item.id}:${item.revision}`, { text, attachments: await extractOutboundAttachments(text, cwd) }, () => {
+      const state = this.store.snapshot(), latest = state.requirements?.find(r => r.id === item.id)
+      return Boolean(latest && latest.revision === item.revision && latest.status === item.status &&
+        (!stage || (requirementIsIdle(state, latest) && requirementProgressKey(state, latest) === item.stageReport!.key)))
+    })
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
@@ -178,12 +187,13 @@ export class ChannelManager {
     await this.queueProactive(route, receipt, await prepareChannelReply(parts, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)))
   }
 
-  private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply): Promise<void> {
+  private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply, stillValid?: () => boolean): Promise<void> {
     if (this.store.snapshot().recentReceipts.includes(receipt)) return
     const key = `${route.channelId}:${route.userId}`
     const previous = this.outboundQueues.get(key) ?? Promise.resolve()
     const current = previous.catch(() => {}).then(async () => {
       if (this.store.snapshot().recentReceipts.includes(receipt)) return
+      if (stillValid && !stillValid()) throw new Error('需求已调整，取消旧结果投递')
       await this.sendProactiveReply(route.channelId, route.userId, reply)
       await this.rememberReceipt(receipt)
     })

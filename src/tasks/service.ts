@@ -6,6 +6,8 @@ import { TASK_PRIORITIES, TASK_STATUSES, type BoardTask, type TaskActivity } fro
 import type { TaskExecutionOutput } from './result.js'
 import { requirementDraft } from '../requirements/service.js'
 import { removeTaskRecords, touchTaskRequirement } from './removal.js'
+import { invalidateTaskWork, preserveTaskAttempt } from './context.js'
+import { requireTaskRequirement } from './requirement-link.js'
 
 const MAX_TASKS = 500
 const MAX_ACTIVITIES = 2000
@@ -26,7 +28,7 @@ export class TaskBoardService {
     return { tasks: state.tasks, activities: state.taskActivities, requirements: state.requirements ?? [] }
   }
 
-  async create(value: unknown, actor: TaskActor): Promise<BoardTask> {
+  async create(value: unknown, actor: TaskActor, requireOwnership = false): Promise<BoardTask> {
     const input = record(value, 'task')
     const now = Date.now()
     const assigneeCompanionId = optionalText(input.assigneeCompanionId, 'assigneeCompanionId', 120)
@@ -37,6 +39,7 @@ export class TaskBoardService {
     this.assertCompanion(assigneeCompanionId)
     this.assertCompanion(reviewerCompanionId)
     const dependencyTaskIds = stringList(input.dependencyTaskIds, 'dependencyTaskIds', 20, 120)
+    if (requireOwnership) requireTaskRequirement(input.requirementId, dependencyTaskIds, this.store.snapshot().tasks)
     this.assertDependencies(undefined, dependencyTaskIds)
     const task: BoardTask = {
       id: `task-${randomUUID()}`, title: requiredText(input.title, 'title', 200), description: typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : '',
@@ -82,10 +85,11 @@ export class TaskBoardService {
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
-      if (state.requirements?.some(r => r.id === task.requirementId && r.status === 'done')) throw new Error('已归档需求中的任务不能修改，请创建后续需求')
+      if (state.requirements?.some(r => r.id === task.requirementId && r.status === 'done')) throw new Error('已归档需求中的任务不能修改；同一目标续做请 reopen 原需求后追加新任务，不要重跑已验收任务')
       const expected = input.expectedRevision
       if (!Number.isInteger(expected) || expected !== task.revision) throw new TaskConflictError(task)
       previousStatus = task.status
+      const previousSpec = JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])
       if (input.title !== undefined) task.title = requiredText(input.title, 'title', 200)
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
       if (input.status !== undefined) task.status = oneOf(input.status, TASK_STATUSES, 'status')
@@ -120,6 +124,9 @@ export class TaskBoardService {
         task.dependencyTaskIds = dependencies
       }
       if ('dueAt' in input) { if (validTimestamp(input.dueAt)) task.dueAt = input.dueAt; else delete task.dueAt }
+      if (previousSpec !== JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds])) {
+        invalidateTaskWork(state, task, '任务要求或分配已更新，旧执行/验收失效')
+      }
       if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
       if (task.status === 'done' && previousStatus !== 'done' && previousStatus !== 'review') throw new Error('任务必须先进入待验收，才能标记为已完成')
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
@@ -129,6 +136,7 @@ export class TaskBoardService {
       if (task.status === 'done' && previousStatus !== 'done') task.completedAt = task.updatedAt
       if (task.status !== 'done') delete task.completedAt
       if (task.status === 'doing' && previousStatus !== 'doing') {
+        preserveTaskAttempt(task)
         delete task.resultAbstract
         delete task.resultSummary
         delete task.reviewHandoff
@@ -143,10 +151,16 @@ export class TaskBoardService {
   }
 
   async comment(taskId: string, message: string, actor: TaskActor): Promise<void> {
+    let task!: BoardTask
     await this.store.update(state => {
-      if (!state.tasks.some(item => item.id === taskId)) throw new TaskNotFoundError()
+      const current = state.tasks.find(item => item.id === taskId)
+      if (!current) throw new TaskNotFoundError()
       appendActivity(state.taskActivities, taskId, actor, 'commented', requiredText(message, 'message', 1200), Date.now())
+      current.revision++; current.updatedAt = Date.now()
+      touchTaskRequirement(state, current.requirementId)
+      task = structuredClone(current)
     })
+    if (task.status === 'review') await this.notifyProgress(task, 'review', true)
   }
 
   async recordRecovery(taskId: string, message: string, retrying: boolean): Promise<void> {
@@ -167,13 +181,14 @@ export class TaskBoardService {
     return task
   }
 
-  async completeExecution(taskId: string, result: string | TaskExecutionOutput, actor: TaskActor): Promise<BoardTask> {
+  async completeExecution(taskId: string, result: string | TaskExecutionOutput, actor: TaskActor, workRevision?: number): Promise<BoardTask> {
     let output!: BoardTask
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
+      if (workRevision !== undefined && workRevision !== (task.workRevision ?? 1)) throw new TaskConflictError(task)
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
       const execution = typeof result === 'string' ? { deliverable: result } : result
@@ -195,12 +210,13 @@ export class TaskBoardService {
     return output
   }
 
-  async recordReview(taskId: string, result: string, actor: TaskActor): Promise<BoardTask> {
+  async recordReview(taskId: string, result: string, actor: TaskActor, expectedRevision?: number): Promise<BoardTask> {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
       if (task.status !== 'review') throw new Error('只有待验收任务可以提交核验结果')
+      if (expectedRevision !== undefined && expectedRevision !== task.revision) throw new TaskConflictError(task)
       if (task.reviewerCompanionId && actor.companionId !== task.reviewerCompanionId) throw new Error('核验结果必须由任务指定的验收伙伴提交')
       task.reviewSummary = boundedText(result, 'reviewResult', 12_000)
       task.revision += 1
@@ -234,19 +250,22 @@ export class TaskBoardService {
     return output
   }
 
-  async accept(taskId: string, actor: TaskActor): Promise<BoardTask> {
+  async accept(taskId: string, actor: TaskActor, expectedRevision?: number): Promise<BoardTask> {
     const current = this.require(taskId)
     if (current.status !== 'review') throw new Error('只有待验收任务可以通过验收')
-    return this.update(taskId, { expectedRevision: current.revision, status: 'done' }, actor)
+    return this.update(taskId, { expectedRevision: expectedRevision ?? current.revision, status: 'done' }, actor)
   }
 
-  async reject(taskId: string, reason: string, actor: TaskActor): Promise<BoardTask> {
+  async reject(taskId: string, reason: string, actor: TaskActor, expectedRevision?: number): Promise<BoardTask> {
     let output!: BoardTask
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
       if (task.status !== 'review') throw new Error('只有待验收任务可以打回')
+      if (expectedRevision !== undefined && expectedRevision !== task.revision) throw new TaskConflictError(task)
       const message = boundedText(reason, 'reason', 1200)
+      task.rejectionReason = message; task.rejectedAt = Date.now()
+      invalidateTaskWork(state, task, '验收打回，旧执行/验收已失效')
       task.status = 'ready'
       delete task.reviewSummary
       delete task.completedAt
