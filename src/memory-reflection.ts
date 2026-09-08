@@ -98,6 +98,8 @@ export function explicitConcernDirective(value: string): boolean {
   const text = value.normalize('NFKC').toLocaleLowerCase('zh-CN')
   if (/(?:不要|不用|无需|别|取消|停止).{0,12}(?:关注|留意|盯着|跟进|惦记|记着)/u.test(text)) return false
   return /(?:请|麻烦|帮我|替我|让(?:伙伴|你)?).{0,24}(?:关注|留意|盯着|跟进|惦记|记着)/u.test(text)
+    || /^(?:持续|继续|长期|定期)?\s*(?:关注|留意|盯着|跟进|追踪)(?:一些|一下|这些|这个|下|\s|[\p{L}\p{N}])/u.test(text.trim())
+    || /(?:有|出现)(?:新)?(?:变化|更新|进展|消息).{0,8}(?:告诉我|通知我|提醒我)/u.test(text)
     || /(?:关注|留意|盯着|跟进|惦记).{0,24}(?:一下|这件事|这个|这些)/u.test(text)
     || /(?:keep\s+an?\s+eye\s+on|watch|track|follow).{0,80}(?:for\s+me|this|these)/iu.test(text)
 }

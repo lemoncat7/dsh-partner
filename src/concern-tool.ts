@@ -21,7 +21,7 @@ export interface ConcernSuggestion {
   confidence: number
 }
 
-/** Register one compact, partner-session-only tool for evidence-backed implicit concern candidates. */
+/** One concern entry point for explicit watches and evidence-backed implicit candidates. */
 export function registerPartnerConcernTool(ctx: ConcernToolContext, store: PartnerStore, concerns: PartnerConcernStore): () => void {
   const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()))
   const disposeVisibility = installVisibility(ctx, store)
@@ -31,7 +31,7 @@ export function registerPartnerConcernTool(ctx: ConcernToolContext, store: Partn
 function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStore, submissions: ConcernTurnSubmissionGate): ToolDefinition {
   return {
     name: TOOL_NAME,
-    description: 'Suggest one implicit concern only when the current user message directly proves that something survives this turn: an unresolved or recurring problem, a temporary workaround, a pending external result, or a need to keep observing future changes. Never use for one-shot research, collecting information, search, summary, translation, writing, ordinary execution, preferences, broad interests, or completed work. An explicit "remind/watch this" request uses the explicit concern flow. Evidence must be an exact excerpt that contains the continuity signal; topic importance alone is insufficient. The backend may reject or merge the candidate.',
+    description: 'Save a concrete ongoing concern to 伙伴记忆 / 在意的事. Use this tool directly for explicit requests such as 帮我关注、关注一些、持续留意、有变化告诉我; do not create partner_schedule merely because watching requires future checks. Save each requested subject separately and report the actual saved/merged/rejected outcome. Without an explicit watch request, suggest at most one implicit concern only with direct evidence of an unresolved or recurring problem, temporary workaround, pending external result, or future changes. Never infer concerns from one-shot research, summary, writing, ordinary execution, broad interests or completed work. Evidence must quote the current user message. Fixed-time execution or scheduled reports belong to partner_schedule; cancel/stop watching is not an upsert.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
@@ -49,18 +49,18 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: String(value) }],
     },
-    presentCall: () => ({ card: 'generic', title: '伙伴发现待关注事项' }),
+    presentCall: () => ({ card: 'generic', title: '保存伙伴关注事项' }),
     async execute(raw, exec) {
       const agent = requireAgent(exec)
       const route = store.snapshot().sessions.find(item => item.sessionId === agent.session.id)
       if (route === undefined) throw new Error('partner_concern_suggest is only available in a partner-owned conversation')
       const companion = store.snapshot().companions.find(item => item.id === route.companionId)
-      if (companion === undefined || !companion.automation.memory.enabled) throw new Error('伙伴长期记忆未启用，不能提交隐式关注')
+      if (companion === undefined || !companion.automation.memory.enabled) throw new Error('伙伴记忆未启用，不能保存关注；请开启记忆，不要改用定时任务代替')
       const currentUser = latestUserMessage(agent)
       const currentUserText = currentUser.text
-      if (explicitConcernDirective(currentUserText)) throw new Error('用户已经明确要求关注；该请求由明确关注流程处理，不应提交为隐式关注')
       const suggestion = validateConcernSuggestion(raw, currentUserText)
-      if (!submissions.claim(agent, currentUser.seq)) return JSON.stringify({
+      const explicit = explicitConcernDirective(currentUserText) && explicitConcernDirective(suggestion.evidence)
+      if (!explicit && !submissions.claim(agent, currentUser.seq)) return JSON.stringify({
         outcome: 'already_processed_this_turn',
         reason: '本轮已经提交过关注候选，请继续处理用户当前任务；仍可调用其他所需工具。',
       })
@@ -71,16 +71,19 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       }
       let result: Awaited<ReturnType<PartnerConcernStore['ingestCandidates']>>
       try {
-        result = await concerns.ingestCandidates(route.companionId, `${route.channelId}:${route.userId}`, [candidate], 'implicit', Date.now(), {
+        result = await concerns.ingestCandidates(route.companionId, `${route.channelId}:${route.userId}`, [candidate], explicit ? 'explicit' : 'implicit', Date.now(), {
           source: 'tool', sessionId: agent.session.id, evidence: suggestion.evidence, maxImplicitCreates: 1,
         })
       } catch (error) {
-        submissions.release(agent, currentUser.seq)
+        if (!explicit) submissions.release(agent, currentUser.seq)
         throw error
       }
       const entry = result.entries[0]
       return JSON.stringify({
         outcome: entry?.decision ?? 'rejected',
+        origin: explicit ? 'explicit' : 'implicit',
+        destination: '在意的事',
+        concernId: entry?.concern?.id,
         subject: entry?.subject ?? suggestion.subject,
         reason: entry?.reason ?? '候选未被处理',
       })

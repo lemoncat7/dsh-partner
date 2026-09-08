@@ -75,7 +75,7 @@ export class PartnerAgentComposition {
         companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限。若你另获伙伴管理能力，可在创建后按用户明确要求配置身份与能力；否则由用户在管理台单独授权。' : '',
         companion.capabilities.includes('administration') ? COMPANION_MANAGEMENT_PROMPT : '',
         companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
-        companion.capabilities.includes('schedules') ? '你拥有“定时任务”能力。只有用户明确要求未来某个时间或按周期执行时，才创建 partner_schedule；普通待办、当前轮次工作和一次性立即执行不能擅自改成定时任务。' : '',
+        companion.capabilities.includes('schedules') ? '关注与定时任务按交付意图区分：持续观察、关注更新、有变化再通知，调用 partner_concern_suggest 保存到记忆的“在意的事”；即使用户说每天检查，也不因此创建定时任务。明确要求按时执行工作或固定周期交付结果（例如每天九点发送日报），才调用 partner_schedule。不明确时询问用户，不自行发明执行周期；关注工具不可用时说明需要开启记忆，不用定时任务替代。普通待办、当前轮次工作和一次性立即执行也不能擅自改成定时任务。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
         '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
@@ -359,7 +359,7 @@ function collaborationTool(companion: Companion, store: PartnerStore, collaborat
 function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService): ToolDefinition {
   return textTool({
     name: 'partner_schedule',
-    description: 'Create and manage this companion\'s scheduled temporary-session work. Schedules support interval or daily time, skip/queue overlap, and optional session retention.',
+    description: 'Create and manage this companion\'s scheduled temporary-session work ONLY for explicitly requested execution times or recurring deliverables, e.g. 每天九点生成并发送日报. 帮我关注、持续留意、有变化告诉我 are change-driven watches: use partner_concern_suggest to save 在意的事, not this tool. Do not invent an interval for a watch or use schedules as a fallback when memory is disabled. A specified checking cadence alone does not turn a watch into a scheduled deliverable. Schedules support interval or daily time, skip/queue overlap, and optional session retention.',
     parameters: actionParameters(['list', 'create', 'update', 'delete', 'run'], {
       scheduleId: { type: 'string' }, title: { type: 'string' }, prompt: { type: 'string' },
       schedule: { type: 'object', description: '{kind:"interval",minutes} or {kind:"daily",hour,minute}' },
