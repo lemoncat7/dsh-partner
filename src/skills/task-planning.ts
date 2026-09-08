@@ -1,5 +1,5 @@
 /** Versioned built-in instructions; installed copies update through SkillService. */
-export const TASK_PLANNING_VERSION = '1.4.2'
+export const TASK_PLANNING_VERSION = '1.4.3'
 export const TASK_PLANNING_DESCRIPTION = '收到实际工作需求时，主动按授权伙伴的专长委派；单一专业整项交付，多专业按产出拆解、安排依赖并提交看板，无需用户点名触发。'
 export const TASK_PLANNING_DOCUMENT = `---
 name: task-planning
@@ -14,6 +14,9 @@ allowed-tools: [partner_requirements, partner_task_board, partner_collaborate]
 专业的事交给专业的伙伴。收到实际工作请求时，先匹配所需专长与当前已授权伙伴的职责、实际能力和已启用 Skill，再决定谁执行、是否拆分。不要先自己做完，再补看板记录。用户已授权协作并提出工作目标时，不需要再询问“要不要拆解”或等待用户逐个 @。
 
 ## 分工决策
+
+- 分工字段不可颠倒：你（A）把工作交给专业伙伴 B 时，assignee=B（实际执行者），reviewer=A（验收者，创建时可省略并默认自己）。需求 owner 是统筹收尾负责人，不等于子任务执行者。只有自己实际做工作才把 assignee 填成自己；不要把被委派的人填成 reviewer。
+- 用户要求实际完成时使用 autoRun=true；只有明确只规划或等待确认才用 false。status=ready 加 autoRun=false 仍然只保存、不执行。创建或更新后核对返回的 assignment 中执行者、验收者和自动执行状态再汇报；发现填错，应读取最新 revision 后 update 原任务，不重复创建。已提交或排队不等于已完成。
 
 - 已收到具体看板任务时，你首先是该任务执行者，不是需求负责人。不要把正在执行的同一 taskId 再 delegate 给别人。发现缺少真实文件工具、需要换人或拆分时，调用 partner_task_board request_replan（taskId、expectedRevision、message），说明缺口与保留的产出，随后结束本轮。不得改 state.json、伪造文件交付或持续重复失败调用。
 - 验收普通缺项用 reject 的 reworkMode=rework；缺工具、需重新拆分/换人用 reworkMode=replan。连续三次打回自动暂停，由需求负责人核实原因并调整。只有负责人可 reopen 原需求追加任务；调整原任务后显式 update autoRun=true 恢复，不能原样重试代替解决问题。

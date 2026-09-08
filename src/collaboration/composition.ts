@@ -222,6 +222,21 @@ function skillTool(companion: Companion, skills: SkillService, executor: Ephemer
 }
 
 function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: PartnerCollaborationService): ToolDefinition {
+  const confirmAssignment = (task: ReturnType<TaskBoardService['require']>) => {
+    const identity = (id: string | undefined) => {
+      if (!id) return null
+      // A deleted companion must not make a successfully saved task look failed.
+      try { return { id, name: collaboration.resolveCompanion(id).name } }
+      catch { return { id, name: null } }
+    }
+    return {
+      executor: identity(task.assigneeCompanionId),
+      reviewer: identity(task.reviewerCompanionId),
+      selfExecution: task.assigneeCompanionId === companion.id,
+      autoRun: Boolean(task.autoRun),
+      summary: `实际执行者：${task.assigneeCompanionId ?? '未指定'}；验收者：${task.reviewerCompanionId ?? '未指定'}。${task.autoRun ? '已启用自动执行，是否开始以任务状态为准；不代表已完成。' : '未启用自动执行，即使 status=ready 也不会自动执行。'}`,
+    }
+  }
   const resolveAssignee = (value: string): string => {
     const target = collaboration.resolveCompanion(value)
     if (target.id !== companion.id && !collaboration.canAccess(companion.id, target.id)) throw new Error(`当前伙伴未获授权访问 @${target.name}`)
@@ -236,8 +251,8 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       requirementId: { type: 'string', description: 'REQUIRED for create. Reuse the existing requirement for continued work on the same deliverable, including later specialist phases. dependencyTaskIds does not set ownership. Missing id fails without creating anything. Query partner_requirements list; reopen a submitted/archived requirement before appending; create a requirement only for a genuinely separate user goal.' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
-      assignee: { type: 'string', description: 'Companion id or @name.' }, reviewer: { type: 'string', description: 'Optional reviewer companion id or @name.' },
-      autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). Persist execution intent and start after dependencies are accepted. Set false when user requests planning only; legacy tasks are never auto-started.' },
+      assignee: { type: 'string', description: 'Actual EXECUTOR companion id or @name, not the coordinator or requester. If you (A) delegate work to B, set assignee=B, reviewer=A. Select from authorized directory and verify real capabilities. Use your own id only when you will actually execute. Never reverse these roles.' }, reviewer: { type: 'string', description: 'Companion who checks and accepts/rejects the executor deliverable, NOT the delegated worker. On create, omitted reviewer defaults to you (the task creator). A delegates to B: assignee=B, reviewer=A. Explicit reviewer is preserved, never silently swapped.' },
+      autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). For requested execution use true; false means SAVE ONLY, even with status=ready. Set false only for explicit planning-only/await-confirmation requests. Persist execution intent and start after dependencies are accepted. Check returned assignment before reporting who executes/reviews; queued is not completed. Legacy tasks are never auto-started.' },
       dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
       expectedRevision: { type: 'integer', description: 'Required for update, accept, reject and request_replan. Use the revision actually reviewed; if stale, reread latest requirements and results.' }, message: { type: 'string', description: 'For request_replan: concrete missing tools, required reassignment/splitting and preserved output. This pauses/cancels the current task; stop this turn afterward. For reject: missing evidence and corrections; use reworkMode=replan for inability to execute.' },
     }),
@@ -266,6 +281,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
         const currentTask = snapshot.tasks.find(item => item.id === task.id)
         if (!currentTask) return JSON.stringify({ taskId: task.id, status: 'removed', message: '任务已删除，不要重复创建' })
         return JSON.stringify({ ...currentTask, execution: autoRun ? 'submitted' : 'planning-only',
+          assignment: confirmAssignment(currentTask),
           ...(requirement ? { requirement: { id: requirement.id, revision: requirement.revision, controlRevision: requirement.controlRevision, status: requirement.status } } : {}),
           ...(dispatchWarning ? { dispatchWarning } : {}) })
       }
@@ -294,11 +310,12 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       if (action === 'update') {
         const assignee = typeof input.assignee === 'string' && input.assignee.trim() ? resolveAssignee(input.assignee) : undefined
         const reviewer = typeof input.reviewer === 'string' && input.reviewer.trim() ? resolveAssignee(input.reviewer) : undefined
-        return JSON.stringify(await tasks.update(taskId, {
+        const updated = await tasks.update(taskId, {
           ...input,
           ...('assignee' in input ? { assigneeCompanionId: assignee ?? '' } : {}),
           ...('reviewer' in input ? { reviewerCompanionId: reviewer ?? '' } : {}),
-        }, { kind: 'companion', companionId: companion.id }))
+        }, { kind: 'companion', companionId: companion.id })
+        return JSON.stringify({ ...updated, assignment: confirmAssignment(updated) })
       }
       throw new Error('Task board action is invalid')
     },
