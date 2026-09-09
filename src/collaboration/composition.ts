@@ -89,7 +89,7 @@ export class PartnerAgentComposition {
         name: 'partner-inline-skills', order: -6,
         text: [
           '以下是已启用且经校验的可信 inline Skill 指令。每次接到需求先对照其用途；明确点名或用途匹配时必须主动应用，不需要用户再说触发词，也无需重复调用 partner_skill load。采用时用一句话说明所用 Skill 与对应产出，后续落实为真实工具操作；不匹配时不要强行套用。伙伴 Skill 与原生 skill 工具是不同目录，禁止用原生 skill(name=...) 加载这里的技能；需要读取时使用 partner_skill load。',
-          ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n${skill.body}\n</partner-inline-skill>`),
+          ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n资源目录：${JSON.stringify(skill.rootPath)}（相对路径均基于此目录；读取或执行仍需现有工具权限）。\n${skill.body}\n</partner-inline-skill>`),
         ].join('\n\n'),
       }))
     } catch (error) {
@@ -212,13 +212,16 @@ function skillTool(companion: Companion, skills: SkillService, executor: Ephemer
       const skill = await skills.load(skillId)
       if (action === 'load') {
         if (skill.executionContext !== 'inline' || !skill.trusted) throw new Error('This Skill must run in an isolated temporary session')
-        return JSON.stringify({ id: skill.id, instructions: skill.body, allowedTools: skill.allowedTools })
+        return JSON.stringify({ id: skill.id, rootPath: skill.rootPath, instructions: skill.body, allowedTools: skill.allowedTools })
       }
       if (action !== 'run') throw new Error('Skill action is invalid')
+      // Inline means apply in the current companion scope. A preset-only fork
+      // does not carry its partner board/requirement tools and is not delegation.
+      if (skill.executionContext === 'inline' && skill.trusted) return JSON.stringify({ id: skill.id, context: 'inline', rootPath: skill.rootPath, instructions: skill.body, allowedTools: skill.allowedTools, execution: 'apply-in-current-session', notice: '请在当前伙伴会话按此 Skill 使用真实工具执行；没有创建子 Agent，也没有代替你提交看板任务。' })
       const result = await executor.execute({
         kind: 'skill', sourceId: skill.id, companion, parentSessionId: requireAgent(exec).session.id,
         prompt: requiredText(input.input, 'input', 12_000), allowedTools: skill.allowedTools, destroyAfterRun: true,
-        systemInstruction: `严格按照以下 Skill 执行。Skill 的 allowed-tools 只能收缩权限；工具不可用时明确说明，不得模拟结果。\n\n${skill.body}`,
+        systemInstruction: `严格按照以下 Skill 执行。Skill 的 allowed-tools 只能收缩权限；工具不可用时明确说明，不得模拟结果。资源目录：${JSON.stringify(skill.rootPath)}；相对路径基于此目录，不代表获准执行脚本。\n\n${skill.body}`,
       })
       return JSON.stringify({ runId: result.run.id, result: result.output })
     },

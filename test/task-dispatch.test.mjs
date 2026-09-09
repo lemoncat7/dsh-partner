@@ -32,6 +32,24 @@ const waitFor = async predicate => {
 const actor={kind:'companion',companionId:'companion-default'}
 const assigned={assigneeCompanionId:'companion-default',autoRun:true}
 
+test('running an inline planning Skill never forks away from companion board tools', async t => {
+  const { store, board, skills, service } = await fixture(t)
+  await skills.installMarket('builtin', 'task-planning')
+  await skills.setBinding('companion-default', 'task-planning', true)
+  await store.update(state => { state.companions[0].capabilities = ['skills'] })
+  const tools = new Map()
+  const executor = { execute() { assert.fail('inline planning must stay in current scope') } }
+  const composer = new PartnerAgentComposition(store, skills, board, service, {}, executor, {})
+  const dispose = await composer.compose({ tools: { register(tool) { tools.set(tool.name, tool); return () => {} } }, systemPrompt: { section() { return () => {} } } }, store.snapshot().companions[0])
+  t.after(dispose)
+  const result = JSON.parse(await tools.get('partner_skill').execute({ action: 'run', skillId: 'task-planning', input: '重新设计，分解任务，调研可行性' }, {}))
+  assert.equal(result.execution, 'apply-in-current-session')
+  assert.match(result.instructions, /临时子 Agent 不会自动成为看板任务/)
+  assert.match(result.instructions, /先提交调研与验证任务/)
+  assert.equal(result.runId, undefined)
+  assert.ok(tools.has('partner_task_board'))
+})
+
 test('planning upgrade preserves bindings, refreshes next-turn configuration and injects the installed policy once', async t => {
   const { store, board, skills, service } = await fixture(t)
   await skills.initialize()

@@ -112,3 +112,4 @@
 @media (prefers-reduced-motion: reduce) {
   .dsh-partner-workspace-dialog, .dsh-partner-collection-skeleton > i { animation: none; }
 }
+.dsh-partner-feature-form > .dsh-partner-form-help { color: var(--partner-text-secondary); background: transparent; padding: 0; overflow-wrap: anywhere; line-height: 1.6; }

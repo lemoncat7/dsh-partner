@@ -80,6 +80,7 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 
 - `partner-state.json` remains the atomic metadata store.
 - Skill contents live below `<defaultCwd>/partner-system/skills`.
+- Local package imports separate browser selection (`ui/skill-import-dialog.tsx`), bounded transport decoding (`skills/import-request.ts`), asynchronous ZIP/CRC validation (`skills/package-zip.ts`), path/root/size checks (`skills/package.ts`) and atomic resource installation (`skills/repository.ts`). Imports retain resources but never run scripts or grant companion bindings. Inline Skill execution stays in the current companion scope; only fork Skills use the ephemeral executor.
 - Task activity, delegation and execution histories are bounded before commit.
 - Every state mutation is serialized by `PartnerStore`; task edits additionally
   use a revision to reject stale concurrent updates.

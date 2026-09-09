@@ -14,13 +14,13 @@ export function mutation(req: IncomingMessage): void {
   if (req.headers['x-dsh-partner-request'] !== '1') throw httpError(403, 'missing Partner mutation request header')
 }
 
-export async function readObject(req: IncomingMessage): Promise<Record<string, unknown>> {
+export async function readObject(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   let total = 0
   const chunks: Buffer[] = []
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     total += buffer.length
-    if (total > MAX_BODY_BYTES) throw httpError(413, 'request body is too large')
+    if (total > maxBytes) throw httpError(413, 'request body is too large')
     chunks.push(buffer)
   }
   try { return object(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'), 'request body') }

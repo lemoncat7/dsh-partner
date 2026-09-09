@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { IconCheckOutline16, IconCloseOutline16, IconPlusOutline16, IconRefreshOutline16, IconSearchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type MarketSkillView, type SkillCatalogView, type SkillMarketNetworkTestView, type SkillMarketNetworkView, type SkillMarketView } from '../client-api.js'
 import { CollectionEmpty, CollectionSkeleton, WorkspaceBlock, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
+import { SkillImportDialog } from './skill-import-dialog.js'
 
 export function SkillsPanel(): JSX.Element {
   const [catalog, setCatalog] = useState<SkillCatalogView>({ installed: [], bindings: [], sources: [] })
@@ -14,6 +15,7 @@ export function SkillsPanel(): JSX.Element {
   const [actionError, setActionError] = useState<{ kind: 'install' | 'uninstall'; id: string; message: string }>()
   const [addingSource, setAddingSource] = useState(false)
   const [creatingSkill, setCreatingSkill] = useState(false)
+  const [importingSkill, setImportingSkill] = useState(false)
   const [editingNetwork, setEditingNetwork] = useState(false)
   const [showAllInstalled, setShowAllInstalled] = useState(false)
   const [network, setNetwork] = useState<SkillMarketNetworkView>({})
@@ -52,10 +54,11 @@ export function SkillsPanel(): JSX.Element {
   return <div className="dsh-partner-feature-page">
     <WorkspaceHero eyebrow="Capability catalog" title="Skill 市场" detail="集中安装和维护工作能力；安装后，再为需要它的伙伴单独启用。" actions={<button type="button" disabled={loading} onClick={() => { void load(true) }}><IconRefreshOutline16 size={15} />{loading ? '同步中…' : '刷新市场'}</button>} />
     {error && <WorkspaceNotice>{error}</WorkspaceNotice>}
+    {importingSkill && <SkillImportDialog close={() => setImportingSkill(false)} changed={load} />}
     {creatingSkill && <WorkspaceDialog title="新建 Skill" detail="创建一个可复用的工作流程，并明确执行上下文、工具边界和验收指令。" close={() => setCreatingSkill(false)} width="wide"><NewSkillForm existingIds={catalog.installed.map(skill => skill.id)} close={() => setCreatingSkill(false)} changed={load} /></WorkspaceDialog>}
     {editingNetwork && <WorkspaceDialog title="市场网络设置" detail="配置 Skill 索引和安装包下载共用的 HTTP 代理，并在保存前测试连通性。" close={() => setEditingNetwork(false)}><NetworkSettingsForm value={network} close={() => setEditingNetwork(false)} changed={async next => { setNetwork(next); await load(true) }} /></WorkspaceDialog>}
     {addingSource && <WorkspaceDialog title="添加市场来源" detail="接入团队或个人维护的 Skill 索引。自定义来源默认按不可信来源隔离执行。" close={() => setAddingSource(false)}><MarketSourceForm close={() => setAddingSource(false)} changed={() => load(true)} /></WorkspaceDialog>}
-    <WorkspaceBlock title="已安装" detail={`${catalog.installed.length} 个可供伙伴使用`} actions={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建 Skill</button>}>
+    <WorkspaceBlock title="已安装" detail={`${catalog.installed.length} 个可供伙伴使用`} actions={<><button type="button" onClick={() => setImportingSkill(true)}>导入 Skill</button><button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建 Skill</button></>}>
       {loading ? <CollectionSkeleton rows={2} /> : catalog.installed.length === 0 ? <CollectionEmpty title="还没有安装 Skill" detail="可以创建自己的 Skill，或从下方市场选择。" action={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建第一个 Skill</button>} /> : <><div className="dsh-partner-skill-installed is-market">{visibleInstalled.map(skill => <article key={skill.id}>
         <span className="dsh-partner-skill-mark"><IconCheckOutline16 size={16} /></span><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.version} · {skill.executionContext === 'fork' ? '临时会话' : '当前会话'} · {skill.source}</small></span>
         <button type="button" className="is-icon" disabled={busy === skill.id} aria-label={`卸载 ${skill.displayName}`} onClick={() => { void uninstall(skill.id) }}><IconTrashOutline16 size={15} /></button>

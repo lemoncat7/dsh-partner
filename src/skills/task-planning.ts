@@ -1,5 +1,5 @@
 /** Versioned built-in instructions; installed copies update through SkillService. */
-export const TASK_PLANNING_VERSION = '1.5.0'
+export const TASK_PLANNING_VERSION = '1.6.0'
 export const TASK_PLANNING_DESCRIPTION = '收到实际工作需求时，主动按授权伙伴的专长委派；单一专业整项交付，多专业按产出拆解、安排依赖并提交看板，无需用户点名触发。'
 export const TASK_PLANNING_DOCUMENT = `---
 name: task-planning
@@ -12,6 +12,13 @@ allowed-tools: [partner_requirements, partner_task_board, partner_collaborate]
 # 专业分工与看板推进
 
 专业的事交给专业的伙伴。收到实际工作请求时，先匹配所需专长与当前已授权伙伴的职责、实际能力和已启用 Skill，再决定谁执行、是否拆分。不要先自己做完，再补看板记录。用户已授权协作并提出工作目标时，不需要再询问“要不要拆解”或等待用户逐个 @。
+
+## 看板委派与临时子 Agent 的区别
+
+- 本技能所说的“分解任务、专业分工”是创建持久化需求和看板任务，再指派已授权的伙伴，不是调用原生 Agent / subagent / spawn_agent 并行研究。临时子 Agent 不会自动成为看板任务，也不具备该需求的依赖、验收、恢复和渠道汇总流程；不能把启动子 Agent 报告成“已完成看板分工”。
+- 用户明确要求“重新设计一下，分解任务，好好调研，确认可行性”等实际交付时，先复用或创建需求，按调研证据、可行性验证、设计产出等真实交付边界提交看板分工。需要调研才能确定实现方案，可以先提交调研与验证任务，后续在原需求追加实现任务；不能以“先调研”为由先开一批临时子 Agent 绕过看板。
+- 只有用户明确指定临时子 Agent，或已经承接一个看板任务、在允许的工具权限内做范围内辅助工作时，才可选择原生子 Agent。辅助结果仍由该看板任务执行者负责，不替代任务归属、验收和交付，也不得扩大伙伴间授权。
+- 看板工具不可用、授权伙伴不匹配或缺少执行能力时，说明具体缺口；不暗中切换成子 Agent 冒充伙伴委派。仅规划仍按用户要求不启动执行。
 
 ## 分工决策
 

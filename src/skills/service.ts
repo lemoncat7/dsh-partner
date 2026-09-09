@@ -9,6 +9,8 @@ import { SkillRepository } from './repository.js'
 import { BUILTIN_SKILLS, BUILTIN_SKILL_SOURCE } from './builtin.js'
 import { marketRequest, parseMarketResponse } from './markets/adapters.js'
 import { extractSkillMarkdown } from './zip.js'
+import { prepareSkillPackage, type SkillPackageFile } from './package.js'
+import { readSkillZip } from './package-zip.js'
 import { normalizeProxyUrl, requestRemoteBytes, requestRemoteText } from './network.js'
 
 const MARKET_CACHE_MS = 5 * 60_000
@@ -55,10 +57,17 @@ export class SkillService {
     return this.mutations.use(() => this.installLocalLocked(document, id))
   }
 
-  private async installLocalLocked(document: string, id?: string): Promise<PartnerSkill> {
+  async importPackage(input: Uint8Array | SkillPackageFile[]): Promise<PartnerSkill> {
+    return this.mutations.use(async () => {
+      const bundle = Array.isArray(input) ? prepareSkillPackage(input) : await readSkillZip(input)
+      return this.installLocalLocked(bundle.document, undefined, bundle.files)
+    })
+  }
+
+  private async installLocalLocked(document: string, id?: string, files?: SkillPackageFile[]): Promise<PartnerSkill> {
     const skillId = id ? requiredText(id, 'skill id', 120) : `skill-${randomUUID()}`
     this.assertInstallCapacity(skillId)
-    const installed = await this.repository.install({ id: skillId, document, source: 'local', trusted: true })
+    const installed = await this.repository.install({ id: skillId, document, source: 'local', trusted: true, ...(files ? { files } : {}) })
     await this.store.update(state => {
       state.skills = [...state.skills.filter(item => item.id !== installed.id), installed]
     })

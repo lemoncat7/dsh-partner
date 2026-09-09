@@ -6,6 +6,7 @@ import type { RequirementService } from '../../requirements/service.js'
 import type { PartnerCollaborationService } from '../../collaboration/service.js'
 import type { PartnerSchedulerService } from '../../scheduler/service.js'
 import { mutation, readObject, sendJson } from '../http.js'
+import { decodeSkillImport } from '../../skills/import-request.js'
 
 export interface PartnerWorkspaceApiRuntime {
   store: PartnerStore
@@ -42,6 +43,12 @@ export async function dispatchPartnerWorkspaceApi(
     }
   }
   if (segments[0] === 'skills') {
+    if (method === 'POST' && segments[1] === 'import' && segments.length === 2) {
+      mutation(req)
+      const input = decodeSkillImport(await readObject(req, 46 * 1024 * 1024))
+      sendJson(res, 201, await runtime.skills.importPackage(input))
+      return true
+    }
     if (method === 'GET' && segments.length === 1) {
       const state = runtime.store.snapshot()
       sendJson(res, 200, { installed: state.skills, bindings: state.skillBindings, sources: state.skillMarketSources })

@@ -3,6 +3,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { loadSkill, skillMetadata } from './loader.js'
 import type { LoadedSkill, PartnerSkill, SkillSourceKind } from './domain.js'
+import { prepareSkillPackage, type SkillPackageFile } from './package.js'
 
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,119}$/i
 
@@ -21,9 +22,10 @@ export class SkillRepository {
     })
   }
 
-  async install(input: { id: string; document: string; source: SkillSourceKind; sourceId?: string; trusted: boolean; now?: number }): Promise<PartnerSkill> {
+  async install(input: { id: string; document: string; source: SkillSourceKind; sourceId?: string; trusted: boolean; now?: number; files?: SkillPackageFile[] }): Promise<PartnerSkill> {
     if (!SAFE_ID.test(input.id)) throw new Error('Skill id is invalid')
     if (Buffer.byteLength(input.document) > 512 * 1024) throw new Error('SKILL.md exceeds the 512 KiB limit')
+    const resources = input.files ? prepareSkillPackage([{ path: 'SKILL.md', bytes: Buffer.from(input.document) }, ...input.files]).files : []
     await this.initialize()
     const now = input.now ?? Date.now()
     const target = join(this.root, input.id)
@@ -32,6 +34,11 @@ export class SkillRepository {
     await mkdir(temporary, { recursive: false, mode: 0o700 })
     try {
       await writeFile(join(temporary, 'SKILL.md'), input.document, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      for (const file of resources) {
+        const destination = join(temporary, file.path)
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
+        await writeFile(destination, file.bytes, { mode: 0o600, flag: 'wx' })
+      }
       const loaded = await loadSkill({
         id: input.id, rootPath: temporary, source: input.source, ...(input.sourceId ? { sourceId: input.sourceId } : {}),
         trusted: input.trusted, installedAt: now, updatedAt: now,
