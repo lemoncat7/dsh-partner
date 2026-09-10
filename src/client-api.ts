@@ -36,10 +36,13 @@ export interface MemoryRelationView { id: string; scopeId: string; sourceMemoryI
 export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRelationView[] }
 export interface DailyReflectionView { scopeId: string; date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }
 export interface ConcernView {
+  recordingPending?: boolean
+  recordTarget?: ConcernRecordTargetView
   id: string; subject: string; reason: string; origin: 'explicit' | 'implicit'; state: 'active' | 'watching' | 'snoozed' | 'resolved' | 'archived'
   priority: number; confidence: number; score: number; watchKind: 'auto' | 'knowledge' | 'workspace' | 'web'; updatedAt: number; nextCheckAt: number; lastCheckedAt?: number
   resources: Array<{ kind: 'file' | 'knowledge'; locator: string; label: string }>
 }
+export interface ConcernRecordTargetView { kind: 'file' | 'note'; locator: string; label: string }
 export interface ConcernObservationView {
   id: string; concernId: string; event: string; evidence: string; source: string; interruptScore: number
   decision: 'drop' | 'remember' | 'defer' | 'feed' | 'notify'; notificationRuleEffect: 'auto' | 'notify' | 'suppress'
@@ -97,7 +100,7 @@ export interface ScheduledTaskView {
   enabled: boolean; destroySessionAfterRun: boolean; overlapPolicy: 'skip' | 'queue'; timeoutMinutes: number
   nextRunAt: number; lastRunAt?: number; lastRunStatus?: 'completed' | 'failed' | 'skipped'; createdAt: number; updatedAt: number
 }
-export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'review' | 'skill'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
+export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'review' | 'skill' | 'observation'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
 
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'

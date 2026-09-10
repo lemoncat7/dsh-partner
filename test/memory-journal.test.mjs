@@ -68,6 +68,39 @@ test('cached extraction and transactional commit survive replay without double c
   assert.equal(context.turns[0].id, 'one')
 })
 
+test('three failures yield to later same-scope jobs without losing the failed turn', async t => {
+  const {store,root}=await fixture(t)
+  await store.enqueue(turn('blocked'))
+  await store.enqueue({...turn('later'),at:at+1})
+  for(let i=0;i<3;i++) {
+    const job=await store.claimJob('c',Date.now()+i*600000)
+    assert.equal(job.turn.id,'blocked')
+    await store.settleJob(job,'model failure')
+  }
+  const later=await new PartnerMemoryStore(root).claimJob('c')
+  assert.equal(later.turn.id,'later')
+  await store.settleJob(later)
+  const layers=await store.memoryLayers('c','s')
+  assert.equal(layers.jobCount,1);assert.equal(layers.retryCount,1)
+  assert.equal(layers.jobs[0].attempts,3)
+  await store.retryJob('c','s','blocked')
+  assert.equal((await store.claimJob('c')).turn.id,'blocked')
+})
+
+test('late extraction cannot overwrite newer preferences or daily summary', async t=>{
+  const {store}=await fixture(t)
+  const old={...turn('old'),at:at-1000}
+  const newer=turn('new')
+  const memory=content=>({kind:'preference',subject:'配色',content,confidence:.9,importance:.8,operation:'upsert'})
+  await store.enqueue(newer)
+  const job=await store.claimJob('c')
+  await store.consolidate(newer,{...result,daily:{...result.daily,summary:'最新摘要'},memories:[memory('新偏好')]},job)
+  await store.settleJob(job)
+  await store.consolidate(old,{...result,daily:{...result.daily,summary:'旧摘要'},memories:[memory('旧偏好')]})
+  assert.equal((await store.recentMemories('c'))[0].content,'新偏好')
+  assert.equal((await store.recentReflections('c'))[0].summary,'最新摘要')
+})
+
 test('reflection enqueue does not invoke a model; background failures retain work', async t => {
   const { root, store } = await fixture(t)
   let calls = 0

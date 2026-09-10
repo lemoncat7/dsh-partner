@@ -93,7 +93,7 @@ test('creates and reuses a local companion conversation without a channel pairin
       agentDefaultModel: { currentSelection: () => ({ provider: 'test', model: 'test-model' }) },
       agents: {
         get() { return undefined },
-        async resume() { throw new Error('not persisted yet') },
+      async resume({resumeSessionId}) { throw Object.assign(new Error('not persisted yet'), {name:'SessionPersistenceNotFoundError',sessionId:resumeSessionId}) },
         async create(options) {
           const agentCtx = { get: name => name === 'agentPresets' ? { async mount() {} } : undefined, systemPrompt: { section() {} } }
           await options.setup(agentCtx)
@@ -238,7 +238,12 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /DSH 版本发布/)
   assert.match(prompt, /逐项判断/)
   assert.match(prompt, /不要把本地项目问题.*无差别丢给网页搜索/)
-  assert.match(prompt, /工具可自由组合/)
+  assert.match(prompt, /正常命令工具/)
+  assert.match(prompt, /缺少 curl、python3 或独立 undici 包不等于没有 HTTP 客户端/)
+  assert.match(prompt, /require\("node:http"\)/)
+  assert.match(prompt, /CONNECT targetHost:443/)
+  assert.match(prompt, /不禁用 TLS 校验/)
+  assert.match(prompt, /HTTP 200 不代表已核到目标数据/)
   assert.match(prompt, /知识库按“确定库 → 库内检索 → 读取准确条目”执行/)
   assert.match(prompt, /是本轮调查的操作约束，不只是背景资料/)
   assert.match(prompt, /需要 HTML 标记、脚本内嵌 JSON.*用 web_source/)
@@ -248,12 +253,13 @@ test('frames heartbeat as bounded concern change observation', () => {
   assert.match(prompt, /"searchQuery":"nomifun nomifun-desktop 版本更新"/)
   assert.match(prompt, /本地目录按“确定范围 → 找到候选文件或命中位置 → 读取准确文件”执行/)
   assert.match(prompt, /不要自行拼接库名、动作词“关注\/留意”/)
-  assert.match(prompt, /不得读取伙伴记忆、会话归档、日记或 concerns 数据库/)
-  assert.match(prompt, /只能更新 resources 中明确列出的现存文件/)
+  assert.match(prompt, /不得读取伙伴私有记忆与会话存储/)
+  assert.match(prompt, /resources 只读/)
+  assert.match(prompt, /recordTarget=null 时不写外部记录/)
   assert.match(prompt, /\/home\/node\/partners\/companion-1\/docs\/status\.md/)
-  assert.match(prompt, /必须调用 heartbeat_local_command/)
-  assert.match(prompt, /不要改成 glob、grep 或 read 去猜结果/)
-  assert.match(prompt, /不得执行其他命令、发布、提交/)
+  assert.match(prompt, /正常命令工具使用 Node HTTP、代理、登录及 Cookie/)
+  assert.match(prompt, /不得自行批准工具或改变 DSH 安全配置/)
+  assert.match(prompt, /checkStatus=blocked/)
   assert.match(prompt, /只输出一个 JSON 对象/)
   assert.match(prompt, /nextCheckInMinutes/)
   assert.match(prompt, /notificationRuleEffect/)
@@ -315,7 +321,9 @@ test('allows flexible discovery and only exposes file updates for linked files',
   const unlinked = heartbeatToolPolicy([concern({ watchKind: 'workspace' })], tools)
   assert.deepEqual([...unlinked.allowed].sort(), [...discovery].sort())
 
-  const linked = heartbeatToolPolicy([concern({ resources: [{ kind: 'file', locator: 'docs/roadmap.md', label: 'docs/roadmap.md' }] })], tools)
+  const sourceOnly = heartbeatToolPolicy([concern({ resources: [{ kind: 'file', locator: 'docs/roadmap.md', label: 'docs/roadmap.md' }] })], tools)
+  assert.equal(sourceOnly.allowed.has('write'), false)
+  const linked = heartbeatToolPolicy([concern({ recordTarget: { kind: 'file', locator: 'docs/roadmap.md', label: 'docs/roadmap.md' } })], tools)
   assert.deepEqual([...linked.allowed].sort(), [...tools].sort())
 })
 
@@ -377,7 +385,7 @@ test('renders compact inspectable heartbeat activity without model reasoning', (
       name: 'knowledge_search', input: '{"query":"待关注事项"}', output: '没有找到新变化', startedAt: 1_200, completedAt: 2_000, status: 'completed',
     }],
   }, 'quiet')
-  assert.match(activity, /状态：无需主动提醒/)
+  assert.match(activity, /状态：检查完成，无需主动提醒/)
   assert.match(activity, /本轮挂念：Canvas 拖动稳定性；依赖更新/)
   assert.match(activity, /1\. knowledge_search · 完成 · 800 ms/)
   assert.match(activity, /最终结论：本轮没有发现经过校验的新变化/)
@@ -855,4 +863,14 @@ test('migrates old focuses into the concern store exactly once', async () => {
     const items = await store.list('companion-1')
     assert.deepEqual(items.map(item => item.subject).sort(), ['DSH 更新', '未完成主题'])
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+test('heartbeat can maintain referenced note bodies but cannot mutate references or note identity', () => {
+  const available = ['knowledge_note_references', 'knowledge_note_read', 'knowledge_note_update', 'knowledge_note_delete']
+  assert.equal(heartbeatToolPolicy([], available).allowed.has('knowledge_note_update'), false)
+  const policy = heartbeatToolPolicy([{ resources: [{ kind: 'knowledge', locator: 'default/关注说明' }] }], available)
+  assert.equal(policy.allowed.has('knowledge_note_update'), false, 'knowledge references are not recording destinations')
+  assert.equal(policy.allowed.has('knowledge_note_delete'), false)
+  for (const name of ['knowledge_note_references','knowledge_note_read','knowledge_note_update']) {
+    assert.match(heartbeatToolDenial(name, {knowledgeHandle:'signed',operation:'list'}), /手动配置的 recordTarget/)
+  }
 })

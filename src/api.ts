@@ -173,11 +173,32 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     if (id !== undefined && segments[2] === 'concerns') {
       requiredCompanion(runtime.store, id)
       if (method === 'GET' && segments.length === 3) return sendJson(res, 200, await runtime.concerns.activity(id))
+      if (method === 'GET' && segments.length === 4 && segments[3] === 'archived') {
+        const offset = Number(url.searchParams.get('offset') ?? 0)
+        if (!Number.isSafeInteger(offset) || offset < 0) throw httpError(400, '分页参数无效')
+        return sendJson(res, 200, await runtime.concerns.archived(id, offset))
+      }
+      if (method === 'DELETE' && segments.length === 4 && segments[3]) {
+        mutation(req)
+        const body = await readObject(req)
+        if (!Number.isSafeInteger(body.expectedUpdatedAt)) throw httpError(400, '请刷新后重新确认删除')
+        await runtime.heartbeat.removeConcern(id, segments[3], body.expectedUpdatedAt as number)
+        return sendJson(res, 200, {ok: true})
+      }
+      if (method === 'PATCH' && segments.length === 4 && segments[3]) {
+        mutation(req)
+        const body = await readObject(req)
+        if (!Number.isSafeInteger(body.expectedUpdatedAt)) throw httpError(400, '缺少关注版本，请刷新后重试')
+        if (typeof body.reason !== 'string' || body.reason.length > 800 || typeof body.sources !== 'string' || body.sources.length > 4000) throw httpError(400, '关注说明或依据格式无效')
+        const recordTarget = await runtime.agents.validateRecordingTarget(requiredCompanion(runtime.store, id), body.recordTarget)
+        return sendJson(res, 200, await runtime.concerns.editExplicit(id, segments[3], {subject:text(body.subject, 'subject', 300), reason:body.reason, sources:body.sources, expectedUpdatedAt:body.expectedUpdatedAt as number, ...(recordTarget ? {recordTarget} : {})}))
+      }
       if (method === 'POST' && segments.length === 3) {
         mutation(req)
         const body = await readObject(req)
         const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 800) : ''
-        return sendJson(res, 201, await runtime.concerns.createExplicit(id, '*', text(body.subject, 'subject', 300), reason))
+        const recordTarget = await runtime.agents.validateRecordingTarget(requiredCompanion(runtime.store, id), body.recordTarget)
+        return sendJson(res, 201, await runtime.concerns.createExplicit(id, '*', text(body.subject, 'subject', 300), reason, recordTarget))
       }
       if (method === 'POST' && segments[3] !== undefined && segments[4] === 'action' && segments.length === 5) {
         mutation(req)
@@ -192,12 +213,19 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const query = (url.searchParams.get('q') ?? '').trim().slice(0, 160)
       return sendJson(res, 200, { items: await runtime.agents.concernSources(companion, query) })
     }
+    if (id !== undefined && method === 'GET' && segments[2] === 'recording-sources' && segments.length === 3) {
+      return sendJson(res, 200, { items: await runtime.agents.recordingSources(requiredCompanion(runtime.store, id), (url.searchParams.get('q') ?? '').slice(0, 160)) })
+    }
     if (id !== undefined && method === 'POST' && segments[2] === 'heartbeat' && segments[3] === 'trigger' && segments.length === 4) {
       mutation(req)
       requiredCompanion(runtime.store, id)
       const body = await readObject(req)
       const concernId = typeof body.concernId === 'string' ? body.concernId.trim().slice(0, 160) : undefined
-      return sendJson(res, 200, await runtime.heartbeat.trigger(id, { manual: true, ...(concernId ? { concernId } : {}) }))
+      return sendJson(res, 202, runtime.heartbeat.startManual(id, concernId))
+    }
+    if (id !== undefined && method === 'GET' && segments[2] === 'heartbeat' && segments[3] === 'status' && segments.length === 4) {
+      requiredCompanion(runtime.store, id)
+      return sendJson(res, 200, runtime.heartbeat.manualStatus(id))
     }
     if (id !== undefined && method === 'POST' && segments[2] === 'memory' && segments[3] === 'review' && segments.length === 4) {
       mutation(req); requiredCompanion(runtime.store, id)

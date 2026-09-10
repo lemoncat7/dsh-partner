@@ -112,6 +112,13 @@ export class PartnerConcernStore {
             continue
           }
           const concern = this.upsert(database, companionId, scopeId, candidate, origin, at)
+          if (source === 'ui' && candidate.recordTarget !== undefined) {
+            const target = concern ?? existing
+            if (target) {
+              database.prepare('UPDATE concerns SET record_target_json = ? WHERE id = ?').run(JSON.stringify(candidate.recordTarget), target.id)
+              target.recordTarget = candidate.recordTarget
+            }
+          }
           if (concern !== undefined) created.push(concern)
           const current = concern ?? existing
           const decision: ConcernAuditDecision = candidate.operation === 'resolve'
@@ -137,15 +144,49 @@ export class PartnerConcernStore {
     })
   }
 
-  async createExplicit(companionId: string, scopeId: string, subject: string, reason = ''): Promise<PartnerConcern> {
+  async createExplicit(companionId: string, scopeId: string, subject: string, reason = '', recordTarget?: PartnerConcern['recordTarget']): Promise<PartnerConcern> {
     const descriptor = explicitConcernDescriptor(subject)
     await this.applyCandidates(companionId, scopeId, [{
       subject: descriptor.subject, reason: reason || '用户明确要求伙伴留意', operation: 'upsert', priority: .9,
       confidence: 1, watchKind: descriptor.watchKind, watchQuery: descriptor.watchQuery, resources: descriptor.resources,
+      ...(recordTarget ? { recordTarget } : {}),
     }], 'explicit', Date.now(), { source: 'ui' })
     const concern = (await this.list(companionId, scopeId)).find(item => normalizeConcernSubject(item.subject) === normalizeConcernSubject(descriptor.subject))
     if (!concern) throw new Error('concern could not be created')
     return concern
+  }
+
+  async editExplicit(companionId: string, id: string, input: {subject: string; reason: string; sources: string; expectedUpdatedAt: number; recordTarget?: PartnerConcern['recordTarget']}): Promise<PartnerConcern> {
+    let edited: PartnerConcern | undefined
+    await this.serial(this.path(companionId), async () => {
+      const database = await this.open(companionId)
+      try {
+        database.exec('BEGIN IMMEDIATE')
+        const row = database.prepare('SELECT * FROM concerns WHERE companion_id = ? AND id = ?').get(companionId, id) as SqlRow | undefined
+        if (!row) throw new Error('关注不存在')
+        const old = concernFromRow(row)
+        if (old.updatedAt !== input.expectedUpdatedAt) throw new Error('关注已发生变化，请刷新后重新编辑；本次未覆盖')
+        const subject = input.subject.trim()
+        if (!subject || subject.length > 300 || input.reason.length > 800 || input.sources.length > 4000) throw new Error('关注内容长度无效')
+        const normalized = normalizeConcernSubject(subject)
+        if (!normalized) throw new Error('请填写有效的关注名称')
+        const duplicate = database.prepare('SELECT id, state FROM concerns WHERE companion_id = ? AND scope_id = ? AND normalized_subject = ? AND id != ?').get(companionId, old.scopeId, normalized, id) as SqlRow | undefined
+        if (duplicate && duplicate.state !== 'archived') throw new Error('另有一条未归档的同名关注，请换一个名称；本次未新建或覆盖任何关注')
+        // Retain archived identity, title and history; release only its deduplication key.
+        if (duplicate) database.prepare('UPDATE concerns SET normalized_subject = ? WHERE id = ?').run(`archived:${String(duplicate.id)}:${normalized}`, String(duplicate.id))
+        const descriptor = explicitConcernDescriptor(input.sources)
+        if (input.sources.trim() && descriptor.resources.length === 0) throw new Error('未识别到检查依据，请使用 @知识库[库名/文档名] 或 @"文件路径"')
+        const updated = Math.max(Date.now(), old.updatedAt + 1)
+        if (JSON.stringify(old.recordTarget) !== JSON.stringify(input.recordTarget)) database.prepare('UPDATE concerns SET recording_pending = ?, recording_snapshot_json=NULL, recording_retry_at=0 WHERE id = ?').run(input.recordTarget ? 1 : 0, id)
+        database.prepare('UPDATE concerns SET subject = ?, normalized_subject = ?, reason = ?, resources_json = ?, watch_kind = ?, watch_query = ?, record_target_json = ?, updated_at = ? WHERE id = ? AND companion_id = ?').run(subject, normalized, input.reason.trim(), resourcesJson(descriptor.resources), descriptor.watchKind, subject, input.recordTarget ? JSON.stringify(input.recordTarget) : null, updated, id, companionId)
+        const result = concernFromRow(database.prepare('SELECT * FROM concerns WHERE id = ?').get(id) as SqlRow)
+        database.exec('COMMIT')
+        edited = result
+      } catch (error) { rollback(database); throw error }
+      finally { database.close() }
+    })
+    if (!edited) throw new Error('关注保存失败')
+    return edited
   }
 
   async applyUserDirective(
@@ -190,6 +231,7 @@ export class PartnerConcernStore {
         database.exec('BEGIN IMMEDIATE')
         const rows = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND scope_id IN (?, '*')
           AND state IN ('active', 'watching') AND (? = 1 OR next_check_at <= ?)
+          AND recording_snapshot_json IS NULL
           AND (? IS NULL OR id = ?)
           ORDER BY priority DESC, next_check_at ASC LIMIT ?`).all(
           companionId, scopeId, options.includeFuture ? 1 : 0, now, options.concernId ?? null, options.concernId ?? null, Math.max(limit, 24),
@@ -222,6 +264,7 @@ export class PartnerConcernStore {
         database.exec('BEGIN IMMEDIATE')
         const byConcern = new Map(candidates.map(item => [item.concernId, item]))
         for (const concern of concerns) {
+          if (!database.prepare('SELECT id FROM concerns WHERE id = ? AND companion_id = ?').get(concern.id, companionId)) continue
           const candidate = byConcern.get(concern.id)
           const chosenMinutes = boundedConcernCheckMinutes(candidate?.nextCheckInMinutes)
           const nextCheckAt = now + (chosenMinutes === undefined ? concernInterval(concern.priority, concern.origin) : chosenMinutes * 60_000)
@@ -298,6 +341,37 @@ export class PartnerConcernStore {
       const observations = (database.prepare("SELECT * FROM concern_observations WHERE companion_id = ? AND decision IN ('defer', 'feed', 'notify') ORDER BY created_at DESC LIMIT ?").all(companionId, limit) as SqlRow[]).map(observationFromRow)
       return { concerns, observations }
     } finally { database.close() }
+  }
+
+  async archived(companionId: string, offset = 0): Promise<{items: PartnerConcern[]; hasMore: boolean}> {
+    const database = await this.open(companionId)
+    try {
+      const rows = database.prepare("SELECT * FROM concerns WHERE companion_id = ? AND state = 'archived' ORDER BY updated_at DESC, id LIMIT 51 OFFSET ?").all(companionId, offset) as SqlRow[]
+      return {items: rows.slice(0, 50).map(concernFromRow), hasMore: rows.length > 50}
+    } finally { database.close() }
+  }
+
+  async remove(companionId: string, id: string, expectedUpdatedAt: number): Promise<void> {
+    await this.serial(this.path(companionId), async () => {
+      const database = await this.open(companionId)
+      try {
+        database.exec('BEGIN IMMEDIATE')
+        const row = database.prepare('SELECT updated_at FROM concerns WHERE companion_id = ? AND id = ?').get(companionId, id) as SqlRow | undefined
+        if (!row) { database.exec('COMMIT'); return }
+        if (number(row.updated_at) !== expectedUpdatedAt) throw new Error('关注已变化，请刷新后重新确认删除')
+        database.prepare('DELETE FROM concern_audit WHERE companion_id = ? AND concern_id = ?').run(companionId, id)
+        // Keep batch replay markers, but scrub deleted concern snapshots from cached results.
+        for (const batch of database.prepare('SELECT scope_id, id, result_json FROM concern_batches WHERE instr(result_json, ?) > 0').all(id) as SqlRow[]) {
+          const result = JSON.parse(String(batch.result_json)) as ConcernApplyResult
+          result.created = result.created.filter(item => item.id !== id)
+          result.entries = result.entries.filter(item => item.concern?.id !== id)
+          database.prepare('UPDATE concern_batches SET result_json = ? WHERE scope_id = ? AND id = ?').run(JSON.stringify(result), String(batch.scope_id), String(batch.id))
+        }
+        database.prepare('DELETE FROM concerns WHERE companion_id = ? AND id = ?').run(companionId, id)
+        database.exec('COMMIT')
+      } catch(error) { rollback(database); throw error }
+      finally { database.close() }
+    })
   }
 
   async pendingToolCreationNotices(companionId: string, scopeId: string, sessionId: string, limit = 4): Promise<PendingConcernNotice> {
@@ -450,6 +524,51 @@ export class PartnerConcernStore {
     )
   }
 
+  async checkpointRecording(item: PartnerConcern, snapshot: import('./recording-snapshot.js').RecordingSnapshot): Promise<void> {
+    await this.serialValue(this.path(item.companionId), async()=>{
+      const db=await this.open(item.companionId)
+      try {
+        const updated=db.prepare('UPDATE concerns SET recording_snapshot_json=?, recording_pending=1, recording_retry_at=0, recording_attempts=0 WHERE id=? AND companion_id=? AND record_target_json=? AND updated_at=?').run(JSON.stringify(snapshot),item.id,item.companionId,JSON.stringify(item.recordTarget),item.updatedAt)
+        if(!updated.changes) throw new Error('关注配置已改变，未保存旧目标的同步任务')
+      } finally {db.close()}
+    })
+  }
+
+  async pendingRecording(companionId: string, now=Date.now()): Promise<PartnerConcern | undefined> {
+    return this.serialValue(this.path(companionId),async()=>{
+      const db=await this.open(companionId)
+      try {const row=db.prepare("SELECT * FROM concerns WHERE companion_id=? AND recording_pending=1 AND recording_snapshot_json IS NOT NULL AND recording_retry_at<=? AND state!='archived' ORDER BY recording_retry_at LIMIT 1").get(companionId,now) as SqlRow|undefined;return row?{...concernFromRow(row),recordingSnapshot:JSON.parse(String(row.recording_snapshot_json))}:undefined}
+      finally {db.close()}
+    })
+  }
+
+  async settleRecording(item: PartnerConcern, synced: boolean): Promise<void> {
+    await this.serialValue(this.path(item.companionId),async()=>{
+      const db=await this.open(item.companionId)
+      try {db.prepare('UPDATE concerns SET recording_pending=?, recording_snapshot_json=CASE WHEN ? THEN NULL ELSE recording_snapshot_json END, recording_retry_at=?, recording_attempts=recording_attempts+1 WHERE id=? AND companion_id=? AND record_target_json=? AND recording_snapshot_json=?').run(synced?0:1,synced?1:0,Date.now()+15*60000,item.id,item.companionId,JSON.stringify(item.recordTarget),JSON.stringify(item.recordingSnapshot))}
+      finally {db.close()}
+    })
+  }
+
+  async recordSyncState(concerns: PartnerConcern[], states: Array<{concernId: string; state: 'synced' | 'pending'}>): Promise<void> {
+    if (!concerns.length || !states.length) return
+    const companionId = concerns[0]!.companionId
+    await this.serialValue(this.path(companionId), async () => {
+      const database = await this.open(companionId)
+      try {
+        database.exec('BEGIN IMMEDIATE')
+        for (const state of states) {
+          const original = concerns.find(item => item.id === state.concernId && item.companionId === companionId)
+          if (!original?.recordTarget) continue
+          // An in-flight execution must not mark a newly selected destination as synced.
+          database.prepare('UPDATE concerns SET recording_pending = ? WHERE id = ? AND companion_id = ? AND record_target_json = ?').run(state.state === 'pending' ? 1 : 0, original.id, companionId, JSON.stringify(original.recordTarget))
+        }
+        database.exec('COMMIT')
+      } catch(error) { database.exec('ROLLBACK'); throw error }
+      finally { database.close() }
+    })
+  }
+
   private async open(companionId: string): Promise<DatabaseSync> {
     const directory = join(this.root, 'partners', companionId, 'concerns')
     await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -486,6 +605,11 @@ export class PartnerConcernStore {
       CREATE INDEX IF NOT EXISTS concern_audit_session ON concern_audit(companion_id, scope_id, session_id, source, decision, notified_at, created_at);
       PRAGMA user_version = 4;`)
     ensureColumn(database, 'concerns', 'resources_json', "TEXT NOT NULL DEFAULT '[]'")
+    ensureColumn(database, 'concerns', 'record_target_json', 'TEXT')
+    ensureColumn(database, 'concerns', 'recording_pending', 'INTEGER NOT NULL DEFAULT 0')
+    ensureColumn(database, 'concerns', 'recording_snapshot_json', 'TEXT')
+    ensureColumn(database, 'concerns', 'recording_retry_at', 'INTEGER NOT NULL DEFAULT 0')
+    ensureColumn(database, 'concerns', 'recording_attempts', 'INTEGER NOT NULL DEFAULT 0')
     ensureColumn(database, 'concern_observations', 'rule_effect', "TEXT NOT NULL DEFAULT 'auto'")
     ensureColumn(database, 'concern_observations', 'rule_reason', "TEXT NOT NULL DEFAULT ''")
     ensureColumn(database, 'concern_observations', 'decision_reason', "TEXT NOT NULL DEFAULT ''")
@@ -506,6 +630,8 @@ export class PartnerConcernStore {
 
 function concernFromRow(row: SqlRow): PartnerConcern {
   return {
+    ...(row.record_target_json && number(row.recording_pending) === 1 ? {recordingPending: true} : {}),
+    ...(typeof row.record_target_json === 'string' ? { recordTarget: JSON.parse(row.record_target_json) as NonNullable<PartnerConcern['recordTarget']> } : {}),
     id: string(row.id), companionId: string(row.companion_id), scopeId: string(row.scope_id), subject: string(row.subject), reason: string(row.reason),
     origin: string(row.origin) as PartnerConcern['origin'], state: string(row.state) as ConcernState,
     priority: number(row.priority), confidence: number(row.confidence), score: number(row.score),

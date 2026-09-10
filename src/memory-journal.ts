@@ -23,16 +23,16 @@ export function enqueueMemoryJob(db: DatabaseSync, turn: ConversationTurn): void
 }
 
 export function claimMemoryJob(db: DatabaseSync, now: number): MemoryJob | undefined {
-  // One lease per companion. Within a scope, an older failed turn blocks newer
-  // turns, but does not prevent unrelated scopes from making progress.
+  // Preserve ordering for transient errors; repeatedly failing jobs yield while
+  // backing off. They remain durable and become eligible at their retry time.
   const token = randomUUID()
   const row = db.prepare(`UPDATE memory_jobs SET lease_token=?, lease_until=? WHERE id=(
     SELECT j.id FROM memory_jobs j WHERE j.done=0 AND j.next_at<=? AND j.lease_until<=?
     AND NOT EXISTS (SELECT 1 FROM memory_jobs WHERE done=0 AND lease_until>?)
-    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.done=0
+    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.done=0 AND (p.attempts<3 OR p.next_at<=?)
       AND (p.at<j.at OR (p.at=j.at AND p.rowid<j.rowid)))
     ORDER BY j.at, j.rowid LIMIT 1
-  ) RETURNING turn_json, result_json, attempts`).get(token, now + LEASE_MS, now, now, now)
+  ) RETURNING turn_json, result_json, attempts`).get(token, now + LEASE_MS, now, now, now, now)
   if (!row) return undefined
   return { turn: JSON.parse(String(row.turn_json)), token, attempts: Number(row.attempts),
     ...(row.result_json ? { result: JSON.parse(String(row.result_json)) } : {}) }

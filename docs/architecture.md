@@ -295,3 +295,6 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - `api/features/pendant-api.ts` 沿用原有 API 同源和写操作校验，只提供固定渲染资源、消息查询和批量已读。前端可见时每 4 秒条件查询（ETag）；无变化不传正文，失败退避至 30 秒，隐藏或卸载时取消请求。
 - 验证：`test/pendant-inbox.test.mjs`、`test/pendant-physics.test.mjs`；构建后设置 `PARTNER_PLAYWRIGHT_MODULE` 并运行 `node scripts/verify-pendant.mjs`，使用隔离假数据检查 WebGL、真实拖拽、拉住停顿后的回弹与反向振荡、休眠、键盘、通知导航、移动端和清理。可设置 `PARTNER_PENDANT_VIDEO_DIR` 保存连续交互录像。
 - 卡面验证：`test/pendant-motion-glare.test.mjs` 覆盖角度往返、固定姿态十秒不漂移、四元数等价、强度边界、减少动态效果和背面关闭；`test/pendant-surface.test.mjs` 覆盖共享 uniform 与背面不变。`scripts/verify-pendant-gloss.mjs` 检查 162 组原色误差、渐变参考对照、不同倾角的光带位移与对比度保护及无额外绘制。浏览器测试覆盖 hover 不改变反光、拖拽改变角度时更新、握持静止高光不循环并正常休眠。
+## 轻量关注执行
+
+`observation-loop.ts` 维护私有消息缓冲，继承来源工具作用域，不启动 Agent turn 或新会话。按需暴露检查工具和指定记录工具，保留 DSH guard/审批。12 轮工具交互、24 次调用、180 秒总预算；结束必须给出 completed/blocked，失败不写成无变化。来源知识挂载沿用原 session，无需临时知识映射。记录内容不回写依据。

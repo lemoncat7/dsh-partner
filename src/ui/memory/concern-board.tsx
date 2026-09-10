@@ -3,8 +3,13 @@ import {IconCheckOutline14, IconChevronDownOutline14, IconPlusOutline16, IconLin
 import {api, type ConcernActivityView, type ConcernView, type ConcernSourceView, type ConcernObservationView} from '../../client-api.js'
 import {futureTime} from '../../time-format.js'
 import {errorMessage as message} from '../workspace-components.js'
-export function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCheck, onAct }: {
-  companionId: string; activity: ConcernActivityView; value: string; busy: boolean; onValue(value: string): void; onAdd(): void
+import {ConcernDeleteButton, ArchivedConcerns} from './concern-deletion.js'
+import {ConcernEditor} from './concern-editor.js'
+import { ConcernRecordFields } from './concern-record-fields.js'
+import type { ConcernRecordTargetView } from '../../client-api.js'
+export function ConcernBoard({ companionId, activity, value, busy, onValue, onAdd, onCheck, onAct, onEdited }: {
+  companionId: string; activity: ConcernActivityView; value: string; busy: boolean; onValue(value: string): void; onAdd(target?: ConcernRecordTargetView, reason?: string): Promise<boolean>
+  onEdited(): Promise<void>
   onCheck(item: ConcernView): void
   onAct(item: ConcernView, action: 'watch' | 'ignore' | 'prioritize' | 'resolve'): void
 }): JSX.Element {
@@ -12,7 +17,10 @@ export function ConcernBoard({ companionId, activity, value, busy, onValue, onAd
   const active = visible.filter(item => item.state !== 'resolved')
   const resolved = visible.filter(item => item.state === 'resolved')
   const latest = new Map([...activity.observations].reverse().map(item => [item.concernId, item]))
+  const [editing, setEditing] = useState<ConcernView>()
   const [composing, setComposing] = useState(false)
+  const [reason, setReason] = useState('')
+  const [recordTarget, setRecordTarget] = useState<ConcernRecordTargetView>()
   const [expandedId, setExpandedId] = useState<string>()
   const [visibleCount, setVisibleCount] = useState(5)
   const [mention, setMention] = useState<{ start: number; end: number; query: string }>()
@@ -40,7 +48,7 @@ export function ConcernBoard({ companionId, activity, value, busy, onValue, onAd
     }, 150)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [companionId, mention?.query, suggestionsOpen])
-  const submit = (event: FormEvent): void => { event.preventDefault(); onAdd(); setComposing(false); setMention(undefined) }
+  const submit = (event: FormEvent): void => { event.preventDefault(); void onAdd(recordTarget, reason).then(ok => { if (ok) { setComposing(false); setMention(undefined); setRecordTarget(undefined); setReason('') } }) }
   const chooseSource = (source: ConcernSourceView): void => {
     if (mention === undefined) return
     const next = `${value.slice(0, mention.start)}${source.token} ${value.slice(mention.end)}`
@@ -49,8 +57,9 @@ export function ConcernBoard({ companionId, activity, value, busy, onValue, onAd
     window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(cursor, cursor) })
   }
   return <section className="dsh-partner-concern-board" aria-labelledby="partner-concerns-title">
-    <header><span><strong id="partner-concerns-title">伙伴在意的事 <b>{active.length}</b></strong><p>尚未闭环、值得继续留意的事情</p></span><button type="button" aria-expanded={composing} onClick={() => setComposing(current => !current)}><IconPlusOutline16 size={14} />交代一件事</button></header>
-    {composing && <form className="dsh-partner-concern-compose" onSubmit={submit}><label><span>需要留意的事</span><div className="dsh-partner-concern-input-wrap"><input
+    <header><span><strong id="partner-concerns-title">伙伴在意的事 <b>{active.length}</b></strong><p>尚未闭环、值得继续留意的事情</p></span><button type="button" aria-expanded={composing} onClick={() => {setEditing(undefined);setComposing(current => !current)}}><IconPlusOutline16 size={14} />交代一件事</button></header>
+    {editing && <ConcernEditor key={editing.id} companionId={companionId} item={editing} close={()=>setEditing(undefined)} saved={onEdited} />}
+    {composing && <form className="dsh-partner-concern-compose" aria-label="新增关注" aria-busy={busy} onSubmit={submit}><header className="dsh-partner-concern-form-heading"><strong>交代一件事</strong><p>先说要关注什么，再补充检查方式和记录位置。</p></header><label><span>需要留意的事</span><div className="dsh-partner-concern-input-wrap"><input
       ref={inputRef} autoFocus value={value} maxLength={300} placeholder="输入 @ 选择文件或知识文档"
       role="combobox" aria-autocomplete="list" aria-expanded={suggestionsOpen} aria-controls={suggestionsOpen ? listboxId : undefined}
       aria-activedescendant={suggestionsOpen && sources[activeSource] ? `${listboxId}-option-${activeSource}` : undefined}
@@ -71,22 +80,26 @@ export function ConcernBoard({ companionId, activity, value, busy, onValue, onAd
           onMouseEnter={() => setActiveSource(index)} onClick={() => chooseSource(source)}
         ><span>{source.kind === 'file' ? <IconDataOutline16 size={15} /> : <IconLinkOutline16 size={15} />}</span><strong>{source.label}</strong><small>{source.detail}</small></button>)}
       </>}
-    </div>}</div><small className="dsh-partner-concern-compose-hint">输入 <b>@</b> 会列出当前会话文件和已挂载的知识文档，也可以继续输入关键词筛选。</small></label><div><button type="button" onClick={() => { setComposing(false); setMention(undefined); onValue('') }}>取消</button><button type="submit" className="is-primary" disabled={busy || !value.trim()}>让伙伴记着</button></div></form>}
+    </div>}</div><small className="dsh-partner-concern-compose-hint">输入 <b>@</b> 选择检查依据：当前会话文件或已挂载知识文档。依据只读，不作为记录位置。</small></label>
+    <ConcernRecordFields companionId={companionId} reason={reason} onReason={setReason} target={recordTarget} onTarget={setRecordTarget} />
+    <div><button type="button" onClick={() => { setComposing(false); setMention(undefined); setRecordTarget(undefined); setReason(''); onValue('') }}>取消</button><button type="submit" className="is-primary" disabled={busy || !value.trim()}>让伙伴记着</button></div></form>}
     <div className="dsh-partner-concern-list" role="list">
       {active.length === 0 ? <p className="dsh-partner-concern-empty">最近没有未闭环的事。你也可以直接对伙伴说“这个帮我留意”。</p> : shown.map(item => {
         const observation = latest.get(item.id)
         const expanded = expandedId === item.id
         const status = observation ? concernObservationStatus(observation) : item.state === 'active' ? '正在留意' : '暂时记着'
         return <article key={item.id} role="listitem" data-state={item.state} data-expanded={expanded}>
+          {expanded && <p className="dsh-partner-record-summary">记录位置：{item.recordTarget ? `${item.recordTarget.kind === 'file' ? '本地文件' : '笔记文档'} · ${item.recordTarget.label}` : '伙伴内部观察记录（不创建文档、不回写依据）'}</p>}
           <button type="button" className="dsh-partner-concern-row" aria-expanded={expanded} onClick={() => setExpandedId(current => current === item.id ? undefined : item.id)}>
             <span className="dsh-partner-concern-state"><i />{status}</span><span className="dsh-partner-concern-copy"><strong>{item.subject}</strong><small>{observation ? observation.event : item.reason}</small></span><span className="dsh-partner-concern-time" title={`计划于 ${new Date(item.nextCheckAt).toLocaleString()} 再次留意`}><small>下次留意</small><strong>{futureTime(item.nextCheckAt)}</strong></span><IconChevronDownOutline14 size={14} />
           </button>
-          {expanded && <div className="dsh-partner-concern-detail"><p>{item.reason}</p>{observation && <><blockquote>{observation.event}</blockquote><div className="dsh-partner-concern-decision" data-decision={observation.decision}><strong>{concernObservationStatus(observation)}</strong><span>{observation.decisionReason || concernObservationExplanation(observation)}</span><small>打扰分数 {Math.round(observation.interruptScore * 100)}{observation.notificationRuleEffect !== 'auto' && observation.notificationRuleReason ? ` · 知识规则：${observation.notificationRuleReason}` : ''}</small></div></>}{item.resources.length > 0 && <div className="dsh-partner-concern-resources">{item.resources.map(resource => <span key={`${resource.kind}:${resource.locator}`}>{resource.kind === 'file' ? '文件' : '知识'} · {resource.label}</span>)}</div>}<small>{item.origin === 'explicit' ? '你明确交代' : '伙伴从对话中注意到'} · {watchKindLabel(item.watchKind)}</small><div className="dsh-partner-concern-actions" aria-label={`${item.subject} 的操作`}><button type="button" disabled={busy} onClick={() => onCheck(item)}>立即检查这条</button><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>继续留意</button><button type="button" disabled={busy} onClick={() => onAct(item, 'prioritize')}>提高关注</button><button type="button" disabled={busy} onClick={() => onAct(item, 'resolve')}>已经解决</button><button type="button" className="is-danger" disabled={busy} onClick={() => onAct(item, 'ignore')}>别管这个</button></div></div>}
+          {expanded && <div className="dsh-partner-concern-detail"><p>{item.reason}</p>{observation && <><blockquote>{observation.event}</blockquote><div className="dsh-partner-concern-decision" data-decision={observation.decision}><strong>{concernObservationStatus(observation)}</strong><span>{observation.decisionReason || concernObservationExplanation(observation)}</span><small>打扰分数 {Math.round(observation.interruptScore * 100)}{observation.notificationRuleEffect !== 'auto' && observation.notificationRuleReason ? ` · 知识规则：${observation.notificationRuleReason}` : ''}</small></div></>}{item.resources.length > 0 && <div className="dsh-partner-concern-resources">{item.resources.map(resource => <span key={`${resource.kind}:${resource.locator}`}>{resource.kind === 'file' ? '文件' : '知识'} · {resource.label}</span>)}</div>}<small>{item.origin === 'explicit' ? '你明确交代' : '伙伴从对话中注意到'} · {watchKindLabel(item.watchKind)}</small><div className="dsh-partner-concern-actions" aria-label={`${item.subject} 的操作`}><button type="button" onClick={() => {setComposing(false);setEditing(item)}}>编辑</button><button type="button" disabled={busy} onClick={() => onCheck(item)}>立即检查这条</button><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>继续留意</button><button type="button" disabled={busy} onClick={() => onAct(item, 'prioritize')}>提高关注</button><button type="button" disabled={busy} onClick={() => onAct(item, 'resolve')}>已经解决</button><ConcernDeleteButton companionId={companionId} item={item} disabled={busy} onDeleted={onEdited}/></div></div>}
         </article>
       })}
     </div>
     {(active.length > shown.length || visibleCount > 5) && <div className="dsh-partner-concern-more">{active.length > shown.length ? <button type="button" onClick={() => setVisibleCount(count => Math.min(active.length, count + 20))}>再显示 {Math.min(20, active.length - shown.length)} 条</button> : <button type="button" onClick={() => setVisibleCount(5)}>收起列表</button>}</div>}
-    {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong>{item.subject}</strong><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button></article>)}</div></details>}
+    {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong>{item.subject}</strong><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button><ConcernDeleteButton companionId={companionId} item={item} disabled={busy} onDeleted={onEdited}/></article>)}</div></details>}
+    <ArchivedConcerns companionId={companionId} onChanged={onEdited}/>
   </section>
 }
 

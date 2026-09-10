@@ -12,6 +12,8 @@ import { groundMemoryCandidates } from './memory-quality.js'
 import { groundExperiences, parseArtifactProposals } from './memory-artifacts.js'
 import { AsyncSemaphore } from './core/semaphore.js'
 import type { MemoryJob } from './memory-journal.js'
+import {redactObservationError} from './observation-errors.js'
+import {memoryFinishError} from './memory-errors.js'
 
 type ReflectionContext = Context & { llm: Context['llm']; agentDefaultModel: AgentDefaultModelConfig }
 
@@ -93,7 +95,7 @@ export class MemoryReflectionService {
         system: DAILY_REVIEW_SYSTEM, temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
-        if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`daily review failed: ${chunk.reason.kind}`)
+        if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`每日记忆终审失败：${memoryFinishError(chunk.reason)}`)
       }
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseDailyReview(output)
@@ -113,7 +115,9 @@ export class MemoryReflectionService {
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
     this.controllers.add(controller)
-    const timeout = setTimeout(() => controller.abort(), 60_000)
+    const startedAt = Date.now()
+    let timedOut = false
+    const timeout = setTimeout(() => {timedOut = true; controller.abort()}, 60_000)
     let output = ''
     try {
       for await (const chunk of this.ctx.llm.stream({
@@ -125,8 +129,11 @@ export class MemoryReflectionService {
         signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
-        if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`memory reflection failed: ${chunk.reason.kind}`)
+        if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(memoryFinishError(chunk.reason))
       }
+    } catch(error) {
+      const cause = timedOut ? '达到60秒模型时限' : this.closed ? '服务停止，任务保留' : redactObservationError(error instanceof Error ? error.message : String(error))
+      throw new Error(`记忆提炼失败：${cause}；耗时${Math.round((Date.now()-startedAt)/1000)}秒，正文${output.length}字`)
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseReflection(output)
     result.memories = groundMemoryCandidates(result.memories, [turn])

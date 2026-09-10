@@ -12,6 +12,9 @@ export interface ConcernResource {
 }
 
 export interface PartnerConcern {
+  recordingSnapshot?: import('./recording-snapshot.js').RecordingSnapshot
+  recordingPending?: boolean
+  recordTarget?: ConcernRecordTarget
   id: string
   companionId: string
   scopeId: string
@@ -35,6 +38,7 @@ export interface PartnerConcern {
 }
 
 export interface ConcernCandidate {
+  recordTarget?: ConcernRecordTarget
   subject: string
   reason: string
   operation: 'upsert' | 'resolve' | 'dismiss'
@@ -44,6 +48,8 @@ export interface ConcernCandidate {
   watchQuery: string
   resources?: ConcernResource[]
 }
+
+export interface ConcernRecordTarget { kind: 'file' | 'note'; locator: string; label: string }
 
 export const IMPLICIT_CONCERN_MIN_PRIORITY = .55
 export const IMPLICIT_CONCERN_MIN_CONFIDENCE = .72

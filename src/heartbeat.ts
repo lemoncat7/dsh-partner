@@ -7,12 +7,31 @@ import type { ConcernObservation } from './concern-domain.js'
 import { ChannelManager } from './channels/manager.js'
 
 const TICK_MS = 60_000
-export interface HeartbeatTriggerOptions { manual?: boolean; concernId?: string }
+export interface HeartbeatTriggerOptions { manual?: boolean; concernId?: string; recordingOnly?: boolean }
 
 export class HeartbeatScheduler {
   private timer: ReturnType<typeof setTimeout> | undefined
   private closed = false
   private readonly running = new Set<string>()
+  private readonly manualResults = new Map<string, {checked: boolean; sent: boolean; reason?: string}>()
+
+  manualStatus(id: string) {
+    return { running: this.isRunning(id), result: this.manualResults.get(id) ?? null }
+  }
+
+  startManual(id: string, concernId?: string) {
+    if (this.closed) throw new Error('关注服务正在停止')
+    if (!this.store.snapshot().companions.some(item => item.id === id)) throw new Error('伙伴不存在')
+    if (this.store.isCompanionRemoving(id)) throw new Error('伙伴正在删除')
+    if (this.isRunning(id)) return { accepted: false, running: true, reason: '心跳正在执行' }
+    this.manualResults.delete(id)
+    // trigger acquires the companion lock synchronously, before its first await.
+    void this.trigger(id, { manual: true, ...(concernId ? { concernId } : {}) })
+      .then(result => { this.manualResults.set(id, result) })
+      .catch(() => { this.manualResults.set(id, { checked: false, sent: false, reason: '检查受阻，请查看关注活动记录' }) })
+    for (const key of this.manualResults.keys()) if (!this.store.snapshot().companions.some(item => item.id === key)) this.manualResults.delete(key)
+    return { accepted: true, running: true, reason: '已开始后台检查' }
+  }
 
   constructor(
     private readonly ctx: Context,
@@ -35,6 +54,13 @@ export class HeartbeatScheduler {
   }
 
   isRunning(id: string): boolean { return this.running.has(id) }
+
+  async removeConcern(companionId: string, concernId: string, expectedUpdatedAt: number): Promise<void> {
+    if (this.running.has(companionId)) throw new Error('本轮关注正在执行，请结束后再删除，避免后台继续写入记录')
+    this.running.add(companionId)
+    try { await this.concerns.remove(companionId, concernId, expectedUpdatedAt) }
+    finally { this.running.delete(companionId) }
+  }
 
   async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
     if (this.store.isCompanionRemoving(companionId)) return { checked: false, sent: false, reason: '伙伴正在删除' }
@@ -60,6 +86,10 @@ export class HeartbeatScheduler {
     const now = Date.now()
     for (const companion of this.store.snapshot().companions) {
       if (!companion.automation.heartbeat.enabled) continue
+      if(!this.running.has(companion.id) && await this.concerns.pendingRecording(companion.id,now)) {
+        void this.trigger(companion.id,{recordingOnly:true}).catch(error=>this.ctx.logger.warn(`记录同步未完成：${message(error)}`))
+        continue
+      }
       const stored = this.store.snapshot().heartbeatStates.find(item => item.companionId === companion.id)
       if (stored === undefined) {
         await this.saveState(companion, heartbeatState([], companion, now, this.timeZone))
@@ -73,6 +103,20 @@ export class HeartbeatScheduler {
 
   private async run(companion: Companion, options: HeartbeatTriggerOptions): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
     const now = Date.now()
+    if(options.recordingOnly) {
+      const item=await this.concerns.pendingRecording(companion.id,now)
+      if(!item)return {checked:false,sent:false,reason:'没有待同步任务'}
+      const route=deliverableRoutes(this.store.snapshot(),companion.id).find(route=>item.scopeId==='*'||memoryScope(route.channelId,route.userId)===item.scopeId)
+      if(!route){await this.concerns.settleRecording(item,false);return {checked:false,sent:false,reason:'记录任务缺少原授权会话，已退避等待'}}
+      let execution: Awaited<ReturnType<PartnerAgentRuntime['heartbeat']>>|undefined
+      try {
+        execution=await this.agents.heartbeat(companion,route,[item])
+        const synced=execution.recording?.some(state=>state.concernId===item.id&&state.state==='synced')===true
+        await this.concerns.settleRecording(item,synced)
+        await this.recordActivity(companion,route,execution,synced?'quiet':'failed',synced?undefined:'记录同步未完成，15分钟后单独重试；不重新抓取或提醒')
+        return {checked:false,sent:false,reason:synced?'记录同步完成':'记录待重试'}
+      } catch(error) {await this.concerns.settleRecording(item,false);throw error}
+    }
     const policy = companion.automation.heartbeat
     const existing = heartbeatState(this.store.snapshot().heartbeatStates, companion, now, this.timeZone)
     const today = localDay(now, this.timeZone)
@@ -123,13 +167,17 @@ export class HeartbeatScheduler {
         })
         return { checked: false, sent: false, reason: options.concernId ? '这条挂念已不存在或当前无需留意' : '当前没有到期的伙伴挂念' }
       }
-      execution = await this.agents.heartbeat(companion, route, due)
+      execution = await this.agents.heartbeat(companion, route, due.map(({recordingSnapshot: _snapshot,...item})=>item))
+      if (execution.recording?.length) await this.concerns.recordSyncState(due, execution.recording)
       if (execution.error) throw new Error(execution.error)
-      const recorded = await this.concerns.recordObservations(due, execution.candidates, Date.now(), now - route.lastMessageAt < 15 * 60_000)
+      const completed = due.filter(item => !execution!.blocked?.includes(item.id))
+      const recorded = await this.concerns.recordObservations(completed, execution.candidates, Date.now(), now - route.lastMessageAt < 15 * 60_000)
       execution = { ...execution, observations: recorded.observations }
-      await this.agents.persistKnowledgeObservations(companion, route, due, recorded.observations).catch(error => {
-        this.ctx.logger.warn(`dsh-partner could not persist knowledge-linked observations: ${message(error)}`)
-      })
+      // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
+      if (execution.blocked?.length) {
+        const blockedNames = due.filter(item => execution!.blocked!.includes(item.id)).map(item => item.subject).join('；')
+        throw new Error(`检查受阻：${blockedNames}。未完成的来源核验不能判定为无变化；已核实结果保留。`)
+      }
       if (recorded.notifications.length === 0) {
         await this.saveState(companion, successState(existing, companion, now, today, sentCount, false))
         await this.recordActivity(companion, route, execution, 'quiet')

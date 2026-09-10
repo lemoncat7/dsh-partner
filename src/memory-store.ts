@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryContextConnection, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryRelationReviewContext, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
 import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
 import { initializeMemoryJournal, enqueueMemoryJob, claimMemoryJob, checkpointMemoryJob, settleMemoryJob, assertMemoryLease, type MemoryJob } from './memory-journal.js'
+import {redactObservationError} from './observation-errors.js'
 import type { ReflectionResult } from './memory-domain.js'
 import { rankMemories, memoryRelevance, memoryTerms } from './memory-retrieval.js'
 import { initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
@@ -31,13 +32,17 @@ export class PartnerMemoryStore {
 
   async memoryLayers(companionId: string, scopeId: string): Promise<{
     scenes: ReturnType<typeof readScenes>; experiences: ReturnType<typeof readExperienceDrafts>;
-    jobs: Array<{ id: string; attempts: number; nextAt: number; status: string }>;
+    jobCount: number; retryCount: number;
+    jobs: Array<{ id: string; attempts: number; nextAt: number; status: string; at: number; error: string }>;
   }> {
     return this.journal(companionId, db => ({
       scenes: readScenes(db, scopeId, this.memoriesForScope(db, companionId, scopeId)),
       experiences: readExperienceDrafts(db, scopeId),
-      jobs: db.prepare('SELECT id, attempts, next_at, lease_until FROM memory_jobs WHERE scope_id=? AND done=0 ORDER BY at LIMIT 100')
+      jobCount: Number(db.prepare('SELECT COUNT(*) AS count FROM memory_jobs WHERE scope_id=? AND done=0').get(scopeId)?.count ?? 0),
+      retryCount: Number(db.prepare('SELECT COUNT(*) AS count FROM memory_jobs WHERE scope_id=? AND done=0 AND attempts>0').get(scopeId)?.count ?? 0),
+      jobs: db.prepare('SELECT id, at, attempts, next_at, lease_until, last_error FROM memory_jobs WHERE scope_id=? AND done=0 ORDER BY at LIMIT 100')
         .all(scopeId).map(row => ({ id: String(row.id), attempts: Number(row.attempts), nextAt: Number(row.next_at),
+          at: Number(row.at), error: row.last_error ? redactObservationError(String(row.last_error)) : '',
           status: Number(row.lease_until) > Date.now() ? 'processing' : Number(row.attempts) > 0 ? 'retrying' : 'pending' })),
     }))
   }
@@ -116,7 +121,10 @@ export class PartnerMemoryStore {
         const existing = this.memoriesForScope(database, turn.companionId, turn.scopeId)
         for (const memory of mergeMemories(existing, result.memories, turn)) this.upsertMemory(database, memory)
         const date = localDay(turn.at, this.timeZone)
+        const newer = database.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND committed=1 AND at>? LIMIT 1').get(turn.scopeId, turn.at)
         const previous = database.prepare('SELECT turn_count FROM daily_reflections WHERE scope_id = ? AND date = ?').get(turn.scopeId, date) as SqlRow | undefined
+        if (newer && previous) database.prepare('UPDATE daily_reflections SET turn_count=turn_count+1 WHERE scope_id=? AND date=?').run(turn.scopeId,date)
+        else
         database.prepare(`INSERT INTO daily_reflections
           (date, companion_id, scope_id, summary, events_json, open_tasks_json, completed_tasks_json, learnings_json, updated_at, turn_count)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -554,7 +562,7 @@ function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[],
       && (candidate.targetMemoryId ? item.id === candidate.targetMemoryId : sameMemorySubject(item, candidate.kind, subject)) && item.status !== 'superseded')
     // A stale or foreign explicit target must never silently create another memory.
     if (candidate.targetMemoryId && !match) continue
-    if (match?.locked) continue
+    if (match?.locked || memories.some(item => item.kind === candidate.kind && item.scopeId === turn.scopeId && sameMemorySubject(item, candidate.kind, subject) && item.updatedAt > turn.at)) continue
     const evidence = candidate.sourceEvidence ?? { turnId: turn.id, at: turn.at, excerpt: compact(turn.user, 300) }
     if (candidate.operation === 'remove' || candidate.operation === 'complete') {
       if (match) {
