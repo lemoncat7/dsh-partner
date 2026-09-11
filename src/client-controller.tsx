@@ -4,6 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { api } from './client-api.js'
+import { registerMainPanel } from './main-panel-compat.js'
 import { activatePluginWorkspace } from './workspace-ownership.js'
 
 export interface PartnerDestination { page: 'home' | 'board' | 'schedules'; taskId?: string }
@@ -32,7 +33,7 @@ export function createPartnerController(ctx: ClientContext, pluginId: string, re
       if (companionId !== undefined) selected = companionId
       if (dispose === undefined) {
         activatePluginWorkspace(pluginId)
-        dispose = ctx.slots.register({ name: 'conversation', priority: -3 }, props => render(props, controller))
+        dispose = registerMainPanel(ctx, pluginId, -3, props => render(props, controller), () => controller.close())
       }
       notify()
     },
@@ -51,7 +52,7 @@ export function createPartnerController(ctx: ClientContext, pluginId: string, re
     async startSession(companionId) {
       const created = await api<{ routeId: string; sessionId: string }>(`/companions/${encodeURIComponent(companionId)}/session`, { method: 'POST' })
       await waitForClientSession(ctx, created.sessionId)
-      dispose?.(); dispose = undefined
+      controller.close()
       sessions(ctx).open(created.sessionId as SessionId)
     },
     async renewSession(routeId) {
