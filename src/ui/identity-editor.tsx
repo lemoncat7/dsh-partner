@@ -57,13 +57,15 @@ function IdentityEditorForm({ companion, count, onChanged, onRemoved }: Props): 
       if (alive.current) setError(`${committed ? '伙伴已删除，但页面刷新失败，请刷新页面，不要再次删除：' : '删除失败：'}${errorMessage(reason)}`)
     } finally { locked.current = false; if (alive.current) setOperation(undefined) }
   }
-  return <form className="dsh-partner-form is-identity" aria-busy={operation !== undefined} onSubmit={event => { void submit(event) }}>
+  return <form id="dsh-partner-identity-editor" className="dsh-partner-form is-identity" aria-busy={operation !== undefined} onSubmit={event => { void submit(event) }}>
     <Section eyebrow="IDENTITY" title="工作身份" detail="它不是一次对话的提示词，而是这个伙伴在桌面和微信中的长期行为基线。" />
+    <section className="dsh-partner-identity-card" aria-label="身份配置">
     <div className="dsh-partner-fields two"><Field label="名字"><input disabled={busy} required maxLength={60} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Field><Field label="角色"><input disabled={busy} required maxLength={120} value={form.role} onChange={event => setForm({ ...form, role: event.target.value })} /></Field></div>
     <Field label="一句话定位" hint="用于名册识别，不会替代完整行为准则。"><textarea disabled={busy} rows={2} maxLength={500} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></Field>
     <Field label="长期行为准则" hint="建议写职责、表达方式与边界；渠道、工具和授权由系统单独控制。"><textarea disabled={busy} rows={9} maxLength={12000} value={form.instructions} onChange={event => setForm({ ...form, instructions: event.target.value })} /></Field>
     {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
     <div className="dsh-partner-form-actions"><span role="status">{saved && <><IconCheckOutline14 size={14} />已保存，下一轮将使用新身份</>}</span><button disabled={busy}>{operation === 'save' ? '正在保存…' : '保存身份'}</button></div>
+    </section>
     <div className="dsh-partner-identity-danger" data-confirming={confirming}>
       <span><strong>{removed ? '伙伴已删除' : confirming ? `确认删除「${companion.name}」？` : '删除伙伴'}</strong><small>{confirming ? '将删除该伙伴的配置、记忆、挂念、专属目录及其中全部文件，此操作不可撤销。共享或异常目录会拦截；DSH 原会话日志仍由宿主管理，不在此次清理范围内。' : '必须先解绑微信并结束运行中的任务。删除只针对本次确认的伙伴，不会转交联系人。'}</small></span>
       <div>{confirming && <button type="button" disabled={busy} className="is-secondary" onClick={() => setConfirmationId(undefined)}>取消</button>}<button type="button" className={confirming ? 'is-danger' : ''} disabled={busy || count <= 1} onClick={() => confirming ? void remove() : setConfirmationId(companion.id)}><IconTrashOutline16 size={16} />{operation === 'remove' ? '正在删除…' : removed ? '已删除' : confirming ? '确认删除' : '删除'}</button></div>

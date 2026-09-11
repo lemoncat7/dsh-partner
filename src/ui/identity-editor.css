@@ -1,0 +1,74 @@
+/* Own the identity form skin without changing host forms or theme tokens. */
+#dsh-partner-identity-editor.dsh-partner-form {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--partner-text);
+  font-family: var(--partner-font-family);
+}
+#dsh-partner-identity-editor .dsh-partner-identity-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--partner-border);
+  border-radius: 15px;
+  background: var(--partner-card-surface);
+  box-shadow: var(--partner-card-shadow);
+}
+#dsh-partner-identity-editor .dsh-partner-field > span { flex-wrap: wrap; gap: 4px 12px; }
+#dsh-partner-identity-editor .dsh-partner-field small { text-align: start; }
+#dsh-partner-identity-editor .dsh-partner-field :is(input, textarea) {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--partner-border);
+  border-radius: 10px;
+  outline: none;
+  color: var(--partner-text);
+  background: var(--partner-control);
+  font: var(--partner-font-label)/1.5 var(--partner-font-family);
+  box-shadow: inset 0 1px 0 var(--partner-glass-highlight);
+}
+#dsh-partner-identity-editor .dsh-partner-field textarea { resize: vertical; }
+#dsh-partner-identity-editor .dsh-partner-field :is(input, textarea):focus {
+  border-color: var(--partner-focus-ring);
+  background: var(--partner-raised);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--partner-focus-ring) 18%, transparent);
+}
+#dsh-partner-identity-editor .dsh-partner-form-actions { flex-wrap: wrap; gap: 12px; }
+#dsh-partner-identity-editor .dsh-partner-form-actions > button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--partner-border);
+  border-radius: 10px;
+  color: var(--partner-on-accent);
+  background: var(--partner-accent-strong);
+  box-shadow: none;
+  font: 600 var(--partner-font-body)/1.4 var(--partner-font-family);
+}
+#dsh-partner-identity-editor .dsh-partner-form-actions > button:hover:not(:disabled) { filter: brightness(.94); }
+#dsh-partner-identity-editor .dsh-partner-identity-danger { flex-wrap: wrap; }
+#dsh-partner-identity-editor .dsh-partner-identity-danger > span { flex: 1 1 250px; }
+#dsh-partner-identity-editor .dsh-partner-identity-danger > div { display: flex; flex-wrap: wrap; gap: 8px; }
+#dsh-partner-identity-editor .dsh-partner-identity-danger button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--partner-danger) 24%, transparent);
+  border-radius: 8px;
+  color: var(--partner-danger);
+  background: transparent;
+  box-shadow: none;
+  font: var(--partner-font-caption)/1.4 var(--partner-font-family);
+}
+#dsh-partner-identity-editor button:focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 3px; }
+#dsh-partner-identity-editor :is(input, textarea, button):disabled { opacity: .55; cursor: default; }
+@media (max-width: 640px) {
+  #dsh-partner-identity-editor .dsh-partner-identity-card { padding: 14px; }
+  #dsh-partner-identity-editor .dsh-partner-fields.two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (forced-colors: active) {
+  #dsh-partner-identity-editor .dsh-partner-field :is(input, textarea):focus { outline: 2px solid Highlight; }
+}
