@@ -10,8 +10,7 @@ test('model failure retains stage, code, HTTP status and safe summary', () => {
 })
 test('thrown adapter failures and cancellation retain distinct causes', () => {
   assert.match(observationFailure({failure:{code:'NETWORK_ERROR',message:'connection reset'}},context),/NETWORK_ERROR.*connection reset/)
-  assert.match(observationFailure(new Error('abort'),{...context,totalAborted:true}),/180 秒总时限/)
-  assert.match(observationFailure(new Error('abort'),{...context,toolAborted:true}),/30 秒执行时限/)
+  assert.match(observationFailure(new Error('abort'),{...context,toolAborted:true}),/60 秒执行时限/)
   assert.match(observationFailure({name:'AbortError'},context),/调用被取消/)
   assert.match(observationFailure({},context),/未提供/)
 })

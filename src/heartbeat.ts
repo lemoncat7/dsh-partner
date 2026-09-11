@@ -167,16 +167,36 @@ export class HeartbeatScheduler {
         })
         return { checked: false, sent: false, reason: options.concernId ? '这条挂念已不存在或当前无需留意' : '当前没有到期的伙伴挂念' }
       }
-      execution = await this.agents.heartbeat(companion, route, due.map(({recordingSnapshot: _snapshot,...item})=>item))
-      if (execution.recording?.length) await this.concerns.recordSyncState(due, execution.recording)
-      if (execution.error) throw new Error(execution.error)
-      const completed = due.filter(item => !execution!.blocked?.includes(item.id))
-      const recorded = await this.concerns.recordObservations(completed, execution.candidates, Date.now(), now - route.lastMessageAt < 15 * 60_000)
-      execution = { ...execution, observations: recorded.observations }
+      const recorded: { observations: ConcernObservation[]; notifications: ConcernObservation[] } = { observations: [], notifications: [] }
+      const failures: string[] = []
+      execution = { concerns: due, candidates: [], tools: [], rounds: [], startedAt: Date.now(), completedAt: Date.now(), blocked: [] }
+      for (const { recordingSnapshot: _snapshot, ...item } of due) {
+        if (this.closed || this.store.isCompanionRemoving(companion.id)) { failures.push('关注服务已停止'); break }
+        try {
+          const single = await this.agents.heartbeat(companion, route, [item])
+          execution.tools!.push(...single.tools ?? [])
+          execution.rounds!.push(...single.rounds ?? [])
+          execution.completedAt = single.completedAt
+          if (single.recording?.length) await this.concerns.recordSyncState([item], single.recording)
+          if (single.error || single.blocked?.includes(item.id)) {
+            execution.blocked!.push(item.id)
+            failures.push(`${item.subject}：${single.error || single.blockedReasons?.[item.id] || '来源核验未完成'}`)
+            continue
+          }
+          // Commit each concern before starting the next; interrupted batches resume only due work.
+          const saved = await this.concerns.recordObservations([item], single.candidates, Date.now(), Date.now() - route.lastMessageAt < 15 * 60_000)
+          execution.candidates.push(...single.candidates)
+          recorded.observations.push(...saved.observations)
+          recorded.notifications.push(...saved.notifications)
+        } catch (error) {
+          execution.blocked!.push(item.id)
+          failures.push(`${item.subject}：${message(error)}`)
+        }
+      }
+      execution.observations = recorded.observations
       // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
-      if (execution.blocked?.length) {
-        const blockedNames = due.filter(item => execution!.blocked!.includes(item.id)).map(item => item.subject).join('；')
-        throw new Error(`检查受阻：${blockedNames}。未完成的来源核验不能判定为无变化；已核实结果保留。`)
+      if (failures.length) {
+        throw new Error(`检查受阻：${failures.join('；')}。已完成的关注结果已保存，不重复检查；未送达通知会补发。`)
       }
       if (recorded.notifications.length === 0) {
         await this.saveState(companion, successState(existing, companion, now, today, sentCount, false))
@@ -193,7 +213,7 @@ export class HeartbeatScheduler {
       await this.saveState(companion, {
         ...existing, companionId: companion.id, lastCheckedAt: now, sentDay: today, sentCount,
         consecutiveFailures: failures, lastError: message(error),
-        nextCheckAt: heartbeatRetryAt(now, policy.intervalMinutes, failures),
+        nextCheckAt: heartbeatRetryAt(Date.now(), policy.intervalMinutes, failures),
       })
       if (execution) await this.recordActivity(companion, route, execution, 'failed', message(error))
       throw error

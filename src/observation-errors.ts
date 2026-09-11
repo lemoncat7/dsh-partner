@@ -14,15 +14,14 @@ export function redactObservationError(text: string, secrets: Iterable<string> =
 }
 
 export function observationFailure(error: unknown, context: {
-  phase: string; round: number; elapsedMs: number; totalAborted?: boolean; toolAborted?: boolean
+  phase: string; round: number; elapsedMs: number; toolAborted?: boolean
 }, secrets: Iterable<string> = []): string {
   const value = error && typeof error === 'object' ? error as Record<string, unknown> : {}
   const failure = value.failure && typeof value.failure === 'object' ? value.failure as Record<string, unknown> : value
   const code = typeof failure.code === 'string' && /^[A-Z0-9_:-]{1,64}$/u.test(failure.code) ? failure.code : undefined
   const status = typeof failure.status === 'number' && failure.status >= 100 && failure.status <= 599 ? failure.status : undefined
   const name = typeof value.name === 'string' ? value.name : ''
-  const reason = context.totalAborted ? '本轮达到 180 秒总时限，已取消后续执行'
-    : context.toolAborted ? '工具达到 30 秒执行时限'
+  const reason = context.toolAborted ? '单次工具达到 60 秒执行时限'
     : name === 'AbortError' ? '调用被取消'
     : name === 'TimeoutError' ? '调用超时'
     : typeof failure.message === 'string' ? redactObservationError(failure.message, secrets) : '未提供可用的底层错误摘要'

@@ -6,12 +6,10 @@ import {join} from 'node:path'
 import {PartnerConcernStore} from '../lib/concern-store.js'
 import {observationBudget} from '../lib/observation-budget.js'
 
-test('recording gets its own bounded phase only with explicit destinations',()=>{
-  assert.equal(observationBudget(109000,1,3,true).stageRemainingMs,1000)
-  assert.equal(observationBudget(110000,1,3,true).recording,true)
-  assert.equal(observationBudget(149000,1,3,true).recording,true)
-  assert.equal(observationBudget(150000,1,3,true).recording,false)
-  assert.equal(observationBudget(110000,1,3,false).recording,false)
+test('independent recording execution receives a fresh round budget',()=>{
+  assert.equal(observationBudget(12).checking,false)
+  assert.equal(observationBudget(0).checking,true)
+  assert.equal(observationBudget(11).checking,true)
 })
 
 test('pending recording survives restart and old execution cannot clear a changed destination',async t=>{

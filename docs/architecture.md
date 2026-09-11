@@ -297,4 +297,4 @@ form and save feedback, using the shared companion draft and existing UI tokens.
 - 卡面验证：`test/pendant-motion-glare.test.mjs` 覆盖角度往返、固定姿态十秒不漂移、四元数等价、强度边界、减少动态效果和背面关闭；`test/pendant-surface.test.mjs` 覆盖共享 uniform 与背面不变。`scripts/verify-pendant-gloss.mjs` 检查 162 组原色误差、渐变参考对照、不同倾角的光带位移与对比度保护及无额外绘制。浏览器测试覆盖 hover 不改变反光、拖拽改变角度时更新、握持静止高光不循环并正常休眠。
 ## 轻量关注执行
 
-`observation-loop.ts` 维护私有消息缓冲，继承来源工具作用域，不启动 Agent turn 或新会话。按需暴露检查工具和指定记录工具，保留 DSH guard/审批。12 轮工具交互、24 次调用、180 秒总预算；结束必须给出 completed/blocked，失败不写成无变化。来源知识挂载沿用原 session，无需临时知识映射。记录内容不回写依据。
+`observation-loop.ts` 维护私有消息缓冲，继承来源工具作用域，不启动 Agent turn 或新会话。按需暴露检查工具和指定记录工具，保留 DSH guard/审批。`heartbeat.ts` 逐条调用并立即持久化结果，单条失败不终止后续关注。每条独享 12 轮检查和一轮无工具收尾；模型请求 180 秒、工具执行 60 秒分别计时，无整批总时限和共享调用次数限制。重试退避从执行结束计算，已完成关注按自身 nextCheckAt 调度。结束必须给出 completed/blocked，失败不写成无变化。来源知识挂载沿用原 session，无需临时知识映射。记录内容不回写依据。
