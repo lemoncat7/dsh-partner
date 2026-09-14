@@ -37,5 +37,5 @@ export function relativeTime(value: number): string {
 }
 
 function channelStatusLabel(status: ChannelView['runtimeStatus']): string {
-  return status === 'running' ? '微信在线' : status === 'starting' ? '连接中' : status === 'error' ? '连接异常' : '已停用'
+  return status === 'running' ? '已连接' : status === 'starting' ? '连接中' : status === 'error' ? '连接异常' : '已停用'
 }

@@ -35,6 +35,8 @@ import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 import { CapabilityEditor } from './ui/capability-editor.js'
 import { IdentityEditor } from './ui/identity-editor.js'
+import { ChannelsPanel } from './ui/channels-panel.js'
+import { useChannelStatus } from './ui/use-channel-status.js'
 import identityCssText from './ui/identity-editor.css'
 import { Avatar, ChannelStatus as Status, ContentState as State, SectionHeading as Section, TabButton, WeixinGlyph, relativeTime } from './ui/partner-components.js'
 import { errorMessage as message } from './ui/workspace-components.js'
@@ -71,6 +73,7 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
   useWorkspaceTopAnchor(ref)
   const [open, setOpen] = useState(true)
   const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
+  useChannelStatus(setSnapshot)
   const [, update] = useState(0)
   useEffect(() => props.controller.subscribe(() => update(value => value + 1)), [props.controller])
   useEffect(() => { void loadPartner().then(setSnapshot).catch(() => {}) }, [props.controller.isOpen()])
@@ -86,7 +89,7 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
     <div className={`dsh-partner-sidebar-list${open ? ' is-open' : ''}`} aria-hidden={!open}>
       <div className="dsh-partner-sidebar-list-inner">
         <button type="button" tabIndex={open ? 0 : -1} className={`dsh-partner-sidebar-row${props.controller.isOpen() ? ' is-active' : ''}`} onClick={() => launch()}>
-          <span className="dsh-partner-sidebar-symbol"><IconAgentPresetOutline16 size={16} /></span><span><strong>伙伴面板</strong><small>{snapshot ? `${snapshot.companions.length} 位伙伴 · ${snapshot.channels.filter(item => item.runtimeStatus === 'running').length} 个微信在线` : '身份、能力与渠道'}</small></span><i className={snapshot?.channels.some(item => item.runtimeStatus === 'running') ? 'is-online' : ''} />
+          <span className="dsh-partner-sidebar-symbol"><IconAgentPresetOutline16 size={16} /></span><span><strong>伙伴面板</strong><small>{snapshot ? `${snapshot.companions.length} 位伙伴 · ${snapshot.channels.filter(item => item.runtimeStatus === 'running').length} 个渠道在线` : '身份、能力与渠道'}</small></span><i className={snapshot?.channels.some(item => item.runtimeStatus === 'running') ? 'is-online' : ''} />
         </button>
       </div>
     </div>
@@ -95,6 +98,7 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
 
 function PartnerWorkspace({ controller }: ConversationProps & { controller: Controller }): JSX.Element {
   const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
+  useChannelStatus(setSnapshot)
   const [selectedId, setSelectedId] = useState(controller.selected())
   const [view, setView] = useState<View>(controller.destination()?.page ?? 'home')
   const [requestedDestination, setRequestedDestination] = useState(controller.destination())
@@ -152,7 +156,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   return <main className="dsh-partner-workspace">
     {creatingCompanion && <CompanionCreateDialog close={() => setCreatingCompanion(false)} create={create} />}
     <header className="dsh-partner-topbar">
-      <div className="dsh-partner-topbar-brand"><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与微信渠道</small></span></div>
+      <div className="dsh-partner-topbar-brand"><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与消息渠道</small></span></div>
       <MobileWorkspaceControls
         companions={snapshot?.companions ?? []}
         selectedId={selectedId}
@@ -177,7 +181,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
           <button type="button" className={view === 'schedules' ? 'is-active' : ''} aria-current={view === 'schedules' ? 'page' : undefined} onClick={() => setView('schedules')}><span><IconPlayOutline16 size={16} /></span><strong>定时任务</strong><small>选择伙伴周期执行</small></button>
           <button type="button" className={view === 'pendant' ? 'is-active' : ''} aria-current={view === 'pendant' ? 'page' : undefined} onClick={() => setView('pendant')}><span><IconEditOutline16 size={16} /></span><strong>卡片设置</strong><small>挂饰、绳子与图案</small></button>
         </nav>
-        <div className="dsh-partner-roster-note"><IconLinkOutline16 size={16} /><span><strong>身份与渠道分离</strong><small>微信只负责收发，权限仍由 DSH 工具决定。</small></span></div>
+        <div className="dsh-partner-roster-note"><IconLinkOutline16 size={16} /><span><strong>身份与渠道分离</strong><small>渠道只负责收发，权限仍由 DSH 工具决定。</small></span></div>
       </aside>
       <section className={`dsh-partner-stage${workspacePage ? ' is-workspace-page' : ''}`}>
         {loading ? <State title="正在读取伙伴…" /> : workspacePage ? <div className="dsh-partner-stage-scroll is-workspace-page">
@@ -191,7 +195,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<IconAgentPresetOutline16 size={16} />}>总览</TabButton>
             <TabButton active={view === 'identity'} onClick={() => setView('identity')} icon={<IconEditOutline16 size={16} />}>身份</TabButton>
             <TabButton active={view === 'capabilities'} onClick={() => setView('capabilities')} icon={<IconAgentPresetOutline16 size={16} />}>能力</TabButton>
-            <TabButton active={view === 'weixin'} onClick={() => setView('weixin')} icon={<WeixinGlyph />}>微信</TabButton>
+            <TabButton active={view === 'weixin'} onClick={() => setView('weixin')} icon={<IconLinkOutline16 size={16}/>}>渠道</TabButton>
             <TabButton active={view === 'memory'} onClick={() => setView('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
             <TabButton active={view === 'concerns'} onClick={() => setView('concerns')} icon={<IconBrowseOutline16 size={16} />}>持续关注</TabButton>
           </nav>
@@ -200,7 +204,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} />}
             {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={() => refresh(true)} onRemoved={companionRemoved} />}
             {view === 'capabilities' && <CapabilityEditor key={selected.id} companion={selected} presets={snapshot?.presets ?? []} onChanged={() => refresh(true)} />}
-            {view === 'weixin' && <WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />}
+            {view === 'weixin' && <ChannelsPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} weixin={<WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />} />}
             {view === 'memory' && <MemoryPanel key={selected.id} companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
             {view === 'concerns' && <ConcernPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} />}
           </div>
@@ -243,7 +247,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
   const online = channel?.runtimeStatus === 'running'
   return <div className="dsh-partner-home">
     <header className="dsh-partner-home-heading">
-      <span><small>工作台</small><h2>{online ? `${companion.name} 正在微信待命` : `${companion.name} 已准备就绪`}</h2></span>
+      <span><small>工作台</small><h2>{online ? `${companion.name} 正在渠道待命` : `${companion.name} 已准备就绪`}</h2></span>
       <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份、会话与能力已经准备完成。'}</p>
     </header>
 
@@ -254,12 +258,12 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
         <span className="dsh-partner-route-weixin"><WeixinGlyph large /></span>
       </div>
       <div className="dsh-partner-home-channel-copy">
-        <span className="dsh-partner-home-kicker"><i />主要渠道 · 微信</span>
+        <span className="dsh-partner-home-kicker"><i />消息渠道 · {channel?.platform==='matrix'?'Matrix':channel?.platform==='mattermost'?'Mattermost':'微信'}</span>
         <h3>{!channel ? '等待扫码连接' : online ? '连接正常，正在接收消息' : channel.runtimeStatus === 'error' ? '渠道连接需要处理' : '渠道当前已停用'}</h3>
-        <p>{!channel ? '通过微信 iLink Bot 接入。凭据只进入 DSH 凭据库，联系人首次发消息仍需你的批准。' : online ? '每位联系人拥有独立 DSH 会话，伙伴身份一致，但上下文不会互相混合。' : channel.lastError || '渠道配置仍然保留，可以随时重新启用。'}</p>
+        <p>{!channel ? '连接微信、Matrix 或 Mattermost，联系人首次发消息需批准。' : online ? '本地与所有已授权渠道共用伙伴主对话，回复返回消息来源。' : channel.lastError || '渠道配置仍然保留，可以随时重新启用。'}</p>
         <div className="dsh-partner-home-channel-actions">
           <button type="button" className="is-primary" onClick={() => navigate('weixin')}>{!channel ? '连接微信' : pending > 0 ? `处理 ${pending} 个请求` : '管理渠道'}</button>
-          <span>{!channel ? '扫码完成，无需粘贴 Token' : `${approved} 位联系人 · ${sessions.length} 个独立会话`}</span>
+          <span>{!channel ? '选择渠道并连接账号' : `${approved} 位联系人 · 共用主对话`}</span>
         </div>
       </div>
     </section>
@@ -275,14 +279,14 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
       </section>
       <section className="dsh-partner-home-continuity">
         <header><span><IconDataOutline16 size={16} /></span><div><small>伙伴对话</small><strong>{localSession?.archived ? '会话已归档' : '伙伴会话已建立'}</strong></div><button type="button" onClick={() => localSession === undefined ? void startSession(companion.id) : localSession.archived ? void renewSession(localSession.id) : void openSession(localSession.id, localSession.sessionId)}>{localSession === undefined ? '开始对话' : localSession.archived ? '开始新会话' : '打开会话'}</button></header>
-        <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；另有 ${sessions.filter(item => item.kind === 'channel').length} 个渠道会话。` : '伙伴会话正在初始化，稍后即可打开。'}</p>
+        <p>{localSession ? `最近活动于 ${relativeTime(localSession.lastMessageAt)}；本地与渠道在这里接着聊。` : '伙伴会话正在初始化，稍后即可打开。'}</p>
       </section>
     </div>
   </div>
 }
 
 function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionView; snapshot: PartnerSnapshot; onChanged(): Promise<void> }): JSX.Element {
-  const channel = snapshot.channels.find(item => item.companionId === companion.id)
+  const channel = snapshot.channels.find(item => item.companionId === companion.id && (!item.platform || item.platform==='weixin'))
   const [login, setLogin] = useState<LoginView>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()

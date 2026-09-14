@@ -222,6 +222,19 @@ export class PartnerConcernStore {
     } finally { database.close() }
   }
 
+  /** A failed source check postpones only its own concern, never its siblings. */
+  async deferFailedCheck(item: PartnerConcern, retryAt: number): Promise<void> {
+    await this.serialValue(this.path(item.companionId), async () => {
+      const database = await this.open(item.companionId)
+      try {
+        database.prepare(`UPDATE concerns SET next_check_at = ? WHERE id = ? AND companion_id = ?
+          AND state IN ('active', 'watching') AND next_check_at = ?`).run(
+          retryAt, item.id, item.companionId, item.nextCheckAt,
+        )
+      } finally { database.close() }
+    })
+  }
+
   async due(companionId: string, scopeId: string, options: ConcernDueOptions = {}): Promise<PartnerConcern[]> {
     const now = options.now ?? Date.now()
     const limit = options.limit ?? 12

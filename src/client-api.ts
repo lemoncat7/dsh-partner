@@ -13,11 +13,17 @@ export interface CompanionView {
   automation: AutomationView
 }
 export interface ChannelView {
+  platform?: 'weixin' | 'matrix' | 'mattermost'
+  direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
   lastError?: string; credentialConfigured: boolean
 }
 export interface PairingView {
+  directTargetId?: string
+  pairingCode?: string
+  contactKey?: string
+  deliveryTarget?: {channelId: string; userId: string}
   id: string; channelId: string; userId: string; displayName: string
   status: 'pending' | 'approved' | 'blocked'; createdAt: number; updatedAt: number
 }

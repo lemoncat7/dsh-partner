@@ -7,6 +7,8 @@ import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { ChannelManager, requiredCompanion } from './channels/manager.js'
 import { WeixinLoginManager } from './channels/weixin/login.js'
+import { DirectTransport, directConfig } from './channels/direct/transport.js'
+import { DirectLoginCache } from './channels/direct/login-cache.js'
 import { memoryScope, PartnerAgentRuntime } from './agent-runtime.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { HeartbeatScheduler } from './heartbeat.js'
@@ -28,6 +30,12 @@ import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson 
 
 export interface WebServerLike {
   register(route: { kind: 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
+}
+const loginCaches=new WeakMap<PartnerStore,DirectLoginCache>()
+function loginCache(store:PartnerStore):DirectLoginCache {
+  let cache=loginCaches.get(store)
+  if(!cache){cache=new DirectLoginCache();loginCaches.set(store,cache)}
+  return cache
 }
 
 interface ApiRuntime {
@@ -263,6 +271,40 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   }
 
   if (segments[0] === 'channels') {
+    if(method==='GET'&&segments[1]==='status'&&segments.length===2)return sendJson(res,200,{channels:await runtime.channels.views(),pairings:runtime.store.snapshot().pairings})
+    if (method === 'POST' && (segments.length === 1 || (segments.length === 2 && segments[1] === 'test'))) {
+      mutation(req)
+      const body = await readObject(req)
+      const companionId = text(body.companionId, 'companionId', 120)
+      requiredCompanion(runtime.store, companionId)
+      if (runtime.store.isCompanionRemoving(companionId)) throw httpError(409, '伙伴正在删除')
+      const config = directConfig(body)
+      if(body.authMode!==undefined&&body.authMode!=='password'&&body.authMode!=='token')throw httpError(400,'登录方式无效')
+      const login=body.authMode==='password'?await loginCache(runtime.store).acquire(companionId,config,{username:body.username,password:body.password,...(body.mfaToken?{mfaToken:body.mfaToken}:{})}):undefined
+      const botToken=login?.token??text(body.botToken,'botToken',8192)
+      const adapter = new DirectTransport(config, botToken)
+      const identity = await adapter.validate()
+      if (segments[1] === 'test') {
+        return sendJson(res, 200, {ok: true, ...identity})
+      }
+      const baseline = await adapter.poll(undefined, AbortSignal.timeout(35_000))
+      await new DirectTransport(config, botToken, identity).validate()
+      const now = Date.now()
+      const channel = {id:createId(config.platform),companionId,platform:config.platform,accountId:identity.accountId,
+        name:text(body.name, 'name', 80),enabled:false,createdAt:now,updatedAt:now,
+        direct:{baseUrl:config.baseUrl,targetId:config.targetId,peerId:identity.peerId,cursor:baseline.cursor}}
+      await runtime.credentials.write(channel.id,{baseUrl:config.baseUrl,botToken})
+      try {
+        await runtime.store.update(state=>{
+          if(state.channels.some(c=>c.platform===config.platform&&c.accountId===identity.accountId&&c.direct?.baseUrl===config.baseUrl))throw httpError(409,'此机器人已配置，请先管理现有渠道，不能绑定到另一个伙伴')
+          if(!state.companions.some(c=>c.id===companionId))throw httpError(409,'伙伴已不存在')
+          state.channels.push(channel)
+          if(identity.peerId)state.pairings.push({id:createId('pairing'),channelId:channel.id,userId:identity.peerId,displayName:identity.peerId,directTargetId:config.targetId,status:'pending',createdAt:now,updatedAt:now})
+        })
+      } catch(error) {await runtime.credentials.delete(channel.id);throw error}
+      login?.retain()
+      return sendJson(res,201,{channel})
+    }
     const id = segments[1]
     if (id !== undefined && method === 'POST' && segments[2] === 'enabled' && segments.length === 3) {
       mutation(req)
@@ -280,6 +322,26 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
 
   if (segments[0] === 'pairings') {
     const id = segments[1]
+    if (id && method==='POST' && segments[2]==='delivery' && segments.length===3) {
+      mutation(req)
+      const body=await readObject(req)
+      if(typeof body.contactKey!=='string'||body.contactKey.length>80)throw httpError(400,'联系人关联标识无效')
+      if(body.targetPairingId!==null&&typeof body.targetPairingId!=='string')throw httpError(400,'通知目标无效')
+      await runtime.store.update(state=>{
+        const source=state.pairings.find(p=>p.id===id&&p.status==='approved')
+        if(!source)throw httpError(404,'已授权联系人不存在')
+        const companion=state.channels.find(c=>c.id===source.channelId)?.companionId
+        if(body.targetPairingId!==null) {
+          const target=state.pairings.find(p=>p.id===body.targetPairingId&&p.status==='approved')
+          if(!target||!state.channels.some(c=>c.id===target.channelId&&c.companionId===companion))throw httpError(400,'只能选择同一伙伴的已授权通知目标')
+          source.deliveryTarget={channelId:target.channelId,userId:target.userId}
+        } else delete source.deliveryTarget
+        if((body.contactKey as string).trim())source.contactKey=(body.contactKey as string).trim()
+        else delete source.contactKey
+        source.updatedAt=Date.now()
+      })
+      return sendJson(res,200,{ok:true})
+    }
     if (id !== undefined && method === 'POST' && segments[2] === 'status' && segments.length === 3) {
       mutation(req)
       const status = text((await readObject(req)).status, 'status', 20)

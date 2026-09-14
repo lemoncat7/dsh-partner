@@ -151,7 +151,7 @@ export class PartnerAgentRuntime {
   }
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
-    const key = `${channelId}:${userId}`
+    const key = `companion:${companion.id}`
     const previous = this.queues.get(key) ?? Promise.resolve()
     let output: PartnerReply = { text: '', attachments: [] }
     const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message) })
@@ -160,7 +160,7 @@ export class PartnerAgentRuntime {
   }
 
   async steer(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<boolean> {
-    const key = `${channelId}:${userId}`
+    const key = `companion:${companion.id}`
     const previous = this.steeringQueues.get(key) ?? Promise.resolve()
     let accepted = false
     const current = previous.catch(() => {}).then(async () => { accepted = await this.deliverSteering(companion, channelId, userId, message) })
@@ -223,6 +223,14 @@ export class PartnerAgentRuntime {
     }
     await this.store.update(state => {
       if (this.store.isCompanionRemoving(companion.id) || !state.companions.some(item => item.id === companion.id)) throw new Error('伙伴正在删除或已不存在')
+      const concurrent=state.sessions.find(item=>item.companionId===companion.id&&item.kind==='local'&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))
+      if(concurrent){Object.assign(route,concurrent);return}
+      // If there was no local conversation, continue the newest existing channel
+      // conversation. Do not concatenate unrelated historical transcripts.
+      if(!existing) {
+        const previous=state.sessions.filter(item=>item.companionId===companion.id&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds)).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)[0]
+        if(previous){route.sessionId=previous.sessionId;if(previous.cwd)route.cwd=previous.cwd}
+      }
       state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
       state.sessions.push(route)
     })
@@ -560,6 +568,7 @@ export class PartnerAgentRuntime {
   async resetChannel(channelId: string): Promise<void> {
     const sessions = this.store.snapshot().sessions.filter(item => item.channelId === channelId)
     await Promise.all(sessions.map(async item => {
+      if(this.store.snapshot().sessions.some(other=>other.channelId!==channelId&&other.sessionId===item.sessionId))return
       const handle = this.handles.get(item.sessionId)
       this.handles.delete(item.sessionId)
       this.profileVersions.delete(item.sessionId)
@@ -599,7 +608,7 @@ export class PartnerAgentRuntime {
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
     const inbound = await this.persistInbound(session, message)
-    const context = await this.memory?.recallContext(companion.id, memoryScope(channelId, userId), inbound.query, 12).catch(() => undefined)
+    const context = await this.memory?.recallContext(companion.id, memoryScope('@local',`owner:${companion.id}`), inbound.query, 12).catch(() => undefined)
     if (context) this.injectProfileUpdate(agent, session.sessionId, context.profile)
     const recalled = context?.relevant ?? []
     if (recalled.length > 0 || context?.scenes?.length || context?.history?.length) agent.inject(createUserMessage({
@@ -619,8 +628,7 @@ export class PartnerAgentRuntime {
     await agent.whenIdle()
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
     await this.store.update(state => {
-      const target = state.sessions.find(item => item.id === session.id)
-      if (target) target.lastMessageAt = Date.now()
+      for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()
     })
     if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     return prepareChannelReply(response, session.cwd ?? this.defaultCwd)
@@ -651,8 +659,9 @@ export class PartnerAgentRuntime {
   }
 
   private async ensureSession(companion: Companion, channelId: string, userId: string): Promise<ChannelSession> {
+    const primary=await this.ensureLocalSessionRecord(companion.id)
     const existing = this.store.snapshot().sessions.find(item => item.channelId === channelId && item.userId === userId)
-    if (existing !== undefined && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) return existing
+    if (existing !== undefined && existing.sessionId===primary.sessionId && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) return existing
     const now = Date.now()
     const session: ChannelSession = {
       id: `route-${randomUUID()}`,
@@ -660,8 +669,8 @@ export class PartnerAgentRuntime {
       channelId,
       userId,
       companionId: companion.id,
-      sessionId: `session-${randomUUID()}`,
-      cwd: partnerCwd(this.defaultCwd, companion.id),
+      sessionId: primary.sessionId,
+      cwd: primary.cwd??partnerCwd(this.defaultCwd, companion.id),
       lastMessageAt: now,
     }
     await this.store.update(state => {

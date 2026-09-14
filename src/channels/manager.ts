@@ -5,6 +5,8 @@ import { PartnerStore } from '../store.js'
 import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
+import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
+import { notificationRoute } from './notification-route.js'
 import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
@@ -23,6 +25,9 @@ import { prepareChannelReply } from './outbound-media.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
 type ChannelContext = Context & { settings: SettingsProvider }
+class DirectDeliveryError extends Error {
+  constructor() { super('消息处理或发送未完成，渠道已暂停。请在 DSH 查看执行结果后重连；同一消息不会自动重复执行。') }
+}
 
 interface PendingQuestion {
   sessionId: string
@@ -70,7 +75,10 @@ export class ChannelManager {
   }
 
   async startEnabled(): Promise<void> {
-    for (const channel of this.store.snapshot().channels) if (channel.enabled) await this.start(channel.id)
+    for (const channel of this.store.snapshot().channels) if (channel.enabled) {
+      try { await this.start(channel.id) }
+      catch { this.runtime.set(channel.id,{status:'error',lastError:'渠道启动失败，请检查凭据和配置'}) }
+    }
   }
 
   async start(channelId: string): Promise<void> {
@@ -79,7 +87,9 @@ export class ChannelManager {
     const credential = await this.credentials.read(channelId)
     const controller = new AbortController()
     this.runtime.set(channelId, { status: 'starting' })
-    const task = this.pollLoop(channel, new WeixinApi(credential.baseUrl, credential.botToken), controller.signal)
+    const task = (channel.platform && channel.platform !== 'weixin'
+      ? this.directLoop(channel, controller.signal)
+      : this.pollLoop(channel, new WeixinApi(credential.baseUrl, credential.botToken), controller.signal))
       .catch(error => {
         if (!controller.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error)
@@ -140,7 +150,7 @@ export class ChannelManager {
     if(!channel.enabled)throw new Error('渠道已停用')
     if(this.store.snapshot().pairings.find(p=>p.channelId===route.channelId&&p.userId===route.userId)?.status!=='approved')throw new Error('渠道联系人尚未批准')
     const credential=await this.credentials.read(route.channelId)
-    await new WeixinApi(credential.baseUrl,credential.botToken).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
+    await this.sender(channel, credential, route.userId).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
   }
 
   async notifyTaskResult(task: BoardTask): Promise<void> {
@@ -162,7 +172,7 @@ export class ChannelManager {
     const summary = stage ? item.stageReport?.summary : item.summary
     if (!summary || !item.creatorSessionId) return
     // A manually created board requirement must not leak into an unrelated chat.
-    const route = this.store.snapshot().sessions.find(route => route.sessionId === item.creatorSessionId)
+    const route = this.routeForSession(item.creatorSessionId)
     if (!route || route.kind === 'local') return
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
     const delivery = await prepareTaskResultDelivery({ id: stage ? `${item.id}-stage-${item.stageReport!.key.slice(0, 16)}` : item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: summary }, cwd)
@@ -180,7 +190,7 @@ export class ChannelManager {
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
-    const route = this.store.snapshot().sessions.find(item => item.sessionId === session.id)
+    const route = this.routeForSession(session.id)
     if (route === undefined || route.kind === 'local') return
     const concernNotice = concernCreatedNoticeFromEvent(event)
     if (concernNotice !== undefined) {
@@ -211,14 +221,23 @@ export class ChannelManager {
     try { await current } finally { if (this.outboundQueues.get(key) === current) this.outboundQueues.delete(key) }
   }
 
+  private routeForSession(sessionId:string):ChannelSession|undefined {
+    const state=this.store.snapshot()
+    const candidates=state.sessions.filter(item=>item.sessionId===sessionId)
+    const inbound=(route:ChannelSession)=>state.pairings.find(p=>p.channelId===route.channelId&&p.userId===route.userId)?.lastInboundAt??0
+    return candidates.filter(item=>item.kind==='channel').sort((a,b)=>inbound(b)-inbound(a))[0]??candidates[0]
+  }
+
   private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply): Promise<void> {
+    const target = notificationRoute(this.store.snapshot(),channelId,userId)
+    channelId = target.channelId; userId = target.userId
     const channel = requiredChannel(this.store, channelId)
     if (!channel.enabled) throw new Error('微信渠道已停用')
     const pairing = this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)
     if (pairing?.status !== 'approved') throw new Error('微信联系人尚未批准')
     const credential = await this.credentials.read(channelId)
     const token = this.contextTokens.get(`${channelId}:${userId}`)
-    const api = new WeixinApi(credential.baseUrl, credential.botToken)
+    const api = this.sender(channel, credential, userId)
     const signal = AbortSignal.timeout(30_000)
     await api.sendText(userId, reply.text, token, signal)
     for (const attachment of reply.attachments) await api.sendAttachment(userId, attachment, token, signal)
@@ -286,6 +305,7 @@ export class ChannelManager {
       return
     }
     const route = this.store.snapshot().sessions.find(item => item.channelId === channel.id && item.userId === userId)
+    await this.markInbound(channel.id,userId)
     if (route !== undefined && text && await this.answerPendingQuestion(route.sessionId, text, channel, api, userId, signal)) {
       await this.rememberReceipt(receipt)
       return
@@ -331,6 +351,9 @@ export class ChannelManager {
     const state = this.store.snapshot()
     const current = state.sessions.find(item => item.id === route.id && item.sessionId === route.sessionId)
     const channel = state.channels.find(item => item.id === route.channelId)
+    // Direct connectors currently serialize reads with replies; interactive questions
+    // stay in DSH rather than waiting for an answer on a blocked receive loop.
+    if (channel?.platform && channel.platform !== 'weixin') return next()
     const pairing = state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
     if (current === undefined || channel === undefined || !channel.enabled || pairing?.status !== 'approved') return next()
 
@@ -354,7 +377,7 @@ export class ChannelManager {
     this.pendingQuestions.set(route.sessionId, pending)
     try {
       const credential = await this.credentials.read(channel.id)
-      const api = new WeixinApi(credential.baseUrl, credential.botToken)
+      const api = this.sender(channel, credential, route.userId)
       await api.sendText(route.userId, renderQuestions(request.questions), this.contextTokens.get(`${channel.id}:${route.userId}`), request.signal ?? AbortSignal.timeout(30_000))
     } catch (error) {
       this.clearPendingQuestion(pending)
@@ -369,7 +392,7 @@ export class ChannelManager {
     }
   }
 
-  private async answerPendingQuestion(sessionId: string, text: string, channel: WeixinChannel, api: WeixinApi, userId: string, signal: AbortSignal): Promise<boolean> {
+  private async answerPendingQuestion(sessionId: string, text: string, channel: WeixinChannel, api: ChannelSender, userId: string, signal: AbortSignal): Promise<boolean> {
     const pending = this.pendingQuestions.get(sessionId)
     if (pending === undefined) return false
     const answer = answerQuestions(pending.questions, text)
@@ -388,6 +411,89 @@ export class ChannelManager {
       state.recentReceipts.push(receipt)
       if (state.recentReceipts.length > 800) state.recentReceipts.splice(0, state.recentReceipts.length - 800)
     })
+  }
+
+  private sender(channel: WeixinChannel, credential: {baseUrl: string; botToken: string}, userId: string): ChannelSender {
+    if (!channel.platform || channel.platform === 'weixin') return new WeixinApi(credential.baseUrl, credential.botToken)
+    if (!channel.direct) throw new Error('渠道会话配置缺失')
+    const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id&&p.userId===userId&&p.status==='approved')
+    const targetId=channel.direct.targetId||pairing?.directTargetId
+    if(!targetId)throw new Error('联系人尚未绑定私聊会话')
+    return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId||userId})
+  }
+
+  /** Independent connector loop. Cursor is persisted only after receipt handoff. */
+  private async directLoop(channel: WeixinChannel, signal: AbortSignal): Promise<void> {
+    if (!channel.direct || !channel.platform || channel.platform==='weixin') throw new Error('渠道配置无效')
+    const credential = await this.credentials.read(channel.id)
+    const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
+    let cursor=channel.direct.cursor
+    let failures=0
+    while(!signal.aborted) {
+      try {
+        const batch=await api.poll(cursor,signal)
+        if(signal.aborted)break
+        this.runtime.set(channel.id,{status:'running'})
+        for(const message of batch.messages) {
+          if(signal.aborted)break
+          try {
+            const targetApi=message.targetId?new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:message.targetId},credential.botToken,{accountId:channel.accountId,peerId:message.sender}):api
+            await targetApi.validate(signal); await this.handleDirect(channel,targetApi,message,signal)
+          }
+          catch { throw new DirectDeliveryError() }
+        }
+        if(signal.aborted)break
+        await this.store.update(state=>{
+          const current=state.channels.find(c=>c.id===channel.id && c.enabled)
+          if(current?.direct)current.direct.cursor=batch.cursor
+        })
+        cursor=batch.cursor;failures=0
+        await delay(channel.platform==='mattermost'?10_000:1000,signal)
+      } catch(error) {
+        if(signal.aborted)break
+        if(error instanceof DirectDeliveryError || (error instanceof ChannelHttpError && [401,403].includes(error.status)))throw error
+        if(++failures>=6)throw error
+        const reason=error instanceof ChannelHttpError?`HTTP ${error.status}`:error instanceof Error&&error.message==='fetch failed'?'网络连接失败，请检查地址、端口和容器 DNS':error instanceof Error&&error.name==='TimeoutError'?'服务器请求超时':error instanceof Error?error.message:'连接异常'
+        this.runtime.set(channel.id,{status:'starting',lastError:`${reason}（重试 ${failures}/6）`})
+        await delay(Math.max(error instanceof ChannelHttpError ? error.retryAfterMs : 0,Math.min(60_000,2000*2**failures)),signal)
+      }
+    }
+  }
+
+  private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal): Promise<void> {
+    const receipt=`${channel.id}:${event.id}`
+    if(this.store.snapshot().recentReceipts.includes(receipt))return
+    const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id && p.userId===event.sender)
+    // A different room must not silently inherit the contact's existing grant.
+    if(pairing?.directTargetId&&event.targetId&&pairing.directTargetId!==event.targetId){await this.rememberReceipt(receipt);return}
+    if(!pairing) {
+      const now=Date.now()
+      const pairingCode=randomBytes(4).toString('hex').toUpperCase()
+      await this.store.update(state=>{
+        if(state.pairings.filter(p=>p.channelId===channel.id).length>=100)throw new Error('配对请求已达上限，请在面板清理')
+        if(!state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender))state.pairings.push({id:`pairing-${randomBytes(10).toString('hex')}`,channelId:channel.id,userId:event.sender,displayName:event.sender,directTargetId:event.targetId||channel.direct?.targetId||'',pairingCode,status:'pending',createdAt:now,updatedAt:now})
+      })
+      await api.sendText(event.sender,`配对码：${pairingCode}\n请在「伙伴 → 渠道 → 配置」核对该码并批准联系人，然后重新发送消息。未批准前不会交给伙伴处理。`,undefined,signal)
+    } else if(pairing.status==='approved') {
+      await this.markInbound(channel.id,event.sender)
+      if(!event.text)await api.sendText(event.sender,'此渠道首版仅支持文本；附件未交给伙伴处理。',undefined,signal)
+      else {
+        // Claim before starting tools. A delivery failure must not execute the same
+        // user command twice on reconnect; its result remains in the DSH session.
+        await this.rememberReceipt(receipt)
+        const companion=requiredCompanion(this.store,channel.companionId)
+        const reply=await this.agents.reply(companion,channel.id,event.sender,{text:event.text,attachments:[]})
+        signal.throwIfAborted()
+        const current=this.store.snapshot()
+        if(!current.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)||!current.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'))throw new Error('渠道或联系人授权已撤销，取消回复')
+        await api.sendText(event.sender,reply.text+(reply.attachments.length?'\n\n附件未交付：此渠道首版只发送文本，请在 DSH 工作区查看文件。':''),undefined,signal)
+      }
+    }
+    await this.rememberReceipt(receipt)
+  }
+
+  private async markInbound(channelId: string, userId: string): Promise<void> {
+    await this.store.update(state=>{const p=state.pairings.find(p=>p.channelId===channelId&&p.userId===userId&&p.status==='approved');if(p)p.lastInboundAt=Date.now()})
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "1.14.2",
-  "description": "Long-lived AI companions with WeChat channel routing for DeepSeek Harness",
+  "version": "1.15.0",
+  "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -36,6 +36,8 @@
     "docs/releases/1.14.0.md",
     "docs/releases/1.14.1.md",
     "docs/releases/1.14.2.md",
+    "docs/releases/1.15.0.md",
+    "docs/direct-channels.md",
     "docs/THIRD_PARTY_LICENSES.md",
     "README.md",
     "LICENSE"

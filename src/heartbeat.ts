@@ -181,6 +181,7 @@ export class HeartbeatScheduler {
           if (single.error || single.blocked?.includes(item.id)) {
             execution.blocked!.push(item.id)
             failures.push(`${item.subject}：${single.error || single.blockedReasons?.[item.id] || '来源核验未完成'}`)
+            await this.concerns.deferFailedCheck(item, Date.now() + policy.intervalMinutes * 60_000)
             continue
           }
           // Commit each concern before starting the next; interrupted batches resume only due work.
@@ -191,23 +192,22 @@ export class HeartbeatScheduler {
         } catch (error) {
           execution.blocked!.push(item.id)
           failures.push(`${item.subject}：${message(error)}`)
+          await this.concerns.deferFailedCheck(item, Date.now() + policy.intervalMinutes * 60_000)
         }
       }
       execution.observations = recorded.observations
       // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
-      if (failures.length) {
-        throw new Error(`检查受阻：${failures.join('；')}。已完成的关注结果已保存，不重复检查；未送达通知会补发。`)
-      }
+      const partialError = failures.length ? `部分关注受阻：${failures.join('；')}。失败项独立等待重试，其他关注的结果和通知正常处理。` : undefined
       if (recorded.notifications.length === 0) {
-        await this.saveState(companion, successState(existing, companion, now, today, sentCount, false))
-        await this.recordActivity(companion, route, execution, 'quiet')
-        return { checked: true, sent: false, reason: recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化' }
+        await this.saveState(companion, { ...successState(existing, companion, now, today, sentCount, false), ...(partialError ? {lastError: partialError} : {}) })
+        await this.recordActivity(companion, route, execution, partialError ? 'failed' : 'quiet', partialError)
+        return { checked: true, sent: false, reason: partialError ?? (recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化') }
       }
       await this.channels.sendProactive(route.channelId, route.userId, notificationMessage(recorded.notifications))
       await this.concerns.markMentioned(companion.id, recorded.notifications.map(item => item.id))
-      await this.saveState(companion, successState(existing, companion, now, today, sentCount + 1, true))
-      await this.recordActivity(companion, route, execution, 'notified')
-      return { checked: true, sent: true }
+      await this.saveState(companion, { ...successState(existing, companion, now, today, sentCount + 1, true), ...(partialError ? {lastError: partialError} : {}) })
+      await this.recordActivity(companion, route, execution, 'notified', partialError)
+      return { checked: true, sent: true, ...(partialError ? {reason: partialError} : {}) }
     } catch (error) {
       const failures = existing.consecutiveFailures + 1
       await this.saveState(companion, {

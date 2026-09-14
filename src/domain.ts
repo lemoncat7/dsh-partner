@@ -56,6 +56,9 @@ export interface HeartbeatRuntimeState {
 }
 
 export interface WeixinChannel {
+  /** Missing platform is legacy WeChat; IDs and credential keys stay unchanged. */
+  platform?: 'weixin' | 'matrix' | 'mattermost'
+  direct?: { baseUrl: string; targetId: string; peerId: string; cursor?: string }
   id: string
   companionId: string
   accountId: string
@@ -66,6 +69,11 @@ export interface WeixinChannel {
 }
 
 export interface PairingRequest {
+  directTargetId?: string
+  pairingCode?: string
+  lastInboundAt?: number
+  contactKey?: string
+  deliveryTarget?: {channelId: string; userId: string}
   id: string
   channelId: string
   userId: string
