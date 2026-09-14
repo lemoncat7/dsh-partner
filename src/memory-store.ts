@@ -18,7 +18,9 @@ type SqlRow = Record<string, unknown>
 export class PartnerMemoryStore {
   private readonly writes = new Map<string, Promise<void>>()
 
-  constructor(private readonly root: string, private readonly timeZone = 'Asia/Shanghai') {}
+  private frozen = false
+  constructor(private readonly root: string, private readonly timeZone = 'Asia/Shanghai', private readonly privateRoot?: (id: string) => string) {}
+  async freeze(): Promise<void> { this.frozen = true; await Promise.allSettled(this.writes.values()) }
 
   day(at: number): string { return localDay(at, this.timeZone) }
 
@@ -412,6 +414,7 @@ export class PartnerMemoryStore {
   }
 
   private async open(companionId: string): Promise<DatabaseSync> {
+    if (this.frozen) throw new Error('伙伴数据迁移中')
     await mkdir(this.memoryRoot(companionId), { recursive: true, mode: 0o700 })
     const database = new DatabaseSync(this.databasePath(companionId))
     try {
@@ -540,12 +543,13 @@ export class PartnerMemoryStore {
     return entries.filter(item => item.isDirectory()).map(item => join(root, item.name))
   }
 
-  private memoryRoot(companionId: string): string { return join(this.root, 'partners', companionId, 'memory') }
+  private memoryRoot(companionId: string): string { return join(this.privateRoot?.(companionId) ?? join(this.root, 'partners', companionId), 'memory') }
   private databasePath(companionId: string): string { return join(this.memoryRoot(companionId), 'memory.sqlite') }
   private scopeDirectory(companionId: string, scopeId: string): string { return join(this.memoryRoot(companionId), 'scopes', createHash('sha256').update(scopeId).digest('hex').slice(0, 24)) }
 
   private async serial(key: string, task: () => Promise<void>): Promise<void> { await this.serialValue(key, task) }
   private async serialValue<T>(key: string, task: () => Promise<T>): Promise<T> {
+    if (this.frozen) throw new Error('伙伴数据迁移中')
     const previous = this.writes.get(key) ?? Promise.resolve()
     let value!: T
     const current = previous.catch(() => {}).then(async () => { value = await task() })

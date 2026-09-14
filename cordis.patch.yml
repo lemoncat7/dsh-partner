@@ -3,6 +3,7 @@
       name: '@lemoncat7/dsh-partner'
       config:
         statePath: !!js dshHomePath('partner/state.json')
+        storageVersion: 0
         exposeWeb: true
         apiPrefix: /partner-local/v1
         defaultCwd: ''

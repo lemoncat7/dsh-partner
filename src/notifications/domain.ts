@@ -1,6 +1,7 @@
 export interface PartnerNotice {
   id: string
-  kind: 'reply' | 'task' | 'schedule'
+  kind: 'reply' | 'task' | 'schedule' | 'system'
+  action?: 'storage-migration'
   companionId: string
   companionName: string
   title: string

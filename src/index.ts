@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -36,6 +36,12 @@ import { PartnerInboxStore } from './notifications/store.js'
 import { PartnerNoticeService } from './notifications/service.js'
 import { AttachmentDeliveryService } from './attachments/service.js'
 import { attachmentTool } from './attachments/tool.js'
+import { StorageCoordinator } from './storage/coordinator.js'
+import { storageLayout, TARGET_STORAGE_VERSION } from './storage/layout.js'
+import { syncStorageNotice } from './storage/notice.js'
+import { readStorageConfig } from './storage/bootstrap.js'
+import { SplitStatePersistence } from './storage/split-state.js'
+import { acquireStorageLease } from './storage/lease.js'
 
 export const Config = ConfigSchema
 export type Config = PartnerConfig
@@ -57,13 +63,26 @@ export function apply(context: Context, config: PartnerConfig): void {
   const ctx = context as RuntimeContext
   const resolved = resolveConfig(config)
   ctx.effect(async () => {
-    const store = await PartnerStore.open(resolved.statePath)
-    const inbox = await PartnerInboxStore.open(join(dirname(resolved.statePath), 'partner-inbox.sqlite'))
+    const releaseStorageLease=await acquireStorageLease(resolved.statePath)
+    try {
+    const storageConfig = await readStorageConfig(resolved.statePath,resolved.defaultCwd,resolved.storageVersion ?? 0)
+    const layout = storageLayout(resolve(resolved.statePath),resolve(resolved.defaultCwd))
+    const migrated = storageConfig.storageVersion === 1
+    const privateRoot = migrated ? layout.privateRoot : undefined
+    const store = migrated ? await PartnerStore.openSplit(new SplitStatePersistence(layout.publicRoot,layout.privateRoot)) : await PartnerStore.open(resolved.statePath)
+    const storage = new StorageCoordinator(resolved.statePath,resolved.defaultCwd,storageConfig.storageVersion,{
+      snapshot:()=>store.snapshot(),
+      busy:()=>store.snapshot().companions.some(c=>agents.isCompanionBusy(c.id)||heartbeat.isRunning(c.id)||dailyReview.isRunning(c.id))||store.snapshot().executionRuns.some(run=>run.status==='running'||run.status==='queued'),
+      quiesce:async()=>{await closeRuntime(false);await memory.freeze();await concerns.freeze();await store.freeze();notices.close();inbox.close();await deliveries.freeze()},
+      restart:()=>ctx.fiber.restart(),report:error=>ctx.logger.warn(`存储迁移后重载失败：${String(error)}`),
+    })
+    const inbox = migrated ? await PartnerInboxStore.openPartitioned(join(layout.publicRoot,'indexes','inbox.sqlite'),layout.privateRoot) : await PartnerInboxStore.open(join(dirname(resolved.statePath), 'partner-inbox.sqlite'))
     const notices = new PartnerNoticeService(store, inbox, error => ctx.logger.warn(`dsh-partner inbox: ${error instanceof Error ? error.message : String(error)}`))
     ctx.effect(() => () => { notices.close(); inbox.close() }, 'dsh-partner.inbox')
+    syncStorageNotice(inbox, storageConfig.storageVersion, TARGET_STORAGE_VERSION)
     const credentials = new PartnerCredentialVault(ctx.credentials)
-    const memory = new PartnerMemoryStore(resolved.defaultCwd, resolved.timeZone)
-    const concerns = new PartnerConcernStore(resolved.defaultCwd)
+    const memory = new PartnerMemoryStore(resolved.defaultCwd, resolved.timeZone,privateRoot)
+    const concerns = new PartnerConcernStore(resolved.defaultCwd,privateRoot)
     for (const companion of store.snapshot().companions) {
       const migrated = await memory.migrateLegacy(companion.id)
       if (migrated > 0) ctx.logger.info(`dsh-partner: migrated ${migrated} legacy memory records for ${companion.id}`)
@@ -81,7 +100,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       for (const companion of state.companions) delete companion.automation.heartbeat.legacyFocus
     })
     const reflection = new MemoryReflectionService(ctx, memory, concerns)
-    const skills = new SkillService(store, new SkillRepository(join(resolved.defaultCwd, 'partner-system', 'skills')))
+    const skills = new SkillService(store, new SkillRepository(migrated?join(layout.publicRoot,'skills'):join(resolved.defaultCwd, 'partner-system', 'skills')))
     await skills.initialize()
     const tasks = new TaskBoardService(store)
     const requirements = new RequirementService(store)
@@ -113,7 +132,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       }),
       warn: message => ctx.logger.warn(`dsh-partner: ${message}`),
     })
-    const deliveries = await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
+    const deliveries = migrated ? await AttachmentDeliveryService.openPartitioned(join(layout.publicRoot,'indexes','attachments'),layout.privateRoot) : await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -147,11 +166,12 @@ export function apply(context: Context, config: PartnerConfig): void {
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, agents, resolved.timeZone)
     const login = new WeixinLoginManager()
     let disposeApi: (() => void) | undefined
+    let closing:Promise<void>|undefined
     const mountApi = (runtime: RuntimeContext): void => {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -163,23 +183,23 @@ export function apply(context: Context, config: PartnerConfig): void {
     scheduler.start()
     requirementWorker.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
-    return async () => {
+    function closeRuntime(removeApi=true):Promise<void> {
+      if(removeApi)disposeApi?.()
+      return closing ??= (async()=>{
       collaboration.beginShutdown()
       requirementWorker.beginShutdown()
-      disposeApi?.()
       disposeSessionObserver()
       disposeConcernTool()
       reflection.close()
-      await memoryWorker.close()
-      await scheduler.close()
-      await heartbeat.close()
-      await dailyReview.close()
-      await channels.close()
+      await Promise.all([memoryWorker.close(),scheduler.close(),heartbeat.close(),dailyReview.close(),channels.close()])
       await agents.close()
       await executor.close()
       await collaboration.close()
       await requirementWorker.close()
+      })()
     }
+    return async () => {try{await closeRuntime()}finally{releaseStorageLease()}}
+    }catch(error){releaseStorageLease();throw error}
   }, 'dsh-partner.runtime')
 }
 

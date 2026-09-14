@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFocus, type PartnerState } from './domain.js'
 import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 import type { CompanionCapability } from './capabilities.js'
+import type { SplitStatePersistence } from './storage/split-state.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -11,9 +12,15 @@ export class PartnerStore {
   private readonly removingCompanions = new Set<string>()
   private readonly listeners = new Set<{ notify(next: PartnerState, previous: PartnerState): void; onError(error: unknown): void }>()
 
-  private constructor(private readonly path: string, state: PartnerState) {
+  private frozen = false
+  private constructor(private readonly path: string, state: PartnerState, private readonly split?: SplitStatePersistence) {
     this.state = state
   }
+
+  static async openSplit(split: SplitStatePersistence): Promise<PartnerStore> {
+    return new PartnerStore('', parseState(await split.read()), split)
+  }
+  async freeze(): Promise<void> { this.frozen = true; await this.writes }
 
   static async open(path: string): Promise<PartnerStore> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
@@ -60,6 +67,7 @@ export class PartnerStore {
   }
 
   async update(change: (draft: PartnerState) => void): Promise<PartnerState> {
+    if (this.frozen) throw new Error('伙伴数据迁移中，暂不可写入')
     let resolveResult!: (value: PartnerState) => void
     let rejectResult!: (reason: unknown) => void
     const result = new Promise<PartnerState>((resolve, reject) => { resolveResult = resolve; rejectResult = reject })
@@ -80,6 +88,7 @@ export class PartnerStore {
   }
 
   private async persist(state: PartnerState): Promise<void> {
+    if (this.split) return this.split.write(state)
     const temporary = `${this.path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
     await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
     const file = await open(temporary, 'r+')

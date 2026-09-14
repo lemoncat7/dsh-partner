@@ -40,7 +40,9 @@ export interface PendingConcernNotice {
 export class PartnerConcernStore {
   private readonly writes = new Map<string, Promise<void>>()
 
-  constructor(private readonly root: string) {}
+  private frozen = false
+  constructor(private readonly root: string, private readonly privateRoot?: (id: string) => string) {}
+  async freeze(): Promise<void> { this.frozen = true; await Promise.allSettled(this.writes.values()) }
 
   async migrateLegacy(companionId: string, seeds: LegacyConcernSeed[]): Promise<boolean> {
     await this.serial(this.path(companionId), async () => {
@@ -462,7 +464,7 @@ export class PartnerConcernStore {
   }
 
   async clear(companionId: string): Promise<void> {
-    await this.serial(this.path(companionId), () => rm(join(this.root, 'partners', companionId, 'concerns'), { recursive: true, force: true }))
+    await this.serial(this.path(companionId), () => rm(this.directory(companionId), { recursive: true, force: true }))
   }
 
   private upsert(database: DatabaseSync, companionId: string, scopeId: string, candidate: ConcernCandidate, origin: ConcernOrigin, at: number): PartnerConcern | undefined {
@@ -583,7 +585,8 @@ export class PartnerConcernStore {
   }
 
   private async open(companionId: string): Promise<DatabaseSync> {
-    const directory = join(this.root, 'partners', companionId, 'concerns')
+    if (this.frozen) throw new Error('伙伴数据迁移中')
+    const directory = this.directory(companionId)
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const database = new DatabaseSync(this.path(companionId))
     database.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
@@ -630,9 +633,11 @@ export class PartnerConcernStore {
     return database
   }
 
-  private path(companionId: string): string { return join(this.root, 'partners', companionId, 'concerns', 'concerns.sqlite') }
+  private directory(companionId: string): string { return join(this.privateRoot?.(companionId) ?? join(this.root, 'partners', companionId), 'concerns') }
+  private path(companionId: string): string { return join(this.directory(companionId), 'concerns.sqlite') }
   private async serial(key: string, task: () => Promise<void>): Promise<void> { await this.serialValue(key, task) }
   private async serialValue<T>(key: string, task: () => Promise<T>): Promise<T> {
+    if (this.frozen) throw new Error('伙伴数据迁移中')
     const previous = this.writes.get(key) ?? Promise.resolve()
     let value!: T
     const current = previous.catch(() => {}).then(async () => { value = await task() })

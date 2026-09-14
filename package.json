@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "1.16.2",
+  "version": "2.0.0",
   "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -31,6 +31,8 @@
     "lib/**/*.map",
     "cordis.patch.yml",
     "docs/architecture.md",
+    "docs/storage-migration.md",
+    "docs/releases/2.0.0.md",
     "docs/memory-quality.md",
     "docs/releases/1.12.0.md",
     "docs/releases/1.14.0.md",

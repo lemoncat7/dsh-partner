@@ -7,7 +7,7 @@ import { api } from './client-api.js'
 import { registerMainPanel } from './main-panel-compat.js'
 import { activatePluginWorkspace } from './workspace-ownership.js'
 
-export interface PartnerDestination { page: 'home' | 'board' | 'schedules'; taskId?: string }
+export interface PartnerDestination { page: 'home' | 'board' | 'schedules' | 'general'; taskId?: string }
 export interface PartnerController {
   open(companionId?: string, destination?: PartnerDestination): void
   destination(): PartnerDestination | undefined

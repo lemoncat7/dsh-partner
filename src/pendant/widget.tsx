@@ -10,6 +10,7 @@ import { usePendantSettings } from './use-settings.js'
 import type { PendantSettings } from './settings.js'
 
 function messageLabel(notice: PartnerNotice): string {
+  if (notice.kind === 'system') return '需要升级迁移'
   if (notice.kind === 'reply') return '有新回复'
   if (notice.kind === 'task' && notice.title.startsWith('遇到阻塞 · ')) return '任务受阻'
   if (notice.kind === 'schedule' && notice.title.startsWith('未完成 · ')) return '尚未完成'
@@ -63,7 +64,8 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
   const visit = async (item: PartnerNotice): Promise<void> => {
     setNavigationError('')
     try {
-      if (item.routeId && item.sessionId) await controller.openSession(item.routeId, item.sessionId)
+      if (item.kind === 'system' && item.action === 'storage-migration') controller.open(undefined, { page: 'general' })
+      else if (item.routeId && item.sessionId) await controller.openSession(item.routeId, item.sessionId)
       else controller.open(item.companionId, { page: item.kind === 'task' ? 'board' : item.kind === 'schedule' ? 'schedules' : 'home', ...(item.taskId ? { taskId: item.taskId } : {}) })
       close()
     } catch (reason) { setNavigationError(reason instanceof Error ? reason.message : '无法打开来源') }

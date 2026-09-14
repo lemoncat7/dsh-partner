@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, mkdirSync, chmodSync, existsSync } from 'node:fs'
 import { chmod, mkdir, open, realpath, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -15,7 +15,41 @@ const MAX_STORED_BYTES = 512 * 1024 * 1024
 /** Explicit immutable deliveries, separate from mutable workspace files and board state. */
 export class AttachmentDeliveryService {
   private queues = new Map<string, Promise<unknown>>()
-  private constructor(private readonly root: string, private readonly db: DatabaseSync) {}
+  private closed = false
+  private shards = new Map<string, DatabaseSync>()
+  releaseOwner(id:string):void {this.shards.get(id)?.close();this.shards.delete(id)}
+  private constructor(private readonly root: string, private readonly db: DatabaseSync, private readonly privateRoot?: (id: string) => string) {}
+  static async openPartitioned(root: string, privateRoot: (id: string) => string): Promise<AttachmentDeliveryService> {
+    await mkdir(root,{recursive:true,mode:0o700})
+    const path=join(root,'index.sqlite'),db=new DatabaseSync(path)
+    db.exec('CREATE TABLE IF NOT EXISTS owners(id TEXT PRIMARY KEY, companion_id TEXT NOT NULL)')
+    await chmod(path,0o600)
+    return new AttachmentDeliveryService(root,db,privateRoot)
+  }
+  private directory(owner: string): string { return this.privateRoot ? join(this.privateRoot(owner),'deliveries') : this.root }
+  private database(owner: string): DatabaseSync {
+    if(this.closed)throw new Error('附件存储已关闭')
+    if(!this.privateRoot)return this.db
+    const cached=this.shards.get(owner);if(cached)return cached
+    const directory=this.directory(owner);mkdirSync(directory,{recursive:true,mode:0o700})
+    const path=join(directory,'deliveries.sqlite'),db=new DatabaseSync(path);chmodSync(path,0o600)
+    db.exec('PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY, payload TEXT NOT NULL, size INTEGER NOT NULL)')
+    this.shards.set(owner,db);return db
+  }
+  private existingDatabase(owner:string):DatabaseSync|undefined {
+    if(this.privateRoot&&!existsSync(join(this.directory(owner),'deliveries.sqlite'))) {
+      this.shards.get(owner)?.close();this.shards.delete(owner)
+      this.db.prepare('DELETE FROM owners WHERE companion_id=?').run(owner)
+      return undefined
+    }
+    return this.database(owner)
+  }
+  async importExisting(item: AttachmentDelivery, data: Buffer): Promise<void> {
+    if(!/^[a-f0-9]{64}$/.test(item.id)||data.length!==item.size||createHash('sha256').update(data).digest('hex')!==item.hash)throw new Error('附件迁移校验失败')
+    this.database(item.companionId)
+    await writeFile(join(this.directory(item.companionId),item.id),data,{flag:'wx',mode:0o600})
+    this.save(item)
+  }
   static async open(root: string): Promise<AttachmentDeliveryService> {
     await mkdir(root, { recursive: true, mode: 0o700 })
     const path = join(root, 'deliveries.sqlite'), db = new DatabaseSync(path)
@@ -32,11 +66,15 @@ export class AttachmentDeliveryService {
   }
   get(id: string): AttachmentDelivery | undefined {
     if (!/^[a-f0-9]{64}$/.test(id)) return undefined
-    const row = this.db.prepare('SELECT payload FROM deliveries WHERE id = ?').get(id)
+    if(this.closed)throw new Error('附件存储已关闭')
+    const owner=this.privateRoot ? this.db.prepare('SELECT companion_id FROM owners WHERE id = ?').get(id) : undefined
+    if(this.privateRoot&&!owner)return undefined
+    const row = this.existingDatabase(String(owner?.companion_id ?? ''))?.prepare('SELECT payload FROM deliveries WHERE id = ?').get(id)
     return row ? JSON.parse(String(row.payload)) as AttachmentDelivery : undefined
   }
   private save(item: AttachmentDelivery): void {
-    this.db.prepare('INSERT OR REPLACE INTO deliveries(id,payload,size) VALUES (?,?,?)').run(item.id, JSON.stringify(item), item.size)
+    this.database(item.companionId).prepare('INSERT OR REPLACE INTO deliveries(id,payload,size) VALUES (?,?,?)').run(item.id, JSON.stringify(item), item.size)
+    if(this.privateRoot)this.db.prepare('INSERT OR REPLACE INTO owners(id,companion_id) VALUES (?,?)').run(item.id,item.companionId)
   }
   async prepare(input: { companionId: string; sessionId: string; turn: number; cwd: string; path: string; channel: boolean }, signal: AbortSignal): Promise<AttachmentDelivery> {
     signal.throwIfAborted()
@@ -66,16 +104,19 @@ export class AttachmentDeliveryService {
     const id = createHash('sha256').update(JSON.stringify([input.companionId,input.sessionId,input.turn,file.name,hash])).digest('hex')
     const existing = this.get(id)
     if (existing) return existing
-    const used = Number(this.db.prepare('SELECT COALESCE(SUM(size),0) AS total FROM deliveries').get()!.total)
+    const owners=this.privateRoot ? this.db.prepare('SELECT DISTINCT companion_id FROM owners').all().map(row=>String(row.companion_id)) : ['']
+    const used = owners.reduce((sum,owner)=>sum+Number(this.existingDatabase(owner)?.prepare('SELECT COALESCE(SUM(size),0) AS total FROM deliveries').get()!.total ?? 0),0)
     if (used + data.length > MAX_STORED_BYTES) throw new Error('附件交付存储已达到 512 MB，请先由管理员清理历史交付；未发送文件')
-    await writeFile(join(this.root, id), data, { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+    this.database(input.companionId)
+    await writeFile(join(this.directory(input.companionId), id), data, { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error })
     const item: AttachmentDelivery = { id, companionId: input.companionId, sessionId: input.sessionId, name: file.name, mediaType: file.mediaType, kind: file.kind, size: data.length, hash, channel: input.channel ? 'pending' : 'none' }
     await this.bytes(item)
     this.save(item)
     return item
   }
   async bytes(item: AttachmentDelivery): Promise<Buffer> {
-    const data = await readFile(join(this.root, item.id))
+    if(!/^[a-f0-9]{64}$/.test(item.id))throw new Error('附件标识无效')
+    const data = await readFile(join(this.directory(item.companionId), item.id))
     if (data.length !== item.size || createHash('sha256').update(data).digest('hex') !== item.hash) throw new Error('交付附件校验失败，请重新提交原文件')
     return data
   }
@@ -83,7 +124,7 @@ export class AttachmentDeliveryService {
     if (item.channel === 'none' || item.channel === 'sent') return item
     await this.bytes(item)
     try {
-      await send({ path: join(this.root,item.id), name:item.name, kind:item.kind, mediaType:item.mediaType })
+      await send({ path: join(this.directory(item.companionId),item.id), name:item.name, kind:item.kind, mediaType:item.mediaType })
       item.channel = 'sent'; this.save(item)
     } catch (error) {
       item.channel = 'failed'; this.save(item)
@@ -91,5 +132,6 @@ export class AttachmentDeliveryService {
     }
     return item
   }
-  close(): void { this.db.close() }
+  async freeze(): Promise<void> { await Promise.allSettled(this.queues.values()); this.close() }
+  close(): void { if(this.closed)return;this.closed=true;for(const db of this.shards.values())db.close();this.db.close() }
 }

@@ -27,6 +27,7 @@ import type { AttachmentDeliveryService } from './attachments/service.js'
 import { dispatchAttachmentsApi } from './api/features/attachments-api.js'
 import type { PartnerInboxStore } from './notifications/store.js'
 import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson } from './api/http.js'
+import type { StorageCoordinator } from './storage/coordinator.js'
 
 export interface WebServerLike {
   register(route: { kind: 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
@@ -57,16 +58,24 @@ interface ApiRuntime {
   companions: CompanionService
   inbox: PartnerInboxStore
   deliveries?: AttachmentDeliveryService
+  storage?: StorageCoordinator
 }
 
 export function registerPartnerApi(webServer: WebServerLike, prefix: string, runtime: ApiRuntime): () => void {
   return webServer.register({
     kind: 'prefix', path: prefix,
     handler: async (req, res) => {
+      let release:(()=>void)|undefined
       try {
         assertSameOrigin(req)
+        if(req.method==='GET'&&new URL(req.url??'/', 'http://partner.local').pathname===`${prefix}/storage/status`) {
+          if(!runtime.storage)throw httpError(503,'存储服务不可用')
+          return sendJson(res,200,await runtime.storage.status())
+        }
+        if(runtime.storage?.running)throw httpError(503,'伙伴正在升级迁移，请稍后刷新')
+        release=runtime.storage?.enterRequest()
         await dispatch(req, res, prefix, runtime)
-      } catch (error) { sendError(res, error) }
+      } catch (error) { sendError(res, error) } finally { release?.() }
     },
   })
 }
@@ -76,6 +85,33 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if(method==='GET'&&segments.length===2&&segments[0]==='storage'&&segments[1]==='status') {
+    if(!runtime.storage)throw httpError(503,'存储服务不可用')
+    return sendJson(res,200,await runtime.storage.status())
+  }
+  if (segments.length === 2 && segments[0] === 'storage' && segments[1] === 'migrate') {
+    if(method!=='POST')throw httpError(405,'请使用升级迁移按钮提交')
+    mutation(req)
+    if(!runtime.storage)throw httpError(503,'存储迁移服务不可用')
+    const body=await readObject(req)
+    if(body.confirm!==true||body.expectedVersion!==0)throw httpError(400,'请确认备份与目录迁移，重新检查当前版本')
+    runtime.storage.start(body.expectedVersion)
+    return sendJson(res,202,{accepted:true})
+  }
+  if (segments.length === 2 && segments[0] === 'storage' && segments[1] === 'cleanup') {
+    if(method!=='POST')throw httpError(405,'请使用清理确认按钮')
+    mutation(req)
+    if(!runtime.storage)throw httpError(503,'存储服务不可用')
+    const body=await readObject(req)
+    if(body.confirm!==true||body.expectedVersion!==1)throw httpError(400,'请确认已备份的旧路径清理')
+    runtime.storage.startCleanup()
+    return sendJson(res,202,{accepted:true})
+  }
+  if (segments.length === 2 && segments[0] === 'storage' && segments[1] === 'inspect') {
+    if (method !== 'GET') throw httpError(405, '目前仅支持只读迁移检查，尚未开放执行迁移')
+    if (!runtime.storage) throw httpError(503, '存储检查服务不可用')
+    return sendJson(res, 200, await runtime.storage.inspect())
+  }
   if (segments[0] === 'companions' && segments[1] && runtime.store.isCompanionRemoving(segments[1]) && !(method === 'DELETE' && segments.length === 2)) throw httpError(409, '伙伴正在删除，请稍后刷新')
   if (await dispatchPendantApi(req, res, segments, runtime.inbox)) return
   if (runtime.deliveries && await dispatchAttachmentsApi(req,res,segments,runtime.deliveries,runtime.store)) return
@@ -142,7 +178,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       await runtime.companions.remove(id, {
         isBusy: target => runtime.agents.isCompanionBusy(target) || runtime.heartbeat.isRunning(target) || runtime.dailyReview.isRunning(target),
         validateDirectory: target => runtime.agents.validateCompanionDirectory(target),
-        ...(removeFiles === '1' ? { removeDirectory: (target: string) => runtime.agents.removeCompanionDirectory(target) } : {}),
+        ...(removeFiles === '1' ? { removeDirectory: async (target: string) => { runtime.inbox.releaseOwner(target); runtime.deliveries?.releaseOwner(target); await runtime.agents.removeCompanionDirectory(target) } } : {}),
         detachWorkspace: target => runtime.agents.removeCompanionWorkspace(target),
         resetSessions: target => runtime.agents.resetCompanion(target),
         clearMemory: target => runtime.memory.clear(target),

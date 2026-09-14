@@ -93,9 +93,9 @@ test('interactive glare batches layout reads into animation frames', () => {
 test('global workspaces stay in the roster while partner Skill bindings stay in capabilities', () => {
   const partnerTabs = clientSource.slice(clientSource.indexOf('<nav className="dsh-partner-tabs"'), clientSource.indexOf('</nav>', clientSource.indexOf('<nav className="dsh-partner-tabs"')))
   assert.match(clientSource, /className="dsh-partner-workspace-nav"/)
-  assert.match(clientSource, />Skill 市场</)
-  assert.match(clientSource, />任务看板</)
-  assert.match(clientSource, />定时任务</)
+  assert.match(clientSource, /<WorkspaceGroupLinks view=\{view\} open=\{setView\}/)
+  assert.match(clientSource, /<WorkspaceGroupTabs view=\{view\} open=\{setView\}/)
+  assert.match(clientSource, /<WorkspaceGroupLinks view=\{view\} open=\{openPage\} compact/)
   assert.doesNotMatch(partnerTabs, />Skill</)
   assert.doesNotMatch(partnerTabs, />看板</)
   assert.doesNotMatch(partnerTabs, />定时</)
