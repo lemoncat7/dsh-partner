@@ -23,6 +23,19 @@ async function server(t,handler) {
   return {url:`http://127.0.0.1:${http.address().port}`,requests}
 }
 const members=[{type:'m.room.member',state_key:'@bot:local',content:{membership:'join'}},{type:'m.room.member',state_key:'@user:local',content:{membership:'join'}}]
+test('Matrix progress uses rich replacement events and accepts empty typing responses',async t=>{
+  const s=await server(t,req=>req.url.includes('/typing/')?{status:204}: {data:matrix(req.url)})
+  const api=new DirectTransport({platform:'matrix',baseUrl:s.url,targetId:'!room:local'},'test-token')
+  const progress=api.progress('@user:local'),signal=new AbortController().signal
+  await progress.typing(true,signal)
+  const id=await progress.create('正在处理…',signal)
+  await progress.edit(id,'**完成**',signal)
+  await progress.typing(false,signal)
+  const edits=s.requests.filter(r=>r.method==='PUT'&&r.path.includes('/send/')).map(r=>JSON.parse(r.body))
+  assert.equal(edits[1]['m.relates_to'].rel_type,'m.replace')
+  assert.equal(edits[1]['m.relates_to'].event_id,'sent')
+  assert.match(edits[1]['m.new_content'].formatted_body,/<strong>完成<\/strong>/)
+})
 function matrix(path,states=members) {
   if(path.includes('whoami'))return {user_id:'@bot:local'}
   if(path.endsWith('/state'))return states

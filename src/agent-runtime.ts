@@ -36,6 +36,7 @@ import { executeObservationLoop } from './observation-loop.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 import { channelReplyPartsAfter } from './channels/delivery-policy.js'
 import { prepareChannelReply } from './channels/outbound-media.js'
+import {replyStage,reportProgress,type ReplyProgress} from './execution/reply-progress.js'
 export { extractOutboundAttachments } from './channels/outbound-media.js'
 export { renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 
@@ -150,11 +151,12 @@ export class PartnerAgentRuntime {
     this.questionAnswerer = answerer
   }
 
-  async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
+  async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
     const key = `companion:${companion.id}`
     const previous = this.queues.get(key) ?? Promise.resolve()
     let output: PartnerReply = { text: '', attachments: [] }
-    const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message) })
+    reportProgress(progress,'queued')
+    const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message, progress) })
     this.queues.set(key, current)
     try { await current; return output } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
   }
@@ -603,7 +605,8 @@ export class PartnerAgentRuntime {
     this.restoredCompositions.delete(sessionId)
   }
 
-  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<PartnerReply> {
+  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
+    reportProgress(progress,'working')
     const session = await this.ensureSession(companion, channelId, userId)
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
@@ -621,11 +624,17 @@ export class PartnerAgentRuntime {
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
     }))
     const startSeq = agent.session.seq
-    agent.followup(createUserMessage({
-      content: inbound.content,
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
+    const detach=progress?this.ctx.on('session/event',(current,event)=>{
+      if(current.id!==agent.session.id||event.seq<startSeq)return
+      const stage=replyStage(event);if(stage)reportProgress(progress,stage)
+    }):()=>{}
+    try {
+      agent.followup(createUserMessage({
+        content: inbound.content,
+        source: { kind: 'user' },
+      }))
+      await agent.whenIdle()
+    } finally { detach() }
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
     await this.store.update(state => {
       for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()

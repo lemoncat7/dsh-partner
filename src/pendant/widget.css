@@ -70,7 +70,27 @@ body[data-ds-dark-theme] .dsh-partner-pendant section#dsh-partner-pendant-inbox.
 .dsh-partner-pendant-reader-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: var(--pendant-muted); font-size: 12px; }
 .dsh-partner-pendant-reader-meta > span { padding: 3px 7px; border: 1px solid var(--pendant-line); border-radius: 6px; }
 .dsh-partner-pendant-detail h3 { margin: 0 0 14px; font-size: 15px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
-.dsh-partner-pendant-detail p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; }
+.dsh-partner-pendant-markdown { min-width: 0; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.dsh-partner-pendant-markdown p { margin: 0 0 12px; white-space: pre-wrap; }
+.dsh-partner-pendant-markdown :is(h3,h4,h5,h6) { margin: 18px 0 8px; font-size: 15px; line-height: 1.5; }
+.dsh-partner-pendant-markdown > :first-child { margin-top: 0; }
+.dsh-partner-pendant-markdown > :last-child { margin-bottom: 0; }
+.dsh-partner-pendant-markdown :is(ul,ol) { margin: 8px 0 12px; padding-left: 24px; }
+.dsh-partner-pendant-markdown li > p { margin: 0; }
+.dsh-partner-pendant-markdown li > input + p { display: inline; margin-left: 6px; }
+.dsh-partner-pendant-markdown li + li { margin-top: 4px; }
+.dsh-partner-pendant-markdown blockquote { margin: 12px 0; padding: 4px 12px; border-left: 3px solid var(--pendant-muted); color: var(--pendant-muted); }
+.dsh-partner-pendant-markdown blockquote > :last-child { margin-bottom: 0; }
+.dsh-partner-pendant-markdown code { font-family: ui-monospace, monospace; font-size: .9em; padding: 2px 4px; border-radius: 4px; background: var(--pendant-tint); }
+.dsh-partner-pendant-markdown pre { max-width: 100%; overflow: auto; white-space: pre; padding: 12px; margin: 12px 0; border: 1px solid var(--pendant-line); border-radius: 8px; background: var(--pendant-tint); }
+.dsh-partner-pendant-markdown pre code { padding: 0; background: none; overflow-wrap: normal; }
+.dsh-partner-pendant-markdown a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.dsh-partner-pendant-markdown :is(a,pre,.dsh-partner-pendant-table):focus-visible { outline: 2px solid var(--pendant-muted); outline-offset: 2px; }
+.dsh-partner-pendant-table { max-width: 100%; overflow: auto; margin: 12px 0; scrollbar-width: thin; }
+.dsh-partner-pendant-table table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--pendant-ink); }
+.dsh-partner-pendant-table :is(th,td) { border: 1px solid var(--pendant-line); padding: 8px 10px; min-width: 90px; text-align: left; }
+.dsh-partner-pendant-table th { background: var(--pendant-tint); }
+.dsh-partner-pendant-markdown hr { border: 0; border-top: 1px solid var(--pendant-line); margin: 16px 0; }
 .dsh-partner-pendant-empty { padding: 32px 12px; color: var(--pendant-muted); text-align: center; }
 .dsh-partner-pendant-error { margin: 8px 12px; color: var(--partner-danger); overflow-wrap: anywhere; }
 @keyframes partner-pendant-read-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }

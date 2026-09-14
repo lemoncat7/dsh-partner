@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { PartnerOutboundAttachment } from '../../channel-message.js'
 import { pollDiscovered } from './discovery.js'
 import { formatDirectMessages } from './message-format.js'
+import { directProgressTransport, type ProgressTransport } from './progress-transport.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
@@ -39,6 +40,7 @@ export class DirectTransport implements ChannelSender {
       const retry=header ? (/^\d+$/.test(header) ? Number(header)*1000 : Date.parse(header)-Date.now()) : 0
       throw new ChannelHttpError(response.status,Number.isFinite(retry)?Math.max(0,Math.min(900_000,retry)):0)
     }
+    if (response.status === 204) return {}
     if (!response.body) throw new Error('渠道返回空响应')
     let size = 0
     const chunks: Uint8Array[] = []
@@ -120,6 +122,11 @@ export class DirectTransport implements ChannelSender {
       if (this.config.platform==='matrix') await this.request(`/_matrix/client/v3/rooms/${encodeURIComponent(this.config.targetId)}/send/m.room.message/${randomUUID()}`,signal,{msgtype:'m.text',body:content.body,format:'org.matrix.custom.html',formatted_body:content.formattedBody},'PUT')
       else await this.request('/api/v4/posts',signal,{channel_id:this.config.targetId,message:content.markdown})
     }
+  }
+  progress(userId:string):ProgressTransport {
+    return directProgressTransport(this.config,userId,signal=>this.validate(signal),
+      (path,signal,body,method)=>this.request(path,signal,body,method),
+      (text,signal)=>this.sendText(userId,text,undefined,signal))
   }
   async sendAttachment(_userId: string, _file: PartnerOutboundAttachment, _context: string | undefined, _signal?: AbortSignal): Promise<void> {
     throw new Error('Matrix / Mattermost 首版仅支持文本，附件尚未交付；请在 DSH 工作区查看文件')

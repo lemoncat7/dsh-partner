@@ -8,6 +8,7 @@ import { WeixinApi } from './weixin/api.js'
 import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
 import { notificationRoutes } from './notification-route.js'
 import { NotificationDelivery } from './notification-delivery.js'
+import { ReplyProgressController } from './reply-progress-controller.js'
 import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
@@ -497,11 +498,21 @@ export class ChannelManager {
         // user command twice on reconnect; its result remains in the DSH session.
         await this.rememberReceipt(receipt)
         const companion=requiredCompanion(this.store,channel.companionId)
-        const reply=await this.agents.reply(companion,channel.id,event.sender,{text:event.text,attachments:[]})
+        const allowed=()=>{
+          const state=this.store.snapshot()
+          return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
+        }
+        const progress=typeof api.progress==='function'?new ReplyProgressController(api.progress(event.sender),allowed,signal):undefined
+        progress?.start()
+        try {
+        const reply=await this.agents.reply(companion,channel.id,event.sender,{text:event.text,attachments:[]},progress?.update)
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!current.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)||!current.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'))throw new Error('渠道或联系人授权已撤销，取消回复')
-        await api.sendText(event.sender,reply.text+(reply.attachments.length?'\n\n附件未交付：此渠道首版只发送文本，请在 DSH 工作区查看文件。':''),undefined,signal)
+        const text=reply.text+(reply.attachments.length?'\n\n附件未交付：此渠道首版只发送文本，请在 DSH 工作区查看文件。':'')
+        if(progress)await progress.finish(text)
+        else await api.sendText(event.sender,text,undefined,signal)
+        } catch(error) {await progress?.fail();throw error}
       }
     }
     await this.rememberReceipt(receipt)
