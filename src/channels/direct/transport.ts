@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { PartnerOutboundAttachment } from '../../channel-message.js'
 import { pollDiscovered } from './discovery.js'
+import { formatDirectMessages } from './message-format.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
@@ -115,10 +116,9 @@ export class DirectTransport implements ChannelSender {
     if(!this.config.targetId)throw new Error('联系人尚未配对，不能投递')
     await this.validate(signal)
     if (userId !== this.peerId) throw new Error('目标联系人与当前双人会话不匹配，拒绝投递')
-    for (let offset=0; offset<text.length; offset+=4000) {
-      const content=text.slice(offset,offset+4000)
-      if (this.config.platform==='matrix') await this.request(`/_matrix/client/v3/rooms/${encodeURIComponent(this.config.targetId)}/send/m.room.message/${randomUUID()}`,signal,{msgtype:'m.text',body:content},'PUT')
-      else await this.request('/api/v4/posts',signal,{channel_id:this.config.targetId,message:content})
+    for (const content of formatDirectMessages(text)) {
+      if (this.config.platform==='matrix') await this.request(`/_matrix/client/v3/rooms/${encodeURIComponent(this.config.targetId)}/send/m.room.message/${randomUUID()}`,signal,{msgtype:'m.text',body:content.body,format:'org.matrix.custom.html',formatted_body:content.formattedBody},'PUT')
+      else await this.request('/api/v4/posts',signal,{channel_id:this.config.targetId,message:content.markdown})
     }
   }
   async sendAttachment(_userId: string, _file: PartnerOutboundAttachment, _context: string | undefined, _signal?: AbortSignal): Promise<void> {

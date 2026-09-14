@@ -2,6 +2,9 @@ import { build } from 'esbuild'
 
 const pluginId = '@lemoncat7/dsh-partner'
 
+// Keep Markdown parsing self-contained when deploying into a host-managed profile.
+await build({ entryPoints: ['src/channels/direct/message-format.ts'], outfile: 'lib/channels/direct/message-format.js', bundle: true, format: 'esm', platform: 'node', target: 'es2022', sourcemap: true })
+
 await build({ entryPoints: ['src/pendant/renderer.ts'], outfile: 'lib/pendant-renderer.js', bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true })
 
 await build({
