@@ -97,6 +97,26 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       return sendJson(res, 201, companion)
     }
     const id = segments[1]
+    if (id && method === 'PUT' && segments[2] === 'notifications' && segments.length === 3) {
+      mutation(req)
+      const body = await readObject(req)
+      if (body.mode !== 'recent' && body.mode !== 'selected') throw httpError(400, '请选择通知方式')
+      if (!Array.isArray(body.targetPairingIds) || body.targetPairingIds.length > 50 || body.targetPairingIds.some(x => typeof x !== 'string')) throw httpError(400, '通知接收人无效')
+      const ids = [...new Set(body.targetPairingIds as string[])]
+      if (body.mode === 'selected' && !ids.length) throw httpError(400, '请至少选择一个通知接收人')
+      await runtime.store.update(state => {
+        const companion = state.companions.find(c => c.id === id)
+        if (!companion) throw httpError(404, '伙伴不存在')
+        const targets = body.mode === 'recent' ? [] : ids.map(pairingId => {
+          const pairing = state.pairings.find(p => p.id === pairingId && p.status === 'approved')
+          if (!pairing || !state.channels.some(c => c.id === pairing.channelId && c.companionId === id && c.enabled)) throw httpError(400, '请选择本伙伴已启用渠道中的已授权接收人')
+          return { channelId: pairing.channelId, userId: pairing.userId }
+        })
+        companion.notificationDelivery = { mode: body.mode as 'recent' | 'selected', targets }
+        companion.updatedAt = Date.now()
+      })
+      return sendJson(res, 200, {ok: true})
+    }
     if (id !== undefined && method === 'POST' && segments[2] === 'session' && segments.length === 3) {
       mutation(req)
       requiredCompanion(runtime.store, id)
@@ -109,7 +129,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })
       const next = saved.companions.find(item => item.id === id)!

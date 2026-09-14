@@ -7,6 +7,7 @@ export interface AutomationView {
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
 }
 export interface CompanionView {
+  notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }
   id: string; name: string; role: string; description: string; instructions: string
   presetId?: string; provider?: string; model?: string; capabilities: Capability[]
   createdAt: number; updatedAt: number

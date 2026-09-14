@@ -1,5 +1,6 @@
 import {useState, type ReactNode, type FormEvent} from 'react'
-import {api, type CompanionView, type PartnerSnapshot, type PairingView} from '../client-api.js'
+import {api, type CompanionView, type PartnerSnapshot} from '../client-api.js'
+import {NotificationSettings} from './notification-settings.js'
 import {SectionHeading, ChannelStatus} from './partner-components.js'
 import {errorMessage, WorkspaceDialog} from './workspace-components.js'
 
@@ -30,13 +31,13 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
     if(save){await onChanged();closeAdd()}
     setFeedback(save?'账号已保存。请启用渠道，再向机器人发送私聊消息，核对配对码并批准联系人。':'账号验证通过，可以保存。')
   })
-  return <div className="dsh-partner-form is-channel dsh-partner-channels">
+  return <div id="dsh-partner-channels" className="dsh-partner-form is-channel dsh-partner-channels">
     <div className="dsh-partner-channel-toolbar">
       <SectionHeading eyebrow="CHANNELS" title="我的渠道" detail="查看连接状态，管理联系人与通知投递。" />
       <button type="button" onClick={()=>openAdd()}>添加渠道</button>
     </div>
     {!adding&&feedback&&<p role="status">{feedback}</p>}
-    {adding&&<WorkspaceDialog title={fixedPlatform?`${platform==='matrix'?'Matrix':'Mattermost'} 配置`:'添加渠道'} detail={platform==='matrix'?'先登录，再邀请机器人进入未加密双人房间并发消息配对。':'先登录，再向机器人发私聊消息，核对配对码后授权。'} close={()=>{if(!busy)closeAdd()}}>
+    {adding&&<WorkspaceDialog title={fixedPlatform?`${platform==='matrix'?'Matrix':'Mattermost'} 配置`:'添加渠道'} detail={platform==='matrix'?'仅未加密的双人会话可获取配对码。请新建未开启端到端加密的会话，邀请机器人后发送文字消息。':'先登录，再向机器人发私聊消息，核对配对码后授权。'} close={()=>{if(!busy)closeAdd()}}>
       <form className="dsh-partner-feature-form dsh-partner-channel-form" aria-busy={busy} onSubmit={(event:FormEvent)=>{event.preventDefault();void configure(true)}}>
         {!fixedPlatform&&<FormField label="平台"><select autoFocus disabled={busy} value={platform} onChange={e=>{setPlatform(e.target.value as typeof platform);setPassword('');setToken('');setMfaToken('');setTargetId('');setFeedback('')}}><option value="matrix">Matrix</option><option value="mattermost">Mattermost</option></select></FormField>}
         <FormField label="渠道名称"><input autoFocus={fixedPlatform} disabled={busy} maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder={`例如：我的 ${platform==='matrix'?'Matrix':'Mattermost'}`} /></FormField>
@@ -58,11 +59,12 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       {configuring==='weixin'&&<WorkspaceDialog title="微信配置" detail="管理扫码登录、连接与联系人授权。" close={()=>setConfiguring(undefined)}>{weixin}</WorkspaceDialog>}
     </div>
     {(['matrix','mattermost'] as const).filter(platform=>!channels.some(c=>c.platform===platform)).map(platform=><div className="dsh-partner-channel-row" key={platform}><span><strong>{platform==='matrix'?'Matrix':'Mattermost'}</strong><small>尚未连接</small></span><button type="button" aria-label={`配置 ${platform}`} onClick={()=>openAdd(platform)}>配置</button></div>)}
-    {channels.filter(c=>c.platform&&c.platform!=='weixin').map(channel=><div key={channel.id} className="dsh-partner-channel-row">
+    {channels.filter(c=>c.platform&&c.platform!=='weixin').map(channel=><div key={channel.id} className="dsh-partner-channel-row has-notice-slot">
       <span><strong>{channel.name}</strong><small>{channel.platform} · {pairings.filter(p=>p.channelId===channel.id&&p.status==='pending').length} 个待授权</small></span><ChannelStatus channel={channel}/><button type="button" aria-label={`配置 ${channel.name}`} onClick={()=>{setFeedback('');setConfiguring(channel.id)}}>配置</button>
       {configuring===channel.id&&<WorkspaceDialog title={`${channel.name} · 配置`} detail="管理连接状态及联系人访问权限。" close={()=>{if(!busy){setConfiguring(undefined);setDeleting(undefined)}}}>
       <div className="dsh-partner-channel-detail dsh-partner-channel-manage">
       <div className="dsh-partner-channel-connection"><span><small>登录账号</small><strong>{channel.accountId}</strong>{channel.direct?.targetId&&<small>{channel.direct.targetId}</small>}</span><ChannelStatus channel={channel}/></div>
+      {channel.platform==='matrix'&&<p>仅支持未加密的双人会话。加密会话无法读取消息或发送配对码；请新建未开启端到端加密的会话，邀请机器人后发送文字消息。检测到加密会话时会在此提示，不影响其他未加密会话。</p>}
       {!channel.direct?.targetId&&<p>向机器人发私聊消息，在下方核对配对码后批准。请求会自动更新。</p>}
       {channel.lastError&&<p role="alert">{channel.lastError}</p>}
       <div className="dsh-partner-form-actions"><button disabled={busy} onClick={()=>void run(async()=>{await api(`/channels/${channel.id}/enabled`,{method:'POST',body:JSON.stringify({enabled:!channel.enabled})});await onChanged()})}>{channel.enabled?'停用':'启用'}</button>
@@ -75,27 +77,14 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       </section>
       {feedback&&<p role="status">{feedback}</p>}
     </div></WorkspaceDialog>}
+      {channel.lastError&&<div className="dsh-partner-channel-inline-notice" role="status" aria-atomic="true"><strong>{channel.runtimeStatus==='running'?'会话提示':'连接提示'}</strong><p>{channel.lastError}</p></div>}
     </div>)}
     </div>
-    <section className="dsh-partner-channel-notifications" aria-label="通知设置"><div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>默认跟随最近渠道</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div></section>
-    {configuring==='delivery'&&<WorkspaceDialog title="通知与交付" detail="设置通知投递目标。" close={()=>setConfiguring(undefined)}><div className="dsh-partner-channel-detail"><p>本地与所有已授权渠道共用伙伴主对话，无需关联联系人。通知默认走最近收到消息的渠道；指定目标不可用时等待重试，不改发其他渠道。</p>
-      {!pairings.some(p=>p.status==='approved')&&<p>批准联系人后，即可设置通知投递目标。</p>}
-      {pairings.filter(p=>p.status==='approved').map(p=><DeliverySettings key={`${p.id}:${p.updatedAt}`} pairing={p} pairings={pairings} channels={channels} onChanged={onChanged}/>)}
-    </div></WorkspaceDialog>}
+    <section className="dsh-partner-channel-notifications" aria-label="通知设置"><div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>{companion.notificationDelivery?.mode==='selected'?`已指定 ${companion.notificationDelivery.targets.length} 位接收人`:'默认跟随最近渠道与用户'}</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div></section>
+    {configuring==='delivery'&&<WorkspaceDialog title="通知与交付" detail="选择通知渠道，再选择各渠道的接收人；支持同时投递。" close={()=>setConfiguring(undefined)}><NotificationSettings companion={companion} snapshot={snapshot} onChanged={onChanged}/></WorkspaceDialog>}
   </div>
 }
 
 function FormField({label,hint,children}:{label:string;hint?:string;children:ReactNode}):JSX.Element {
   return <label className="dsh-partner-channel-field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>
-}
-
-function DeliverySettings({pairing,pairings,channels,onChanged}:{pairing:PairingView;pairings:PairingView[];channels:PartnerSnapshot['channels'];onChanged():Promise<void>}):JSX.Element {
-  const contactKey=pairing.contactKey??''
-  const [target,setTarget]=useState(pairing.deliveryTarget ? pairings.find(p=>p.status==='approved'&&p.channelId===pairing.deliveryTarget?.channelId&&p.userId===pairing.deliveryTarget?.userId)?.id??'unavailable' : '')
-  const [busy,setBusy]=useState(false),[error,setError]=useState('')
-  return <form className="dsh-partner-feature-form dsh-partner-channel-form" onSubmit={e=>{e.preventDefault();if(busy)return;setBusy(true);setError('');void api(`/pairings/${pairing.id}/delivery`,{method:'POST',body:JSON.stringify({contactKey,targetPairingId:target||null})}).then(onChanged).catch(e=>setError(errorMessage(e))).finally(()=>setBusy(false))}}>
-    <h4>{channels.find(c=>c.id===pairing.channelId)?.name} · {pairing.displayName}</h4>
-    <FormField label="通知投递目标"><select disabled={busy} value={target} onChange={e=>setTarget(e.target.value)}><option value="">自动：该联系人最近渠道</option>{target==='unavailable'&&<option value="unavailable" disabled>原指定目标不可用，请明确重新选择</option>}{pairings.filter(p=>p.status==='approved').map(p=><option key={p.id} value={p.id}>{channels.find(c=>c.id===p.channelId)?.name} · {p.displayName}</option>)}</select></FormField>
-    <div className="dsh-partner-form-actions"><span role="alert">{error}</span><button disabled={busy}>保存投递设置</button></div>
-  </form>
 }

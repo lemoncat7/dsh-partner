@@ -5,7 +5,7 @@ import { pollDiscovered } from './discovery.js'
 export type DirectPlatform = 'matrix' | 'mattermost'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
 export interface DirectMessage { id: string; sender: string; text: string; targetId?: string }
-export interface DirectBatch { cursor: string; messages: DirectMessage[] }
+export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
 export interface ChannelSender {
   sendText(userId: string, text: string, context: string | undefined, signal?: AbortSignal): Promise<void>
   sendAttachment(userId: string, file: PartnerOutboundAttachment, context: string | undefined, signal?: AbortSignal): Promise<void>
@@ -63,7 +63,7 @@ export class DirectTransport implements ChannelSender {
       if (typeof who.user_id !== 'string') throw new Error('Matrix 用户身份无效')
       const state = await this.request(`/_matrix/client/v3/rooms/${target}/state`, signal)
       if (!Array.isArray(state)) throw new Error('Matrix 房间状态无效')
-      if (state.some(e => e.type === 'm.room.encryption')) throw new Error('首版不支持 Matrix 加密房间，请使用未加密双人房间')
+      if (state.some(e => e.type === 'm.room.encryption')) throw new Error('检测到 Matrix 加密房间：暂不支持端到端加密，无法读取消息或发送配对码。请新建未开启加密的双人会话，邀请机器人后发送文字消息。')
       const members = state.filter(e => e.type === 'm.room.member' && e.content?.membership === 'join').map(e => e.state_key)
       if (members.length !== 2 || !members.includes(who.user_id) || members.some(id => typeof id !== 'string')) throw new Error('Matrix 房间必须只有机器人和一位已加入的联系人')
       this.botId = who.user_id; this.peerId = members.find(id => id !== this.botId)!

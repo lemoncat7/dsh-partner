@@ -278,6 +278,17 @@ function validateState(value: unknown): asserts value is PartnerState {
   if (typeof state.skillMarketNetwork !== 'object' || state.skillMarketNetwork === null || Array.isArray(state.skillMarketNetwork)) throw new Error('partner state skillMarketNetwork must be an object')
   if (state.skillMarketNetwork.proxyUrl !== undefined && typeof state.skillMarketNetwork.proxyUrl !== 'string') throw new Error('partner state skillMarketNetwork.proxyUrl must be a string')
   const companionIds = new Set(state.companions!.map(companion => companion.id))
+  for (const companion of state.companions!) {
+    const config = companion.notificationDelivery
+    if (config === undefined) continue
+    if (!config || !['recent','selected'].includes(config.mode) || !Array.isArray(config.targets) || config.targets.length > 50 || (config.mode === 'selected' && !config.targets.length) || config.targets.some(t => !t || typeof t.channelId !== 'string' || !t.channelId || typeof t.userId !== 'string' || !t.userId)) throw new Error('invalid companion notification settings')
+  }
+  if (state.notificationDeliveries !== undefined) {
+    if (!Array.isArray(state.notificationDeliveries) || state.notificationDeliveries.length > 1000) throw new Error('invalid notification delivery ledger')
+    for (const record of state.notificationDeliveries) {
+      if (!record || typeof record.id !== 'string' || typeof record.companionId !== 'string' || !Number.isFinite(record.createdAt) || !record.reply || typeof record.reply.text !== 'string' || !Array.isArray(record.reply.attachments) || !Array.isArray(record.targets) || !record.targets.length || record.targets.length > 50 || record.targets.some(t => !t || typeof t.channelId !== 'string' || typeof t.userId !== 'string' || !Array.isArray(t.sentParts) || t.sentParts.some(n => !Number.isInteger(n) || n < 0))) throw new Error('invalid notification delivery record')
+    }
+  }
   const grantKeys = new Set<string>()
   if (state.companionAccessGrants!.length > 1000) throw new Error('partner state companionAccessGrants exceeds limit')
   for (const grant of state.companionAccessGrants!) {

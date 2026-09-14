@@ -10,6 +10,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }
   id: string
   name: string
   role: string
@@ -103,6 +104,7 @@ export interface PartnerState {
   pairings: PairingRequest[]
   sessions: ChannelSession[]
   recentReceipts: string[]
+  notificationDeliveries?: import('./channels/notification-delivery.js').NotificationDeliveryRecord[]
   heartbeatStates: HeartbeatRuntimeState[]
   skills: PartnerSkill[]
   skillBindings: CompanionSkillBinding[]

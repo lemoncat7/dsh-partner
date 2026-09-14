@@ -1,0 +1,128 @@
+/* Deliberate, local boundary against host themes with global !important form rules.
+   Keep layout responsive and use the plugin's light/dark material tokens. */
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-settings { display: grid; gap: 10px; }
+.dsh-partner-workspace #dsh-partner-channels :is(.dsh-partner-delivery-hint, .dsh-partner-delivery-empty) { margin: 0; color: var(--partner-text-secondary); font-size: var(--partner-font-caption); line-height: 1.5; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-contact { padding: 0; border: 1px solid var(--partner-border); border-radius: 10px; background: var(--partner-control); }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-contact > summary { padding: 12px; cursor: pointer; color: var(--partner-text); }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-contact > summary > span { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; vertical-align: middle; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-contact small { color: var(--partner-text-secondary); }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; margin: 0; padding: 0; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form > p:not([role="alert"]) { color: var(--partner-text-secondary); background: transparent; padding: 0; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form > p { grid-column: 1 / -1; margin: 0; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog:has(.dsh-partner-delivery-form) { width: min(560px, 100%); height: auto; align-self: center; max-height: calc(100% - 24px); border-radius: 16px !important; }
+.dsh-partner-workspace #dsh-partner-identity-editor.dsh-partner-form,
+.dsh-partner-workspace #dsh-partner-channels.dsh-partner-form {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-family: var(--partner-font-family) !important;
+  color: var(--partner-text) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-identity-card {
+  background: var(--partner-card-surface) !important;
+  border: 1px solid var(--partner-border) !important;
+  border-radius: 15px !important;
+  box-shadow: var(--partner-card-shadow) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-field :is(input, textarea),
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-field > :is(input, select) {
+  appearance: none !important;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px !important;
+  color: var(--partner-text) !important;
+  background-color: var(--partner-control) !important;
+  border: 1px solid var(--partner-border) !important;
+  border-radius: 10px !important;
+  box-shadow: inset 0 1px 0 var(--partner-glass-highlight) !important;
+  font: var(--partner-font-label)/1.5 var(--partner-font-family) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-field :is(input, textarea),
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-field > input { background-image: none !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-field > select {
+  padding-right: 36px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23909095' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor button,
+.dsh-partner-workspace #dsh-partner-channels button {
+  appearance: none !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 14px !important;
+  border: 1px solid var(--partner-border) !important;
+  border-radius: 10px !important;
+  color: var(--partner-text) !important;
+  background: var(--partner-control) !important;
+  box-shadow: none !important;
+  font: 600 var(--partner-font-body)/1.4 var(--partner-font-family) !important;
+  cursor: pointer;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-form-actions > button,
+.dsh-partner-workspace #dsh-partner-channels button.is-primary {
+  color: var(--partner-on-accent) !important;
+  background: var(--partner-accent-strong) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-identity-danger button:not(.is-secondary) {
+  color: var(--partner-danger) !important;
+  border-color: color-mix(in srgb, var(--partner-danger) 30%, transparent) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-identity-danger button.is-danger {
+  background: var(--partner-danger) !important;
+  color: var(--partner-on-accent) !important;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor button:hover:not(:disabled),
+.dsh-partner-workspace #dsh-partner-channels button:hover:not(:disabled) { filter: brightness(.94); }
+.dsh-partner-workspace #dsh-partner-identity-editor :is(input, textarea, button):focus-visible,
+.dsh-partner-workspace #dsh-partner-channels :is(input, select, button, summary):focus-visible {
+  outline: 2px solid var(--partner-focus-ring) !important;
+  outline-offset: 2px;
+}
+.dsh-partner-workspace #dsh-partner-identity-editor :disabled,
+.dsh-partner-workspace #dsh-partner-channels :disabled { opacity: .55; cursor: not-allowed; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog {
+  background: var(--partner-solid-panel) !important;
+  color: var(--partner-text) !important;
+  border: 1px solid var(--partner-border) !important;
+  border-radius: 16px !important;
+  font-family: var(--partner-font-family) !important;
+  box-shadow: 0 22px 58px color-mix(in srgb, #000 18%, transparent), 0 4px 14px color-mix(in srgb, #000 8%, transparent), inset 0 1px 0 var(--partner-card-highlight) !important;
+}
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog > header {
+  background: var(--partner-solid-raised) !important;
+  color: var(--partner-text) !important;
+}
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog > header button {
+  width: 32px; min-height: 32px; padding: 0 !important;
+  background: transparent !important; border-color: transparent !important;
+}
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-form {
+  background: transparent !important; box-shadow: none !important; border: 0 !important;
+  color: var(--partner-text) !important;
+  font: var(--partner-font-body)/1.5 var(--partner-font-family) !important;
+}
+@media (max-width: 640px) {
+  .dsh-partner-workspace #dsh-partner-channels button,
+  .dsh-partner-workspace #dsh-partner-identity-editor button { min-height: 44px; }
+  .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog { border-radius: 0 !important; border-width: 0 !important; }
+  .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-toolbar { align-items: flex-start; flex-wrap: wrap; }
+}
+
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-choices { display: grid; gap: 16px; min-width: 0; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-channel { margin: 0; padding: 8px 16px; min-width: 0; border: 1px solid var(--partner-border); border-radius: 12px; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-channel label { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-channel input[type="checkbox"] { appearance: auto !important; width: 18px !important; height: 18px !important; min-height: 0 !important; flex: 0 0 18px; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-users { display: grid; gap: 8px; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-users span { min-width: 0; overflow-wrap: anywhere; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-notification-users small { display: block; color: var(--partner-text-secondary); }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-row.has-notice-slot { display: grid; grid-template-columns: minmax(0,1fr) auto auto; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-inline-notice { grid-column: 1 / -1; min-width: 0; padding-top: 12px; border-top: 1px solid var(--partner-border); color: var(--partner-text); font-size: var(--partner-font-body); line-height: 1.6; overflow-wrap: anywhere; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-inline-notice strong { font-weight: 600; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-inline-notice p { margin: 4px 0 0; color: var(--partner-text-secondary); }

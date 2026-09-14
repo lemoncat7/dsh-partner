@@ -15,6 +15,17 @@ export class HeartbeatScheduler {
   private readonly running = new Set<string>()
   private readonly manualResults = new Map<string, {checked: boolean; sent: boolean; reason?: string}>()
 
+  private async deliverNotifications(companionId:string, route:ChannelSession, items:ConcernObservation[]):Promise<void> {
+    const failures:unknown[]=[]
+    for (const item of items) {
+      try {
+        await this.channels.sendProactive(route.channelId, route.userId, notificationMessage([item]), `concern:${companionId}:${item.id}`)
+        await this.concerns.markMentioned(companionId,[item.id])
+      } catch(error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures,`${failures.length} 条通知尚未完全送达，已送达部分保留，下轮继续重试`)
+  }
+
   manualStatus(id: string) {
     return { running: this.isRunning(id), result: this.manualResults.get(id) ?? null }
   }
@@ -141,8 +152,7 @@ export class HeartbeatScheduler {
         for (const candidate of routes) {
           const pending = await this.concerns.pendingNotifications(companion.id, memoryScope(candidate.channelId, candidate.userId))
           if (pending.length === 0) continue
-          await this.channels.sendProactive(candidate.channelId, candidate.userId, notificationMessage(pending))
-          await this.concerns.markMentioned(companion.id, pending.map(item => item.id))
+          await this.deliverNotifications(companion.id, candidate, pending)
           await this.saveState(companion, successState(existing, companion, now, today, sentCount + 1, true))
           return { checked: false, sent: true, reason: '已补发此前未送达的重要变化' }
         }
@@ -203,8 +213,7 @@ export class HeartbeatScheduler {
         await this.recordActivity(companion, route, execution, partialError ? 'failed' : 'quiet', partialError)
         return { checked: true, sent: false, reason: partialError ?? (recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化') }
       }
-      await this.channels.sendProactive(route.channelId, route.userId, notificationMessage(recorded.notifications))
-      await this.concerns.markMentioned(companion.id, recorded.notifications.map(item => item.id))
+      await this.deliverNotifications(companion.id, route, recorded.notifications)
       await this.saveState(companion, { ...successState(existing, companion, now, today, sentCount + 1, true), ...(partialError ? {lastError: partialError} : {}) })
       await this.recordActivity(companion, route, execution, 'notified', partialError)
       return { checked: true, sent: true, ...(partialError ? {reason: partialError} : {}) }

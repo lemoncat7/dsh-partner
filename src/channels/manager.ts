@@ -6,7 +6,8 @@ import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
 import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
-import { notificationRoute } from './notification-route.js'
+import { notificationRoutes } from './notification-route.js'
+import { NotificationDelivery } from './notification-delivery.js'
 import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
@@ -49,6 +50,7 @@ export class ChannelManager {
   private readonly operations = new Map<string, Set<Promise<void>>>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
+  private readonly notificationDelivery: NotificationDelivery
 
   constructor(
     private readonly ctx: ChannelContext,
@@ -56,7 +58,7 @@ export class ChannelManager {
     private readonly credentials: PartnerCredentialVault,
     private readonly agents: PartnerAgentRuntime,
     private readonly defaultCwd: string,
-  ) {}
+  ) { this.notificationDelivery = new NotificationDelivery(store) }
 
   attachQuestionAnswerer(agentCtx: Context, route: ChannelSession): () => void {
     return agentCtx.on('user-questions/request', (request, next) => this.askThroughChannel(route, request, next), { prepend: true })
@@ -139,8 +141,8 @@ export class ChannelManager {
     else await this.stop(channelId)
   }
 
-  async sendProactive(channelId: string, userId: string, text: string): Promise<void> {
-    await this.sendProactiveReply(channelId, userId, { text, attachments: [] })
+  async sendProactive(channelId: string, userId: string, text: string, receipt?: string): Promise<void> {
+    await this.sendProactiveReply(channelId, userId, { text, attachments: [] }, receipt)
   }
 
   async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal): Promise<void> {
@@ -158,7 +160,7 @@ export class ChannelManager {
     if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
     const routes = this.store.snapshot().sessions.filter(item => item.companionId === task.creatorCompanionId)
     const route = selectTaskNotificationRoute(routes, task.creatorSessionId, () => false)
-    if (!route || route.kind === 'local') return
+    if (!route || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, task.creatorCompanionId)
     const delivery = await prepareTaskResultDelivery(task, cwd)
     await this.queueProactive(route, `task-result:${task.id}:${task.revision}:${task.status}`, {
@@ -173,7 +175,7 @@ export class ChannelManager {
     if (!summary || !item.creatorSessionId) return
     // A manually created board requirement must not leak into an unrelated chat.
     const route = this.routeForSession(item.creatorSessionId)
-    if (!route || route.kind === 'local') return
+    if (!route || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
     const delivery = await prepareTaskResultDelivery({ id: stage ? `${item.id}-stage-${item.stageReport!.key.slice(0, 16)}` : item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: summary }, cwd)
     const text = delivery.text.replace(/^看板任务已完成：/, stage ? '需求阶段结果：' : '需求已完成：')
@@ -191,7 +193,7 @@ export class ChannelManager {
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
     const route = this.routeForSession(session.id)
-    if (route === undefined || route.kind === 'local') return
+    if (route === undefined || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const concernNotice = concernCreatedNoticeFromEvent(event)
     if (concernNotice !== undefined) {
       await this.queueProactive(route, `concern-created:${session.id}:${event.seq}`, { text: concernNotice, attachments: [] })
@@ -214,7 +216,7 @@ export class ChannelManager {
     const current = previous.catch(() => {}).then(async () => {
       if (this.store.snapshot().recentReceipts.includes(receipt)) return
       if (stillValid && !stillValid()) throw new Error('需求已调整，取消旧结果投递')
-      await this.sendProactiveReply(route.channelId, route.userId, reply)
+      await this.sendProactiveReply(route.channelId, route.userId, reply, receipt, route.companionId)
       await this.rememberReceipt(receipt)
     })
     this.outboundQueues.set(key, current)
@@ -228,19 +230,29 @@ export class ChannelManager {
     return candidates.filter(item=>item.kind==='channel').sort((a,b)=>inbound(b)-inbound(a))[0]??candidates[0]
   }
 
-  private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply): Promise<void> {
-    const target = notificationRoute(this.store.snapshot(),channelId,userId)
-    channelId = target.channelId; userId = target.userId
+  private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply, receipt?: string, owner?: string): Promise<void> {
+    const state = this.store.snapshot()
+    const companionId = state.channels.find(c => c.id === channelId)?.companionId ?? owner
+    if (!companionId) throw new Error('通知来源伙伴不存在')
+    await this.notificationDelivery.deliver(receipt ?? randomBytes(16).toString('hex'), companionId,
+      () => notificationRoutes(this.store.snapshot(),channelId,userId,companionId), reply,
+      async (target, payload, sendPart) => {
+        const current = this.store.snapshot()
+        if (!current.channels.some(c => c.id === target.channelId && c.companionId === companionId)) throw new Error('通知目标不属于当前伙伴')
+        await this.sendNotificationTarget(target.channelId, target.userId, payload, sendPart)
+      })
+  }
+  private async sendNotificationTarget(channelId: string, userId: string, reply: PartnerReply, sendPart: (part:number, send:()=>Promise<unknown>)=>Promise<void>): Promise<void> {
     const channel = requiredChannel(this.store, channelId)
-    if (!channel.enabled) throw new Error('微信渠道已停用')
+    if (!channel.enabled) throw new Error('通知渠道已停用')
     const pairing = this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)
-    if (pairing?.status !== 'approved') throw new Error('微信联系人尚未批准')
+    if (pairing?.status !== 'approved') throw new Error('通知接收人尚未批准')
     const credential = await this.credentials.read(channelId)
     const token = this.contextTokens.get(`${channelId}:${userId}`)
     const api = this.sender(channel, credential, userId)
     const signal = AbortSignal.timeout(30_000)
-    await api.sendText(userId, reply.text, token, signal)
-    for (const attachment of reply.attachments) await api.sendAttachment(userId, attachment, token, signal)
+    await sendPart(0, () => api.sendText(userId, reply.text, token, signal))
+    for (const [index, attachment] of reply.attachments.entries()) await sendPart(index + 1, () => api.sendAttachment(userId, attachment, token, signal))
   }
 
   private async pollLoop(channel: WeixinChannel, api: WeixinApi, signal: AbortSignal): Promise<void> {
@@ -429,11 +441,14 @@ export class ChannelManager {
     const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
     let cursor=channel.direct.cursor
     let failures=0
+    let roomWarning: string | undefined
     while(!signal.aborted) {
       try {
         const batch=await api.poll(cursor,signal)
         if(signal.aborted)break
-        this.runtime.set(channel.id,{status:'running'})
+        if(batch.warning)roomWarning=batch.warning
+        else if(batch.messages.length)roomWarning=undefined
+        this.runtime.set(channel.id,{status:'running',...(roomWarning?{lastError:roomWarning}:{})})
         for(const message of batch.messages) {
           if(signal.aborted)break
           try {
