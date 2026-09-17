@@ -191,7 +191,9 @@ export class PartnerAgentRuntime {
       }))
       await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     }
-    agent.steer(createUserMessage({ content: inbound.content, source: { kind: 'user' } }))
+    const userMessage = createUserMessage({ content: inbound.content, source: { kind: 'user' } })
+    await this.rememberMessageOrigin(route, userMessage.id)
+    agent.steer(userMessage)
     return true
   }
 
@@ -629,10 +631,12 @@ export class PartnerAgentRuntime {
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
     }):()=>{}
     try {
-      agent.followup(createUserMessage({
+      const userMessage = createUserMessage({
         content: inbound.content,
         source: { kind: 'user' },
-      }))
+      })
+      await this.rememberMessageOrigin(session, userMessage.id)
+      agent.followup(userMessage)
       await agent.whenIdle()
     } finally { detach() }
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
@@ -641,6 +645,14 @@ export class PartnerAgentRuntime {
     })
     if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     return prepareChannelReply(response, session.cwd ?? this.defaultCwd)
+  }
+
+  private async rememberMessageOrigin(route: ChannelSession, messageId: string): Promise<void> {
+    await this.store.update(state => {
+      const current = state.sessions.find(item => item.id === route.id && item.sessionId === route.sessionId)
+      if (!current) throw new Error('消息来源会话已变化，请重新发送')
+      current.inboundMessageIds = [...(current.inboundMessageIds ?? []), messageId].slice(-128)
+    })
   }
 
   private async persistInbound(session: ChannelSession, message: PartnerInboundMessage): Promise<{ content: ContentBlock[]; query: string }> {

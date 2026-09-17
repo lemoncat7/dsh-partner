@@ -95,6 +95,8 @@ export interface ChannelSession {
   /** Immutable working directory copied into the DSH Session header. */
   cwd?: string
   lastMessageAt: number
+  /** Stable user-message identities received on this route; never inferred from text. */
+  inboundMessageIds?: string[]
 }
 
 export interface PartnerState {

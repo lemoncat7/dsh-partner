@@ -10,6 +10,7 @@ import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { PartnerAgentRuntime, partnerCwd } from './agent-runtime.js'
 import { ChannelManager } from './channels/manager.js'
+import { ChannelAvatarService } from './channels/avatar-tool.js'
 import { WeixinLoginManager } from './channels/weixin/login.js'
 import { registerPartnerApi, type WebServerLike } from './api.js'
 import { HeartbeatScheduler } from './heartbeat.js'
@@ -124,6 +125,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts, requirements)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const avatars = new ChannelAvatarService(store, credentials)
+    composer.setAvatarToolFactory(id => avatars.tool(id))
     const memoryWorker = new MemoryWorker({
       companions: () => store.snapshot().companions,
       removing: id => store.isCompanionRemoving(id),

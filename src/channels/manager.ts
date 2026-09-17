@@ -24,6 +24,7 @@ import type { BoardRequirement } from '../requirements/domain.js'
 import { requirementIsIdle, requirementProgressKey } from '../requirements/progress.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
 import { prepareChannelReply } from './outbound-media.js'
+import { questionOrigin } from './question-origin.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
 type ChannelContext = Context & { settings: SettingsProvider }
@@ -33,6 +34,8 @@ class DirectDeliveryError extends Error {
 
 interface PendingQuestion {
   sessionId: string
+  channelId: string
+  userId: string
   questions: AskUserQuestionItem[]
   resolve(answer: AskUserQuestionAnswer): void
   reject(error: unknown): void
@@ -104,6 +107,10 @@ export class ChannelManager {
   }
 
   async stop(channelId: string): Promise<void> {
+    for (const pending of this.pendingQuestions.values()) if (pending.channelId === channelId) {
+      pending.reject(new Error('提问来源渠道已停止'))
+      this.clearPendingQuestion(pending)
+    }
     const running = this.tasks.get(channelId)
     if (running !== undefined) {
       running.controller.abort()
@@ -360,15 +367,16 @@ export class ChannelManager {
     request: AskUserQuestionRequestEvent,
     next: () => Promise<AskUserQuestionAnswer>,
   ): Promise<AskUserQuestionAnswer> {
-    if (route.kind === 'local' || request.signal?.aborted || this.pendingQuestions.has(route.sessionId)) return next()
+    const origin = request.agent && questionOrigin(request.agent.session.id, request.agent.session.snapshotEvents(), this.store.snapshot().sessions)
+    if (!origin) return next()
+    route = origin
+    request.signal?.throwIfAborted()
+    if (this.pendingQuestions.has(route.sessionId)) throw new Error('当前会话已有等待回答的问题，请先完成该问题')
     const state = this.store.snapshot()
     const current = state.sessions.find(item => item.id === route.id && item.sessionId === route.sessionId)
     const channel = state.channels.find(item => item.id === route.channelId)
-    // Direct connectors currently serialize reads with replies; interactive questions
-    // stay in DSH rather than waiting for an answer on a blocked receive loop.
-    if (channel?.platform && channel.platform !== 'weixin') return next()
     const pairing = state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
-    if (current === undefined || channel === undefined || !channel.enabled || pairing?.status !== 'approved') return next()
+    if (current === undefined || channel === undefined || channel.companionId !== route.companionId || !channel.enabled || pairing?.status !== 'approved') throw new Error('提问来源渠道或联系人授权已失效，未转发到其他渠道')
 
     let resolveAnswer!: (answer: AskUserQuestionAnswer) => void
     let rejectAnswer!: (error: unknown) => void
@@ -380,34 +388,56 @@ export class ChannelManager {
     const abort = (): void => rejectAnswer(request.signal?.reason ?? new Error('用户提问已取消'))
     request.signal?.addEventListener('abort', abort, { once: true })
     if (request.signal?.aborted) abort()
+    const polling = new AbortController()
+    const lifetime = request.signal ? AbortSignal.any([request.signal, polling.signal]) : polling.signal
     const pending: PendingQuestion = {
       sessionId: route.sessionId,
+      channelId: channel.id,
+      userId: route.userId,
       questions: request.questions,
       resolve: resolveAnswer,
       reject: rejectAnswer,
-      detachAbort: () => request.signal?.removeEventListener('abort', abort),
+      detachAbort: () => { request.signal?.removeEventListener('abort', abort); polling.abort() },
     }
     this.pendingQuestions.set(route.sessionId, pending)
+    let receiver: Promise<void> | undefined
     try {
       const credential = await this.credentials.read(channel.id)
       const api = this.sender(channel, credential, route.userId)
-      await api.sendText(route.userId, renderQuestions(request.questions), this.contextTokens.get(`${channel.id}:${route.userId}`), request.signal ?? AbortSignal.timeout(30_000))
+      // The main direct loop awaits this run. Take a watermark BEFORE sending
+      // the question, then receive answers independently without replaying history.
+      const cursor = api instanceof DirectTransport ? (await api.poll(undefined, lifetime)).cursor : undefined
+      const fresh = this.store.snapshot()
+      if (this.pendingQuestions.get(route.sessionId) !== pending
+        || !fresh.channels.some(item => item.id === channel.id && item.enabled && item.companionId === route.companionId && item.accountId === channel.accountId && item.platform === channel.platform && item.direct?.baseUrl === channel.direct?.baseUrl)
+        || !fresh.pairings.some(item => item.channelId === channel.id && item.userId === route.userId && item.status === 'approved' && (!(api instanceof DirectTransport) || !item.directTargetId || item.directTargetId === api.config.targetId))) throw new Error('提问来源或授权已变化，取消发送')
+      await api.sendText(route.userId, renderQuestions(request.questions), this.contextTokens.get(`${channel.id}:${route.userId}`), lifetime)
+      if (api instanceof DirectTransport && cursor !== undefined) {
+        receiver = this.receiveDirectAnswer(pending, channel, api, cursor, polling.signal).catch(error => {
+          if (!polling.signal.aborted) pending.reject(error)
+        })
+      }
     } catch (error) {
       this.clearPendingQuestion(pending)
-      if (request.signal?.aborted) throw error
-      this.ctx.logger.warn(`dsh-partner: failed to deliver question for ${route.sessionId}: ${error instanceof Error ? error.message : String(error)}`)
-      return next()
+      polling.abort()
+      throw error
     }
     try {
       return await answer
     } finally {
+      polling.abort()
+      await receiver
       this.clearPendingQuestion(pending)
     }
   }
 
   private async answerPendingQuestion(sessionId: string, text: string, channel: WeixinChannel, api: ChannelSender, userId: string, signal: AbortSignal): Promise<boolean> {
     const pending = this.pendingQuestions.get(sessionId)
-    if (pending === undefined) return false
+    if (pending === undefined || pending.channelId !== channel.id || pending.userId !== userId) return false
+    const state = this.store.snapshot()
+    const pairing = state.pairings.find(item => item.channelId === channel.id && item.userId === userId)
+    if (pairing?.status !== 'approved' || !state.channels.some(item => item.id === channel.id && item.enabled && item.companionId === channel.companionId && item.accountId === channel.accountId)) return false
+    if (api instanceof DirectTransport && pairing.directTargetId && pairing.directTargetId !== api.config.targetId) return false
     const answer = answerQuestions(pending.questions, text)
     pending.resolve(answer)
     this.clearPendingQuestion(pending)
@@ -417,6 +447,24 @@ export class ChannelManager {
   private clearPendingQuestion(pending: PendingQuestion): void {
     if (this.pendingQuestions.get(pending.sessionId) === pending) this.pendingQuestions.delete(pending.sessionId)
     pending.detachAbort()
+  }
+
+  private async receiveDirectAnswer(pending: PendingQuestion, channel: WeixinChannel, api: DirectTransport, cursor: string, signal: AbortSignal): Promise<void> {
+    while (!signal.aborted && this.pendingQuestions.get(pending.sessionId) === pending) {
+      const state = this.store.snapshot()
+      if (!state.channels.some(item => item.id === channel.id && item.enabled && item.companionId === channel.companionId)
+        || !state.pairings.some(item => item.channelId === channel.id && item.userId === pending.userId && item.status === 'approved' && (!item.directTargetId || item.directTargetId === api.config.targetId))) throw new Error('提问来源渠道或联系人权限已撤回')
+      const batch = await api.poll(cursor, signal)
+      cursor = batch.cursor
+      for (const message of batch.messages) {
+        const receipt = `${channel.id}:${message.id}`
+        if (message.sender !== pending.userId || !message.text || this.store.snapshot().recentReceipts.includes(receipt)) continue
+        if (this.pendingQuestions.get(pending.sessionId) !== pending) return
+        await this.rememberReceipt(receipt)
+        if (await this.answerPendingQuestion(pending.sessionId, message.text, channel, api, pending.userId, signal)) return
+      }
+      await delay(1000, signal)
+    }
   }
 
   private async rememberReceipt(receipt: string): Promise<void> {

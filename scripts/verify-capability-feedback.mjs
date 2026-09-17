@@ -71,6 +71,7 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}`)
     await page.addStyleTag({content: styles})
     await page.evaluate(dark => document.body.toggleAttribute('data-ds-dark-theme', dark), dark)
+    assert.equal(await page.getByRole('button', {name: /^渠道头像/}).count(), 0)
     await choice.click()
     const before = writes
     await commit(await startSave())

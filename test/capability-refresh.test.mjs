@@ -42,7 +42,7 @@ async function fixture(t, makeComposer) {
   })
   t.after(async () => { await runtime.close(); await scope.dispose(); await rm(directory, { recursive: true, force: true }) })
   const step = (turn, signal = new AbortController().signal) => ctx.waterfall(scopeTarget(carrier), 'agent/pre-step', { agent, turn, signal }, async () => 'ready')
-  return { runtime, store, agent, route, companion, registered, sections, step, counts: () => ({ compositions, disposals }) }
+  return { runtime, store, agent, route, companion, composition, registered, sections, step, counts: () => ({ compositions, disposals }) }
 }
 
 test('native browser resume installs tools before the first turn without /prepare, unchanged turns do not recompose', async t => {
@@ -56,6 +56,18 @@ test('native browser resume installs tools before the first turn without /prepar
   await runtime.prepareAgentTurn({ session: { id: 'ordinary-session' } }, 1, new AbortController().signal)
   assert.deepEqual(counts(), { compositions: 1, disposals: 0 })
   assert.equal(agent.status, 'running')
+})
+
+test('avatar tool registers by default without a capability toggle', async t => {
+  const { step, store, composition, registered } = await fixture(t)
+  composition.setAvatarToolFactory(() => ({ name: 'partner_channel_avatar', parameters: { type: 'object' }, output: { schema: { type: 'string' }, render: () => [] }, execute: async () => 'updated' }))
+  await step(1)
+  const tool = registered.get('partner_channel_avatar')
+  assert.ok(tool)
+  assert.equal(await tool.execute({}, {}), 'updated')
+  await store.update(state => { state.companions[0].capabilities = [] })
+  await step(3)
+  assert.equal(registered.has('partner_channel_avatar'), true)
 })
 
 test('activity-only writes do not recompose but peer grants and identity changes do', async t => {

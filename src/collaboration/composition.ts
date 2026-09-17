@@ -26,6 +26,8 @@ const MAX_INLINE_SKILL_CHARS = 32_000
 
 /** Composes partner-only tools into one agent scope. No global tool is registered. */
 export class PartnerAgentComposition {
+  private avatarToolFactory?: (companionId: string) => ToolDefinition
+  setAvatarToolFactory(factory: (companionId: string) => ToolDefinition): void { this.avatarToolFactory = factory }
   private attachmentToolFactory?: (companionId: string) => ToolDefinition
   setAttachmentToolFactory(factory: (companionId: string) => ToolDefinition): void { this.attachmentToolFactory = factory }
   constructor(
@@ -56,6 +58,7 @@ export class PartnerAgentComposition {
     }
     try {
       if (this.attachmentToolFactory) disposers.push(ctx.tools.register(this.attachmentToolFactory(companion.id)))
+      if (this.avatarToolFactory) disposers.push(ctx.tools.register(this.avatarToolFactory(companion.id)))
       if (skillsEnabled) register(skillTool(companion, this.skills, this.executor), 'skills')
       if (companion.capabilities.includes('companions')) register(companionTool(this.companions), 'companions')
       if (companion.capabilities.includes('access')) register(accessGrantTool(companion, this.collaboration), 'access')
