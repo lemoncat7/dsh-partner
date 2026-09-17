@@ -53,12 +53,12 @@ test('boundaries reject links outside cwd, symlinks, missing files, URLs and can
 
 test('tool records native images and download links, reports channel failure, retries by ID',async t=>{
   const f=await fixture(t),messages=[],saved=[]
-  const route={companionId:'c1',sessionId:'s1',kind:'channel',cwd:f.cwd}
+  const route={id:'route',companionId:'c1',sessionId:'s1',kind:'channel',cwd:f.cwd,inboundMessageIds:['inbound']}
   const store={snapshot:()=>({companions:[{id:'c1'}],sessions:[route]}),isCompanionRemoving:()=>false}
   let fail=true,sends=0
   const channels={sendExplicitAttachment:async()=>{sends++;if(fail)throw Error('upload failed')}}
   const ctx={attachments:{saveImage:async input=>{saved.push(input);return {attachmentId:'test-image',mediaType:'image/png',bytes:input.data.length,width:1,height:1}}}}
-  const exec={signal:f.signal,agent:{session:{id:'s1',seq:3,header:{cwd:f.cwd},snapshotEvents:()=>[{type:'user/message',seq:1,data:{source:{kind:'user'}}}]}},deferContext:msg=>messages.push(msg)}
+  const exec={signal:f.signal,agent:{session:{id:'s1',seq:3,header:{cwd:f.cwd},snapshotEvents:()=>[{type:'user/message',seq:1,data:{id:'inbound',source:{kind:'user'}}}]}},deferContext:msg=>messages.push(msg)}
   await writeFile(join(f.cwd,'image.png'),'test-image-bytes')
   const tool=attachmentTool('c1',store,f.service,ctx,channels,'/partner-local/v1')
   const first=JSON.parse(await tool.execute({path:'image.png'},exec))
@@ -73,6 +73,30 @@ test('tool records native images and download links, reports channel failure, re
   assert.ok(messages.every(m=>m.source.summary==='伙伴附件交付'))
   const other=attachmentTool('c2',{...store,snapshot:()=>({companions:[{id:'c2'}],sessions:[{...route,companionId:'c2'}]})},f.service,ctx,channels,'/api')
   await assert.rejects(other.execute({deliveryId:first.deliveryId},exec),/不属于/)
+})
+
+test('shared-session attachment delivery follows source and pins retry to the original route',async t=>{
+  const f=await fixture(t),sends=[]
+  const state={companions:[{id:'c1'}],sessions:[
+    {id:'local',companionId:'c1',sessionId:'s1',kind:'local',cwd:f.cwd},
+    {id:'matrix',companionId:'c1',sessionId:'s1',kind:'channel',cwd:f.cwd,inboundMessageIds:['mx']},
+    {id:'mattermost',companionId:'c1',sessionId:'s1',kind:'channel',cwd:f.cwd,inboundMessageIds:['mm']},
+  ]}
+  let source='mx',seq=1,fail=true
+  const tool=attachmentTool('c1',{snapshot:()=>state,isCompanionRemoving:()=>false},f.service,{},
+    {sendExplicitAttachment:async(_session,_file,_signal,route)=>{sends.push(route);if(fail)throw Error('network')}},'/api')
+  const exec={signal:f.signal,agent:{session:{id:'s1',header:{cwd:f.cwd},snapshotEvents:()=>[{type:'user/message',seq,data:{id:source,source:{kind:'user'}}}]}},deferContext:()=>{}}
+  const first=JSON.parse(await tool.execute({path:'report.md'},exec))
+  assert.equal(first.channel,'failed');assert.deepEqual(sends,['matrix'])
+  assert.equal(f.service.get(first.deliveryId).channelRouteId,'matrix')
+  source='mm';seq++
+  await assert.rejects(tool.execute({deliveryId:first.deliveryId},exec),/来源不一致/)
+  source='browser';seq++
+  const local=JSON.parse(await tool.execute({path:'report.md'},exec))
+  assert.equal(local.channel,'none');assert.equal(sends.length,1)
+  source='mx';seq++;fail=false
+  assert.equal(JSON.parse(await tool.execute({deliveryId:first.deliveryId},exec)).channel,'sent')
+  assert.deepEqual(sends,['matrix','matrix'])
 })
 
 test('internal task/review file delivery never calls the channel',async t=>{

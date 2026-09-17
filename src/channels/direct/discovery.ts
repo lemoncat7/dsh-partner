@@ -1,14 +1,15 @@
 import type {DirectBatch, DirectMessage, DirectPlatform, DirectTransport} from './transport.js'
+import { matrixMessage } from './message.js'
 
 /** Discover conversations without granting access. Every candidate still passes
  * the same two-member / no-encryption validation as explicitly pinned rooms. */
 export async function pollDiscovered(platform:DirectPlatform, accountId:string, cursor:string|undefined, signal:AbortSignal,
-  request:(path:string,body?:unknown)=>Promise<any>, room:(id:string)=>DirectTransport):Promise<DirectBatch> {
+  request:(path:string,body?:unknown)=>Promise<any>, room:(id:string)=>DirectTransport, waitMs=20000):Promise<DirectBatch> {
   const messages:DirectMessage[]=[]
   if(platform==='matrix') {
     let encrypted=false
     const filter=JSON.stringify({room:{timeline:{limit:100}},presence:{types:[]}})
-    const data=await request('/_matrix/client/v3/sync?timeout=20000&filter='+encodeURIComponent(filter)+(cursor?'&since='+encodeURIComponent(cursor):''))
+    const data=await request('/_matrix/client/v3/sync?timeout='+waitMs+'&filter='+encodeURIComponent(filter)+(cursor?'&since='+encodeURIComponent(cursor):''))
     if(typeof data.next_batch!=='string')throw new Error('Matrix 同步游标缺失')
     const invites=Object.entries(data.rooms?.invite??{})
     if(invites.length>50)throw new Error('房间邀请过多，请清理后重连')
@@ -36,8 +37,8 @@ export async function pollDiscovered(platform:DirectPlatform, accountId:string, 
       }
       if(timeline.limited)throw new Error('Matrix 私聊消息出现缺口，请检查后重连')
       for(const event of timeline.events) {
-        if(event.sender!==identity.peerId||event.type!=='m.room.message'||event.content?.['m.relates_to']?.rel_type==='m.replace'||typeof event.event_id!=='string')continue
-        messages.push({id:event.event_id,sender:identity.peerId,targetId:id,text:event.content?.msgtype==='m.text'&&typeof event.content.body==='string'?event.content.body:''})
+        const message = matrixMessage(event, identity.peerId, id)
+        if (message) messages.push(message)
       }
     }
     return {cursor:data.next_batch,messages,...(encrypted?{warning:'检测到 Matrix 加密会话，已跳过：只有未加密的双人会话才能获取配对码和交流。请新建未开启加密的会话并邀请机器人；其他未加密会话不受影响。'}:{})}

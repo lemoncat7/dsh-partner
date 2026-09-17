@@ -58,7 +58,7 @@ test('Matrix uses authenticated API, ignores first-sync history, then reads and 
   assert.match(rich.formatted_body,/a &lt; b/)
   assert.match(rich.body,/\*\*bold\*\*/)
   await assert.rejects(api.sendText('@intruder:local','secret',undefined),/不匹配/)
-  await assert.rejects(api.sendAttachment(),/尚未交付/)
+  await assert.rejects(api.sendAttachment('@intruder:local', {path:'/unused',name:'file',mediaType:'text/plain',kind:'file'},undefined),/不匹配/)
 })
 for(const scenario of ['encrypted','group','changed-peer'])test(`Matrix rejects ${scenario}`,async t=>{
   const state=scenario==='encrypted'?[...members,{type:'m.room.encryption'}]:scenario==='group'?[...members,{type:'m.room.member',state_key:'@other:local',content:{membership:'join'}}]:members
@@ -78,7 +78,7 @@ test('Mattermost accepts only DM, skips initial posts and thread messages',async
   })
   const api=new DirectTransport({platform:'mattermost',baseUrl:s.url,targetId:'dm'},'test-token')
   assert.deepEqual((await api.poll(undefined,new AbortController().signal)).messages,[])
-  assert.deepEqual((await api.poll('50',new AbortController().signal)).messages,[{id:'a',sender:'user',text:'hello'}])
+  assert.deepEqual((await api.poll('50',new AbortController().signal)).messages,[{id:'a',sender:'user',text:'hello',timestamp:100}])
   await api.sendText('user','reply',undefined)
   assert.ok(s.requests.some(r=>r.method==='POST'&&JSON.parse(r.body).channel_id==='dm'))
   await api.sendText('user','**bold**',undefined)
@@ -166,7 +166,7 @@ test('Mattermost discovers only DM rooms and preserves room routing',async t=>{
   })
   const api=new DirectTransport({platform:'mattermost',baseUrl:s.url,targetId:''},'token')
   assert.deepEqual((await api.poll(undefined,new AbortController().signal)).messages,[])
-  assert.deepEqual((await api.poll('50',new AbortController().signal)).messages,[{id:'a',sender:'user',text:'pair',targetId:'dm'}])
+  assert.deepEqual((await api.poll('50',new AbortController().signal)).messages,[{id:'a',sender:'user',text:'pair',targetId:'dm',timestamp:100}])
   assert.ok(!s.requests.some(r=>r.path.includes('/channels/public')))
 })
 test('discovered contact must pair before model execution; another room cannot inherit approval',async()=>{

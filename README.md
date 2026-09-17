@@ -6,6 +6,12 @@
 
 交互提问按实际消息来源返回，不按会话绑定猜测渠道。伙伴默认可修改自身 Matrix / Mattermost 渠道账号头像，无需单独开启能力，详见 [提问来源与渠道头像](docs/channel-questions-and-avatar.md)。
 
+Matrix / Mattermost 私聊支持图片、文件、音频和视频收发；单条入站消息最多 8 个附件、合计 64 MB。音视频先作为文件保存或交付，不自动转写；Matrix 加密房间仍不支持。详见 [渠道说明](docs/direct-channels.md)。
+
+## 2.2.0：渠道附件与合并接收
+
+正式版，已验证宿主 **DSH 0.1.5-rc.1**。Matrix / Mattermost 支持附件收发，并合并紧邻的文字和附件，下载完成后再交给伙伴。详见 [2.2.0 发布说明](docs/releases/2.2.0.md)。
+
 ## 2.1.0：提问来源与渠道头像
 
 正式版，已验证宿主 **DSH 0.1.5-rc.1**。提问按实际发起端返回；伙伴默认可修改自身 Matrix / Mattermost 渠道账号头像，无需能力开关。详见 [2.1.0 发布说明](docs/releases/2.1.0.md)。

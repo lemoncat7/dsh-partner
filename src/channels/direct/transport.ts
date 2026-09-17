@@ -3,10 +3,12 @@ import type { PartnerOutboundAttachment } from '../../channel-message.js'
 import { pollDiscovered } from './discovery.js'
 import { formatDirectMessages } from './message-format.js'
 import { directProgressTransport, type ProgressTransport } from './progress-transport.js'
+import { DirectMediaTransfer, type DirectMedia } from './media.js'
+import { matrixMessage } from './message.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
-export interface DirectMessage { id: string; sender: string; text: string; targetId?: string }
+export interface DirectMessage { id: string; sender: string; text: string; targetId?: string; media?: DirectMedia[]; timestamp?: number }
 export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
 export interface ChannelSender {
   sendText(userId: string, text: string, context: string | undefined, signal?: AbortSignal): Promise<void>
@@ -27,7 +29,7 @@ export function directConfig(value: Record<string, unknown>): DirectConfig {
 export class DirectTransport implements ChannelSender {
   private botId = ''
   private peerId = ''
-  constructor(readonly config: DirectConfig, private readonly token: string, private readonly expected?: {accountId: string; peerId: string}) {}
+  constructor(readonly config: DirectConfig, private readonly token: string, private readonly expected?: {accountId: string; peerId: string}, private readonly authorize?: () => void) {}
 
   private async request(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<any> {
     const response = await fetch(this.config.baseUrl + path, {
@@ -53,6 +55,7 @@ export class DirectTransport implements ChannelSender {
   }
 
   async validate(signal?: AbortSignal): Promise<{accountId: string; peerId: string}> {
+    this.authorize?.()
     if(!this.config.targetId) {
       const who=await this.request(this.config.platform==='matrix'?'/_matrix/client/v3/account/whoami':'/api/v4/users/me',signal)
       const id=this.config.platform==='matrix'?who.user_id:who.id
@@ -83,26 +86,22 @@ export class DirectTransport implements ChannelSender {
     return {accountId: this.botId, peerId: this.peerId}
   }
 
-  async poll(cursor: string | undefined, signal: AbortSignal): Promise<DirectBatch> {
+  async poll(cursor: string | undefined, signal: AbortSignal, waitMs = 20000): Promise<DirectBatch> {
     await this.validate(signal)
     if(!this.config.targetId)return pollDiscovered(this.config.platform,this.botId,cursor,signal,
       (path,body)=>this.request(path,signal,body),
-      targetId=>new DirectTransport({...this.config,targetId},this.token))
+      targetId=>new DirectTransport({...this.config,targetId},this.token),waitMs)
     if (this.config.platform === 'matrix') {
       const filter = JSON.stringify({room:{rooms:[this.config.targetId],timeline:{limit:100}},presence:{types:[]}})
-      const data = await this.request('/_matrix/client/v3/sync?timeout=20000&filter='+encodeURIComponent(filter)+(cursor ? '&since='+encodeURIComponent(cursor) : ''), signal)
+      const data = await this.request('/_matrix/client/v3/sync?timeout='+waitMs+'&filter='+encodeURIComponent(filter)+(cursor ? '&since='+encodeURIComponent(cursor) : ''), signal)
       if (typeof data.next_batch !== 'string') throw new Error('Matrix 同步游标缺失')
       const room = data.rooms?.join?.[this.config.targetId]
       if (cursor && room?.timeline?.limited) throw new Error('Matrix 消息出现缺口，已暂停以免跳过未处理消息')
       const messages: DirectMessage[] = []
       // First sync establishes a watermark, never executes historical messages.
       for (const event of cursor ? room?.timeline?.events ?? [] : []) {
-        if (event.sender !== this.peerId || event.type !== 'm.room.message' || event.content?.['m.relates_to']?.rel_type === 'm.replace') continue
-        if (typeof event.event_id !== 'string') continue
-        if (event.content?.msgtype !== 'm.text' || typeof event.content.body !== 'string') {
-          messages.push({id:event.event_id,sender:this.peerId,text:''}); continue
-        }
-        messages.push({id:event.event_id,sender:this.peerId,text:event.content.body})
+        const message = matrixMessage(event, this.peerId)
+        if (message) messages.push(message)
       }
       return {cursor:data.next_batch,messages}
     }
@@ -111,7 +110,7 @@ export class DirectTransport implements ChannelSender {
     if (cursor && data.order.length >= 200) throw new Error('Mattermost 消息积压超出单批上限，已暂停以免遗漏')
     const posts = data.order.map((id: string) => data.posts[id]).filter((p: any) => p && Number.isFinite(p.create_at)).sort((a:any,b:any)=>a.create_at-b.create_at)
     const next = Math.max(Number(cursor ?? 0), ...posts.map((p:any)=>p.create_at))
-    return {cursor:String(next),messages:cursor ? posts.filter((p:any)=>p.user_id===this.peerId && !p.type && !p.delete_at && !p.root_id).map((p:any)=>({id:p.id,sender:this.peerId,text:Array.isArray(p.file_ids)&&p.file_ids.length?'':p.message ?? ''})) : []}
+    return {cursor:String(next),messages:cursor ? posts.filter((p:any)=>p.user_id===this.peerId && !p.type && !p.delete_at && !p.root_id).map((p:any)=>({id:p.id,sender:this.peerId,text:p.message ?? '',timestamp:p.create_at,...(Array.isArray(p.file_ids)&&p.file_ids.length?{media:p.file_ids.map((source: unknown)=>({source}))}:{})})) : []}
   }
 
   async sendText(userId: string, text: string, _context: string | undefined, signal?: AbortSignal): Promise<void> {
@@ -128,7 +127,25 @@ export class DirectTransport implements ChannelSender {
       (path,signal,body,method)=>this.request(path,signal,body,method),
       (text,signal)=>this.sendText(userId,text,undefined,signal))
   }
-  async sendAttachment(_userId: string, _file: PartnerOutboundAttachment, _context: string | undefined, _signal?: AbortSignal): Promise<void> {
-    throw new Error('Matrix / Mattermost 首版仅支持文本，附件尚未交付；请在 DSH 工作区查看文件')
+  async receiveAttachments(message: DirectMessage, signal: AbortSignal, allowed: () => boolean, maxBytes?: number) {
+    const lifetime = AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+    const transfer = new DirectMediaTransfer(this.config, this.token, async () => {
+      if (!allowed()) throw new Error('渠道或联系人授权已撤销')
+      const who = await this.validate(lifetime)
+      if (!allowed()) throw new Error('渠道或联系人授权已撤销')
+      if (!this.config.targetId || who.peerId !== message.sender || message.targetId && message.targetId !== this.config.targetId) throw new Error('附件来源与当前会话不匹配')
+    })
+    return transfer.receive(message.id, message.media ?? [], lifetime, maxBytes)
+  }
+  async sendAttachment(userId: string, file: PartnerOutboundAttachment, _context: string | undefined, signal?: AbortSignal, allowed: () => boolean = () => true): Promise<void> {
+    const lifetime = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
+    const transfer = new DirectMediaTransfer(this.config, this.token, async () => {
+      if (!allowed()) throw new Error('渠道或联系人授权已撤销')
+      const who = await this.validate(lifetime)
+      this.authorize?.()
+      if (!allowed()) throw new Error('渠道或联系人授权已撤销')
+      if (!this.config.targetId || who.peerId !== userId) throw new Error('附件接收人与当前会话不匹配')
+    })
+    await transfer.send(file, lifetime)
   }
 }

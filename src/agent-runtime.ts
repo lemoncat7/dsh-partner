@@ -662,20 +662,20 @@ export class PartnerAgentRuntime {
     const content: ContentBlock[] = []
     const notes: string[] = []
     for (const attachment of message.attachments) {
-      if (attachment.data.byteLength > PARTNER_MEDIA_MAX_BYTES) throw new Error('微信附件超过 64 MB 限制')
+      if (attachment.data.byteLength > PARTNER_MEDIA_MAX_BYTES) throw new Error('渠道附件超过 64 MB 限制')
       const name = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeMediaName(attachment.name)}`
       const path = join(directory, name)
       await writeFile(path, attachment.data, { flag: 'wx', mode: 0o600 })
-      notes.push(`微信${attachment.kind === 'image' ? '图片' : '文档'}已保存：${path}`)
+      notes.push(`渠道${attachment.kind === 'image' ? '图片' : '附件'}已保存：${path}${attachment.mediaType ? `（${attachment.mediaType}）` : ''}`)
       if (attachment.kind === 'image') {
         const mediaType = attachment.mediaType as ImageMediaType
         const ref = await this.ctx.attachments.saveImage({ data: attachment.data, mediaType, name: attachment.name })
         content.push({ type: 'image', attachment: ref })
       }
     }
-    const visibleText = [message.text.trim(), ...notes].filter(Boolean).join('\n\n')
+    const visibleText = [...notes, message.text.trim()].filter(Boolean).join('\n\n')
     if (visibleText) content.unshift({ type: 'text', text: visibleText })
-    if (content.length === 0) content.push({ type: 'text', text: '[微信附件消息]' })
+    if (content.length === 0) content.push({ type: 'text', text: '[渠道附件消息]' })
     return { content, query: [message.text, ...message.attachments.map(item => item.name)].filter(Boolean).join(' ') }
   }
 

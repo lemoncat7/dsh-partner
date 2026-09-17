@@ -5,6 +5,7 @@ import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { PartnerStore } from '../store.js'
 import type { ChannelManager } from '../channels/manager.js'
 import { isInternalTaskNotice } from '../channels/delivery-policy.js'
+import { questionOrigin } from '../channels/question-origin.js'
 import type { AttachmentDeliveryService } from './service.js'
 
 export const ATTACHMENT_PROTOCOL = '交付图片或文档时，如果当前提供 partner_send_attachment，必须调用它，path 填生成工具返回的真实本地文件路径。普通 Markdown 链接仅是引用，不代表发送成功。工具会把指定文件显示在会话中，并在当前会话绑定渠道时发送真实附件；必须以工具返回的 channel 状态为准。失败用 deliveryId 重试原附件，无需重新生成。远端文件先下载到当前会话目录，不要编造 sandbox 地址。不要提交中间产物、内部核验材料或用户未要求交付的文件。工具完成后最终回复只简述结论，不要再次粘贴附件下载地址。若临时执行环境未提供此工具，只向负责人交回真实文件位置和结果，不得声称附件已发送。'
@@ -28,13 +29,15 @@ export function attachmentTool(companionId: string, store: PartnerStore, service
         const events=agent.session.snapshotEvents()
         const origin=[...events].reverse().find(e=>e.type==='user/message' && (e.data.source.kind==='user'||isInternalTaskNotice(e)))
         const internal = origin ? isInternalTaskNotice(origin) : true
-        const channel = route.kind !== 'local' && !internal
+        const source = questionOrigin(sessionId, events, state.sessions.filter(item=>item.companionId===companionId))
+        const channel = !!source && !internal
         const cwd=route.cwd??agent.session.header.cwd
         if(!cwd)throw new Error('当前会话缺少工作目录')
-        let item = typeof input.deliveryId==='string' ? service.get(input.deliveryId) : await service.serial('prepare',()=>service.prepare({companionId,sessionId,turn:origin?.seq??agent.session.seq,cwd,path:input.path as string,channel},exec.signal))
+        let item = typeof input.deliveryId==='string' ? service.get(input.deliveryId) : await service.serial('prepare',()=>service.prepare({companionId,sessionId,turn:origin?.seq??agent.session.seq,cwd,path:input.path as string,channel,...(source?{channelRouteId:source.id}:{})},exec.signal))
         if (!item || item.companionId!==companionId || item.sessionId!==sessionId) throw new Error('附件交付不存在或不属于当前伙伴会话')
         if (!channel && item.channel!=='none') throw new Error('当前执行不能向原渠道重发附件，请回到直接对话重试')
         if (channel && item.channel==='none' && typeof input.deliveryId==='string') throw new Error('这份附件原本仅供会话查看。若要正式发送到渠道，请使用 path 明确提交原文件')
+        if(channel&&item.channelRouteId!==source?.id)throw new Error('附件原始投递渠道与当前来源不一致，请回到原渠道重试；旧版未记录目标的附件请用 path 重新提交')
         const url=`${prefix.replace(/\/$/,'')}/attachments/${item.id}`
         const escaped=item.name.replace(/[\[\]\\]/g,'_')
         const content: ContentBlock[]=[{type:'text',text:`[下载附件：${escaped}](${url})`}]
@@ -43,7 +46,7 @@ export function attachmentTool(companionId: string, store: PartnerStore, service
           content.push({type:'image',attachment:ref})
         }
         let error: string | undefined
-        try { item=await service.deliver(item,file=>channels.sendExplicitAttachment(sessionId,file,exec.signal)) }
+        try { item=await service.deliver(item,file=>channels.sendExplicitAttachment(sessionId,file,exec.signal,item!.channelRouteId)) }
         catch (cause) { error=cause instanceof Error?cause.message:String(cause) }
         const status=item.channel==='sent'?'渠道附件已发送':item.channel==='none'?'仅交付到当前会话':`渠道发送未完成，请用 deliveryId 重试：${item.id}`
         content.push({type:'text',text:status})

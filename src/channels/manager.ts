@@ -6,6 +6,7 @@ import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
 import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
+import { collectDirectBatch, groupDirectMessages } from './direct/inbound-batch.js'
 import { notificationRoutes } from './notification-route.js'
 import { NotificationDelivery } from './notification-delivery.js'
 import { ReplyProgressController } from './reply-progress-controller.js'
@@ -17,6 +18,7 @@ import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
 import type { PartnerReply, PartnerOutboundAttachment } from '../channel-message.js'
+import { PARTNER_MEDIA_MAX_BYTES, type PartnerInboundAttachment } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
@@ -153,8 +155,8 @@ export class ChannelManager {
     await this.sendProactiveReply(channelId, userId, { text, attachments: [] }, receipt)
   }
 
-  async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal): Promise<void> {
-    const route=this.store.snapshot().sessions.find(s=>s.sessionId===sessionId)
+  async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal, channelRouteId?: string): Promise<void> {
+    const route=this.store.snapshot().sessions.find(s=>s.sessionId===sessionId&&s.id===channelRouteId)
     if(!route||route.kind==='local')throw new Error('当前会话没有绑定渠道')
     const channel=requiredChannel(this.store,route.channelId)
     if(!channel.enabled)throw new Error('渠道已停用')
@@ -468,8 +470,12 @@ export class ChannelManager {
   }
 
   private async rememberReceipt(receipt: string): Promise<void> {
+    await this.rememberReceipts([receipt])
+  }
+
+  private async rememberReceipts(receipts: string[]): Promise<void> {
     await this.store.update(state => {
-      state.recentReceipts.push(receipt)
+      for(const receipt of receipts)if(!state.recentReceipts.includes(receipt))state.recentReceipts.push(receipt)
       if (state.recentReceipts.length > 800) state.recentReceipts.splice(0, state.recentReceipts.length - 800)
     })
   }
@@ -480,7 +486,11 @@ export class ChannelManager {
     const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id&&p.userId===userId&&p.status==='approved')
     const targetId=channel.direct.targetId||pairing?.directTargetId
     if(!targetId)throw new Error('联系人尚未绑定私聊会话')
-    return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId||userId})
+    return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId||userId},()=>{
+      const state=this.store.snapshot()
+      if(!state.channels.some(c=>c.id===channel.id&&c.enabled&&c.accountId===channel.accountId&&c.companionId===channel.companionId)
+        ||!state.pairings.some(p=>p.channelId===channel.id&&p.userId===userId&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===targetId)))throw new Error('渠道或联系人授权已撤销')
+    })
   }
 
   /** Independent connector loop. Cursor is persisted only after receipt handoff. */
@@ -493,16 +503,20 @@ export class ChannelManager {
     let roomWarning: string | undefined
     while(!signal.aborted) {
       try {
-        const batch=await api.poll(cursor,signal)
+        const initial=await api.poll(cursor,signal)
+        const batch=await collectDirectBatch(initial,(next,lifetime)=>api.poll(next,lifetime,0),signal)
         if(signal.aborted)break
         if(batch.warning)roomWarning=batch.warning
         else if(batch.messages.length)roomWarning=undefined
         this.runtime.set(channel.id,{status:'running',...(roomWarning?{lastError:roomWarning}:{})})
-        for(const message of batch.messages) {
+        const seenReceipts=new Set(this.store.snapshot().recentReceipts)
+        const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`))
+        for(const group of groupDirectMessages(unseen,channel.direct.targetId)) {
+          const message=group[0]!
           if(signal.aborted)break
           try {
             const targetApi=message.targetId?new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:message.targetId},credential.botToken,{accountId:channel.accountId,peerId:message.sender}):api
-            await targetApi.validate(signal); await this.handleDirect(channel,targetApi,message,signal)
+            await targetApi.validate(signal); await this.handleDirect(channel,targetApi,message,signal,group)
           }
           catch { throw new DirectDeliveryError() }
         }
@@ -524,12 +538,18 @@ export class ChannelManager {
     }
   }
 
-  private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal): Promise<void> {
-    const receipt=`${channel.id}:${event.id}`
-    if(this.store.snapshot().recentReceipts.includes(receipt))return
+  private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal, group: readonly DirectMessage[] = [event]): Promise<void> {
+    const seen=this.store.snapshot().recentReceipts
+    const events=group.filter(item=>!seen.includes(`${channel.id}:${item.id}`))
+    if(!events.length)return
+    event=events[0]!
+    if(events.some(item=>item.sender!==event.sender||(item.targetId??api.config?.targetId)!==(event.targetId??api.config?.targetId)))throw new Error('不能合并不同联系人的附件消息')
+    const receipts=events.map(item=>`${channel.id}:${item.id}`)
+    const text=events.map(item=>item.text).filter(Boolean).join('\n\n')
+    const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id && p.userId===event.sender)
     // A different room must not silently inherit the contact's existing grant.
-    if(pairing?.directTargetId&&event.targetId&&pairing.directTargetId!==event.targetId){await this.rememberReceipt(receipt);return}
+    if(pairing?.directTargetId&&event.targetId&&pairing.directTargetId!==event.targetId){await this.rememberReceipts(receipts);return}
     if(!pairing) {
       const now=Date.now()
       const pairingCode=randomBytes(4).toString('hex').toUpperCase()
@@ -540,30 +560,54 @@ export class ChannelManager {
       await api.sendText(event.sender,`配对码：${pairingCode}\n请在「伙伴 → 渠道 → 配置」核对该码并批准联系人，然后重新发送消息。未批准前不会交给伙伴处理。`,undefined,signal)
     } else if(pairing.status==='approved') {
       await this.markInbound(channel.id,event.sender)
-      if(!event.text)await api.sendText(event.sender,'此渠道首版仅支持文本；附件未交给伙伴处理。',undefined,signal)
+      if(!text&&!mediaCount)await api.sendText(event.sender,'消息类型暂不支持；可发送文字、图片、文件、音频或视频。',undefined,signal)
       else {
         // Claim before starting tools. A delivery failure must not execute the same
         // user command twice on reconnect; its result remains in the DSH session.
-        await this.rememberReceipt(receipt)
+        await this.rememberReceipts(receipts)
         const companion=requiredCompanion(this.store,channel.companionId)
         const allowed=()=>{
           const state=this.store.snapshot()
-          return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
+          return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
         }
         const progress=typeof api.progress==='function'?new ReplyProgressController(api.progress(event.sender),allowed,signal):undefined
         progress?.start()
         try {
-        const reply=await this.agents.reply(companion,channel.id,event.sender,{text:event.text,attachments:[]},progress?.update)
+        const attachments:PartnerInboundAttachment[]=[]
+        try {
+          if(mediaCount>8)throw new Error('单条消息最多接收 8 个附件')
+          let remaining=PARTNER_MEDIA_MAX_BYTES
+          for(const item of events)if(item.media?.length){
+            const received=await api.receiveAttachments(item,signal,allowed,remaining)
+            for(const attachment of received){remaining-=attachment.data.byteLength;if(remaining<0)throw new Error('附件总大小超过 64 MB');attachments.push(attachment)}
+          }
+        }
+        catch(error){
+          await progress?.fail()
+          if(signal.aborted||!allowed())throw error
+          await api.sendText(event.sender,'附件接收失败，未交给伙伴执行。请确认附件可下载、单条消息不超过 8 个附件且总大小不超过 64 MB，再重新发送。加密附件暂不支持。',undefined,signal)
+          return
+        }
+        if(!allowed())throw new Error('渠道或联系人授权已撤销')
+        const reply=await this.agents.reply(companion,channel.id,event.sender,{text,attachments},progress?.update)
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!current.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)||!current.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'))throw new Error('渠道或联系人授权已撤销，取消回复')
-        const text=reply.text+(reply.attachments.length?'\n\n附件未交付：此渠道首版只发送文本，请在 DSH 工作区查看文件。':'')
-        if(progress)await progress.finish(text)
-        else await api.sendText(event.sender,text,undefined,signal)
-        } catch(error) {await progress?.fail();throw error}
+        const replyText=reply.text || (reply.attachments.length?'已生成附件，正在发送。':'')
+        if(progress)await progress.finish(replyText)
+        else await api.sendText(event.sender,replyText,undefined,signal)
+        for(const attachment of reply.attachments){
+          if(!allowed())throw new Error('渠道或联系人授权已撤销')
+          await api.sendAttachment(event.sender,attachment,undefined,signal,allowed)
+        }
+        } catch(error) {
+          await progress?.fail()
+          if(allowed()&&!signal.aborted)await api.sendText(event.sender,'本次消息处理或附件传输未完成，请在 DSH 查看错误。附件接收失败时未交给伙伴执行；请检查文件大小后重新发送。',undefined,signal).catch(()=>{})
+          throw error
+        }
       }
     }
-    await this.rememberReceipt(receipt)
+    await this.rememberReceipts(receipts)
   }
 
   private async markInbound(channelId: string, userId: string): Promise<void> {

@@ -9,6 +9,7 @@ import { PARTNER_MEDIA_MAX_BYTES, type PartnerOutboundAttachment } from '../chan
 export interface AttachmentDelivery {
   id: string; companionId: string; sessionId: string; name: string; mediaType: string
   kind: 'image' | 'file'; size: number; hash: string; channel: 'pending' | 'sent' | 'failed' | 'none'
+  channelRouteId?: string
 }
 const MAX_STORED_BYTES = 512 * 1024 * 1024
 
@@ -76,7 +77,7 @@ export class AttachmentDeliveryService {
     this.database(item.companionId).prepare('INSERT OR REPLACE INTO deliveries(id,payload,size) VALUES (?,?,?)').run(item.id, JSON.stringify(item), item.size)
     if(this.privateRoot)this.db.prepare('INSERT OR REPLACE INTO owners(id,companion_id) VALUES (?,?)').run(item.id,item.companionId)
   }
-  async prepare(input: { companionId: string; sessionId: string; turn: number; cwd: string; path: string; channel: boolean }, signal: AbortSignal): Promise<AttachmentDelivery> {
+  async prepare(input: { companionId: string; sessionId: string; turn: number; cwd: string; path: string; channel: boolean; channelRouteId?: string }, signal: AbortSignal): Promise<AttachmentDelivery> {
     signal.throwIfAborted()
     if (!input.path || input.path.length > 4096 || /[\n\r<>`]/.test(input.path)) throw new Error('请提供单个真实文件路径，不要传 Markdown 或 URL')
     const files = await extractOutboundAttachments(`[交付](<${input.path}>)`, input.cwd)
@@ -109,7 +110,7 @@ export class AttachmentDeliveryService {
     if (used + data.length > MAX_STORED_BYTES) throw new Error('附件交付存储已达到 512 MB，请先由管理员清理历史交付；未发送文件')
     this.database(input.companionId)
     await writeFile(join(this.directory(input.companionId), id), data, { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error })
-    const item: AttachmentDelivery = { id, companionId: input.companionId, sessionId: input.sessionId, name: file.name, mediaType: file.mediaType, kind: file.kind, size: data.length, hash, channel: input.channel ? 'pending' : 'none' }
+    const item: AttachmentDelivery = { id, companionId: input.companionId, sessionId: input.sessionId, name: file.name, mediaType: file.mediaType, kind: file.kind, size: data.length, hash, channel: input.channel ? 'pending' : 'none', ...(input.channelRouteId ? {channelRouteId:input.channelRouteId} : {}) }
     await this.bytes(item)
     this.save(item)
     return item
