@@ -50,6 +50,7 @@ test('connector collects caption then file across polls before execution and com
   t.mock.method(DirectTransport.prototype,'poll',async(cursor,_signal,wait)=>{
     calls++
     if(calls===1)return {cursor:'first',messages:[text]}
+    if(calls>2)return {cursor:'complete',messages:[]}
     assert.equal(cursor,'first');assert.equal(wait,0)
     return {cursor:'complete',messages:[image]}
   })

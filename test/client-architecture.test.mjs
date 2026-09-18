@@ -55,7 +55,10 @@ test('global feature pages share one template and one create-dialog contract', (
     assert.match(source, /<WorkspaceDialog/)
     assert.match(source, /<WorkspaceNotice/)
   }
-  assert.match(shared, /<dialog[^>]*open/)
+  assert.match(shared, /<dialog ref=\{layerRef\}/)
+  assert.match(shared, /layer\?\.showModal\(\)/)
+  assert.doesNotMatch(shared, /<dialog[^>]*\sopen[\s>]/)
+  assert.match(shared, /focus\(\{preventScroll: true\}\)/)
   assert.doesNotMatch(shared, /<dialog[^>]*role="dialog"/)
   assert.match(shared, /aria-modal="true"/)
   assert.match(shared, /event\.key === 'Escape'/)

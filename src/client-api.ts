@@ -38,7 +38,7 @@ export interface HeartbeatStateView {
 export type MemoryKindView = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
 export interface MemoryEvidenceView { turnId: string; at: number; excerpt: string }
 export interface MemoryView { id: string; scopeId: string; kind: MemoryKindView; subject: string; content: string; status: 'active' | 'completed' | 'superseded' | 'expired'; confidence: number; importance: number; updatedAt: number; locked?: boolean; evidence: MemoryEvidenceView[] }
-export interface UserProfileSnapshotView { scopeId: string; label: string; version: string; updatedAt?: number; entries: MemoryView[]; preferences?: MemoryView[]; evidenceCount: number; lockedCount: number }
+export interface UserProfileSnapshotView { persona?: import('./persona/types.js').PersonaView; scopeId: string; label: string; version: string; updatedAt?: number; entries: MemoryView[]; preferences?: MemoryView[]; evidenceCount: number; lockedCount: number }
 export interface MemoryRelationView { id: string; scopeId: string; sourceMemoryId: string; targetMemoryId: string; kind: 'supports' | 'depends_on' | 'about' | 'conflicts_with' | 'follows'; label: string; confidence: number; updatedAt: number }
 export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRelationView[] }
 export interface DailyReflectionView { scopeId: string; date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }

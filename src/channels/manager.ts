@@ -7,6 +7,8 @@ import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
 import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
 import { collectDirectBatch, groupDirectMessages } from './direct/inbound-batch.js'
+import { DirectDispatcher } from './direct/dispatcher.js'
+import {matrixTransientFailure} from './direct/retry-policy.js'
 import { notificationRoutes } from './notification-route.js'
 import { NotificationDelivery } from './notification-delivery.js'
 import { ReplyProgressController } from './reply-progress-controller.js'
@@ -54,6 +56,7 @@ export class ChannelManager {
   private readonly runtime = new Map<string, RuntimeState>()
   private readonly contextTokens = new Map<string, string>()
   private readonly operations = new Map<string, Set<Promise<void>>>()
+  private readonly directDispatchers = new Map<string, DirectDispatcher>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
   private readonly notificationDelivery: NotificationDelivery
@@ -102,7 +105,7 @@ export class ChannelManager {
         if (!controller.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error)
           this.runtime.set(channelId, { status: 'error', lastError: message })
-          this.ctx.logger.error(`dsh-partner: WeChat channel ${channelId} stopped: ${message}`)
+          this.ctx.logger.error(`dsh-partner: ${channel.platform ?? 'weixin'} channel ${channelId} stopped: ${message}`)
         }
       }).finally(() => { this.tasks.delete(channelId) })
     this.tasks.set(channelId, { controller, task })
@@ -406,9 +409,9 @@ export class ChannelManager {
     try {
       const credential = await this.credentials.read(channel.id)
       const api = this.sender(channel, credential, route.userId)
-      // The main direct loop awaits this run. Take a watermark BEFORE sending
-      // the question, then receive answers independently without replaying history.
-      const cursor = api instanceof DirectTransport ? (await api.poll(undefined, lifetime)).cursor : undefined
+      // An active connector handles answers while model work is dispatched.
+      // External/native turns without a connector keep the independent receiver.
+      const cursor = api instanceof DirectTransport && !this.directDispatchers.has(channel.id) ? (await api.poll(undefined, lifetime)).cursor : undefined
       const fresh = this.store.snapshot()
       if (this.pendingQuestions.get(route.sessionId) !== pending
         || !fresh.channels.some(item => item.id === channel.id && item.enabled && item.companionId === route.companionId && item.accountId === channel.accountId && item.platform === channel.platform && item.direct?.baseUrl === channel.direct?.baseUrl)
@@ -494,14 +497,19 @@ export class ChannelManager {
   }
 
   /** Independent connector loop. Cursor is persisted only after receipt handoff. */
-  private async directLoop(channel: WeixinChannel, signal: AbortSignal): Promise<void> {
+  private async directLoop(channel: WeixinChannel, outerSignal: AbortSignal): Promise<void> {
     if (!channel.direct || !channel.platform || channel.platform==='weixin') throw new Error('渠道配置无效')
     const credential = await this.credentials.read(channel.id)
     const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
+    const failure=new AbortController()
+    const signal=AbortSignal.any([outerSignal,failure.signal])
+    let dispatchError:unknown
+    const dispatcher=new DirectDispatcher(signal,error=>{dispatchError=error;failure.abort()})
+    this.directDispatchers.set(channel.id,dispatcher)
     let cursor=channel.direct.cursor
     let failures=0
     let roomWarning: string | undefined
-    while(!signal.aborted) {
+    try { while(!signal.aborted) {
       try {
         const initial=await api.poll(cursor,signal)
         const batch=await collectDirectBatch(initial,(next,lifetime)=>api.poll(next,lifetime,0),signal)
@@ -510,35 +518,56 @@ export class ChannelManager {
         else if(batch.messages.length)roomWarning=undefined
         this.runtime.set(channel.id,{status:'running',...(roomWarning?{lastError:roomWarning}:{})})
         const seenReceipts=new Set(this.store.snapshot().recentReceipts)
-        const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`))
+        const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`)&&!dispatcher.has(message.id))
         for(const group of groupDirectMessages(unseen,channel.direct.targetId)) {
           const message=group[0]!
           if(signal.aborted)break
           try {
             const targetApi=message.targetId?new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:message.targetId},credential.botToken,{accountId:channel.accountId,peerId:message.sender}):api
-            await targetApi.validate(signal); await this.handleDirect(channel,targetApi,message,signal,group)
+            const pending=[...this.pendingQuestions.values()].find(p=>p.channelId===channel.id&&p.userId===message.sender)
+            if(pending&&group.length===1&&message.text&&!message.media?.length){
+              await targetApi.validate(signal)
+              if(await this.answerPendingQuestion(pending.sessionId,message.text,channel,targetApi,message.sender,signal)){await this.rememberReceipt(`${channel.id}:${message.id}`);continue}
+            }
+            const mode=busyEnterMode(this.ctx.settings)
+            if (channel.platform === 'matrix') await dispatcher.waitForCapacity()
+            dispatcher.enqueue(group.map(item=>item.id),mode,async prepared=>{
+              await targetApi.validate(signal)
+              await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode)
+            })
           }
           catch { throw new DirectDeliveryError() }
         }
         if(signal.aborted)break
-        await this.store.update(state=>{
+        if(!dispatcher.busy)await this.store.update(state=>{
           const current=state.channels.find(c=>c.id===channel.id && c.enabled)
           if(current?.direct)current.direct.cursor=batch.cursor
         })
         cursor=batch.cursor;failures=0
-        await delay(channel.platform==='mattermost'?10_000:1000,signal)
+        await delay(channel.platform==='mattermost'?(dispatcher.busy?1000:10_000):1000,signal)
       } catch(error) {
         if(signal.aborted)break
         if(error instanceof DirectDeliveryError || (error instanceof ChannelHttpError && [401,403].includes(error.status)))throw error
-        if(++failures>=6)throw error
+        const persistentRetry = channel.platform === 'matrix' && matrixTransientFailure(error)
+        failures = Math.min(failures + 1, 30)
+        if(failures>=6 && !persistentRetry)throw error
         const reason=error instanceof ChannelHttpError?`HTTP ${error.status}`:error instanceof Error&&error.message==='fetch failed'?'网络连接失败，请检查地址、端口和容器 DNS':error instanceof Error&&error.name==='TimeoutError'?'服务器请求超时':error instanceof Error?error.message:'连接异常'
-        this.runtime.set(channel.id,{status:'starting',lastError:`${reason}（重试 ${failures}/6）`})
+        this.runtime.set(channel.id,{status:'starting',lastError:`${reason}（${persistentRetry ? '自动重连' : '重试'} ${failures}${persistentRetry ? '' : '/6'}）`})
         await delay(Math.max(error instanceof ChannelHttpError ? error.retryAfterMs : 0,Math.min(60_000,2000*2**failures)),signal)
       }
+    } } finally {
+      failure.abort()
+      for(const pending of this.pendingQuestions.values())if(pending.channelId===channel.id){
+        pending.reject(new Error('提问来源渠道已停止'))
+        this.clearPendingQuestion(pending)
+      }
+      await dispatcher.drain()
+      if(this.directDispatchers.get(channel.id)===dispatcher)this.directDispatchers.delete(channel.id)
     }
+    if(dispatchError&&!outerSignal.aborted)throw new DirectDeliveryError()
   }
 
-  private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal, group: readonly DirectMessage[] = [event]): Promise<void> {
+  private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal, group: readonly DirectMessage[] = [event], prepared: () => void = () => {}, mode = busyEnterMode(this.ctx.settings)): Promise<void> {
     const seen=this.store.snapshot().recentReceipts
     const events=group.filter(item=>!seen.includes(`${channel.id}:${item.id}`))
     if(!events.length)return
@@ -571,7 +600,6 @@ export class ChannelManager {
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
         }
         const progress=typeof api.progress==='function'?new ReplyProgressController(api.progress(event.sender),allowed,signal):undefined
-        progress?.start()
         try {
         const attachments:PartnerInboundAttachment[]=[]
         try {
@@ -589,7 +617,16 @@ export class ChannelManager {
           return
         }
         if(!allowed())throw new Error('渠道或联系人授权已撤销')
-        const reply=await this.agents.reply(companion,channel.id,event.sender,{text,attachments},progress?.update)
+        if(mode==='steer'&&await this.agents.steer(companion,channel.id,event.sender,{text,attachments})){
+          prepared()
+          await api.sendText(event.sender,'已插入当前处理，将结合这条补充继续。',undefined,signal)
+          return
+        }
+        signal.throwIfAborted()
+        progress?.start()
+        const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments},progress?.update)
+        prepared()
+        const reply=await pendingReply
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!current.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)||!current.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'))throw new Error('渠道或联系人授权已撤销，取消回复')
@@ -682,14 +719,16 @@ function shortIdentity(value: string): string {
   return `微信用户 · ${[...value].slice(-6).join('')}`
 }
 
-export function busyEnterMode(settings: Pick<SettingsProvider, 'get'>): 'queue' | 'steer' {
-  const section = settings.get('ui-conversation') as { busyEnter?: unknown } | undefined
+export function busyEnterMode(settings: Pick<SettingsProvider, 'get'> | undefined): 'queue' | 'steer' {
+  const section = settings?.get('ui-conversation') as { busyEnter?: unknown } | undefined
   return section?.busyEnter === 'steer' ? 'steer' : 'queue'
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if(signal.aborted)return Promise.resolve()
   return new Promise(resolve => {
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+    const finish=()=>{clearTimeout(timer);signal.removeEventListener('abort',finish);resolve()}
+    const timer = setTimeout(finish, ms)
+    signal.addEventListener('abort', finish, { once: true })
   })
 }

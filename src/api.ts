@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { conversationMemoryScope } from './memory-scope.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
@@ -204,11 +205,15 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && segments[2] === 'memory') {
       requiredCompanion(runtime.store, id)
+      const memoryRoutes = runtime.store.snapshot().sessions.filter(item => item.companionId === id)
+      const requestedMemoryScope = url.searchParams.get('scopeId')
+      const memoryRoute = memoryRoutes.find(item => memoryScope(item.channelId, item.userId) === requestedMemoryScope)
+      if (memoryRoute) url.searchParams.set('scopeId', conversationMemoryScope(memoryRoute, memoryRoutes))
       if (await dispatchMemoryLayersApi(req, res, url, segments, runtime.memory, id)) return
       if (method === 'GET' && segments.length === 3) {
         const state = runtime.store.snapshot()
         const routes = state.sessions.filter(item => item.companionId === id)
-        const scopes = routes.map(item => memoryScope(item.channelId, item.userId))
+        const scopes = [...new Set(routes.map(item => conversationMemoryScope(item, routes)))]
         const scopeId = url.searchParams.get('scopeId') ?? undefined
         const [memories, reflections, profiles] = await Promise.all([
           runtime.memory.recentMemories(id, 100, scopeId), scopeId === undefined ? runtime.memory.recentReflections(id, 30) : runtime.memory.recentReflectionsForScope(id, scopeId, 30), runtime.memory.profileSnapshots(id, scopes),
@@ -218,7 +223,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
           profiles: profiles.map(profile => {
             const route = routes.find(item => memoryScope(item.channelId, item.userId) === profile.scopeId)
             const pairing = route && state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
-            return { ...profile, label: pairing?.displayName || route?.userId || '历史联系人' }
+            return { ...profile, label: route?.kind === 'local' ? '统一会话记忆' : pairing?.displayName || route?.userId || '历史联系人' }
           }),
         })
       }

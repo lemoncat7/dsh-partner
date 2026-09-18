@@ -37,9 +37,9 @@ try {
  const fits=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no horizontal overflow')
  for(const dark of [false,true])for(const width of [375,844,1440]){
   await page.setViewportSize({width,height:width===844?500:900});await page.goto(`http://127.0.0.1:${server.address().port}`);await page.addStyleTag({content:styles});await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
-  await page.getByRole('heading',{name:'伙伴对你的理解'}).waitFor();await fits();const count=graphs
+  await page.locator('.dsh-partner-persona > summary').waitFor();assert.equal(await page.getByRole('button',{name:'画像',exact:true}).count(),0);await fits();const count=graphs
   await page.getByRole('button',{name:'记忆',exact:true}).click();await page.getByLabel('记忆状态').selectOption('expired');await page.getByText('已过期',{exact:true}).last().waitFor();assert.equal(graphs,count)
-  await page.getByLabel('当前联系人').selectOption('channel:b');await page.getByRole('button',{name:/另一位联系人的背景/}).waitFor();assert.equal(await page.getByRole('button',{name:/明确的项目背景/}).count(),0)
+  await page.getByLabel('记忆范围').selectOption('channel:b');await page.getByRole('button',{name:/另一位联系人的背景/}).waitFor();assert.equal(await page.getByRole('button',{name:/明确的项目背景/}).count(),0)
   await page.getByRole('button',{name:'记忆设置',exact:true}).click();await page.getByRole('dialog').waitFor();await fits();const before=writes
   await page.getByRole('button',{name:'保存设置',exact:true}).evaluate(b=>{b.click();b.click()});await page.getByText('设置已保存',{exact:true}).waitFor();assert.equal(writes,before+1)
   await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'})

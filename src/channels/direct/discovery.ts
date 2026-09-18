@@ -1,5 +1,6 @@
 import type {DirectBatch, DirectMessage, DirectPlatform, DirectTransport} from './transport.js'
 import { matrixMessage } from './message.js'
+import {matrixTimeline} from './matrix-timeline.js'
 
 /** Discover conversations without granting access. Every candidate still passes
  * the same two-member / no-encryption validation as explicitly pinned rooms. */
@@ -28,15 +29,19 @@ export async function pollDiscovered(platform:DirectPlatform, accountId:string, 
       const timeline=(value as any)?.timeline
       const stateEvents=(value as any)?.state?.events??[]
       if(stateEvents.some((e:any)=>e.type==='m.room.encryption')||(timeline?.events??[]).some((e:any)=>e.type==='m.room.encryption'||e.type==='m.room.encrypted')){encrypted=true;continue}
-      if(!cursor||!timeline?.events?.length)continue
+      if(!cursor||(!timeline?.events?.length && !timeline?.limited))continue
       let identity
       try {identity=await room(id).validate(signal)}catch(error){
         if(error instanceof Error&&/加密房间/.test(error.message)){encrypted=true;continue}
         if(error instanceof Error&&/必须只有机器人/.test(error.message))continue
         throw error
       }
-      if(timeline.limited)throw new Error('Matrix 私聊消息出现缺口，请检查后重连')
-      for(const event of timeline.events) {
+      const events = await matrixTimeline(id, timeline, cursor, data.next_batch, path => request(path), signal)
+      if (timeline.limited) {
+        const current = await room(id).validate(signal)
+        if (current.accountId !== identity.accountId || current.peerId !== identity.peerId) throw new Error('Matrix 补拉期间会话成员已变化，保留原游标')
+      }
+      for(const event of events) {
         const message = matrixMessage(event, identity.peerId, id)
         if (message) messages.push(message)
       }

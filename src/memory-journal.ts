@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { ConversationTurn, ReflectionResult } from './memory-domain.js'
 
-export interface MemoryJob { turn: ConversationTurn; token: string; attempts: number; result?: ReflectionResult }
+export interface MemoryJob { turn: ConversationTurn; token: string; attempts: number; result?: ReflectionResult; repair?: boolean }
 const LEASE_MS = 5 * 60_000
 
 /** SQL-only durable journal. Connections and transactions belong to the memory store. */
@@ -15,6 +15,27 @@ export function initializeMemoryJournal(db: DatabaseSync): void {
   );
   CREATE INDEX IF NOT EXISTS memory_jobs_pending ON memory_jobs(done, next_at, at);
   CREATE INDEX IF NOT EXISTS memory_jobs_scope ON memory_jobs(scope_id, at);`)
+  if (!db.prepare('PRAGMA table_info(memory_jobs)').all().some(row => row.name === 'repair')) {
+    db.exec('ALTER TABLE memory_jobs ADD COLUMN repair INTEGER NOT NULL DEFAULT 0')
+  }
+  db.exec('CREATE TABLE IF NOT EXISTS memory_maintenance (key TEXT PRIMARY KEY)')
+}
+
+/** One bounded repair per scope. Original turn IDs and completed diaries survive. */
+export function scheduleProfileRepair(db: DatabaseSync, scopeId: string): number {
+  const key = `profile-evidence-v1:${scopeId}`
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    if (db.prepare('SELECT 1 FROM memory_maintenance WHERE key=?').get(key)) { db.exec('COMMIT'); return 0 }
+    const rows = db.prepare(`SELECT id FROM memory_jobs WHERE scope_id=? AND done=1 AND repair=0
+      AND result_json IS NOT NULL AND json_array_length(result_json, '$.memories')=0
+      ORDER BY at DESC LIMIT 30`).all(scopeId)
+    for (const row of rows) db.prepare(`UPDATE memory_jobs SET done=0, repair=1, attempts=0, next_at=0,
+      result_json=NULL, lease_token=NULL, lease_until=0, last_error=NULL WHERE id=?`).run(String(row.id))
+    db.prepare('INSERT INTO memory_maintenance VALUES (?)').run(key)
+    db.exec('COMMIT')
+    return rows.length
+  } catch (error) { db.exec('ROLLBACK'); throw error }
 }
 
 export function enqueueMemoryJob(db: DatabaseSync, turn: ConversationTurn): void {
@@ -29,12 +50,13 @@ export function claimMemoryJob(db: DatabaseSync, now: number): MemoryJob | undef
   const row = db.prepare(`UPDATE memory_jobs SET lease_token=?, lease_until=? WHERE id=(
     SELECT j.id FROM memory_jobs j WHERE j.done=0 AND j.next_at<=? AND j.lease_until<=?
     AND NOT EXISTS (SELECT 1 FROM memory_jobs WHERE done=0 AND lease_until>?)
-    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.done=0 AND (p.attempts<3 OR p.next_at<=?)
+    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.repair=j.repair AND p.done=0 AND (p.attempts<3 OR p.next_at<=?)
       AND (p.at<j.at OR (p.at=j.at AND p.rowid<j.rowid)))
-    ORDER BY j.at, j.rowid LIMIT 1
-  ) RETURNING turn_json, result_json, attempts`).get(token, now + LEASE_MS, now, now, now, now)
+    ORDER BY (j.repair>0), j.at, j.rowid LIMIT 1
+  ) RETURNING turn_json, result_json, attempts, repair`).get(token, now + LEASE_MS, now, now, now, now)
   if (!row) return undefined
   return { turn: JSON.parse(String(row.turn_json)), token, attempts: Number(row.attempts),
+    ...(Number(row.repair) > 0 ? { repair: true } : {}),
     ...(row.result_json ? { result: JSON.parse(String(row.result_json)) } : {}) }
 }
 

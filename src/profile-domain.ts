@@ -39,7 +39,8 @@ export function buildProfileSnapshot(companionId: string, scopeId: string, memor
     if (entries.length >= PROFILE_ENTRY_LIMIT) break
   }
   const preferences = memories.filter(item => item.kind === 'preference' && item.status === 'active'
-    && (item.locked || (item.confidence >= .8 && item.importance >= .65 && new Set(item.evidence.map(source => source.turnId)).size >= 2)))
+    && (item.locked || (item.confidence >= .8 && item.importance >= .65 && new Set(item.evidence.map(source => source.turnId)).size >= 2)
+      || (item.confidence >= .95 && item.importance >= .8 && item.evidence.some(source => source.excerpt.trim().length >= 2))))
     .sort((a, b) => Number(Boolean(b.locked)) - Number(Boolean(a.locked)) || b.importance - a.importance || b.updatedAt - a.updatedAt).slice(0, 4)
   const baseline = [...entries, ...preferences]
   const version = createHash('sha256').update(baseline.map(entry => [

@@ -8,7 +8,7 @@ import type { PartnerMemoryStore } from './memory-store.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import { canonicalProfileSubject } from './profile-domain.js'
 import { dailyReviewPromptInput, reflectionPromptInput } from './memory-prompt-context.js'
-import { groundMemoryCandidates } from './memory-quality.js'
+import { groundMemoryCandidates, requireGroundedMemories } from './memory-quality.js'
 import { groundExperiences, parseArtifactProposals } from './memory-artifacts.js'
 import { AsyncSemaphore } from './core/semaphore.js'
 import type { MemoryJob } from './memory-journal.js'
@@ -49,11 +49,16 @@ export class MemoryReflectionService {
 
   private async processJob(companion: Companion, job: MemoryJob, notify?: (scopeId: string, created: PartnerConcern[]) => Promise<void>): Promise<{ scopeId: string; created: PartnerConcern[] }> {
     try {
-      const result = job.result ?? await this.extract(companion, job.turn)
+      const result = job.result ?? await this.extract(companion, job.turn, job.repair)
       if (!job.result) await this.store.checkpointJob(job, result)
+      if (job.repair) {
+        await this.store.restoreProfileJob(job, result)
+        await this.store.settleJob(job)
+        return { scopeId: job.turn.scopeId, created: [] }
+      }
       await this.store.consolidate(job.turn, result, job)
       const created = await this.applyConcerns(companion, job.turn, result)
-      if (created.length && notify) await notify(job.turn.scopeId, created)
+      if (created.length && notify) await notify(job.turn.concernScopeId ?? job.turn.scopeId, created)
       await this.store.settleJob(job)
       if (Date.now() - (this.lastPruned.get(companion.id) ?? 0) > 6 * 60 * 60_000) {
         try {
@@ -61,7 +66,7 @@ export class MemoryReflectionService {
           this.lastPruned.set(companion.id, Date.now())
         } catch { this.ctx.logger.warn('dsh-partner: memory maintenance failed; will retry on the next completed job') }
       }
-      return { scopeId: job.turn.scopeId, created }
+      return { scopeId: job.turn.concernScopeId ?? job.turn.scopeId, created }
     } catch (error) {
       await this.store.settleJob(job, error instanceof Error ? error.message : String(error))
       throw error
@@ -108,10 +113,10 @@ export class MemoryReflectionService {
     })
   }
 
-  private async extract(companion: Companion, turn: ConversationTurn): Promise<ReflectionResult> {
+  private async extract(companion: Companion, turn: ConversationTurn, repair = false): Promise<ReflectionResult> {
     const existing = await this.store.candidateMemories(companion.id, turn.scopeId, turn.user)
     const diaries = await this.store.recentReflectionsForScope(companion.id, turn.scopeId, 1)
-    const concerns = await this.concerns.list(companion.id, turn.scopeId, false, 40)
+    const concerns = await this.concerns.list(companion.id, turn.concernScopeId ?? turn.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
     const controller = new AbortController()
     this.controllers.add(controller)
@@ -123,7 +128,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
-        system: REFLECTION_SYSTEM,
+        system: REFLECTION_SYSTEM + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
         temperature: 0.1,
         maxTokens: 1800,
         signal: controller.signal,
@@ -135,8 +140,8 @@ export class MemoryReflectionService {
       const cause = timedOut ? '达到60秒模型时限' : this.closed ? '服务停止，任务保留' : redactObservationError(error instanceof Error ? error.message : String(error))
       throw new Error(`记忆提炼失败：${cause}；耗时${Math.round((Date.now()-startedAt)/1000)}秒，正文${output.length}字`)
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
-    const result = parseReflection(output)
-    result.memories = groundMemoryCandidates(result.memories, [turn])
+    const result = parseReflection(output, true)
+    result.memories = requireGroundedMemories(result.memories, [turn])
     return result
   }
 
@@ -145,10 +150,10 @@ export class MemoryReflectionService {
     const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
     const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)
     const origin = explicitConcernDirective(turn.user) ? 'explicit' : 'implicit'
-    const created = await this.concerns.applyCandidates(companion.id, turn.scopeId, candidates, origin, turn.at, {
+    const created = await this.concerns.applyCandidates(companion.id, turn.concernScopeId ?? turn.scopeId, candidates, origin, turn.at, {
       source: 'reflection', sessionId: turn.sessionId, evidence: turn.user, batchId: turn.id,
     })
-    const current = await this.concerns.list(companion.id, turn.scopeId, true, 1000)
+    const current = await this.concerns.list(companion.id, turn.concernScopeId ?? turn.scopeId, true, 1000)
     if (turn.concernDirective !== undefined && current.some(item => item.id === turn.concernDirective?.concernId)) {
       await this.concerns.act(companion.id, turn.concernDirective.concernId, turn.concernDirective.action, turn.at)
     }
@@ -186,10 +191,15 @@ function modelSelection(ctx: ReflectionContext, companion: Companion): { provide
 
 const MEMORY_QUALITY_RULES = `记忆写入契约：每个 memories 候选（包括 complete/remove）必须附 evidenceQuote（用户原话的连续引用，2-300 字）和 sourceTurnId（该原话所在轮次 id），不能引用助手回答或日记摘要；无证据则不输出。更新同义旧记忆时附 targetMemoryId，必须是输入中的同类型记忆 id，并沿用原 subject；不要凭标题相似合并不同项目或相反偏好。纠错时 confidence 应反映新证据，允许降低。一次性执行请求和过程细节只进 daily，不新增 task；task 仅保留明确跨轮次未完承诺，已有任务完成仍应 complete。持续观察交 concerns，项目技术正文交知识库，记忆不复制整篇资料。emotion 仅限用户明确自述感受，不得把催促、设计反馈或工作要求当情绪。长期偏好、画像默认不设 expiresInDays，只有用户明确有效期时才设置。`
 
+function memoryCandidateContract(): string {
+  return `memories 每项必须包含完整字段，例如：{"kind":"profile","subject":"常用环境","content":"用户日常使用 macOS。","confidence":0.95,"importance":0.8,"operation":"upsert","evidenceQuote":"我平时用 macOS","sourceTurnId":"复制输入中对应的 id"}。该例仅说明格式，不是待记录事实。evidenceQuote 必须来自输入 user 的连续原话，不能包含压缩标记省略号；sourceTurnId 取 newTurn.id 或 turns[].id。targetMemoryId 仅更新已有记忆时填写；长期画像和偏好不要填写 expiresInDays。用户明确陈述的长期背景和明确的长期协作偏好，应当及时提炼，不要求先重复多次；不能从临时任务推断身份。`
+}
+
 const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答用户，只从有证据的对话中维护每日回顾和结构化记忆。
 ${MEMORY_QUALITY_RULES}
+${memoryCandidateContract()}
 只输出一个 JSON 对象，不要 Markdown。格式：
-{"daily":{"summary":"当天截至当前的简洁总结","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[{"kind":"profile|preference|task|event|relationship|emotion","subject":"稳定且简短的索引主题","content":"带场景边界的准确内容","confidence":0.0,"importance":0.0,"operation":"upsert|complete|remove","expiresInDays":3}],"concerns":[{"subject":"尚未闭环的具体事情","reason":"为什么伙伴应该继续惦记","operation":"upsert|resolve|dismiss","priority":0.0,"confidence":0.0,"watchKind":"auto|knowledge|workspace|web","watchQuery":"用于观察变化的具体对象或问题"}]}
+{"daily":{"summary":"当天截至当前的简洁总结","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[{"kind":"profile|preference|task|event|relationship|emotion","subject":"稳定且简短的索引主题","content":"带场景边界的准确内容","confidence":0.9,"importance":0.8,"operation":"upsert|complete|remove","evidenceQuote":"用户连续原话","sourceTurnId":"newTurn.id"}],"concerns":[{"subject":"尚未闭环的具体事情","reason":"为什么伙伴应该继续惦记","operation":"upsert|resolve|dismiss","priority":0.0,"confidence":0.0,"watchKind":"auto|knowledge|workspace|web","watchQuery":"用于观察变化的具体对象或问题"}]}
 规则：
 1. 不把寒暄、模型猜测、助手自述当成用户事实；没有长期价值时 memories 返回空数组。
 2. 偏好必须保留适用场景和例外；任务只记录用户明确提出或双方明确承诺的事项。
@@ -203,17 +213,21 @@ ${MEMORY_QUALITY_RULES}
 
 const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据当天每一轮对话的双向代表片段、滚动回顾和已有记忆，输出一次最终整理，不回答用户。
 ${MEMORY_QUALITY_RULES}
+${memoryCandidateContract()}
 还可输出 scenes:[{"title":"具体项目或场景名称","memoryIds":["输入中已有的记忆 id"]}]，每个场景只关联同一项目的有效事实，最多 8 个，不把不同项目因名称相似而混在一起；无可靠关联返回空数组。
 还可输出 experiences:[{"title":"可复用方法","steps":["带适用条件的操作步骤"],"evidence":[{"turnId":"原始轮次 id","quote":"用户明确确认成功的连续原话"}]}]。只有至少两个不同会话均有用户明确确认成功，且方法确实可复用时才提出，最多 3 个；重复尝试、反复失败、助手自称成功均不算。这里只生成待人工审核的草稿，不安装、不授权、不修改现有 Skill。没有足够证据返回空数组。
 只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","sourceKind":"profile|preference|task|event|relationship|emotion","targetSubject":"必须等于已有或候选记忆主题","targetKind":"同上","kind":"supports|depends_on|about|conflicts_with|follows","label":"有证据的简短关系说明","confidence":0.0,"operation":"upsert|remove"}]}
 要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；结合所有轮次片段纠正逐轮偏差，对被压缩而证据不足的细节保持原状而非猜测；明确任务完成状态；复核并关闭已经完成或失效的挂念；只有对话原文证明事情会延续到当前轮次之后时才能新增挂念，一次性资料收集、搜索、总结、写作、即时执行和普通问答不得新增挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
 
-export function parseReflection(raw: string): ReflectionResult {
+export function parseReflection(raw: string, strict = false): ReflectionResult {
   const match = raw.trim().match(/\{[\s\S]*\}/)
   if (!match) throw new Error('memory reflection returned no JSON object')
   const value = JSON.parse(match[0]) as Record<string, unknown>
   const daily = record(value.daily)
   const memories = Array.isArray(value.memories) ? value.memories.map(parseCandidate).filter((item): item is MemoryCandidate => item !== undefined).slice(0, 12) : []
+  if (strict && value.memories !== undefined && (!Array.isArray(value.memories) || value.memories.length !== memories.length)) {
+    throw new Error('记忆候选格式无效：请使用支持的类型、画像主题及完整字段；将自动重试')
+  }
   const concerns = Array.isArray(value.concerns)
     ? value.concerns.map(parseConcern).filter((item): item is ConcernCandidate => item !== undefined)
     : []

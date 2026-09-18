@@ -4,6 +4,11 @@ import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryContextConnection, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryRelationReviewContext, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
 import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
+import {initializePersona, readPersona, claimPersona, finishPersona, failPersona, requestPersona} from './persona/store.js'
+import {personaHash} from './persona/domain.js'
+import type {PersonaJob, PersonaParagraph} from './persona/types.js'
+import { mergeConversationMemoryScopes } from './memory-scope-migration.js'
+import { scheduleProfileRepair } from './memory-journal.js'
 import { initializeMemoryJournal, enqueueMemoryJob, claimMemoryJob, checkpointMemoryJob, settleMemoryJob, assertMemoryLease, type MemoryJob } from './memory-journal.js'
 import {redactObservationError} from './observation-errors.js'
 import type { ReflectionResult } from './memory-domain.js'
@@ -23,6 +28,49 @@ export class PartnerMemoryStore {
   async freeze(): Promise<void> { this.frozen = true; await Promise.allSettled(this.writes.values()) }
 
   day(at: number): string { return localDay(at, this.timeZone) }
+
+  async claimPersona(companionId: string, scopeId: string): Promise<PersonaJob | undefined> {
+    return this.journal(companionId, db => claimPersona(db, companionId, scopeId))
+  }
+  async finishPersona(job: PersonaJob, paragraphs: PersonaParagraph[]): Promise<void> {
+    await this.journal(job.companionId, db => finishPersona(db, job, paragraphs))
+  }
+  async failPersona(job: PersonaJob, error: string): Promise<void> {
+    await this.journal(job.companionId, db => failPersona(db, job, redactObservationError(error)))
+  }
+  async requestPersona(companionId: string, scopeId: string, version: string, paragraphId?: string, correction?: string): Promise<void> {
+    await this.journal(companionId, db => requestPersona(db, scopeId, version, companionId, paragraphId, correction))
+  }
+  private profileWithPersona(db: DatabaseSync, companionId: string, scopeId: string, memories: PartnerMemory[]): UserProfileSnapshot {
+    const profile = buildProfileSnapshot(companionId, scopeId, memories)
+    const persona = readPersona(db, companionId, scopeId)
+    const updatedAt = Math.max(profile.updatedAt ?? 0, persona.updatedAt ?? 0)
+    return {...profile, persona, version: personaHash([profile.version, persona.version]).slice(0, 12),
+      ...(updatedAt ? {updatedAt} : {})}
+  }
+
+  async mergeScopes(companionId: string, target: string, sources: string[], recoverLeases = false): Promise<void> {
+    await this.journal(companionId, db => mergeConversationMemoryScopes(db, companionId, target, sources, recoverLeases))
+  }
+
+  async scheduleProfileRepair(companionId: string, scopeId: string): Promise<number> {
+    return this.journal(companionId, db => scheduleProfileRepair(db, scopeId))
+  }
+
+  async restoreProfileJob(job: MemoryJob, result: ReflectionResult): Promise<void> {
+    await this.journal(job.turn.companionId, db => {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        assertMemoryLease(db, job)
+        if (Number(db.prepare('SELECT repair FROM memory_jobs WHERE id=?').get(job.turn.id)?.repair) === 1) {
+          const candidates = result.memories.filter(item => item.operation === 'upsert' && (item.kind === 'profile' || item.kind === 'preference'))
+          for (const memory of mergeMemories(this.memoriesForScope(db, job.turn.companionId, job.turn.scopeId), candidates, job.turn)) this.upsertMemory(db, memory)
+          db.prepare('UPDATE memory_jobs SET repair=2 WHERE id=?').run(job.turn.id)
+        }
+        db.exec('COMMIT')
+      } catch (error) { rollback(db); throw error }
+    })
+  }
 
   async enqueue(turn: ConversationTurn): Promise<void> {
     await this.journal(turn.companionId, db => enqueueMemoryJob(db, turn))
@@ -161,7 +209,7 @@ export class PartnerMemoryStore {
       const memories = (database.prepare(`SELECT * FROM memories
         WHERE companion_id = ? AND scope_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY updated_at DESC`).all(companionId, scopeId, now) as SqlRow[]).map(memoryFromRow)
-      const profile = buildProfileSnapshot(companionId, scopeId, memories)
+      const profile = this.profileWithPersona(database, companionId, scopeId, memories)
       const baselineIds = new Set([...profile.entries, ...(profile.preferences ?? [])].map(entry => entry.id))
       const scored = rankMemories(memories.filter(item => !baselineIds.has(item.id) && (item.kind !== 'profile' || isProfileBaselineEntry(item))), query, now)
       const recall = expandRecallWithRelations(database, companionId, scopeId, memories, scored, baselineIds, Math.max(0, Math.min(100, limit)))
@@ -185,7 +233,7 @@ export class PartnerMemoryStore {
       const rows = database.prepare(`SELECT * FROM memories WHERE companion_id = ? AND scope_id = ?
         AND kind IN ('profile', 'preference') AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY updated_at DESC`).all(companionId, scopeId, Date.now()) as SqlRow[]
-      return buildProfileSnapshot(companionId, scopeId, rows.map(memoryFromRow))
+      return this.profileWithPersona(database, companionId, scopeId, rows.map(memoryFromRow))
     } finally { database.close() }
   }
 
@@ -198,7 +246,7 @@ export class PartnerMemoryStore {
       const grouped = new Map<string, PartnerMemory[]>()
       for (const memory of rows) grouped.set(memory.scopeId, [...(grouped.get(memory.scopeId) ?? []), memory])
       for (const scopeId of knownScopeIds) if (!grouped.has(scopeId)) grouped.set(scopeId, [])
-      return [...grouped].map(([scopeId, memories]) => buildProfileSnapshot(companionId, scopeId, memories))
+      return [...grouped].map(([scopeId, memories]) => this.profileWithPersona(database, companionId, scopeId, memories))
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     } finally { database.close() }
   }
@@ -448,6 +496,7 @@ export class PartnerMemoryStore {
     ensureColumn(database, 'daily_reflections', 'next_review_at', 'INTEGER NOT NULL DEFAULT 0')
     initializeMemoryJournal(database)
     initializeMemoryArtifacts(database)
+    initializePersona(database)
     return database
     } catch (error) { database.close(); throw error }
   }

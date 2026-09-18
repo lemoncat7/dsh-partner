@@ -18,18 +18,21 @@ export function WorkspaceBlock({ title, detail, actions, children, className = '
 export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular' }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide' }): JSX.Element {
   const titleId = useId()
   const detailId = useId()
-  const panelRef = useRef<HTMLDialogElement>(null)
+  const layerRef = useRef<HTMLDialogElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const layer = layerRef.current
+    layer?.showModal()
     const frame = requestAnimationFrame(() => {
       const panel = panelRef.current
       const target = panel?.querySelector<HTMLElement>('[autofocus]') ?? panel?.querySelector<HTMLElement>('input, textarea, select, button')
-      target?.focus()
+      target?.focus({preventScroll: true})
     })
-    return () => { cancelAnimationFrame(frame); previous?.focus() }
+    return () => { cancelAnimationFrame(frame); layer?.close(); if (previous?.isConnected) previous.focus({preventScroll: true}) }
   }, [])
   const keyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === 'Escape') { event.preventDefault(); close(); return }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return }
     if (event.key !== 'Tab') return
     const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])') ?? [])].filter(node => node.getClientRects().length > 0)
     if (focusable.length === 0) return
@@ -37,12 +40,12 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
-  return <div className="dsh-partner-workspace-dialog-layer" onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
-    <dialog ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}`} open aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onKeyDown={keyDown}>
+  return <dialog ref={layerRef} className="dsh-partner-workspace-dialog-layer" aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onCancel={event => {event.preventDefault(); event.stopPropagation(); close()}} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
+    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}`} onKeyDown={keyDown}>
       <header><span><small>{eyebrow}</small><strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
       <div className="dsh-partner-workspace-dialog-body">{children}</div>
-    </dialog>
-  </div>
+    </section>
+  </dialog>
 }
 
 export function WorkspaceNotice({ children, kind = 'error' }: { children: ReactNode; kind?: 'error' | 'warning' | 'success' }): JSX.Element {

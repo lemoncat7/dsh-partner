@@ -1,4 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { conversationMemoryScope } from './memory-scope.js'
+import {PersonaService} from './persona/service.js'
 import { dirname, join, resolve } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
@@ -87,6 +89,11 @@ export function apply(context: Context, config: PartnerConfig): void {
     for (const companion of store.snapshot().companions) {
       const migrated = await memory.migrateLegacy(companion.id)
       if (migrated > 0) ctx.logger.info(`dsh-partner: migrated ${migrated} legacy memory records for ${companion.id}`)
+      const routes = store.snapshot().sessions.filter(route => route.companionId === companion.id)
+      const primary = routes.find(route => route.kind === 'local')
+      if (primary) await memory.mergeScopes(companion.id, conversationMemoryScope(primary, routes),
+        routes.filter(route => route.sessionId === primary.sessionId).map(route => `${route.channelId}:${route.userId}`), true)
+      if (primary && companion.automation.memory.enabled) await memory.scheduleProfileRepair(companion.id, conversationMemoryScope(primary, routes))
       const legacyRows = await memory.legacyHeartbeatFocuses(companion.id)
       const seeds: LegacyConcernSeed[] = [
         ...legacyTopics(companion.automation.heartbeat.legacyFocus).map(subject => ({
@@ -101,6 +108,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       for (const companion of state.companions) delete companion.automation.heartbeat.legacyFocus
     })
     const reflection = new MemoryReflectionService(ctx, memory, concerns)
+    const persona = new PersonaService(ctx, memory)
     const skills = new SkillService(store, new SkillRepository(migrated?join(layout.publicRoot,'skills'):join(resolved.defaultCwd, 'partner-system', 'skills')))
     await skills.initialize()
     const tasks = new TaskBoardService(store)
@@ -130,9 +138,17 @@ export function apply(context: Context, config: PartnerConfig): void {
     const memoryWorker = new MemoryWorker({
       companions: () => store.snapshot().companions,
       removing: id => store.isCompanionRemoving(id),
-      process: companion => reflection.processPending(companion, async (scopeId, created) => {
-        if (!await agents.recordConcernCreatedNotice(companion, scopeId, created)) throw new Error('关注通知未送达，稍后重试')
-      }),
+      process: async companion => {
+        try {
+          return await reflection.processPending(companion, async (scopeId, created) => {
+            if (!await agents.recordConcernCreatedNotice(companion, scopeId, created)) throw new Error('关注通知未送达，稍后重试')
+          })
+        } finally {
+          const routes = store.snapshot().sessions.filter(route => route.companionId === companion.id)
+          const primary = routes.find(route => route.kind === 'local')
+          if (primary && !store.isCompanionRemoving(companion.id)) await persona.process(companion, conversationMemoryScope(primary, routes))
+        }
+      },
       warn: message => ctx.logger.warn(`dsh-partner: ${message}`),
     })
     const deliveries = migrated ? await AttachmentDeliveryService.openPartitioned(join(layout.publicRoot,'indexes','attachments'),layout.privateRoot) : await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
@@ -194,6 +210,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       disposeSessionObserver()
       disposeConcernTool()
       reflection.close()
+      persona.close()
       await Promise.all([memoryWorker.close(),scheduler.close(),heartbeat.close(),dailyReview.close(),channels.close()])
       await agents.close()
       await executor.close()

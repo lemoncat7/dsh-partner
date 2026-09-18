@@ -14,3 +14,12 @@ export function groundMemoryCandidates(candidates: MemoryCandidate[], turns: Con
     return [{ ...candidate, sourceEvidence: { turnId: source.id, at: source.at, excerpt: quote.slice(0, 300) } }]
   })
 }
+
+/** Invalid evidence is a retryable extraction failure, not successful empty memory. */
+export function requireGroundedMemories(candidates: MemoryCandidate[], turns: ConversationTurn[]): MemoryCandidate[] {
+  const grounded = groundMemoryCandidates(candidates, turns)
+  if (grounded.length !== candidates.length) {
+    throw new Error(`记忆证据校验失败：${candidates.length - grounded.length} 项缺少可匹配的用户原话或轮次 ID；将自动重试`)
+  }
+  return grounded
+}

@@ -6,8 +6,17 @@ import { mutation, readObject, sendJson, httpError } from '../http.js'
 /** Called only after the parent route's same-origin and companion checks. */
 export async function dispatchMemoryLayersApi(req: IncomingMessage, res: ServerResponse, url: URL, segments: string[], memory: PartnerMemoryStore, companionId: string): Promise<boolean> {
   const section = segments[3]
-  if (!['layers', 'history', 'experiences', 'jobs'].includes(section ?? '')) return false
+  if (!['layers', 'history', 'experiences', 'jobs', 'persona'].includes(section ?? '')) return false
   const scopeId = text(url.searchParams.get('scopeId'), 'scopeId', 500)
+  if (section === 'persona' && segments.length === 4 && req.method === 'POST') {
+    mutation(req)
+    const body = await readObject(req)
+    if (body.action !== 'refresh' && body.action !== 'correct') throw httpError(400, 'Invalid persona action')
+    await memory.requestPersona(companionId, scopeId, text(body.version, 'version', 80),
+      body.action === 'correct' ? text(body.paragraphId, 'paragraphId', 80) : undefined,
+      body.action === 'correct' && body.correction ? text(body.correction, 'correction', 500) : undefined)
+    sendJson(res, 200, {ok: true}); return true
+  }
   if (req.method === 'GET' && segments.length === 4 && section === 'layers') {
     sendJson(res, 200, await memory.memoryLayers(companionId, scopeId)); return true
   }

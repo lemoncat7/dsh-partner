@@ -5,6 +5,8 @@ export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relation
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
 
 export interface ConversationTurn {
+  /** Transport identity for concern delivery, independent of shared memory. */
+  concernScopeId?: string
   id: string
   companionId: string
   scopeId: string
@@ -39,6 +41,7 @@ export interface PartnerMemory {
 }
 
 export interface UserProfileSnapshot {
+  persona?: import('./persona/types.js').PersonaView
   preferences?: PartnerMemory[]
   companionId: string
   scopeId: string

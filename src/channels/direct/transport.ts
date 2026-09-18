@@ -5,6 +5,7 @@ import { formatDirectMessages } from './message-format.js'
 import { directProgressTransport, type ProgressTransport } from './progress-transport.js'
 import { DirectMediaTransfer, type DirectMedia } from './media.js'
 import { matrixMessage } from './message.js'
+import {matrixTimeline} from './matrix-timeline.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
@@ -96,10 +97,15 @@ export class DirectTransport implements ChannelSender {
       const data = await this.request('/_matrix/client/v3/sync?timeout='+waitMs+'&filter='+encodeURIComponent(filter)+(cursor ? '&since='+encodeURIComponent(cursor) : ''), signal)
       if (typeof data.next_batch !== 'string') throw new Error('Matrix 同步游标缺失')
       const room = data.rooms?.join?.[this.config.targetId]
-      if (cursor && room?.timeline?.limited) throw new Error('Matrix 消息出现缺口，已暂停以免跳过未处理消息')
+      const identity = {accountId: this.botId, peerId: this.peerId}
+      const events = await matrixTimeline(this.config.targetId, room?.timeline, cursor, data.next_batch, path => this.request(path, signal), signal)
+      if (cursor && room?.timeline?.limited) {
+        const current = await this.validate(signal)
+        if (current.accountId !== identity.accountId || current.peerId !== identity.peerId) throw new Error('Matrix 补拉期间会话成员已变化，保留原游标')
+      }
       const messages: DirectMessage[] = []
       // First sync establishes a watermark, never executes historical messages.
-      for (const event of cursor ? room?.timeline?.events ?? [] : []) {
+      for (const event of events) {
         const message = matrixMessage(event, this.peerId)
         if (message) messages.push(message)
       }
