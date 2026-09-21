@@ -6,6 +6,7 @@ import type { CompanionCapability } from '../capabilities.js'
 import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
+import type { McpService } from '../mcp/service.js'
 import { renderEnabledSkills } from '../skills/service.js'
 import type { LoadedSkill } from '../skills/domain.js'
 import type { TaskBoardService } from '../tasks/service.js'
@@ -26,6 +27,8 @@ const MAX_INLINE_SKILL_CHARS = 32_000
 
 /** Composes partner-only tools into one agent scope. No global tool is registered. */
 export class PartnerAgentComposition {
+  private mcp?: McpService
+  setMcpService(service: McpService): void { this.mcp = service }
   private avatarToolFactory?: (companionId: string) => ToolDefinition
   setAvatarToolFactory(factory: (companionId: string) => ToolDefinition): void { this.avatarToolFactory = factory }
   private attachmentToolFactory?: (companionId: string) => ToolDefinition
@@ -57,6 +60,7 @@ export class PartnerAgentComposition {
       } }))
     }
     try {
+      for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
       if (this.attachmentToolFactory) disposers.push(ctx.tools.register(this.attachmentToolFactory(companion.id)))
       if (this.avatarToolFactory) disposers.push(ctx.tools.register(this.avatarToolFactory(companion.id)))
       if (skillsEnabled) register(skillTool(companion, this.skills, this.executor), 'skills')
@@ -262,7 +266,7 @@ function taskTool(companion: Companion, tasks: TaskBoardService, collaboration: 
       requirementId: { type: 'string', description: 'REQUIRED for create. Reuse the existing requirement for continued work on the same deliverable, including later specialist phases. dependencyTaskIds does not set ownership. Missing id fails without creating anything. Query partner_requirements list; reopen a submitted/archived requirement before appending; create a requirement only for a genuinely separate user goal.' },
       status: { type: 'string', enum: ['backlog', 'ready', 'doing', 'review', 'done', 'blocked'] },
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
-      assignee: { type: 'string', description: 'Actual EXECUTOR companion id or @name, not the coordinator or requester. If you (A) delegate work to B, set assignee=B, reviewer=A. Select from authorized directory and verify real capabilities. Use your own id only when you will actually execute. Never reverse these roles.' }, reviewer: { type: 'string', description: 'Companion who checks and accepts/rejects the executor deliverable, NOT the delegated worker. On create, omitted reviewer defaults to you (the task creator). A delegates to B: assignee=B, reviewer=A. Explicit reviewer is preserved, never silently swapped.' },
+      assignee: { type: 'string', description: 'Actual EXECUTOR companion id or @name, not the coordinator or requester. Select from authorized directory and verify real capabilities. Use your own id only when you will actually execute. Set reviewer independently according to the specified review arrangement, never reverse these roles.' }, reviewer: { type: 'string', description: 'Companion who actually accepts/rejects this deliverable. If the user or your plan designates a specialist reviewer, MUST explicitly set that companion here; mentioning them in description or making them executor of a later review task is not sufficient. Only when nobody else was designated may the omitted reviewer default to the creator. Dependencies wait for acceptance, not merely a saved result.' },
       autoRun: { type: 'boolean', description: 'Default true on create with assignee (except explicit backlog). For requested execution use true; false means SAVE ONLY, even with status=ready. Set false only for explicit planning-only/await-confirmation requests. Persist execution intent and start after dependencies are accepted. Check returned assignment before reporting who executes/reviews; queued is not completed. Legacy tasks are never auto-started.' },
       dependencyTaskIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Tasks that must be done before this task can start.' },
       expectedRevision: { type: 'integer', description: 'Required for update, accept, reject and request_replan. Use the revision actually reviewed; if stale, reread latest requirements and results.' }, message: { type: 'string', description: 'For request_replan: concrete missing tools, required reassignment/splitting and preserved output. This pauses/cancels the current task; stop this turn afterward. For reject: missing evidence and corrections; use reworkMode=replan for inability to execute.' },

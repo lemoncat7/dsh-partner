@@ -4,7 +4,7 @@ import { api, type CompanionAccessView } from '../client-api.js'
 import { CollectionEmpty, WorkspaceNotice, errorMessage } from './workspace-components.js'
 import { CAPABILITY_LABELS, isCompanionCapability } from '../capabilities.js'
 
-export function CompanionAccessPanel({ companionId }: { companionId: string }): JSX.Element {
+export function CompanionAccessPanel({ companionId, onBusyChange }: { companionId: string; onBusyChange?(busy: boolean): void }): JSX.Element {
   const [access, setAccess] = useState<CompanionAccessView>({ targetIds: [], companions: [] })
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
@@ -15,6 +15,8 @@ export function CompanionAccessPanel({ companionId }: { companionId: string }): 
   useEffect(() => { void load() }, [load])
 
   const toggle = async (targetId: string): Promise<void> => {
+    if (busy) return
+    onBusyChange?.(true)
     const previous = access.targetIds
     const targetIds = previous.includes(targetId) ? previous.filter(id => id !== targetId) : [...previous, targetId]
     setBusy(targetId); setAccess(current => ({ ...current, targetIds })); setError(undefined)
@@ -22,7 +24,7 @@ export function CompanionAccessPanel({ companionId }: { companionId: string }): 
       const result = await api<{ targetIds: string[] }>(`/companions/${encodeURIComponent(companionId)}/access`, { method: 'PUT', body: JSON.stringify({ targetIds }) })
       setAccess(current => ({ ...current, targetIds: result.targetIds }))
     } catch (reason) { setAccess(current => ({ ...current, targetIds: previous })); setError(errorMessage(reason)) }
-    finally { setBusy(undefined) }
+    finally { setBusy(undefined); onBusyChange?.(false) }
   }
 
   return <section className="dsh-partner-capability-detail dsh-partner-access" aria-labelledby="dsh-partner-access-title">

@@ -80,6 +80,7 @@ export async function migrateLayout(statePath:string,root:string,state:PartnerSt
   await copyVerified(layout.legacySkills,join(staging(layout.publicRoot),'skills'))
   const next=structuredClone(state)
   next.notificationDeliveries ??= []
+  next.mcpBindings ??= []
   for(const skill of next.skills) {
     const rel=relative(layout.legacySkills,resolve(skill.rootPath))
     if(isAbsolute(rel)||rel==='..'||rel.startsWith('../')||rel.startsWith('..\\')||resolve(layout.legacySkills,rel)!==resolve(skill.rootPath))throw Error('Skill 不在已登记的公共目录中')

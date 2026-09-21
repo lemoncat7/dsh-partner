@@ -8,6 +8,29 @@ import { TaskBoardService } from '../lib/tasks/service.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 
 const actor = { kind: 'companion', companionId: 'companion-default' }
+for (const interrupted of [false, true]) test(`restart recovers automatic acceptance without rerunning executor (existing review: ${interrupted})`, async t => {
+  const { root, store, task } = await fixture(t)
+  await store.update(s => {
+    Object.assign(s.tasks.find(x => x.id === task.id), { status: 'review', autoRun: true, resultSummary: '持久化调研结果', reviewerCompanionId: actor.companionId })
+    if (interrupted) s.delegations.push({ id: 'review-interrupted', kind: 'review', automaticReview: true, reviewWorkRevision: 1, taskId: task.id, initiatedBy: 'user', toCompanionId: actor.companionId, request: '核验', status: 'running', attempts: 1, createdAt: Date.now() })
+  })
+  const restored = await PartnerStore.open(join(root, 'state.json'))
+  const board = new TaskBoardService(restored)
+  let calls = 0
+  const service = serviceFor(t, restored, board, async ({ sourceId, prompt }) => {
+    calls++
+    assert.match(sourceId, /^review:/)
+    assert.match(prompt, /必须使用 partner_task_board accept 或 reject/)
+    assert.equal(board.require(task.id).resultSummary, '持久化调研结果')
+    await board.accept(task.id, actor, board.require(task.id).revision)
+    return { run: { id: 'review-run' }, output: '已核验通过' }
+  })
+  await service.start()
+  await waitFor(() => board.require(task.id).status === 'done')
+  await service.dispatchReadyTasks()
+  assert.equal(calls, 1)
+  assert.equal(board.require(task.id).resultSummary, '持久化调研结果')
+})
 async function waitFor(check) {
   for (let i = 0; i < 200; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)) }
   assert.fail('task did not reach expected state')

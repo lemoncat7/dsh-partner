@@ -218,6 +218,7 @@ test('an atomic plan progresses through dependency acceptance without duplicate 
   const { board, requirements, collaboration } = await fixture(t)
   const calls = []
   collaboration.setSessionExecutor({ execute: async input => {
+    if (input.sourceId.startsWith('review:')) return { run: { id: input.sourceId }, output: '此测试由下方显式验收' }
     calls.push(input)
     return { run: { id: input.sourceId }, output: '<partner-deliverable>实际产出</partner-deliverable><partner-evidence>[{"criterion":1,"reference":"/session/result.md"}]</partner-evidence>' }
   } })
@@ -227,6 +228,7 @@ test('an atomic plan progresses through dependency acceptance without duplicate 
   await collaboration.dispatchReadyTasks()
   await waitFor(() => board.require(a.id).status === 'review')
   await collaboration.dispatchReadyTasks()
+  await waitFor(() => collaboration.active.size === 0)
   assert.equal(calls.length, 1)
   assert.equal(board.snapshot().tasks.find(t => t.id === b.id).scheduling.code, 'dependencies')
   await requirements.submitPlan(input, actor)

@@ -32,6 +32,8 @@ import { pendingStorageRecovery } from './ui/storage-recovery-marker.js'
 
 import { GlassSurface } from './glass-surface.js'
 import { SkillsPanel } from './ui/skills-panel.js'
+import { McpPanel } from './ui/mcp-panel.js'
+import mcpCssText from './ui/mcp.css'
 import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 import { CapabilityEditor } from './ui/capability-editor.js'
@@ -48,14 +50,14 @@ import { CAPABILITY_LABELS } from './capabilities.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${formSurfaceCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${formSurfaceCssText}\n${mcpCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns'
 import { WorkspaceGroupLinks, WorkspaceGroupTabs, GeneralSettingsPanel, workspaceGroup, type WorkspacePage } from './ui/workspace-navigation.js'
 type View = CompanionTab | WorkspacePage
 
-const WORKSPACE_PAGES = new Set<View>(['skills', 'board', 'schedules', 'pendant', 'general'])
+const WORKSPACE_PAGES = new Set<View>(['skills', 'mcp', 'board', 'schedules', 'pendant', 'general'])
 
 export const inject = ['slots', 'layout', 'sessions']
 
@@ -186,6 +188,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
       <section className={`dsh-partner-stage${workspacePage ? ' is-workspace-page' : ''}`}>
         {loading ? <State title="正在读取伙伴…" /> : workspacePage ? <><div className="dsh-partner-group-heading"><h1>{workspaceGroup(view)?.label}</h1></div><WorkspaceGroupTabs view={view} open={setView} /><div className="dsh-partner-stage-scroll is-workspace-page">
           {view === 'skills' && <SkillsPanel />}
+          {view === 'mcp' && <McpPanel />}
           {view === 'board' && <TaskBoardPanel initialTaskId={requestedDestination?.taskId} openRequest={requestedDestination} />}
           {view === 'schedules' && <SchedulePanel companions={snapshot?.companions ?? []} />}
           {view === 'pendant' && <PendantSettingsPanel />}

@@ -23,6 +23,9 @@ export interface PartnerDelegation {
   error?: string
   /** Resource snapshot at claim time; retained until the actual executor exits. */
   resourceKeys?: string[]
+  /** Automatic acceptance is distinct from user-requested advisory review. */
+  automaticReview?: boolean
+  reviewWorkRevision?: number
 }
 
 export function delegationKind(value: PartnerDelegation): DelegationKind { return value.kind ?? 'task' }

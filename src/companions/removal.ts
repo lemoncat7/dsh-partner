@@ -43,6 +43,7 @@ export class CompanionRemovalService {
       state.companions = state.companions.filter(item => item.id !== id)
       state.sessions = state.sessions.filter(item => item.companionId !== id)
       state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
+      if (state.mcpBindings) state.mcpBindings = state.mcpBindings.filter(item => item.companionId !== id)
       state.companionAccessGrants = state.companionAccessGrants.filter(grant => grant.fromCompanionId !== id && grant.toCompanionId !== id)
       state.schedules = state.schedules.filter(item => item.companionId !== id)
       state.heartbeatStates = state.heartbeatStates.filter(item => item.companionId !== id)

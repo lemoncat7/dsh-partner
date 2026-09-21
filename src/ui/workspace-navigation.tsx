@@ -2,10 +2,11 @@ import { IconBrowseOutline16, IconEditOutline16, IconListPenOutline16, IconPlayO
 import { TabButton } from './partner-components.js'
 export { GeneralSettingsPanel } from './storage-settings.js'
 
-export type WorkspacePage = 'skills' | 'board' | 'schedules' | 'pendant' | 'general'
+export type WorkspacePage = 'skills' | 'mcp' | 'board' | 'schedules' | 'pendant' | 'general'
 export const workspaceGroups = [
   { id: 'features', label: '功能', detail: '能力、协作与计划', icon: IconBrowseOutline16, pages: [
     { id: 'skills', label: 'Skill 市场', icon: IconBrowseOutline16 },
+    { id: 'mcp', label: 'MCP 服务', icon: IconBrowseOutline16 },
     { id: 'board', label: '任务看板', icon: IconListPenOutline16 },
     { id: 'schedules', label: '定时任务', icon: IconPlayOutline16 },
   ] },

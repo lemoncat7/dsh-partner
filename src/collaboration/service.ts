@@ -14,6 +14,7 @@ import { preserveTaskAttempt, taskWorkContext } from '../tasks/context.js'
 import { TaskConflictError } from '../tasks/service.js'
 import { repairableReviewCancellation, unfinishedReview } from './task-recovery.js'
 import { BOARD_CONCURRENCY, executionWait } from '../tasks/scheduling.js'
+import { automaticReviewCandidates } from './review-dispatch.js'
 
 const RECOVERY_TICK_MS = 5_000
 const RECOVERY_CONCURRENCY = BOARD_CONCURRENCY
@@ -197,6 +198,7 @@ export class PartnerCollaborationService {
     const delegation: PartnerDelegation = {
       id: `delegation-${randomUUID()}`, kind: 'review', taskId: task.id, initiatedBy: 'user', toCompanionId: reviewer.id,
       request: `核验看板任务：${task.title}`, status: 'queued', attempts: 0, nextAttemptAt: Date.now(), createdAt: Date.now(),
+      ...(task.autoRun ? { automaticReview: true } : {}), reviewWorkRevision: task.workRevision ?? 1,
     }
     await this.saveNew(delegation)
     const claimed = await this.claim(delegation.id)
@@ -247,6 +249,9 @@ export class PartnerCollaborationService {
 
   private async dispatchTick(): Promise<void> {
     if (this.closing || this.active.size >= RECOVERY_CONCURRENCY) return
+    if (automaticReviewCandidates(this.store.snapshot()).length) await this.store.update(state => {
+      for (const item of automaticReviewCandidates(state)) appendDelegation(state, item)
+    })
     // Only explicit new submission intent is scanned. Legacy ready tasks and
     // planning-only backlog records never start as a side effect of upgrading.
     if (autoRunCandidates(this.store.snapshot()).length) await this.store.update(state => {
@@ -340,7 +345,7 @@ export class PartnerCollaborationService {
       const prerequisiteResults = this.tasks.snapshot().tasks.filter(item => task.dependencyTaskIds.includes(item.id))
         .map(item => `- ${item.title}（${item.id}）：${(item.resultSummary || item.resultAbstract || '没有可见交付物，请先核对看板记录').slice(0, 1800)}`).join('\n').slice(0, 10_000)
       const context = taskWorkContext(this.store.snapshot(), task)
-      const prompt = kind === 'review' ? reviewPrompt(task) + '\n\n' + context : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults) + '\n\n' + context
+      const prompt = kind === 'review' ? reviewPrompt(task, delegation.automaticReview) + '\n\n' + context : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults) + '\n\n' + context
       const result = this.sessionExecutor
         ? await this.sessionExecutor.execute({
             sourceId: kind === 'review' ? `review:${task.id}:${delegation.id}` : delegation.id,
@@ -355,6 +360,7 @@ export class PartnerCollaborationService {
       if (kind === 'review') {
         if (latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧验收结果`); return }
         if (latest.revision !== task.revision) { await this.cancel(delegation.id, '核验期间任务已更新，忽略旧意见；请重新核验最新版本'); return }
+        if (delegation.automaticReview) throw new Error('自动验收未提交 accept/reject，任务保留待验收；请检查验收伙伴工具权限后重试核验')
         await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id }, task.revision)
       } else {
         if (latest.status !== 'doing' && latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
@@ -447,14 +453,14 @@ function taskPrompt(task: ReturnType<TaskBoardService['require']>, delegation: P
   ].filter(Boolean).join('\n\n')
 }
 
-function reviewPrompt(task: ReturnType<TaskBoardService['require']>): string {
+function reviewPrompt(task: ReturnType<TaskBoardService['require']>, automatic = false): string {
   return [
     '你收到一个伙伴看板任务的独立验收请求。请根据任务要求和执行结果核验真实性、完整性与可复现性。',
     `任务：${task.title}`,
     task.description ? `任务说明：${task.description}` : '',
     task.resultSummary ? `执行结果：\n${task.resultSummary}` : '执行者没有提交可见结果，请明确指出。',
     task.reviewHandoff ? `执行者验收交接：\n${task.reviewHandoff}` : '',
-    '请输出：验收结论建议（通过或打回）、核验证据、缺失项，以及若打回应如何修正。你只提供核验意见，最终通过或打回由用户决定。',
+    automatic ? '你是任务指定的验收者。核验已有成果，不重跑原任务。必须使用 partner_task_board accept 或 reject 提交真实结论，使用实际核验的 expectedRevision，有验收清单时附 checks。缺项应打回并说明证据及修改要求，不能仅回复“建议通过”。不通知用户内部验收过程，需求结果由系统统一汇总。' : '请输出：验收结论建议（通过或打回）、核验证据、缺失项，以及若打回应如何修正。你只提供核验意见，最终通过或打回由用户决定。',
   ].filter(Boolean).join('\n\n')
 }
 

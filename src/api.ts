@@ -29,6 +29,8 @@ import { dispatchAttachmentsApi } from './api/features/attachments-api.js'
 import type { PartnerInboxStore } from './notifications/store.js'
 import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson } from './api/http.js'
 import type { StorageCoordinator } from './storage/coordinator.js'
+import type { McpService } from './mcp/service.js'
+import { dispatchMcpApi } from './api/features/mcp-api.js'
 
 export interface WebServerLike {
   register(route: { kind: 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
@@ -41,6 +43,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  mcp?: McpService
   ctx: Context & { agentPresets: AgentPresets }
   store: PartnerStore
   credentials: PartnerCredentialVault
@@ -86,6 +89,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if (runtime.mcp && await dispatchMcpApi(req, res, segments, runtime.mcp)) return
   if(method==='GET'&&segments.length===2&&segments[0]==='storage'&&segments[1]==='status') {
     if(!runtime.storage)throw httpError(503,'存储服务不可用')
     return sendJson(res,200,await runtime.storage.status())

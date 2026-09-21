@@ -1,0 +1,17 @@
+.dsh-partner-market-grid footer.dsh-partner-mcp-actions { flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+.dsh-partner-mcp-tool-list { display: grid; gap: 12px; min-width: 0; }
+.dsh-partner-mcp-tool-list summary { cursor: pointer; overflow-wrap: anywhere; }
+.dsh-partner-mcp-tool-list p, .dsh-partner-mcp-tool-list pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.dsh-partner-mcp-examples { min-width: 0; color: var(--partner-text-secondary); font-size: var(--partner-font-body); }
+.dsh-partner-mcp-examples summary { cursor: pointer; padding: 8px 0; }
+.dsh-partner-mcp-examples pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--partner-font-caption); }
+.dsh-partner-skill-installed.dsh-partner-mcp-bindings > article { grid-template-columns: minmax(0, 1fr) auto; min-height: 0; gap: 12px; padding: 10px 12px; }
+.dsh-partner-mcp-bindings > article > span { display: grid; min-width: 0; gap: 2px; }
+.dsh-partner-mcp-bindings > article strong { overflow-wrap: anywhere; }
+.dsh-partner-mcp-bindings > article p { white-space: normal; font-size: var(--partner-font-caption); }
+.dsh-partner-workspace .dsh-partner-mcp-bindings > article > button,
+.dsh-partner-workspace-dialog .dsh-partner-mcp-bindings > article > button { width: auto; min-width: 0; min-height: 32px; height: auto; padding: 6px 10px; justify-self: end; align-self: center; white-space: nowrap; font-size: var(--partner-font-caption); line-height: 1.4; }
+@media (pointer: coarse) {
+  .dsh-partner-workspace .dsh-partner-mcp-bindings > article > button,
+  .dsh-partner-workspace-dialog .dsh-partner-mcp-bindings > article > button { min-height: 44px; min-width: 44px; }
+}

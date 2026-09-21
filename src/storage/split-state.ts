@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { PartnerState } from '../domain.js'
 import { atomicJson } from './atomic.js'
 
-const privateKeys = ['companions', 'channels', 'pairings', 'sessions', 'heartbeatStates', 'skillBindings', 'schedules', 'executionRuns', 'notificationDeliveries'] as const
+const privateKeys = ['companions', 'channels', 'pairings', 'sessions', 'heartbeatStates', 'skillBindings', 'mcpBindings', 'schedules', 'executionRuns', 'notificationDeliveries'] as const
 type PrivateKey = typeof privateKeys[number]
 export function privateStateOwners(state: PartnerState): string[] {
   const owners = new Set(state.companions.map(c => c.id))
@@ -49,7 +49,7 @@ export class SplitStatePersistence {
   async write(state: PartnerState): Promise<void> {
     const publicState = structuredClone(state) as Partial<PartnerState>
     for (const key of privateKeys) delete publicState[key]
-    const empty = ():Record<PrivateKey,unknown[]> => ({companions:[],channels:[],pairings:[],sessions:[],heartbeatStates:[],skillBindings:[],schedules:[],executionRuns:[],notificationDeliveries:[]})
+    const empty = ():Record<PrivateKey,unknown[]> => ({companions:[],channels:[],pairings:[],sessions:[],heartbeatStates:[],skillBindings:[],mcpBindings:[],schedules:[],executionRuns:[],notificationDeliveries:[]})
     const owners = new Map(state.companions.map(c => [c.id, empty()]))
     const channels = new Map(state.channels.map(c => [c.id, c.companionId]))
     for (const key of privateKeys) for (const item of state[key] ?? []) {

@@ -5,6 +5,7 @@ import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFoc
 import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 import type { CompanionCapability } from './capabilities.js'
 import type { SplitStatePersistence } from './storage/split-state.js'
+import { validateMcpState } from './mcp/state.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -287,6 +288,7 @@ function validateState(value: unknown): asserts value is PartnerState {
   if (typeof state.skillMarketNetwork !== 'object' || state.skillMarketNetwork === null || Array.isArray(state.skillMarketNetwork)) throw new Error('partner state skillMarketNetwork must be an object')
   if (state.skillMarketNetwork.proxyUrl !== undefined && typeof state.skillMarketNetwork.proxyUrl !== 'string') throw new Error('partner state skillMarketNetwork.proxyUrl must be a string')
   const companionIds = new Set(state.companions!.map(companion => companion.id))
+  validateMcpState(state)
   for (const companion of state.companions!) {
     const config = companion.notificationDelivery
     if (config === undefined) continue

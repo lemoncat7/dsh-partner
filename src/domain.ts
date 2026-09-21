@@ -100,6 +100,8 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
+  mcpServers?: import('./mcp/domain.js').McpServer[]
+  mcpBindings?: import('./mcp/domain.js').McpBinding[]
   schemaVersion: 14
   companions: Companion[]
   channels: WeixinChannel[]

@@ -8,6 +8,7 @@ import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { McpService, mcpToolName } from '../lib/mcp/service.js'
 
 async function fixture(t, makeComposer) {
   const directory = await mkdtemp(join(tmpdir(), 'partner-live-grant-'))
@@ -44,6 +45,44 @@ async function fixture(t, makeComposer) {
   const step = (turn, signal = new AbortController().signal) => ctx.waterfall(scopeTarget(carrier), 'agent/pre-step', { agent, turn, signal }, async () => 'ready')
   return { runtime, store, agent, route, companion, composition, registered, sections, step, counts: () => ({ compositions, disposals }) }
 }
+
+test('MCP grant and refreshed tool generation register on the next real pre-step, revoke denies stale tools', async t => {
+  const { store, companion, composition, registered, step, counts } = await fixture(t)
+  const credentials = new Map()
+  let tools = [{ name: 'first', inputSchema: { type: 'object' } }]
+  const mcp = new McpService(store, { read: async id => credentials.get(id), write: async (id, value) => credentials.set(id, value), delete: async id => credentials.delete(id) }, {
+    async use(_id, _config, signal, work) { return work({ listTools: async () => ({ tools }), callTool: async () => ({ content: [{ type: 'text', text: 'ok' }] }) }, signal) }, close: async () => {},
+  })
+  composition.setMcpService(mcp)
+  t.after(() => mcp.close())
+  await mcp.save({ name: 'MCP test', config: { url: 'https://example.com/mcp' } })
+  const id = mcp.catalog().servers[0].id
+  await mcp.refresh(id)
+  await store.update(s => { s.companions[0].capabilities = ['mcp'] })
+  await step(1)
+  const first = mcpToolName(id, 'first'), added = mcpToolName(id, 'added')
+  assert.equal(registered.has(first), false)
+  await mcp.bind(companion.id, id, true)
+  await step(1)
+  assert.equal(registered.has(first), false, 'running turn unchanged')
+  await step(2)
+  assert.equal(registered.has(first), true)
+  tools = [...tools, { name: 'added', inputSchema: { type: 'object' } }]
+  await mcp.refresh(id)
+  await step(2)
+  assert.equal(registered.has(added), false)
+  await step(3)
+  assert.equal(registered.has(added), true)
+  const old = registered.get(first)
+  await mcp.bind(companion.id, id, false)
+  await assert.rejects(old.execute({}, { signal: new AbortController().signal }), /撤回/)
+  await step(4)
+  assert.equal(registered.has(first), false)
+  assert.equal(registered.has(added), false)
+  const before = counts().compositions
+  await step(5)
+  assert.equal(counts().compositions, before, 'unchanged turns do not recompose')
+})
 
 test('native browser resume installs tools before the first turn without /prepare, unchanged turns do not recompose', async t => {
   const { step, registered, counts, runtime, agent } = await fixture(t)

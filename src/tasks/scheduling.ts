@@ -23,6 +23,8 @@ export function taskScheduling(state: PartnerState, task: BoardTask, liveClaims?
   if (task.status === 'blocked') return { code: 'blocked', message: task.resultSummary?.slice(0, 200) || '执行受阻，需要处理' }
   const job = state.delegations.find(d => d.taskId === task.id && delegationPending(d))
   if (job?.status === 'running') return { code: 'running', message: job.kind === 'review' ? '正在验收' : '正在执行' }
+  const failedReview = state.delegations.filter(d => d.taskId === task.id && d.kind === 'review' && d.toCompanionId === task.reviewerCompanionId).at(-1)
+  if (!job && task.status === 'review' && failedReview?.status === 'failed' && (failedReview.reviewWorkRevision ?? 1) === (task.workRevision ?? 1)) return { code: 'review_failed', message: '验收执行失败，请检查权限或连接后重试核验' }
   if (task.status === 'review' && !job) return { code: 'review', message: task.reviewerCompanionId ? '等待验收伙伴核验' : '等待人工验收' }
   if (!task.assigneeCompanionId) return { code: 'unassigned', message: '尚未指定执行伙伴' }
   if (!job && !task.autoRun && task.status !== 'doing') return { code: 'planning', message: '仅保存规划，尚未提交执行' }

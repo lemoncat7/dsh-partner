@@ -82,7 +82,7 @@ export function SkillsPanel(): JSX.Element {
   </div>
 }
 
-export function CompanionSkillSettings({ companionId }: { companionId: string }): JSX.Element {
+export function CompanionSkillSettings({ companionId, onBusyChange }: { companionId: string; onBusyChange?(busy: boolean): void }): JSX.Element {
   const [catalog, setCatalog] = useState<SkillCatalogView>({ installed: [], bindings: [], sources: [] })
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
@@ -104,12 +104,14 @@ export function CompanionSkillSettings({ companionId }: { companionId: string })
   const visibleEnabledSkills = showAll ? enabledSkills : enabledSkills.slice(0, 4)
   const visibleAvailableSkills = availableSkills.slice(0, 80)
   const setBinding = async (skillId: string, nextEnabled: boolean): Promise<void> => {
+    if (busy) return
+    onBusyChange?.(true)
     setBusy(skillId)
     setError(undefined)
     try {
       await api(`/companions/${encodeURIComponent(companionId)}/skills/${encodeURIComponent(skillId)}`, { method: 'PUT', body: JSON.stringify({ enabled: nextEnabled }) })
       await load()
-    } catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined) }
+    } catch (reason) { setError(errorMessage(reason)) } finally { setBusy(undefined); onBusyChange?.(false) }
   }
   return <section className="dsh-partner-capability-detail" aria-labelledby="dsh-partner-skill-capability-title">
     <header><span><small>PARTNER SKILLS</small><strong id="dsh-partner-skill-capability-title">当前伙伴的 Skill</strong></span><div className="dsh-partner-capability-actions"><em>{enabledSkills.length} 个启用</em>{catalog.installed.length > 0 && <button type="button" aria-expanded={selecting} onClick={() => setSelecting(value => !value)}><IconPlusOutline16 size={14} />添加 Skill</button>}</div></header>

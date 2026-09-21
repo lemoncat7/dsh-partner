@@ -15,7 +15,7 @@ export function WorkspaceBlock({ title, detail, actions, children, className = '
   </section>
 }
 
-export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular' }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide' }): JSX.Element {
+export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular', className = '' }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide'; className?: string }): JSX.Element {
   const titleId = useId()
   const detailId = useId()
   const layerRef = useRef<HTMLDialogElement>(null)
@@ -41,8 +41,8 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   return <dialog ref={layerRef} className="dsh-partner-workspace-dialog-layer" aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onCancel={event => {event.preventDefault(); event.stopPropagation(); close()}} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
-    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}`} onKeyDown={keyDown}>
-      <header><span><small>{eyebrow}</small><strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
+    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width} ${className}`} onKeyDown={keyDown}>
+      <header><span>{eyebrow && <small>{eyebrow}</small>}<strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
       <div className="dsh-partner-workspace-dialog-body">{children}</div>
     </section>
   </dialog>

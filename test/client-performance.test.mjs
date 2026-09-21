@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const clientSource = await readFile(new URL('../src/client.tsx', import.meta.url), 'utf8')
 const capabilitySource = await readFile(new URL('../src/ui/capability-editor.tsx', import.meta.url), 'utf8')
+const capabilityResources = await readFile(new URL('../src/ui/capability-resources.tsx', import.meta.url), 'utf8')
 const clientCss = await readFile(new URL('../src/client.css', import.meta.url), 'utf8')
 const workspaceUiCss = await readFile(new URL('../src/ui/workspace-ui.css', import.meta.url), 'utf8')
 const workspaceComponents = await readFile(new URL('../src/ui/workspace-components.tsx', import.meta.url), 'utf8')
@@ -102,7 +103,8 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.doesNotMatch(partnerTabs, />Skill</)
   assert.doesNotMatch(partnerTabs, />看板</)
   assert.doesNotMatch(partnerTabs, />定时</)
-  assert.match(capabilitySource, /<CompanionSkillSettings companionId=\{companion\.id\}/)
+  assert.match(capabilitySource, /<CapabilityResources[^>]*companionId=\{companion\.id\}/)
+  assert.match(capabilityResources, /opened === 'skills' && <CompanionSkillSettings companionId=\{companionId\}/)
   assert.match(skillSource, /集中安装和维护工作能力/)
   assert.match(scheduleSource, /name="companionId" required/)
 })

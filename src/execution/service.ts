@@ -7,7 +7,7 @@ import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-mod
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type { ToolRuntime, ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { appendBounded } from '../core/collections.js'
 import { AsyncSemaphore } from '../core/semaphore.js'
@@ -41,6 +41,8 @@ export interface EphemeralExecutionRequest {
 export interface EphemeralExecutionResult { run: ExecutionRun; output: string }
 
 export class EphemeralExecutionService {
+  private mcpTools?: (companionId: string) => ToolDefinition[]
+  setMcpTools(factory: (companionId: string) => ToolDefinition[]): void { this.mcpTools = factory }
   private readonly semaphore = new AsyncSemaphore(3)
   private readonly retained = new Map<string, AgentHandle>()
   private readonly active = new Map<string, AgentHandle>()
@@ -112,6 +114,7 @@ export class EphemeralExecutionService {
           agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: renderToolProtocol() })
           if (request.systemInstruction) agentCtx.systemPrompt.section({ name: 'partner-ephemeral-task', order: -8, text: request.systemInstruction })
           agentCtx.tools.presentAs('native')
+          for (const tool of this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
           if (request.allowedTools !== undefined) restrictTools(agentCtx as ExecutionContext, request.allowedTools)
         },
       })

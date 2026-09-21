@@ -252,6 +252,9 @@ export class PartnerAgentRuntime {
 
   async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
     if (task.status !== 'review' && task.status !== 'done' && task.status !== 'blocked') return
+    // Automatic reviews have durable ownership; do not also wake the creator
+    // into a second, untracked acceptance round.
+    if (task.status === 'review' && task.autoRun && task.reviewerCompanionId) return
     const ownerId = task.replanRequested
       ? this.store.snapshot().requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
       : task.creatorCompanionId

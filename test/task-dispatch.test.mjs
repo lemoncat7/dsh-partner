@@ -21,7 +21,7 @@ async function fixture(t) {
   const skills = new SkillService(store, new SkillRepository(join(root, 'skills')))
   const service = new PartnerCollaborationService(store, skills, board, {})
   const calls = []
-  service.setSessionExecutor({ execute: async input => { calls.push(input); return {run:{id:'run-'+calls.length}, output:'真实产出'} } })
+  service.setSessionExecutor({ execute: async input => { if (!input.sourceId.startsWith('review:')) calls.push(input); return {run:{id:'run-'+calls.length}, output:'真实产出'} } })
   t.after(async () => { await service.close(); await rm(root,{recursive:true,force:true}) })
   return {root,store,board,skills,service,calls}
 }
@@ -233,16 +233,19 @@ test('four dependent tasks are submitted once and advance only after all prerequ
   await service.dispatchReadyTasks()
   await waitFor(()=>board.require(a.id).status==='review'&&board.require(c.id).status==='review')
   assert.equal(calls.length,2);assert.equal(board.require(b.id).status,'ready');assert.equal(board.require(d.id).status,'ready')
-  assert.equal(store.snapshot().delegations.length,4)
-  await service.dispatchReadyTasks();assert.equal(calls.length,2)
+  assert.equal(store.snapshot().delegations.filter(d=>d.kind!=='review').length,4)
+  await service.dispatchReadyTasks();await waitFor(()=>service.active.size===0);assert.equal(calls.length,2)
   await board.accept(a.id,actor);await service.dispatchReadyTasks()
   await waitFor(()=>board.require(b.id).status==='review')
+  // Review status is persisted before the executor finishes its final bookkeeping.
+  // Manual acceptance must wait for that in-flight update, as it does for task A above.
+  await waitFor(()=>service.active.size===0)
   await board.accept(b.id,actor);await service.dispatchReadyTasks();assert.equal(calls.length,3)
   await board.accept(c.id,actor);await service.dispatchReadyTasks()
   await waitFor(()=>board.require(d.id).status==='review');assert.equal(calls.length,4)
   assert.match(calls[3].prompt,/已验收前置任务的公开产出/)
   assert.match(calls[3].prompt,/真实产出/)
-  assert.equal(store.snapshot().delegations.length,4)
+  assert.equal(store.snapshot().delegations.filter(d=>d.kind!=='review').length,4)
 })
 
 test('explicit delegation accepts pending dependencies, repeated submissions share one job, and revocation stops it',async t=>{

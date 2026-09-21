@@ -10,6 +10,8 @@ import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { Config as ConfigSchema, resolveConfig, type Config as PartnerConfig } from './config.js'
 import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
+import { McpCredentials } from './mcp/credentials.js'
+import { McpService } from './mcp/service.js'
 import { PartnerAgentRuntime, partnerCwd } from './agent-runtime.js'
 import { ChannelManager } from './channels/manager.js'
 import { ChannelAvatarService } from './channels/avatar-tool.js'
@@ -131,6 +133,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     })
     const knowledgeMounts = new CompanionKnowledgeMounts(store, management, () => ctx.get('dshKnowledgeMountManagement'), id => partnerCwd(resolved.defaultCwd, id))
     const composer = new PartnerAgentComposition(store, skills, tasks, collaboration, scheduler, executor, companions, management, knowledgeMounts, requirements)
+    const mcp = new McpService(store, new McpCredentials(ctx.credentials))
+    composer.setMcpService(mcp)
+    executor.setMcpTools(id => mcp.definitions(id))
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     const avatars = new ChannelAvatarService(store, credentials)
@@ -190,7 +195,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -213,6 +218,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       persona.close()
       await Promise.all([memoryWorker.close(),scheduler.close(),heartbeat.close(),dailyReview.close(),channels.close()])
       await agents.close()
+      await mcp.close()
       await executor.close()
       await collaboration.close()
       await requirementWorker.close()
