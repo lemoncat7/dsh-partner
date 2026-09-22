@@ -11,6 +11,7 @@ import { DirectDispatcher } from './direct/dispatcher.js'
 import {matrixTransientFailure} from './direct/retry-policy.js'
 import { notificationRoutes } from './notification-route.js'
 import { NotificationDelivery } from './notification-delivery.js'
+import { sendNotificationPart } from './notification-timeout.js'
 import { ReplyProgressController } from './reply-progress-controller.js'
 import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
@@ -52,11 +53,13 @@ interface RuntimeState {
 }
 
 export class ChannelManager {
+  private notificationShutdown = new AbortController()
   private readonly tasks = new Map<string, { controller: AbortController; task: Promise<void> }>()
   private readonly runtime = new Map<string, RuntimeState>()
   private readonly contextTokens = new Map<string, string>()
   private readonly operations = new Map<string, Set<Promise<void>>>()
   private readonly directDispatchers = new Map<string, DirectDispatcher>()
+  private readonly directReplyProgress = new Map<string, ReplyProgressController>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
   private readonly notificationDelivery: NotificationDelivery
@@ -126,6 +129,7 @@ export class ChannelManager {
   }
 
   async close(): Promise<void> {
+    this.notificationShutdown.abort()
     for (const pending of this.pendingQuestions.values()) {
       pending.detachAbort()
       pending.reject(new Error('伙伴渠道已停止'))
@@ -263,9 +267,14 @@ export class ChannelManager {
     const credential = await this.credentials.read(channelId)
     const token = this.contextTokens.get(`${channelId}:${userId}`)
     const api = this.sender(channel, credential, userId)
-    const signal = AbortSignal.timeout(30_000)
-    await sendPart(0, () => api.sendText(userId, reply.text, token, signal))
-    for (const [index, attachment] of reply.attachments.entries()) await sendPart(index + 1, () => api.sendAttachment(userId, attachment, token, signal))
+    const send = (attachment:boolean, perform:(signal:AbortSignal)=>Promise<unknown>) => {
+      const current = requiredChannel(this.store, channelId)
+      if (!current.enabled || current.companionId !== channel.companionId) throw new Error('通知渠道已停用或授权已变更')
+      if (this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)?.status !== 'approved') throw new Error('通知接收人尚未批准')
+      return sendNotificationPart(attachment, perform, this.notificationShutdown.signal)
+    }
+    await sendPart(0, () => send(false, signal => api.sendText(userId, reply.text, token, signal)))
+    for (const [index, attachment] of reply.attachments.entries()) await sendPart(index + 1, () => send(true, signal => api.sendAttachment(userId, attachment, token, signal)))
   }
 
   private async pollLoop(channel: WeixinChannel, api: WeixinApi, signal: AbortSignal): Promise<void> {
@@ -600,6 +609,7 @@ export class ChannelManager {
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
         }
         const progress=typeof api.progress==='function'?new ReplyProgressController(api.progress(event.sender),allowed,signal):undefined
+        const progressKey=JSON.stringify([channel.id,event.targetId||api.config?.targetId||'',event.sender])
         try {
         const attachments:PartnerInboundAttachment[]=[]
         try {
@@ -617,13 +627,18 @@ export class ChannelManager {
           return
         }
         if(!allowed())throw new Error('渠道或联系人授权已撤销')
-        if(mode==='steer'&&await this.agents.steer(companion,channel.id,event.sender,{text,attachments})){
+        const settleProgress=mode==='steer'?this.directReplyProgress.get(progressKey)?.prepareInput():undefined
+        let inserted=false
+        try { if(mode==='steer')inserted=await this.agents.steer(companion,channel.id,event.sender,{text,attachments}) }
+        finally { await settleProgress?.(inserted) }
+        if(inserted){
           prepared()
           await api.sendText(event.sender,'已插入当前处理，将结合这条补充继续。',undefined,signal)
           return
         }
         signal.throwIfAborted()
         progress?.start()
+        if(progress)this.directReplyProgress.set(progressKey,progress)
         const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments},progress?.update)
         prepared()
         const reply=await pendingReply
@@ -641,6 +656,8 @@ export class ChannelManager {
           await progress?.fail()
           if(allowed()&&!signal.aborted)await api.sendText(event.sender,'本次消息处理或附件传输未完成，请在 DSH 查看错误。附件接收失败时未交给伙伴执行；请检查文件大小后重新发送。',undefined,signal).catch(()=>{})
           throw error
+        } finally {
+          if(progress&&this.directReplyProgress.get(progressKey)===progress)this.directReplyProgress.delete(progressKey)
         }
       }
     }

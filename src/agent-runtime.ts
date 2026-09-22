@@ -35,9 +35,9 @@ import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-no
 import { type NoteRecordingBridge } from './concern-recording.js'
 import { executeObservationLoop } from './observation-loop.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
-import { channelReplyPartsAfter } from './channels/delivery-policy.js'
+import { channelReplyPartsAfter, isInternalTaskNotice } from './channels/delivery-policy.js'
 import { prepareChannelReply } from './channels/outbound-media.js'
-import {replyStage,reportProgress,type ReplyProgress} from './execution/reply-progress.js'
+import {replyStage,replyActivity,reportProgress,type ReplyProgress} from './execution/reply-progress.js'
 export { extractOutboundAttachments } from './channels/outbound-media.js'
 export { renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 
@@ -630,9 +630,13 @@ export class PartnerAgentRuntime {
       source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
     }))
     const startSeq = agent.session.seq
+    let directProgress=false
     const detach=progress?this.ctx.on('session/event',(current,event)=>{
       if(current.id!==agent.session.id||event.seq<startSeq)return
+      if(event.type==='turn/start'||event.type==='turn/end'||isInternalTaskNotice(event))directProgress=false
+      if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=true
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
+      if(directProgress){const activity=replyActivity(event);if(activity)reportProgress(progress,activity)}
     }):()=>{}
     try {
       const userMessage = createUserMessage({

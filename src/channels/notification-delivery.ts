@@ -1,5 +1,6 @@
 import type {PartnerReply} from '../channel-message.js'
 import type {PartnerStore} from '../store.js'
+import {notificationFailureReason} from './notification-timeout.js'
 
 type Target = {channelId:string;userId:string}
 export interface NotificationDeliveryRecord {
@@ -8,7 +9,7 @@ export interface NotificationDeliveryRecord {
   createdAt:number
   completedAt?:number
   reply:PartnerReply
-  targets:(Target & {sentParts:number[]})[]
+  targets:(Target & {sentParts:number[];lastAttemptAt?:number;lastError?:string})[]
 }
 type Send = (target:Target, reply:PartnerReply, part:(index:number, send:()=>Promise<unknown>)=>Promise<void>)=>Promise<void>
 
@@ -45,9 +46,15 @@ export class NotificationDelivery {
     const failures:unknown[]=[]
     await Promise.all(frozen.targets.map(async target=>{
       if(target.sentParts.length===parts)return
+      let currentPart:number|undefined
       try{
+        await this.store.update(state=>{
+          const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
+          saved.lastAttemptAt=Date.now()
+        })
         await send(target,frozen.reply,async(index,perform)=>{
           if(target.sentParts.includes(index))return
+          currentPart=index
           await perform()
           await this.store.update(state=>{
             const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
@@ -55,9 +62,21 @@ export class NotificationDelivery {
           })
           target.sentParts.push(index)
         })
-      }catch(error){failures.push(error)}
+        await this.store.update(state=>{
+          const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
+          delete saved.lastError
+        })
+      }catch(error){
+        const stage=currentPart===undefined?'接收人检查':currentPart===0?'文字':`附件 ${currentPart}`
+        const message=`${stage}：${notificationFailureReason(error)}`
+        failures.push(new Error(message))
+        await this.store.update(state=>{
+          const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
+          saved.lastError=message
+        })
+      }
     }))
-    if(failures.length)throw new AggregateError(failures,`${failures.length} 个通知目标投递失败，等待重试；已成功部分已保存`)
+    if(failures.length)throw new AggregateError(failures,`${failures.length} 个通知目标投递失败，等待重试；已成功部分已保存。${failures.slice(0,3).map(e=>(e as Error).message).join('；')}`)
     await this.store.update(state=>{const saved=state.notificationDeliveries!.find(r=>r.id===id)!;saved.completedAt=Date.now();saved.reply={text:'',attachments:[]}})
   }
 }

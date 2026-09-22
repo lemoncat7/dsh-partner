@@ -144,7 +144,7 @@ export class DirectTransport implements ChannelSender {
     return transfer.receive(message.id, message.media ?? [], lifetime, maxBytes)
   }
   async sendAttachment(userId: string, file: PartnerOutboundAttachment, _context: string | undefined, signal?: AbortSignal, allowed: () => boolean = () => true): Promise<void> {
-    const lifetime = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
+    const lifetime = signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000)
     const transfer = new DirectMediaTransfer(this.config, this.token, async () => {
       if (!allowed()) throw new Error('渠道或联系人授权已撤销')
       const who = await this.validate(lifetime)

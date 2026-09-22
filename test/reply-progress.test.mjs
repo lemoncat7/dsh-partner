@@ -29,6 +29,53 @@ test('fast replies do not create placeholder posts',async()=>{
  assert.equal(events.filter(e=>e[0]==='create').length,0)
  assert.ok(events.some(e=>e[0]==='send'&&e[1]==='done'))
 })
+test('accepted inserted input moves progress and final reply to a new message',async()=>{
+ let count=0
+ const {events,transport}=fixture({create:async text=>{const id=`message-${++count}`;events.push(['create',id,text]);return id}})
+ const controller=new ReplyProgressController(transport,()=>true,new AbortController().signal,10,0)
+ controller.start();await until(()=>count===1)
+ await controller.continueAfterInput()
+ controller.update('tools');await until(()=>count===2)
+ await controller.finish('new final')
+ assert.deepEqual(events.filter(e=>e[0]==='edit'&&e[1]==='message-1').map(e=>e[2]),['已收到后续消息，处理进度与回复将在下方继续。'])
+ assert.ok(events.some(e=>e[0]==='edit'&&e[1]==='message-2'&&e[2]==='new final'))
+})
+test('insertion waits for a late placeholder ID; simultaneous finish cannot edit the old reply',async()=>{
+ let release,entered=false
+ const {events,transport}=fixture({create:async()=>{entered=true;return new Promise(resolve=>{release=()=>resolve('old')})}})
+ const controller=new ReplyProgressController(transport,()=>true,new AbortController().signal,1000,0)
+ controller.start();await until(()=>entered)
+ const rotation=controller.continueAfterInput()
+ const final=controller.finish('after insertion')
+ release();await rotation;await final
+ assert.equal(events.filter(e=>e[0]==='edit'&&e[2]==='after insertion').length,0)
+ assert.ok(events.some(e=>e[0]==='send'&&e[1]==='after insertion'))
+})
+test('repeated inserts and failed retirement never reuse the old message',async()=>{
+ const {events,transport}=fixture({edit:async()=>{throw Error('network')}})
+ const controller=new ReplyProgressController(transport,()=>true,new AbortController().signal,1000,0)
+ controller.start();await until(()=>events.some(e=>e[0]==='create'))
+ await Promise.all([controller.continueAfterInput(),controller.continueAfterInput()])
+ await controller.finish('final')
+ assert.ok(events.some(e=>e[0]==='send'&&e[1]==='final'))
+ const length=events.length
+ await controller.continueAfterInput();await wait(20)
+ assert.equal(events.length,length)
+})
+test('steer acceptance racing final completion is fenced; rejected insertion keeps current message',async()=>{
+ for(const accepted of [true,false]){
+  const {events,transport}=fixture()
+  const controller=new ReplyProgressController(transport,()=>true,new AbortController().signal,1000,0)
+  controller.start();await until(()=>events.some(e=>e[0]==='create'))
+  const settle=controller.prepareInput()
+  const finish=controller.finish('final')
+  await wait(5)
+  assert.ok(!events.some(e=>e[0]==='send'||e[0]==='edit'))
+  await settle(accepted);await finish
+  assert.equal(events.some(e=>e[0]==='send'&&e[1]==='final'),accepted)
+  assert.equal(events.some(e=>e[0]==='edit'&&e[2]==='final'),!accepted)
+ }
+})
 test('a late placeholder acknowledgement is settled before the final edit',async()=>{
  let release,entered=false
  const {events,transport}=fixture({create:async()=>{entered=true;return new Promise(resolve=>{release=()=>resolve('late')})}})
@@ -84,8 +131,28 @@ test('protocol adapters use Matrix replacements and Mattermost post patches',asy
    assert.equal(calls[0][2].timeout,30000);assert.equal(calls[1][2].typing,false)
    assert.deepEqual(edit[2]['m.relates_to'],{rel_type:'m.replace',event_id:'event'})
    assert.match(edit[2]['m.new_content'].formatted_body,/<strong>done<\/strong>/)
-  }else{assert.equal(calls.filter(c=>c[0].endsWith('/typing')).length,1);assert.equal(edit[0],'/api/v4/posts/post/patch');assert.equal(edit[3],'PUT');assert.equal(edit[2].message,'**done**')}
+  }else{assert.equal(calls.filter(c=>c[0].endsWith('/typing')).length,1);assert.equal(edit[0],'/api/v4/posts/post/patch');assert.equal(edit[3],'PUT');assert.equal(edit[2].message,'');assert.equal(edit[2].props.attachments[0].text,'**done**');assert.equal(adapter.finalDelivery,'separate')}
  }
+})
+test('Mattermost keeps progress in a native attachment and sends the final Markdown separately',async()=>{
+ const calls=[]
+ const adapter=directProgressTransport({platform:'mattermost',baseUrl:'http://test',targetId:'room'},'user',async()=>({accountId:'bot',peerId:'user'}),async(path,signal,body)=>{calls.push([path,body]);return {id:'progress'}},async text=>{calls.push(['send',text])})
+ const controller=new ReplyProgressController(adapter,()=>true,new AbortController().signal,1000,0)
+ controller.update({kind:'tool-start',id:'call',name:'read'});controller.start()
+ await until(()=>calls.some(c=>c[0]==='/api/v4/posts'))
+ const card=calls.find(c=>c[0]==='/api/v4/posts')[1]
+ assert.equal(card.message,'');assert.match(card.props.attachments[0].text,/`read` · 执行中/)
+ await controller.finish('## 回复\n\n- 完成')
+ assert.deepEqual(calls.find(c=>c[0]==='send'),['send','## 回复\n\n- 完成'])
+ assert.match(calls.find(c=>c[0].endsWith('/patch'))[1].props.attachments[0].text,/已结束/)
+ assert.ok(!JSON.stringify(calls.filter(c=>c[0].endsWith('/patch'))).includes('## 回复'))
+})
+test('failed Mattermost card cleanup cannot lose or duplicate the final answer',async()=>{
+ const {events,transport}=fixture({finalDelivery:'separate',edit:async()=>{throw Error('network')}})
+ const controller=new ReplyProgressController(transport,()=>true,new AbortController().signal,1000,0)
+ controller.start();await until(()=>events.some(e=>e[0]==='create'))
+ await controller.finish('answer')
+ assert.equal(events.filter(e=>e[0]==='send'&&e[1]==='answer').length,1)
 })
 test('progress events never expose model/tool data and observer failures are isolated',()=>{
  assert.equal(replyStage({type:'tool/call',data:{name:'secret',arguments:'password'}}),'tools')
