@@ -68,9 +68,11 @@
   --partner-glass-thick: rgba(255, 255, 255, .42);
   --partner-glass-highlight: rgba(255, 255, 255, .7);
   --partner-glass-rim-shadow: rgba(60, 60, 67, .11);
-  --partner-glass-filter: saturate(.65) contrast(1.015) blur(24px);
-  --partner-frosted-filter: saturate(.65) contrast(1.015) blur(24px);
-  --partner-toolbar-filter: saturate(.18) contrast(1.015) blur(24px);
+  /* Share Knowledge's material without desaturating the host backdrop. */
+  --partner-glass-filter: saturate(1.22) contrast(1.03) blur(32px);
+  --partner-frosted-filter: var(--partner-glass-filter);
+  --partner-toolbar-filter: var(--partner-glass-filter);
+  --partner-toolbar-surface: rgb(255 255 255 / 16%);
   --partner-shadow-sm: 0 1px 2px rgba(0, 0, 0, .055);
   --partner-shadow-md: 0 10px 28px rgba(31, 31, 35, .085);
   --partner-shadow-lg: 0 24px 64px rgba(31, 31, 35, .14);
@@ -130,12 +132,22 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
   --partner-glass-thick: rgba(0, 0, 0, .26);
   --partner-glass-highlight: rgba(255, 255, 255, .16);
   --partner-glass-rim-shadow: rgba(0, 0, 0, .3);
-  --partner-glass-filter: saturate(.55) contrast(1.02) blur(24px);
-  --partner-frosted-filter: saturate(.55) contrast(1.02) blur(24px);
-  --partner-toolbar-filter: saturate(.45) contrast(1.02) blur(24px);
+  --partner-toolbar-surface: rgb(25 33 35 / 16%);
   --partner-shadow-sm: 0 1px 2px rgba(0, 0, 0, .28);
   --partner-shadow-md: 0 12px 32px rgba(0, 0, 0, .34);
   --partner-shadow-lg: 0 28px 72px rgba(0, 0, 0, .48);
+}
+
+/* Lift workspace cards to neutral graphite without changing the pendant,
+   host canvas, or the opaque dialog/control fallback palette. */
+body[data-ds-dark-theme] .dsh-partner-workspace {
+  --partner-raised: rgb(76 78 82 / 58%);
+  --partner-card-surface: var(--partner-raised);
+  --partner-card-highlight: rgb(255 255 255 / 13%);
+  --partner-card-shadow:
+    inset 0 1px 0 var(--partner-card-highlight),
+    inset 0 -1px 0 rgb(0 0 0 / 14%),
+    0 6px 18px rgb(0 0 0 / 14%);
 }
 
 .dsh-partner-sidebar,
@@ -596,7 +608,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
   }
   .dsh-partner-glass-surface.is-interactive:hover::after { opacity: .72; }
 }
-.dsh-partner-topbar { position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between; min-height: 52px; margin: 8px 10px 0; padding: 7px 14px; border: 1px solid var(--partner-border); border-radius: 14px 14px 11px 11px; background: transparent; -webkit-backdrop-filter: var(--partner-toolbar-filter); backdrop-filter: var(--partner-toolbar-filter); box-shadow: var(--partner-glass-shadow); }
+.dsh-partner-topbar { position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between; min-height: 52px; margin: 8px 10px 0; padding: 7px 14px; border: 1px solid var(--partner-border); border-radius: 14px 14px 11px 11px; background: var(--partner-toolbar-surface); -webkit-backdrop-filter: var(--partner-toolbar-filter); backdrop-filter: var(--partner-toolbar-filter); box-shadow: var(--partner-glass-shadow); }
 .dsh-partner-topbar > div { display: flex; align-items: center; gap: 10px; }
 .dsh-partner-topbar > div > span:last-child { display: grid; gap: 2px; }
 .dsh-partner-topbar strong { font-size: var(--partner-font-label); font-weight: 620; }

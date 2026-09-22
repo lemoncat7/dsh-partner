@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { record, requiredText } from '../core/validation.js'
+import { record, requiredText, requiredMarkdown } from '../core/validation.js'
 import type { RequirementService } from './service.js'
 import type { TaskBoardService } from '../tasks/service.js'
 import { RequirementConflictError } from './revisions.js'
@@ -47,7 +47,7 @@ export function requirementTool(companionId: string, service: RequirementService
         if (action === 'update') return JSON.stringify(await service.update(id, revision as number, input, actor))
         if (action === 'submit') return JSON.stringify(await service.submit(id, revision as number, actor))
         if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor, input))
-        if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredText(input.summary, 'summary', 12000), actor))
+        if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredMarkdown(input.summary, 'summary', 12000), actor))
         throw new Error('需求操作无效')
       } catch (error) {
         if (!(error instanceof RequirementConflictError)) throw error

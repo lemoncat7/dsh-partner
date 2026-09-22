@@ -1,6 +1,6 @@
 import type { PartnerStore } from '../store.js'
 import type { TaskActor } from '../tasks/service.js'
-import { optionalText, record, requiredText } from '../core/validation.js'
+import { optionalText, record, requiredText, requiredMarkdown } from '../core/validation.js'
 import type { BoardRequirement } from './domain.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { invalidateTaskWork } from '../tasks/context.js'
@@ -90,7 +90,7 @@ export class RequirementService {
     })
   }
   async finish(id: string, revision: number, summary: string, actor: TaskActor): Promise<BoardRequirement> {
-    const text = requiredText(summary, 'summary', 12000)
+    const text = requiredMarkdown(summary, 'summary', 12000)
     return this.change(id, revision, actor, (item, tasks) => {
       if (item.status === 'done' || !tasks.length || tasks.some(t => t.status !== 'done')) throw new RequirementError(409, '需求已归档或仍有未验收任务，不能完成归档')
       item.summary = text; item.status = 'done'; item.archivedAt = Date.now()

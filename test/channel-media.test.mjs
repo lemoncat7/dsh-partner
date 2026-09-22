@@ -250,13 +250,14 @@ test('separates review handoff and writes long deliverables to a private Markdow
   assert.deepEqual(parsed, { summary: '短结论', deliverable: '完整交付', reviewHandoff: '请核对来源 A' })
   const legacy = parseTaskExecutionOutput('## 产出\n最终内容\n\n## 需要验收的内容\n请检查格式')
   assert.deepEqual(legacy, { deliverable: '## 产出\n最终内容', reviewHandoff: '请检查格式' })
-  const long = '这是完整交付内容。'.repeat(300)
+  const long = '## 完整交付\n\n- 第一项\n  - 子项\n\n```js\n  const value = 1\n```\n\n' + '这是完整交付内容。'.repeat(300)
   const delivery = await prepareTaskResultDelivery({
     id: 'task-long-result', title: '超长调研', description: '', status: 'done', priority: 'normal', createdBy: 'companion',
     creatorCompanionId: 'creator', skillIds: [], dependencyTaskIds: [], resultAbstract: '调研已完成，详见附件。', resultSummary: long,
     reviewHandoff: '内部核验清单', revision: 2, createdAt: 1, updatedAt: 2,
   }, root)
-  assert.match(delivery.text, /结论：调研已完成，详见附件/)
+  assert.ok(delivery.text.includes(long))
+  assert.doesNotMatch(delivery.text, /结论：调研已完成，详见附件/)
   assert.match(delivery.text, /完整交付文档/)
   assert.doesNotMatch(delivery.text, /内部核验清单/)
   assert.ok(delivery.documentPath)

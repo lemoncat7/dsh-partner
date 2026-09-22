@@ -16,6 +16,14 @@ export function optionalText(value: unknown, label: string, max: number): string
   return requiredText(value, label, max)
 }
 
+/** Markdown bodies retain indentation, blank lines and hard-break spaces. */
+export function requiredMarkdown(value: unknown, label: string, max: number): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required`)
+  const normalized = value.replace(/\r\n?/gu, '\n')
+  if (normalized.length > max) throw new Error(`${label} is too long`)
+  return normalized
+}
+
 export function oneOf<const T extends readonly string[]>(value: unknown, values: T, label: string): T[number] {
   if (typeof value !== 'string' || !values.includes(value)) throw new Error(`${label} is invalid`)
   return value as T[number]

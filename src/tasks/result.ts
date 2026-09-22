@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import type { BoardTask } from './domain.js'
 
 const INLINE_RESULT_LIMIT = 1_800
-const SUMMARY_LIMIT = 480
 const SUMMARY_TAG = /<partner-summary>\s*([\s\S]*?)\s*<\/partner-summary>/iu
 const DELIVERABLE_TAG = /<partner-deliverable>\s*([\s\S]*?)\s*<\/partner-deliverable>/iu
 const REVIEW_TAG = /<partner-review-handoff>\s*([\s\S]*?)\s*<\/partner-review-handoff>/iu
@@ -38,7 +37,7 @@ export function parseTaskExecutionOutput(value: string): TaskExecutionOutput {
     const summary = raw.match(SUMMARY_TAG)?.[1]?.trim()
     const reviewHandoff = raw.match(REVIEW_TAG)?.[1]?.trim()
     return {
-      ...(summary ? { summary: boundedSummary(summary) } : {}),
+      ...(summary ? { summary } : {}),
       deliverable: taggedDeliverable,
       ...(reviewHandoff ? { reviewHandoff } : {}),
       ...(evidence !== undefined ? { evidence } : {}),
@@ -63,15 +62,10 @@ export async function prepareTaskResultDelivery(task: BoardTask, cwd: string): P
   if (direct.length <= INLINE_RESULT_LIMIT) return { text: direct }
   const document = renderResultDocument(task, deliverable, review)
   const documentPath = await writeResultDocument(cwd, task, document)
-  const summary = task.resultAbstract?.trim() || summarizeDeliverable(deliverable)
-  const reviewSummary = review ? boundedSummary(review) : ''
   return {
-    text: [
-      task.status === 'done' ? `看板任务已完成：${task.title}` : `看板任务受阻：${task.title}`,
-      summary ? `结论：${summary}` : '',
-      reviewSummary ? `验收结论：${reviewSummary}` : '',
-      `完整交付文档：\`${documentPath}\``,
-    ].filter(Boolean).join('\n\n'),
+    // Channel transports handle message limits; do not replace Markdown with a
+    // flattened first-paragraph abstract. Keep the document as an extra copy.
+    text: `${direct}\n\n完整交付文档：\`${documentPath}\``,
     documentPath,
   }
 }
@@ -120,16 +114,6 @@ async function writeResultDocument(cwd: string, task: BoardTask, document: strin
     await rm(temporary, { force: true }).catch(() => {})
   }
   return target
-}
-
-function summarizeDeliverable(value: string): string {
-  const first = value.split(/\n\s*\n/u).map(item => item.replace(/^#{1,6}\s*/u, '').replace(/\s+/gu, ' ').trim()).find(Boolean) ?? ''
-  return boundedSummary(first)
-}
-
-function boundedSummary(value: string): string {
-  const normalized = value.replace(/\s+/gu, ' ').trim()
-  return normalized.length > SUMMARY_LIMIT ? `${normalized.slice(0, SUMMARY_LIMIT - 1)}…` : normalized
 }
 
 function safeFilePart(value: string): string {

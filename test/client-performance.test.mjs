@@ -13,6 +13,16 @@ const skillSource = await readFile(new URL('../src/ui/skills-panel.tsx', import.
 const scheduleSource = await readFile(new URL('../src/ui/schedule-panel.tsx', import.meta.url), 'utf8')
 const boardSource = await readFile(new URL('../src/ui/requirement-tasks-panel.tsx', import.meta.url), 'utf8')
 
+test('workspace panes share the header frost without desaturating the host backdrop', () => {
+  assert.match(clientCss, /--partner-glass-filter: saturate\(1\.22\) contrast\(1\.03\) blur\(32px\)/)
+  assert.match(clientCss, /--partner-frosted-filter: var\(--partner-glass-filter\)/)
+  assert.match(clientCss, /--partner-toolbar-filter: var\(--partner-glass-filter\)/)
+  assert.equal((clientCss.match(/--partner-glass-filter:/g) || []).length, 1)
+  for (const selector of ['roster', 'stage']) {
+    assert.match(clientCss, new RegExp(`\\.dsh-partner-${selector} \\{[^}]*background: var\\(--partner-pane\\);[^}]*backdrop-filter: var\\(--partner-frosted-filter\\)`))
+  }
+})
+
 test('memory workspace keeps dynamic glass off data-heavy surfaces', async () => {
   const memoryPanel = await readFile(new URL('../src/ui/memory/memory-panel.tsx', import.meta.url), 'utf8')
   const concernBoard = await readFile(new URL('../src/ui/memory/concern-board.tsx', import.meta.url), 'utf8')

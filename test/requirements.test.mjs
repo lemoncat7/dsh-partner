@@ -14,6 +14,16 @@ import { consolidateCompletedRequirements } from '../lib/requirements/consolidat
 import { requirementTool } from '../lib/requirements/tool.js'
 
 const actor = { kind: 'companion', companionId: 'companion-default' }
+test('completion preserves Markdown through tool validation, service and storage', async t => {
+  const { tasks, service, requirement, add, accept, current, store } = await fixture(t)
+  await accept(await add('工作'))
+  const summary = '## 完成总结\n\n- 第一项\n  - 子项\n\n| 名称 | 状态 |\n| --- | --- |\n| 任务 | 完成 |\n\n```js\n  const value = 1\n```\n\n保留硬换行  \n下一行'
+  const tool = requirementTool(actor.companionId, service, tasks)
+  const result = JSON.parse(await tool.execute({ action: 'finish', requirementId: requirement.id, expectedRevision: current().revision, summary }, {}))
+  assert.equal(result.summary, summary)
+  assert.equal(service.require(requirement.id).summary, summary)
+  assert.equal(store.snapshot().requirements.find(item => item.id === requirement.id).summary, summary)
+})
 test('large requirement summary includes every child within a bounded prompt', () => {
   const tasks = Array.from({ length: 500 }, (_, i) => ({ title: `任务-${i} ` + '长标题'.repeat(60), resultSummary: '交付内容'.repeat(3000) }))
   const prompt = requirementSummaryPrompt({ id: 'req', title: '需求', description: '背景'.repeat(4000) }, tasks)
