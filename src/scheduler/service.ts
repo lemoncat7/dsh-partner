@@ -3,6 +3,7 @@ import { oneOf, optionalBoolean, record, requiredText } from '../core/validation
 import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { ScheduledPartnerTask } from './domain.js'
+import { ScheduleContinuations } from './continuations.js'
 
 const OVERLAP_POLICIES = ['skip', 'queue'] as const
 
@@ -12,10 +13,12 @@ export class PartnerSchedulerService {
   private readonly queued = new Set<string>()
   private closed = false
 
-  constructor(private readonly store: PartnerStore, private readonly executor: EphemeralExecutionService, private readonly timeZone: string) {}
+  readonly continuations: ScheduleContinuations
+  constructor(private readonly store: PartnerStore, private readonly executor: EphemeralExecutionService, private readonly timeZone: string) { this.continuations = new ScheduleContinuations(store) }
 
   start(): void {
     if (this.timer || this.closed) return
+    this.continuations.start()
     this.timer = setInterval(() => { void this.tick() }, 15_000)
     this.timer.unref?.()
     void this.tick()
@@ -23,6 +26,7 @@ export class PartnerSchedulerService {
 
   async close(): Promise<void> {
     this.closed = true
+    this.continuations.close()
     if (this.timer) clearInterval(this.timer)
     this.timer = undefined
   }
@@ -44,6 +48,7 @@ export class PartnerSchedulerService {
       nextRunAt: nextOccurrence(schedule, now, this.timeZone), createdAt: now, updatedAt: now,
     }
     await this.store.update(state => {
+      if (!state.companions.find(c => c.id === owner)?.capabilities.includes('schedules')) throw new Error('请先勾选伙伴的定时任务能力')
       if (state.schedules.length >= 100) throw new Error('Scheduled task limit reached; remove an obsolete schedule first')
       state.schedules.push(entry)
     })
@@ -56,6 +61,13 @@ export class PartnerSchedulerService {
     await this.store.update(state => {
       const entry = state.schedules.find(item => item.id === id)
       if (!entry) throw new Error('Schedule does not exist')
+      if (input.enabled === true && !state.companions.find(c => c.id === entry.companionId)?.capabilities.includes('schedules')) throw new Error('请先勾选伙伴的定时任务能力')
+      if (entry.continuation) {
+        if (Object.keys(input).some(key => !['enabled', 'action', 'scheduleId'].includes(key))) throw new Error('续接计划只支持暂停；延期请使用 resolve 更新当前轮次')
+        if (input.enabled === true && entry.continuation.state !== 'waiting') throw new Error('已结束或受阻的续接不可直接重跑，请先核实原任务')
+        entry.enabled = optionalBoolean(input.enabled, entry.enabled); entry.updatedAt = Date.now()
+        output = structuredClone(entry); return
+      }
       if (input.title !== undefined) entry.title = requiredText(input.title, 'title', 160)
       if (input.prompt !== undefined) entry.prompt = requiredText(input.prompt, 'prompt', 12_000)
       if (input.schedule !== undefined) entry.schedule = parseSchedule(input.schedule)
@@ -77,12 +89,15 @@ export class PartnerSchedulerService {
   async trigger(id: string): Promise<void> {
     const entry = this.store.snapshot().schedules.find(item => item.id === id)
     if (!entry) throw new Error('Schedule does not exist')
+    this.requireCompanion(entry.companionId)
+    if (entry.continuation) { void this.continuations.run(id).catch(() => {}); return }
     await this.run(entry)
   }
 
   private async tick(): Promise<void> {
     if (this.closed) return
-    const due = this.store.snapshot().schedules.filter(item => item.enabled && item.nextRunAt <= Date.now())
+    await this.continuations.tick()
+    const due = this.store.snapshot().schedules.filter(item => !item.continuation && item.enabled && item.nextRunAt <= Date.now() && this.store.hasCapability(item.companionId, 'schedules'))
     for (const entry of due) void this.run(entry).catch(() => {})
   }
 
@@ -128,11 +143,13 @@ export class PartnerSchedulerService {
   private requireCompanion(id: string) {
     const companion = this.store.snapshot().companions.find(item => item.id === id)
     if (!companion) throw new Error('Companion does not exist')
+    if (!companion.capabilities.includes('schedules')) throw new Error('请先勾选伙伴的定时任务能力')
     return companion
   }
 }
 
 export function nextOccurrence(schedule: ScheduledPartnerTask['schedule'], now: number, timeZone: string): number {
+  if (schedule.kind === 'once') return schedule.at
   if (schedule.kind === 'interval') return now + schedule.minutes * 60_000
   const start = Math.floor(now / 60_000) * 60_000 + 60_000
   for (let offset = 0; offset <= 49 * 60; offset += 1) {

@@ -1,9 +1,14 @@
 import type { MarketSkillEntry } from './domain.js'
 import { TASK_PLANNING_DESCRIPTION, TASK_PLANNING_DOCUMENT, TASK_PLANNING_VERSION } from './task-planning.js'
+import { LONG_TASK_DESCRIPTION, LONG_TASK_DOCUMENT, LONG_TASK_VERSION } from './long-task-continuation.js'
 
 export const BUILTIN_SKILL_SOURCE = 'builtin'
 
 export const BUILTIN_SKILLS = new Map<string, { entry: MarketSkillEntry; document: string }>([
+  ['long-task-continuation', {
+    entry: { id: 'long-task-continuation', name: '长任务等待与续接', description: LONG_TASK_DESCRIPTION, version: LONG_TASK_VERSION, tags: ['定时任务', '续接'], skillUrl: 'builtin:long-task-continuation', sourceId: BUILTIN_SKILL_SOURCE },
+    document: LONG_TASK_DOCUMENT,
+  }],
   ['task-planning', {
     entry: { id: 'task-planning', name: '任务拆解与看板推进', description: TASK_PLANNING_DESCRIPTION, version: TASK_PLANNING_VERSION, tags: ['任务', '看板', '协作'], skillUrl: 'builtin:task-planning', sourceId: BUILTIN_SKILL_SOURCE },
     document: TASK_PLANNING_DOCUMENT,

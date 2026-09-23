@@ -2,12 +2,15 @@ import type { PartnerState } from '../domain.js'
 import type { BoardTask } from './domain.js'
 import { delegationPending, type PartnerDelegation } from '../collaboration/domain.js'
 import { taskDispatchDenied } from '../collaboration/task-dispatch.js'
+import { continuationDispatchWait } from './continuation.js'
 
 export const BOARD_CONCURRENCY = 3
 export interface TaskScheduling { code: string; message: string; taskIds?: string[]; resourceKeys?: string[]; retryAt?: number }
 
 /** The same resource predicate is used at claim time and in read-only UI status. */
 export function executionWait(state: PartnerState, task: BoardTask, liveClaims: readonly PartnerDelegation[] = []): TaskScheduling | undefined {
+  const waiting = continuationDispatchWait(state, task.id)
+  if (waiting) return waiting
   const running = [...new Map([...state.delegations.filter(d => d.status === 'running'), ...liveClaims].map(d => [d.id, d])).values()]
   const keys = new Set(task.resourceKeys ?? [])
   const conflicts = running.filter(d => (d.resourceKeys ?? state.tasks.find(t => t.id === d.taskId)?.resourceKeys ?? []).some(k => keys.has(k)))
@@ -21,6 +24,8 @@ export function taskScheduling(state: PartnerState, task: BoardTask, liveClaims?
   if (task.status === 'done') return { code: 'done', message: '已完成' }
   if (task.replanRequested) return { code: 'replan', message: '等待需求负责人重新规划' }
   if (task.status === 'blocked') return { code: 'blocked', message: task.resultSummary?.slice(0, 200) || '执行受阻，需要处理' }
+  const waiting = continuationDispatchWait(state, task.id)
+  if (waiting) return waiting
   const job = state.delegations.find(d => d.taskId === task.id && delegationPending(d))
   if (job?.status === 'running') return { code: 'running', message: job.kind === 'review' ? '正在验收' : '正在执行' }
   const failedReview = state.delegations.filter(d => d.taskId === task.id && d.kind === 'review' && d.toCompanionId === task.reviewerCompanionId).at(-1)

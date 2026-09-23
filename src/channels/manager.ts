@@ -172,6 +172,19 @@ export class ChannelManager {
     await this.sender(channel, credential, route.userId).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
   }
 
+  async notifyContinuation(entry: import('../scheduler/domain.js').ScheduledPartnerTask): Promise<void> {
+    const wake = entry.continuation
+    if (!wake?.summary) return
+    const route = this.routeForSession(wake.originSessionId)
+    if (!route || route.companionId !== entry.companionId) return
+    if (route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === entry.companionId)?.notificationDelivery) return
+    const text = `${wake.state === 'completed' ? '长任务已完成' : '长任务需要处理'}：${entry.title}\n\n${wake.summary}`
+    await this.queueProactive(route, `schedule-result:${entry.id}:${wake.state}`, { text, attachments: [] }, () => {
+      const current = this.store.snapshot().schedules.find(s => s.id === entry.id)
+      return this.store.hasCapability(entry.companionId, 'schedules') && current?.continuation?.state === wake.state
+    })
+  }
+
   async notifyTaskResult(task: BoardTask): Promise<void> {
     if (task.requirementId) return
     if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return

@@ -79,10 +79,11 @@ export class PartnerAgentComposition {
         name: 'partner-collaboration', order: -7,
         text: [
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
+        companion.capabilities.includes('schedules') ? '看板内长任务等待必须使用 partner_schedule defer 并填写 boardTaskId，不用 create 周期任务轮询。系统将此任务挂起，等待说明不是交付物，不送验收。关联看板的定时唤醒只检查外部状态并 resolve 后结束，由看板恢复原任务执行 nextStep，不在唤醒里再执行一遍。未关联看板的预约才在 resolve completed 后自行继续 nextStep。completion 仅描述外部任务自己的完成条件，仍运行则 pending 保存延期；不 sleep、不为等待创建或修改 Goal。后续自动轮次先 list，未到期不重复查询。原会话提前核实 waiting 任务已完成/失败，可用 scheduleId、精确 externalTaskId、summary、outcome=completed/blocked 提前关闭且不传 runToken；running 状态必须使用当前 token。过期唤醒不执行。' : '',
         companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限。若你另获伙伴管理能力，可在创建后按用户明确要求配置身份与能力；否则由用户在管理台单独授权。' : '',
         companion.capabilities.includes('administration') ? COMPANION_MANAGEMENT_PROMPT : '',
         companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
-        companion.capabilities.includes('schedules') ? '关注与定时任务按交付意图区分：持续观察、关注更新、有变化再通知，调用 partner_concern_suggest 保存到记忆的“在意的事”；即使用户说每天检查，也不因此创建定时任务。明确要求按时执行工作或固定周期交付结果（例如每天九点发送日报），才调用 partner_schedule。不明确时询问用户，不自行发明执行周期；关注工具不可用时说明需要开启记忆，不用定时任务替代。普通待办、当前轮次工作和一次性立即执行也不能擅自改成定时任务。' : '',
+        companion.capabilities.includes('schedules') ? '关注与定时任务按交付意图区分：持续观察、有变化再通知，调用 partner_concern_suggest 保存“在意的事”。明确按时执行或周期交付才用 partner_schedule create。例外：已提交并拿到任务 ID 的长时间工作，可用 partner_schedule defer 预约一次性续接，无需绑定 Skill：填写稳定 taskKey、externalTaskId、title、check 检查方法、nextStep 授权的后续步骤、delayMinutes（默认2）、deadlineMinutes（默认1440）、maxAttempts（默认12）。原会话由工具自动记录；相同 taskKey 幂等，不重复预约。返回成功后结束当前轮次。唤醒后检查已有任务，不重复提交；resolve 携带 scheduleId、runToken、summary 和 outcome=pending/completed/blocked，pending 保存延期后结束；用户取消用 cancel。关闭能力即禁止预约和执行。不要用此功能替代关注、当前可立即完成的工作或绕过授权，凭据不得存入计划。' : '',
         '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
         '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
         '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
@@ -369,21 +370,29 @@ function collaborationTool(companion: Companion, store: PartnerStore, collaborat
 function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService): ToolDefinition {
   return textTool({
     name: 'partner_schedule',
-    description: 'Create and manage this companion\'s scheduled temporary-session work ONLY for explicitly requested execution times or recurring deliverables, e.g. 每天九点生成并发送日报. 帮我关注、持续留意、有变化告诉我 are change-driven watches: use partner_concern_suggest to save 在意的事, not this tool. Do not invent an interval for a watch or use schedules as a fallback when memory is disabled. A specified checking cadence alone does not turn a watch into a scheduled deliverable. Schedules support interval or daily time, skip/queue overlap, and optional session retention.',
-    parameters: actionParameters(['list', 'create', 'update', 'delete', 'run'], {
+    description: 'Manage this companion\'s schedules. create is only for explicitly requested scheduled work, never change-driven watches. defer creates an idempotent one-shot continuation for an already-submitted long task: taskKey, externalTaskId, title, check and nextStep are required; delayMinutes defaults to 2, deadlineMinutes to 1440, maxAttempts to 12. Origin is captured from the current session. On wake check the existing task, never resubmit it; resolve with scheduleId, runToken, summary and outcome pending/completed/blocked; pending reschedules the same entry and ends the turn. cancel stops a continuation. No Skill is required. Never store credentials or exceed current tool approvals.',
+    parameters: actionParameters(['list', 'create', 'update', 'delete', 'run', 'defer', 'resolve', 'cancel'], {
       scheduleId: { type: 'string' }, title: { type: 'string' }, prompt: { type: 'string' },
       schedule: { type: 'object', description: '{kind:"interval",minutes} or {kind:"daily",hour,minute}' },
       enabled: { type: 'boolean' }, destroySessionAfterRun: { type: 'boolean' }, overlapPolicy: { type: 'string', enum: ['skip', 'queue'] }, timeoutMinutes: { type: 'integer' },
+      taskKey: { type: 'string', description: 'Stable provider/job identity; reuse for retries, never invent a new key for the same task.' },
+      boardTaskId: { type: 'string', description: 'Current board task ID when waiting within board work. The server binds the running delegation, parks only this task, and resumes it after a completed receipt. Never use recurring create for board polling. Waiting is not a deliverable.' },
+      externalTaskId: { type: 'string', description: 'Exact external job ID; required to resolve a waiting task early without runToken, from its original session.' }, check: { type: 'string', description: 'Read-only status check; no secrets.' }, completion: { type: 'string', description: 'This scheduled task alone is complete when this condition is verified, independent of the conversation or Goal. Defaults to verified success of this external job alone, not subsequent workflow steps.' }, nextStep: { type: 'string', description: 'Authorized steps after completed. When continuation.board is present, end the wake immediately after resolve: the BOARD resumes these steps, never execute them in the timer too. A new long job needs its own defer. Never sleep or create/modify a Goal for scheduling; do not re-poll before due.' },
+      delayMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, deadlineMinutes: { type: 'integer', minimum: 1, maximum: 43200 }, maxAttempts: { type: 'integer', minimum: 1, maximum: 100 },
+      runToken: { type: 'string' }, outcome: { type: 'string', enum: ['pending', 'completed', 'blocked'] }, summary: { type: 'string' },
     }),
     timeoutMs: 15 * 60_000,
-    async execute(raw) {
+    async execute(raw, exec) {
       const input = record(raw, 'arguments')
       const action = requiredText(input.action, 'action', 20)
       if (action === 'list') return JSON.stringify(scheduler.list().filter(item => item.companionId === companion.id))
+      if (action === 'defer') return JSON.stringify(await scheduler.continuations.defer(companion.id, requireAgent(exec).session.id, input))
+      if (action === 'resolve') return JSON.stringify(await scheduler.continuations.resolve(companion.id, requireAgent(exec).session.id, input))
       if (action === 'create') return JSON.stringify(await scheduler.create(input, companion.id))
       const id = requiredText(input.scheduleId, 'scheduleId', 160)
       const owned = scheduler.list().find(item => item.id === id && item.companionId === companion.id)
       if (!owned) throw new Error('Schedule does not exist for this companion')
+      if (action === 'cancel') { await scheduler.continuations.cancel(companion.id, id); return JSON.stringify({ ok: true }) }
       if (action === 'update') return JSON.stringify(await scheduler.update(id, input))
       if (action === 'delete') { await scheduler.remove(id); return JSON.stringify({ ok: true }) }
       if (action === 'run') { await scheduler.trigger(id); return JSON.stringify({ ok: true }) }

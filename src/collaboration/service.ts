@@ -48,7 +48,7 @@ export class PartnerCollaborationService {
     })
     this.stopWorkObserver = store.subscribe(state => {
       for (const [id, entry] of this.cancellations) {
-        if (!state.delegations.some(d => d.id === id && d.status === 'running')) entry.controller.abort(new Error('任务执行已取消或被新版本替代'))
+        if (!state.delegations.some(d => d.id === id && (d.status === 'running' || (d.status === 'queued' && d.continuationScheduleId)))) entry.controller.abort(new Error('任务执行已取消或被新版本替代'))
       }
     }, () => {})
   }
@@ -314,6 +314,7 @@ export class PartnerCollaborationService {
       item.resourceKeys = [...(task.resourceKeys ?? [])]
       item.attempts = (item.attempts ?? 0) + 1
       item.lastAttemptAt = now
+      delete item.executionSessionId
       item.startedAt ??= now
       delete item.nextAttemptAt
       delete item.completedAt
@@ -345,7 +346,9 @@ export class PartnerCollaborationService {
       const prerequisiteResults = this.tasks.snapshot().tasks.filter(item => task.dependencyTaskIds.includes(item.id))
         .map(item => `- ${item.title}（${item.id}）：${(item.resultSummary || item.resultAbstract || '没有可见交付物，请先核对看板记录').slice(0, 1800)}`).join('\n').slice(0, 10_000)
       const context = taskWorkContext(this.store.snapshot(), task)
-      const prompt = kind === 'review' ? reviewPrompt(task, delegation.automaticReview) + '\n\n' + context : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults) + '\n\n' + context
+      const continuation = this.store.snapshot().schedules.find(s => s.id === delegation.continuationScheduleId)?.continuation
+      const resume = continuation?.state === 'completed' ? `\n外部任务 ${continuation.externalTaskId} 已核实完成：${continuation.summary ?? ''}\n只继续后续步骤：${continuation.nextStep}\n先核实已有产物，不得重新提交原外部任务。若仍需等待新的外部任务，用新的任务 ID defer，并绑定当前看板任务。` : ''
+      const prompt = kind === 'review' ? reviewPrompt(task, delegation.automaticReview) + '\n\n' + context : taskPrompt(task, delegation, to, this.optionalCompanion(delegation.fromCompanionId), prerequisiteResults) + '\n\n' + context + resume
       const result = this.sessionExecutor
         ? await this.sessionExecutor.execute({
             sourceId: kind === 'review' ? `review:${task.id}:${delegation.id}` : delegation.id,

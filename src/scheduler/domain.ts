@@ -5,7 +5,8 @@ export interface ScheduledPartnerTask {
   companionId: string
   title: string
   prompt: string
-  schedule: { kind: 'interval'; minutes: number } | { kind: 'daily'; hour: number; minute: number }
+  schedule: { kind: 'interval'; minutes: number } | { kind: 'daily'; hour: number; minute: number } | { kind: 'once'; at: number }
+  continuation?: ScheduleContinuation
   enabled: boolean
   destroySessionAfterRun: boolean
   overlapPolicy: ScheduleOverlapPolicy
@@ -15,4 +16,24 @@ export interface ScheduledPartnerTask {
   lastRunStatus?: 'completed' | 'failed' | 'skipped'
   createdAt: number
   updatedAt: number
+}
+
+export interface ScheduleContinuation {
+  board?: { taskId: string; delegationId: string; workRevision: number }
+  taskKey: string
+  externalTaskId: string
+  originSessionId: string
+  check: string
+  nextStep: string
+  completion?: string
+  state: 'waiting' | 'running' | 'completed' | 'blocked' | 'cancelled'
+  attempts: number
+  checks?: number
+  dispatchedAt?: number
+  maxAttempts: number
+  deadlineAt: number
+  runToken?: string
+  summary?: string
+  notifiedAt?: number
+  nextNotifyAt?: number
 }

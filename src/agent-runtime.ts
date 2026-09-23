@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { deliverScheduledWake } from './scheduler/wakeup.js'
+import { continuationPrompt } from './scheduler/continuations.js'
+import { assertWakeTools } from './scheduler/wakeup-context.js'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import type { ScheduledPartnerTask } from './scheduler/domain.js'
 import { conversationMemoryScope } from './memory-scope.js'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -34,6 +39,7 @@ import { listConcernFileSources, type ConcernSource } from './concern-sources.js
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { type NoteRecordingBridge } from './concern-recording.js'
 import { executeObservationLoop } from './observation-loop.js'
+import { waitForBoardTurn } from './tasks/continuation-yield.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 import { channelReplyPartsAfter, isInternalTaskNotice } from './channels/delivery-policy.js'
 import { prepareChannelReply } from './channels/outbound-media.js'
@@ -114,6 +120,8 @@ export class PartnerAgentRuntime {
   private readonly restoredCompositionJobs = new Map<string, Promise<void>>()
   private readonly disposeAgentListener: () => void
   private readonly disposeConfigurationListener: () => void
+  private readonly disposeAssemblyListener: () => void
+  private readonly rebuildingAssemblies = new WeakSet<object>()
   private readonly configurations: SessionConfigurationIndex
   private readonly preparedTurns = new WeakMap<Agent, number>()
   private readonly observationJobs = new Map<string, number>()
@@ -132,6 +140,18 @@ export class PartnerAgentRuntime {
     private readonly composer?: PartnerAgentComposer,
   ) {
     this.configurations = new SessionConfigurationIndex(store)
+    // Current hosts snapshot providers BEFORE agent/pre-step. Rebuild the first
+    // assembly after installing scoped contributions; returning the old snapshot
+    // would still omit tools for one request even though registration succeeded.
+    this.disposeAssemblyListener = typeof this.ctx.on === 'function'
+      ? this.ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
+        if (!context.agent || !context.signal || this.rebuildingAssemblies.has(context)) return next()
+        const changed = await this.prepareAgentAssembly(context.agent, context.signal)
+        if (!changed) return next()
+        this.rebuildingAssemblies.add(context)
+        try { return await this.ctx.systemPrompt.assemble(context) }
+        finally { this.rebuildingAssemblies.delete(context) }
+      }) : () => {}
     this.disposeConfigurationListener = typeof this.ctx.on === 'function'
       ? this.ctx.on('agent/pre-step', async ({ agent, turn, signal }, next) => {
         await this.prepareAgentTurn(agent, turn, signal)
@@ -293,6 +313,29 @@ export class PartnerAgentRuntime {
     }))
   }
 
+  async wakeSchedule(entry: ScheduledPartnerTask, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
+    const wake = entry.continuation!
+    const state = this.store.snapshot()
+    const companion = state.companions.find(c => c.id === entry.companionId)
+    const route = state.sessions.find(s => s.companionId === entry.companionId && s.sessionId === wake.originSessionId)
+    if (!companion || !route || this.isArchived(route)) throw new Error('原续接会话不存在或已归档')
+    const agent = await this.ensureAgent(companion, route)
+    if (!this.store.snapshot().sessions.some(s => s.id === route.id && s.sessionId === wake.originSessionId) || this.isArchived(route)) throw new Error('原续接会话已变更')
+    const assembly = await agent.ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
+    signal.throwIfAborted()
+    assertWakeTools(entry, assembly.tools.map(tool => tool.name))
+    await deliverScheduledWake({ store: this.store, id: entry.id, token: wake.runToken!, signal,
+      timeoutMs: entry.timeoutMinutes * 60_000,
+      deliver: () => {
+        const message = createUserMessage({ content: [{ type: 'text', text: continuationPrompt(entry) }],
+          source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴长任务续接' } })
+        if (agent.status === 'idle') agent.followup(message)
+        else agent.steer(message)
+      },
+    })
+  }
+
   async executeTask(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string; signal?: AbortSignal }): Promise<{ run: { id: string }; output: string }> {
     input.signal?.throwIfAborted()
     const route = await this.createLocalSession(input.companion.id)
@@ -305,6 +348,11 @@ export class PartnerAgentRuntime {
       if (agent.status !== 'idle') await agent.whenIdle()
       input.signal?.throwIfAborted()
       const startSeq = agent.session.seq
+      await this.store.update(state => {
+        const delegation = state.delegations.find(d => d.id === input.sourceId && d.status === 'running')
+        if (delegation) delegation.executionSessionId = route.sessionId
+      })
+      input.signal?.throwIfAborted()
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: input.prompt }],
         source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
@@ -318,7 +366,9 @@ export class PartnerAgentRuntime {
       const cancel = (): void => { agent.cancel({ kind: 'hook', reason: 'partner task removed' }) }
       input.signal?.addEventListener('abort', cancel, { once: true })
       if (input.signal?.aborted) cancel()
-      try { await agent.whenIdle(); input.signal?.throwIfAborted() } finally { clearTimeout(timer); input.signal?.removeEventListener('abort', cancel) }
+      let deferred = false
+      try { deferred = await waitForBoardTurn(this.store, input.sourceId, agent.whenIdle(), input.signal); input.signal?.throwIfAborted() } finally { clearTimeout(timer); input.signal?.removeEventListener('abort', cancel) }
+      if (deferred) return
       if (timedOut) throw new Error('伙伴看板任务执行超时')
       output = assistantTextAfter(agent, startSeq).trim()
       if (!output) throw new Error('伙伴会话没有产生任务结果')
@@ -539,22 +589,34 @@ export class PartnerAgentRuntime {
   async prepareAgentTurn(agent: Agent, turn: number, signal: AbortSignal): Promise<void> {
     if (this.closed) throw new Error('伙伴运行时已关闭')
     if (this.preparedTurns.get(agent) === turn) return
+    await this.prepareAgentAssembly(agent, signal)
+    this.preparedTurns.set(agent, turn)
+  }
+
+  /** Also used by assembly: never return a model-facing snapshot before setup. */
+  async prepareAgentAssembly(agent: Agent, signal: AbortSignal): Promise<boolean> {
+    if (this.closed) throw new Error('伙伴运行时已关闭')
+    const pending = this.restoredCompositionJobs.get(agent.session.id)
+    if (pending) { await pending; signal.throwIfAborted(); return true }
     const configuration = this.configurations.forSession(agent.session.id)
-    if (!configuration) return
+    if (!configuration) return false
     if (this.store.isCompanionRemoving(configuration.companion.id)) throw new Error('伙伴正在删除，不能启动新轮次')
     signal.throwIfAborted()
     const installed = this.restoredCompositions.get(agent.session.id)
     if (installed?.agent !== agent || installed.revision !== configuration.revision) {
-      const profile = await this.memory?.profileSnapshot(configuration.companion.id, conversationMemoryScope(configuration.route, this.store.snapshot().sessions)).catch(() => undefined)
-      signal.throwIfAborted()
-      if (this.closed) throw new Error('伙伴运行时已关闭')
-      const job = this.composeRestoredAgent(agent, configuration.companion, configuration.route, configuration.revision, profile, signal)
+      const job = (async () => {
+        const profile = await this.memory?.profileSnapshot(configuration.companion.id, conversationMemoryScope(configuration.route, this.store.snapshot().sessions)).catch(() => undefined)
+        signal.throwIfAborted()
+        if (this.closed) throw new Error('伙伴运行时已关闭')
+        await this.composeRestoredAgent(agent, configuration.companion, configuration.route, configuration.revision, profile, signal)
+      })()
       this.restoredCompositionJobs.set(agent.session.id, job)
       try { await job } finally {
         if (this.restoredCompositionJobs.get(agent.session.id) === job) this.restoredCompositionJobs.delete(agent.session.id)
       }
+      return true
     }
-    this.preparedTurns.set(agent, turn)
+    return false
   }
 
   isCompanionBusy(companionId: string): boolean {
@@ -589,6 +651,7 @@ export class PartnerAgentRuntime {
   async close(): Promise<void> {
     this.closed = true
     this.disposeConfigurationListener()
+    this.disposeAssemblyListener()
     this.disposeAgentListener()
     this.configurations.close()
     await Promise.allSettled(this.restoredCompositionJobs.values())

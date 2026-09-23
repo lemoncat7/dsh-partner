@@ -6,6 +6,7 @@ import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 import type { CompanionCapability } from './capabilities.js'
 import type { SplitStatePersistence } from './storage/split-state.js'
 import { validateMcpState } from './mcp/state.js'
+import { reconcileBoardContinuations } from './tasks/continuation.js'
 
 export class PartnerStore {
   private state: PartnerState
@@ -75,6 +76,7 @@ export class PartnerStore {
     this.writes = this.writes.then(async () => {
       const next = structuredClone(this.state)
       change(next)
+      reconcileBoardContinuations(next)
       validateState(next)
       await this.persist(next)
       const previous = this.state

@@ -101,12 +101,7 @@ export interface PartnerDelegationView {
 }
 export interface CompanionAccessView { targetIds: string[]; companions: PartnerDirectoryEntryView[] }
 
-export interface ScheduledTaskView {
-  id: string; companionId: string; title: string; prompt: string
-  schedule: { kind: 'interval'; minutes: number } | { kind: 'daily'; hour: number; minute: number }
-  enabled: boolean; destroySessionAfterRun: boolean; overlapPolicy: 'skip' | 'queue'; timeoutMinutes: number
-  nextRunAt: number; lastRunAt?: number; lastRunStatus?: 'completed' | 'failed' | 'skipped'; createdAt: number; updatedAt: number
-}
+export type ScheduledTaskView = import('./scheduler/domain.js').ScheduledPartnerTask
 export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'review' | 'skill' | 'observation'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
 
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {

@@ -89,6 +89,7 @@ export class TaskBoardService {
       if (input.title !== undefined) task.title = requiredText(input.title, 'title', 200)
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
       if (input.status !== undefined) task.status = oneOf(input.status, TASK_STATUSES, 'status')
+      if (['review', 'done'].includes(task.status) && state.schedules.some(s => s.continuation?.board?.taskId === task.id && ['waiting', 'running'].includes(s.continuation.state))) throw new Error('任务正在等待外部结果，不能提前送验收或标记完成')
       if (input.priority !== undefined) task.priority = oneOf(input.priority, TASK_PRIORITIES, 'priority')
       if (input.autoRun !== undefined) {
         task.autoRun = optionalBoolean(input.autoRun, false)
@@ -199,6 +200,7 @@ export class TaskBoardService {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
+      if (state.schedules.some(s => s.continuation?.board?.taskId === task.id && ['waiting', 'running'].includes(s.continuation.state))) throw new Error('任务正在等待外部结果，不能把等待说明作为交付结果送验收')
       if (workRevision !== undefined && workRevision !== (task.workRevision ?? 1)) throw new TaskConflictError(task)
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId

@@ -138,6 +138,10 @@ export function apply(context: Context, config: PartnerConfig): void {
     executor.setMcpTools(id => mcp.definitions(id))
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    scheduler.continuations.configure({
+      execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
+      notify: entry => channels.notifyContinuation(entry),
+    })
     const avatars = new ChannelAvatarService(store, credentials)
     composer.setAvatarToolFactory(id => avatars.tool(id))
     const memoryWorker = new MemoryWorker({

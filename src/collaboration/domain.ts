@@ -20,6 +20,8 @@ export interface PartnerDelegation {
   completedAt?: number
   resultSummary?: string
   executionRunId?: string
+  executionSessionId?: string
+  continuationScheduleId?: string
   error?: string
   /** Resource snapshot at claim time; retained until the actual executor exits. */
   resourceKeys?: string[]

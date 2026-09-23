@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -39,6 +39,7 @@
     "docs/releases/2.4.0.md",
     "docs/releases/2.4.1.md",
     "docs/releases/2.4.2.md",
+    "docs/releases/2.5.0.md",
     "docs/mcp.md",
     "docs/channel-questions-and-avatar.md",
     "docs/memory-quality.md",
@@ -51,6 +52,7 @@
     "docs/releases/1.16.1.md",
     "docs/releases/1.16.2.md",
     "docs/channel-reply-progress.md",
+    "docs/long-task-continuation.md",
     "docs/channel-message-format.md",
     "docs/notification-delivery.md",
     "docs/direct-channels.md",

@@ -48,6 +48,12 @@
 .dsh-partner-skill-installed > article:hover,
 .dsh-partner-schedule-list > article:hover { border-color: color-mix(in srgb, var(--partner-text) 20%, var(--partner-border)); background: color-mix(in srgb, var(--partner-hover) 60%, var(--partner-raised)); transform: translate3d(0, -1px, 0); }
 .dsh-partner-schedule-meta { display: flex !important; align-items: center; flex-wrap: wrap; gap: 5px 10px !important; margin-top: 2px; }
+.dsh-partner-schedule-list details { min-width: 0; max-width: 100%; }
+.dsh-partner-schedule-list details p,
+.dsh-partner-schedule-list details summary,
+.dsh-partner-schedule-list strong { white-space: normal; overflow-wrap: anywhere; }
+.dsh-partner-schedule-list details p { overflow: visible; text-overflow: clip; }
+.dsh-partner-schedule-list details summary { cursor: pointer; }
 .dsh-partner-schedule-meta > em { position: relative; color: var(--partner-text-tertiary); font-size: var(--partner-font-caption); font-style: normal; font-variant-numeric: tabular-nums; }
 .dsh-partner-schedule-meta > em + em::before { position: absolute; top: 50%; left: -6px; width: 2px; height: 2px; border-radius: 50%; background: var(--partner-text-tertiary); content: ""; }
 .dsh-partner-run-list > article { border-radius: 9px; transition: background-color 140ms ease; }

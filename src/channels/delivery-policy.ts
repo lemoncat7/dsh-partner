@@ -2,6 +2,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 const INTERNAL_TASK_NOTICES = new Set([
   '看板任务待验收', '看板任务已完成', '看板任务受阻', '伙伴执行看板任务', '伙伴核验看板任务', '伙伴汇总需求',
+  '伙伴长任务续接',
 ])
 
 export function isInternalTaskNotice(event: SessionEvent): boolean {
