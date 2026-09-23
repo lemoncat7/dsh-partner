@@ -28,6 +28,8 @@ import { prepareTaskResultDelivery } from '../tasks/result.js'
 import type { BoardRequirement } from '../requirements/domain.js'
 import { requirementIsIdle, requirementProgressKey } from '../requirements/progress.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
+import { continuationFinalReply } from '../scheduler/final-reply.js'
+import { savedContinuationRoute } from '../scheduler/channel-origin.js'
 import { prepareChannelReply } from './outbound-media.js'
 import { questionOrigin } from './question-origin.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
@@ -166,6 +168,7 @@ export class ChannelManager {
     const route=this.store.snapshot().sessions.find(s=>s.sessionId===sessionId&&s.id===channelRouteId)
     if(!route||route.kind==='local')throw new Error('当前会话没有绑定渠道')
     const channel=requiredChannel(this.store,route.channelId)
+    if(channel.companionId!==route.companionId)throw new Error('附件原渠道不再属于当前伙伴')
     if(!channel.enabled)throw new Error('渠道已停用')
     if(this.store.snapshot().pairings.find(p=>p.channelId===route.channelId&&p.userId===route.userId)?.status!=='approved')throw new Error('渠道联系人尚未批准')
     const credential=await this.credentials.read(route.channelId)
@@ -174,15 +177,16 @@ export class ChannelManager {
 
   async notifyContinuation(entry: import('../scheduler/domain.js').ScheduledPartnerTask): Promise<void> {
     const wake = entry.continuation
-    if (!wake?.summary) return
-    const route = this.routeForSession(wake.originSessionId)
+    if (!wake?.finalReply || wake.board) return
+    const route = savedContinuationRoute(this.store.snapshot(), entry.companionId, wake)
     if (!route || route.companionId !== entry.companionId) return
     if (route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === entry.companionId)?.notificationDelivery) return
-    const text = `${wake.state === 'completed' ? '长任务已完成' : '长任务需要处理'}：${entry.title}\n\n${wake.summary}`
-    await this.queueProactive(route, `schedule-result:${entry.id}:${wake.state}`, { text, attachments: [] }, () => {
+    const reply = await prepareChannelReply(wake.finalReply, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId))
+    await this.queueProactive(route, `schedule-final:${entry.id}:${wake.finalReply.key}`, reply, () => {
       const current = this.store.snapshot().schedules.find(s => s.id === entry.id)
       return this.store.hasCapability(entry.companionId, 'schedules') && current?.continuation?.state === wake.state
-    })
+        && (!wake.finalReply || current.continuation.finalReply?.key === wake.finalReply.key)
+    }, true)
   }
 
   async notifyTaskResult(task: BoardTask): Promise<void> {
@@ -232,6 +236,16 @@ export class ChannelManager {
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const history = session.snapshotEvents().filter(item => item.seq < event.seq)
     const events = completedTurnEvents(history, event)
+    const final = continuationFinalReply(this.store.snapshot().schedules, session.id, history, events, event)
+    if (final) {
+      await this.store.update(state => {
+        const wake = state.schedules.find(item => item.id === final.id)?.continuation
+        if (wake && !wake.board && wake.messageId === final.messageId && ['completed', 'blocked'].includes(wake.state)
+          && wake.finalReply?.key !== final.reply.key) wake.finalReply = final.reply
+      })
+      // Persist before delivery; the scheduler retries independently of the conversation.
+      return
+    }
     if (!isAutonomousDeliveryTurn(events, history)) return
     const parts = channelReplyPartsAfter(events, 0, true)
     if (!parts.text && !parts.referenceTexts.length) return
@@ -239,14 +253,14 @@ export class ChannelManager {
     await this.queueProactive(route, receipt, await prepareChannelReply(parts, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)))
   }
 
-  private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply, stillValid?: () => boolean): Promise<void> {
+  private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply, stillValid?: () => boolean, exactOrigin = false): Promise<void> {
     if (this.store.snapshot().recentReceipts.includes(receipt)) return
     const key = `${route.channelId}:${route.userId}`
     const previous = this.outboundQueues.get(key) ?? Promise.resolve()
     const current = previous.catch(() => {}).then(async () => {
       if (this.store.snapshot().recentReceipts.includes(receipt)) return
       if (stillValid && !stillValid()) throw new Error('需求已调整，取消旧结果投递')
-      await this.sendProactiveReply(route.channelId, route.userId, reply, receipt, route.companionId)
+      await this.sendProactiveReply(route.channelId, route.userId, reply, receipt, route.companionId, exactOrigin)
       await this.rememberReceipt(receipt)
     })
     this.outboundQueues.set(key, current)
@@ -260,12 +274,12 @@ export class ChannelManager {
     return candidates.filter(item=>item.kind==='channel').sort((a,b)=>inbound(b)-inbound(a))[0]??candidates[0]
   }
 
-  private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply, receipt?: string, owner?: string): Promise<void> {
+  private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply, receipt?: string, owner?: string, exactOrigin = false): Promise<void> {
     const state = this.store.snapshot()
-    const companionId = state.channels.find(c => c.id === channelId)?.companionId ?? owner
+    const companionId = exactOrigin ? owner : state.channels.find(c => c.id === channelId)?.companionId ?? owner
     if (!companionId) throw new Error('通知来源伙伴不存在')
     await this.notificationDelivery.deliver(receipt ?? randomBytes(16).toString('hex'), companionId,
-      () => notificationRoutes(this.store.snapshot(),channelId,userId,companionId), reply,
+      () => exactOrigin ? [{channelId, userId}] : notificationRoutes(this.store.snapshot(),channelId,userId,companionId), reply,
       async (target, payload, sendPart) => {
         const current = this.store.snapshot()
         if (!current.channels.some(c => c.id === target.channelId && c.companionId === companionId)) throw new Error('通知目标不属于当前伙伴')

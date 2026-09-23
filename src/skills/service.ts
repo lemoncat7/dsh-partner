@@ -7,6 +7,7 @@ import type { LoadedSkill, MarketSkillEntry, PartnerSkill, SkillMarketSource } f
 import { sha256 } from './loader.js'
 import { SkillRepository } from './repository.js'
 import { BUILTIN_SKILLS, BUILTIN_SKILL_SOURCE } from './builtin.js'
+import { builtinResourcesMatch, loadBuiltinResources } from './builtin-resources.js'
 import { marketRequest, parseMarketResponse } from './markets/adapters.js'
 import { extractSkillMarkdown } from './zip.js'
 import { prepareSkillPackage, type SkillPackageFile } from './package.js'
@@ -31,8 +32,10 @@ export class SkillService {
     for (const skill of this.store.snapshot().skills) {
       if (skill.source !== 'builtin') continue
       const builtin = BUILTIN_SKILLS.get(skill.id)
-      if (!builtin || skill.checksum === sha256(builtin.document)) continue
-      replacements.push(await this.repository.install({ id: skill.id, document: builtin.document, source: 'builtin', sourceId: BUILTIN_SKILL_SOURCE, trusted: true }))
+      if (!builtin) continue
+      const files = await loadBuiltinResources(builtin.resourceBundle)
+      if (skill.checksum === sha256(builtin.document) && await builtinResourcesMatch(skill.rootPath, files)) continue
+      replacements.push(await this.repository.install({ id: skill.id, document: builtin.document, files, source: 'builtin', sourceId: BUILTIN_SKILL_SOURCE, trusted: true }))
     }
     if (replacements.length > 0) await this.store.update(state => {
       const byId = new Map(replacements.map(skill => [skill.id, skill]))
@@ -168,7 +171,8 @@ export class SkillService {
     if (sourceId === BUILTIN_SKILL_SOURCE) {
       const builtin = BUILTIN_SKILLS.get(entryId)
       if (!builtin) throw new Error('Built-in Skill does not exist')
-      const installed = await this.repository.install({ id: entryId, document: builtin.document, source: 'builtin', sourceId: BUILTIN_SKILL_SOURCE, trusted: true })
+      const files = await loadBuiltinResources(builtin.resourceBundle)
+      const installed = await this.repository.install({ id: entryId, document: builtin.document, files, source: 'builtin', sourceId: BUILTIN_SKILL_SOURCE, trusted: true })
       await this.store.update(state => {
         state.skills = [...state.skills.filter(item => item.id !== installed.id), installed]
       })

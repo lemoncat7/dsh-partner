@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/wuwangzhang1216/DirectorSKILL",
+  "commit": "c65ae0d14457053efb1e354c7e7f7e120d97fad1",
+  "license": "MIT",
+  "normalization": "LF line endings and terminal newline only",
+  "files": [
+    {
+      "path": "upstream/CHANGELOG.md",
+      "sha256": "ebcbaf9bb45908127b0c3bd71873b90bc42e356293b2b32edd72b79ebc431401"
+    },
+    {
+      "path": "upstream/CONTRIBUTING.md",
+      "sha256": "b457e8094b71f8619685073032b38dcb342a5df4d3439f1f20440b9f71a9d1ad"
+    },
+    {
+      "path": "upstream/LICENSE",
+      "sha256": "df731ea2e1ffd3b8890ad246da3df96ceba3301c16fb4970c16811df4c728b56"
+    },
+    {
+      "path": "upstream/README.md",
+      "sha256": "de61800434c2ff91cb5aff1b86d35d542b70d3b64716ecb09c1fa8322b9c1fd9"
+    },
+    {
+      "path": "upstream/SKILL.md",
+      "sha256": "543be6ece626beaa7dbc36b8225dcdc0b763d8044563189e842b306bb5cfd792"
+    },
+    {
+      "path": "upstream/assets/beat-sheet-template.md",
+      "sha256": "e53e846e9f43cdc80cf261bde4978001628d6383a6d4bd702762f88131e04bda"
+    },
+    {
+      "path": "upstream/assets/director-book-template.md",
+      "sha256": "d6f0901207a822220fe87a7ca2feeea0ddeaf142a168a03704456e69b0ad68b0"
+    },
+    {
+      "path": "upstream/assets/edit-timeline-template.md",
+      "sha256": "b6a6ad673094a419ada6afb9d8e613b4d2c8538cface5cb17031bc7b408fc5ee"
+    },
+    {
+      "path": "upstream/assets/keyframe-prompt-template.md",
+      "sha256": "9d9f4463e87551c29268e6179890291ce90bbd1adb6cc2c48e62116df90fa527"
+    },
+    {
+      "path": "upstream/assets/qc-checklist.md",
+      "sha256": "ca10d9bd57a253d555b18a5ca4f1e29e7ff944434adb1e74b45fa4dffe2f4a11"
+    },
+    {
+      "path": "upstream/assets/shot-plan-template.md",
+      "sha256": "74aad412013e13ff0b3ff05880f55f74aadf009a080188a7adc91b4b3ff87688"
+    },
+    {
+      "path": "upstream/assets/sound-plan-template.md",
+      "sha256": "f8a4064cc2817aaba3e49027e6c93552693b773ffce2ab4058223f8745cc42d6"
+    },
+    {
+      "path": "upstream/assets/video-prompt-template.md",
+      "sha256": "0f70494e620e9ad72355799421ff53b02b8e347eb1fb10a80a008bba9bb4473b"
+    },
+    {
+      "path": "upstream/evals/run.md",
+      "sha256": "27f46fdbefab8eb7b21991d6d8ef7d5afa6cac7a5b980693276d7e8462c7ca1a"
+    },
+    {
+      "path": "upstream/references/ai-video-tool-adapters.md",
+      "sha256": "4fec32bd0dbe95a87af84f6319c428af1f58f0e266e42f907e2dfc51edbe7334"
+    },
+    {
+      "path": "upstream/references/blocking-and-staging.md",
+      "sha256": "16203dd654d61459df6eabb7754d5b450a17774ad18484f27a1c05e73d392402"
+    },
+    {
+      "path": "upstream/references/cinematic-language.md",
+      "sha256": "2e899733fdefb12d316faeeaed1a5dc466dea55ef3818b28e7cec13d7a501933"
+    },
+    {
+      "path": "upstream/references/continuity-bible.md",
+      "sha256": "92aad85488aee0fcad6d432ce29f66286d66245bb2a17499a325afb356c74826"
+    },
+    {
+      "path": "upstream/references/director_styles/01_spielberg.md",
+      "sha256": "c1d8db44ae145e3a5bc1791967afb2d02a9f838ae5691dbbe47d006b754d7783"
+    },
+    {
+      "path": "upstream/references/director_styles/02_hitchcock.md",
+      "sha256": "fcd7952d7c1970ed9b477d1d8ac3c03b3c3c956d4fc057dfb2a061a8a180b4a8"
+    },
+    {
+      "path": "upstream/references/director_styles/03_kubrick.md",
+      "sha256": "fb63f95a6e0467cac92c7a876bf5d371d844ac60bee160280cbf94f895f32117"
+    },
+    {
+      "path": "upstream/references/director_styles/04_kurosawa.md",
+      "sha256": "492e644362f4942616f28ae51c330a82c0116094a20a0bcf7c54378009a8e2ac"
+    },
+    {
+      "path": "upstream/references/director_styles/05_scorsese.md",
+      "sha256": "cf1449787769cd918b6b8438a66a61979211005039ffba24c48ec4ab1969c942"
+    },
+    {
+      "path": "upstream/references/director_styles/06_fellini.md",
+      "sha256": "6f6fe403c2da97e8bda4c6c2429f5f9418e9f04da74d91f201df6b5b3fd74211"
+    },
+    {
+      "path": "upstream/references/director_styles/07_bergman.md",
+      "sha256": "e277116732258c3557eba5c040ade8b71646fa5c23b704355017f4688bb6fd00"
+    },
+    {
+      "path": "upstream/references/director_styles/08_tarkovsky.md",
+      "sha256": "fe7e26e409ae727a859f07374d8a5f910e6a8a737695b0a6605db8f24bd6d77d"
+    },
+    {
+      "path": "upstream/references/director_styles/09_wong_kar_wai.md",
+      "sha256": "c60e33b3d99cc1e52dc02d57e40f61fb008c5647ac2eab30a51c45544711c57b"
+    },
+    {
+      "path": "upstream/references/director_styles/10_nolan.md",
+      "sha256": "ef506940f2447567427c819725351f6bafc91e51c935c3bbdc6cacdf94f5a6dd"
+    },
+    {
+      "path": "upstream/references/director_styles/11_villeneuve.md",
+      "sha256": "8f825927d68091767cd901e293484bfe50646b778c1cac8a8f77cccca198ca9c"
+    },
+    {
+      "path": "upstream/references/director_styles/12_fincher.md",
+      "sha256": "4cf9cce055dd14088ba7cd01446b389ac62e327a7aea7dac2d345939526061b5"
+    },
+    {
+      "path": "upstream/references/director_styles/13_refn.md",
+      "sha256": "05dc74f79684cc9f1bb4ec760d69ba4498e1fcca904fa504f58acde96442de74"
+    },
+    {
+      "path": "upstream/references/director_styles/14_bi_gan.md",
+      "sha256": "47ca34530e8573fbe49818c0dcaf8553ce92be37279c03ae388e92e6faf6a82a"
+    },
+    {
+      "path": "upstream/references/director_styles/15_zhang_yimou.md",
+      "sha256": "9bc951babbf3e51f8c2f0e129216578378536d17fac42663596a8397b28505c3"
+    },
+    {
+      "path": "upstream/references/director_styles/16_hou_hsiao_hsien.md",
+      "sha256": "c336fab4d549603beaf47a01ec0dbdcb52be99837d774425e50ec0350691f8b1"
+    },
+    {
+      "path": "upstream/references/director_styles/17_park_chan_wook.md",
+      "sha256": "8ada598768c187ea8b057a1b5e1107045b567811487eee73f64199507c1efb7b"
+    },
+    {
+      "path": "upstream/references/director_styles/18_malick.md",
+      "sha256": "ee5c6786c58385772e99eb003430bd24eafea83db19023619d63e47954af1f95"
+    },
+    {
+      "path": "upstream/references/director_styles/19_michael_mann.md",
+      "sha256": "b34fd4c8b0ca4833818f4d3f6471777341c6b23481b6efc6f69b4cfb0554cf79"
+    },
+    {
+      "path": "upstream/references/director_styles/20_coen_brothers.md",
+      "sha256": "4809d2861e696a54df4b28f3abe442311dc722b0a67f2f6e99db19dd385d5a68"
+    },
+    {
+      "path": "upstream/references/director_styles/README.md",
+      "sha256": "fcd5fc6193e0b86765be168af4cb43ee30bd1cb805ceb5bcc27241dbcd2d1798"
+    },
+    {
+      "path": "upstream/references/director_styles/example_comparisons.md",
+      "sha256": "d13bd746f88418fdf259b25115b6cab4d259ba31ef6d57f251fdeeaddebc9504"
+    },
+    {
+      "path": "upstream/references/editing-and-assembly.md",
+      "sha256": "8256bb843e8d45ba66aba927edef30cd586a0a32030e4a4639d26be156e850de"
+    },
+    {
+      "path": "upstream/references/failure-modes.md",
+      "sha256": "9a374e78ac8257ed8c91d7c247ebc2f1d27a3484b0c1486fee7d77e554fb9be7"
+    },
+    {
+      "path": "upstream/references/genre-playbooks.md",
+      "sha256": "5713431b20dcd6c4804d086385106ecce9ef483210287dfdceacc351077d33e1"
+    },
+    {
+      "path": "upstream/references/image-model-adapters.md",
+      "sha256": "307f429a66ce7ae2c4f4e7d6893e59b8017549dd12d944c2a1aefd605b2f543a"
+    },
+    {
+      "path": "upstream/references/lighting-and-color.md",
+      "sha256": "fb34edea030bbb29b047ff7e489968dded8978f1a3acb768ede230a1c106792b"
+    },
+    {
+      "path": "upstream/references/product-and-macro.md",
+      "sha256": "c6b791fe96db082517c8e3d639269228cee3ae68d55ddababbb7b09d967ca350"
+    },
+    {
+      "path": "upstream/references/production-workflow.md",
+      "sha256": "3f5e431b23931ae636d6637c92b63bc084407a1b4a8b1625fb5e9c393bb97998"
+    },
+    {
+      "path": "upstream/references/prompt-lexicon.md",
+      "sha256": "8e2172f9255dbc9ce51b7f54af9cb570283808a6ad4aa34fcf439c56c513138f"
+    },
+    {
+      "path": "upstream/references/sound-and-dialogue.md",
+      "sha256": "fcc99cacf1bc35caf3dd5e9430a0f3c731b5b65868171cc488282559017d43de"
+    }
+  ]
+}

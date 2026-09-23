@@ -1,5 +1,5 @@
 export const LONG_TASK_DESCRIPTION = '为已提交的长时间任务预约一次性唤醒，核验状态后延期或续接；需勾选定时任务能力，不新增权限。'
-export const LONG_TASK_VERSION = '1.2.0'
+export const LONG_TASK_VERSION = '1.2.1'
 export const LONG_TASK_DOCUMENT = `---
 name: long-task-continuation
 display-name: 长任务等待与续接
@@ -30,7 +30,7 @@ allowed-tools: [partner_schedule]
 - 成功：核验本预约自己的 completion（省略时仅要求本外部任务成功且产出可回查）完成条件，立即 resolve outcome=completed 关闭本预约，summary 写证据与产出位置；之后才执行 nextStep。新长任务另行 defer，不延长已完成任务，不等待整个对话或 Goal 完成。用户取消或权限撤回后不得继续；需要审批照常申请。
 - 失败、读取不到可信状态、需要用户选择或缺权限：resolve outcome=blocked，summary 写事实、已做部分和需要的处理。达到期限/次数会停止，不换 taskKey 或新建计划绕过限制。
 
-唤醒中的 resolve 只能使用本轮 runToken，旧轮次不能覆盖新轮次。原会话提前核实等待中的任务已完成/失败时，可用 scheduleId、精确 externalTaskId、summary、outcome=completed/blocked 提前关闭，不传 runToken。没有 resolve 的口头承诺不算完成。每轮含自动续轮先 list，尚未到期的任务不重复轮询或 sleep，不为预约创建或修改 Goal。检查超时只暂停预约，不取消共享对话。完成/受阻由系统通知，不额外重复发消息。
+唤醒中的 resolve 只能使用本轮 runToken，旧轮次不能覆盖新轮次。原会话提前核实等待中的任务已完成/失败时，可用 scheduleId、精确 externalTaskId、summary、outcome=completed/blocked 提前关闭，不传 runToken。没有 resolve 的口头承诺不算完成。每轮含自动续轮先 list，尚未到期的任务不重复轮询或 sleep，不为预约创建或修改 Goal。检查超时只暂停预约，不取消共享对话。预约完成、受阻和原始错误仅记内部状态，不单独通知渠道；完成授权的后续流程后才给用户最终结论和附件。新预约保存原始渠道，后续交付不跟随最近联系人；旧预约来源不明时不猜测发送。
 
 ## 最小示例
 defer：{"action":"defer","taskKey":"video:provider:job-123","externalTaskId":"job-123","title":"视频生成后检查并下载","check":"用原视频服务查询 job-123；queued/running 等待，failed 受阻，completed 后核对产物链接。","nextStep":"先查本地是否已下载；未下载时保存到本任务工作目录并验证文件，报告路径，不重复生成。","delayMinutes":2,"deadlineMinutes":120,"maxAttempts":8}

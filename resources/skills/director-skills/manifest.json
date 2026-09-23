@@ -1,0 +1,541 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/0xhughs/director-skills",
+  "commit": "35ca0a2b4cd55b0668aa9ea0f40273324b774bb4",
+  "license": "MIT",
+  "normalization": "LF line endings and terminal newline only",
+  "files": [
+    {
+      "path": "upstream/CHANGELOG.md",
+      "sha256": "4546e561a8a97b332b35e3a05eab6ede732300d7979ba4987814477e08e0c9fd"
+    },
+    {
+      "path": "upstream/LICENSE",
+      "sha256": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70"
+    },
+    {
+      "path": "upstream/MANIFEST.md",
+      "sha256": "40fb4f4a3bc73728ead0c84ce6eee21140f7b97c97e168b35c93f2ef2e5ebf46"
+    },
+    {
+      "path": "upstream/README.md",
+      "sha256": "3b7dc2d822342c194ae8cc6d98a62981794dcfbb64513cee331e64b6de085053"
+    },
+    {
+      "path": "upstream/RESEARCH_PROVENANCE.md",
+      "sha256": "4b04e313cceab04931300bd462218747a037d388e8920d4a1427c8a2810296b0"
+    },
+    {
+      "path": "upstream/SKILL.md",
+      "sha256": "c81c9104a106ac90993a11e81d8a0c0eaec5cd621d5b26edb0b4a0d88f0044b7"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/SKILL.md",
+      "sha256": "3aa7722fc49475551f92f93565148596c54d8c6a65f317baad3299fd64110201"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/checklists/continuity_checklist.md",
+      "sha256": "5366c8bf03312657ce910e26f16bd4b3a7c9b56c0144c94067c078889825ff6f"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/examples/character_continuity_update.md",
+      "sha256": "6fe7c6e91ee57faaa21ad6f302c26fdc6b26dc2a64c08154a2faf046e6a093b1"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/examples/location_continuity_update.md",
+      "sha256": "20d4ee22d306ba45dfc8e4aed7e068be287c2bd56b7016fa3f0d77a2d4851d92"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/references/continuity_system.md",
+      "sha256": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/references/golden_image_workflow.md",
+      "sha256": "5d75414810241720d2d5288eb0c61b3ca18a9451363c0bebb4cef616269a554d"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/references/identity_anchors.md",
+      "sha256": "d69cfe6da70d63524a6d53e0c468f407b79bf71f8fa00e22730158683584eb74"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/references/visual_bible_system.md",
+      "sha256": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/character_profile.md",
+      "sha256": "6ac8d89c3d9188f6ff76869d94e2171a40e903a28e3894f3ba8f1aec7e154072"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/continuity_checklist.md",
+      "sha256": "235955e059a8f8f43f2ce22766eb59571c7c0a69277b728ef392b60050baa484"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/costume_profile.md",
+      "sha256": "bf411365d26801049629ed0ce49d2ff405e87a2eae6b8c2bb1849edf62637a8e"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/location_profile.md",
+      "sha256": "831f1774919fa0781f5726ae4713cdbc1a5e58bb8fba620e1497c1fbe3081a7e"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/prop_profile.md",
+      "sha256": "e0507ff522a6e3d51fe29c80e42e39092815fea52b42199de26d91284558a644"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/templates/visual_style_bible.md",
+      "sha256": "1f018e02a651e6e0a387a357ed9ad34d1f506474c5bb559defc395a4821f117f"
+    },
+    {
+      "path": "upstream/skills/character-location-prop-bible/tests/continuity_tests.md",
+      "sha256": "decbd38e183e30c5f5bb37c908a1b3501a24c877cc281f1e4c321be17f0e4a6d"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/SKILL.md",
+      "sha256": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/checklists/image_prompt_quality_checklist.md",
+      "sha256": "8ffc49d39d5d96796722d070013d30fffed09e238df5af336926ac3e666e09bf"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/examples/shot_list_to_image_prompts.md",
+      "sha256": "826bef69c1c55170591cd418711697256a675dd71815b49b1b7e46b60d692541"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/references/image_prompt_components.md",
+      "sha256": "0dddab119176e7a897fadcceaeb65b7694600a01a457fe2802ccf7f9133387e9"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/references/lighting_and_photorealism.md",
+      "sha256": "5cf854b7714429fb21ff854134833d5ddd58db3c43d4f4130354d4cf548f9fa7"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/references/negative_prompt_patterns.md",
+      "sha256": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/references/prompt_anatomy.md",
+      "sha256": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/templates/character_reference_sheet_prompt.md",
+      "sha256": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/templates/cinematic_still_prompt.md",
+      "sha256": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/templates/keyframe_prompt.md",
+      "sha256": "7d285a0689b88441c78d808e537ad019e0e33e8d15365c34f2c1f335d67e1012"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/templates/location_reference_prompt.md",
+      "sha256": "c80cdb126743527a3404818d4f0a4774ba82f7cfa4c7c46756384c07c841d8ad"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/templates/prop_prompt.md",
+      "sha256": "caa20e95593ff9ef022abf56dcb5d8446e9fe7acc8db60c3b873127532273a7e"
+    },
+    {
+      "path": "upstream/skills/cinematic-image-prompting/tests/image_prompt_completeness_tests.md",
+      "sha256": "332298e3095e784fdacecfc2a914fe356c11d68d9fc4b9e82bd244d748cbcc3e"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/SKILL.md",
+      "sha256": "e082955dfa35d669a98dc5f2c576d71171ea3e80fd6a79c1028a1e88ca9635ad"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/checklists/video_prompt_quality_checklist.md",
+      "sha256": "0d97ff129865b0457711ca7fb701297956dcc0899bf74e139f589e23413ca20c"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/examples/image_prompt_to_video_prompt.md",
+      "sha256": "e421f5f436e57bdcdaebc2de5c14fafe313640ee8f04b8d16a3d4dc23e16e728"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/ai_film_production_pipeline.md",
+      "sha256": "008e454cb56fdc4820cd0f8e9deb2dbeeeee90903fe28563d85ec2207bcd5bef"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/audio_motion_timing.md",
+      "sha256": "6075e5eff3bc8ddda7692d1331d84e2271167ed9171c7df9e5cc15b6e34c4c96"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/camera_lens_movement.md",
+      "sha256": "c257edfaec6d17bd708be107d3b86a8d2fa4b6cfdf0a47f737fde0896ec0446c"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/negative_prompt_patterns.md",
+      "sha256": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/prompt_anatomy.md",
+      "sha256": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/references/video_prompt_components.md",
+      "sha256": "62c3a0b9195f2cd8407e595edce96d2ad4e377c720a309d28893749e78495847"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/templates/image_to_video_prompt.md",
+      "sha256": "83f88f61f7464688dd67ac39c8aad4e0b013de689bc7c1020257071cb12dd468"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/templates/text_to_video_prompt.md",
+      "sha256": "d5a45100e3b1e39166ade3c4972ff8a8243e75cf56892996bceab12ff8360e85"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/templates/video_beat_prompt.md",
+      "sha256": "58c4493eb3cc46a254ecfe531baa9c7c4368742ddf22627fcd2d1ff7be8c2942"
+    },
+    {
+      "path": "upstream/skills/cinematic-video-prompting/tests/video_prompt_completeness_tests.md",
+      "sha256": "07a200e801cc5edb3a8012d39023051e27a8cb9014e4b97abf2693e59618b33b"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/SKILL.md",
+      "sha256": "98fba9bef326e49262797024137e34d7365cf44bbb47ff779035772945c2a228"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/checklists/model_export_checklist.md",
+      "sha256": "8d01eb6a28692547462b3d5aacc0cba17d7854f1de792921954809aedbec93b5"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/examples/failed_model_transfer_diagnosis.md",
+      "sha256": "626d17fe24181aa6d161bad3a9b02dbd35ee8cad1a3693eea4d5933866773c80"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/examples/image_prompt_translation.md",
+      "sha256": "130c8e48add681a785ced7719002bcb74cc4cb6baa254a625052c1742ccd2307"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/examples/same_scene_across_models.md",
+      "sha256": "9c8ceaea126d8f44eccee78a8492408e86a30400833024bf17bbe446b3bff2e6"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/examples/universal_prompt_to_model_specific_exports.md",
+      "sha256": "0cc81feef8fc7e26286988a17eef3150689f90ffa39453542723224145cdf1bd"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/examples/video_prompt_translation.md",
+      "sha256": "fcc460f6d5c92f49386dbb55b6dfe91f4e8bfddda5be738ac340d5c4ac406f2d"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/failure_modes_by_model.md",
+      "sha256": "e875f69e5e45dd8363e077b0db30720c8567416f6bd57b8fe248636641653073"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/image_model_profiles.md",
+      "sha256": "ff70bf434fb8b90a81b72c99f15f32b61867b9b5b963e67dc76cffd398b09a8e"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/model_capability_matrix.md",
+      "sha256": "e7f1b2b011065be934502e3cb9578640a3701a1fb4c3332ba6b3e9c5c07cc75a"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/model_update_protocol.md",
+      "sha256": "9ddac48d8be3d3f81ba78372a8c00c2843373e6b7956eb9e365c5cacb70fba07"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/parameter_compatibility.md",
+      "sha256": "118b6a8cb87132079149798299ea94d7dbd91f2058e3e6c0115342ded0ac17f1"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/prompt_translation_rules.md",
+      "sha256": "c9c531f1f53f65aac518957e8673ae0e76e3dbcd9c511ec29ebf09f854166bf6"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/references/video_model_profiles.md",
+      "sha256": "45a1218d70d8d572285c0b48ca70bd19f1ebe80c289839376496e8360bbffed9"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/templates/model_comparison_table.md",
+      "sha256": "c6104d322ff46610e0f8e80f866cbf37bca61027386e159f509b3d2728b455a2"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/templates/model_specific_prompt_export.md",
+      "sha256": "7ca867257691e8880cf7acf38d6a4c3822aff73aea4a49751a2cf49c5a17858c"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/templates/multi_model_export_package.md",
+      "sha256": "9be7d3269893a1bcdf27edcec075c06be52e58a6ecebdeab7cedc52e80d255bb"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/templates/prompt_translation_report.md",
+      "sha256": "9b23cdb9b9246fecb3ed78362ba9fcb9ea67bfcf26871b4c092efb96d5438a20"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/templates/universal_prompt_brief.md",
+      "sha256": "0679459dc803c962c548f1c11a20a4ac8f3d75703261f1d0f11f137d7133fba0"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/tests/model_routing_tests.md",
+      "sha256": "9eaf0427e648d86e7f2b7da83ed1b6437e51f0d999ab5f1b19c46b5178f9bb48"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/tests/prompt_translation_tests.md",
+      "sha256": "02c706fd456674927b10ef3ee72aa7914fc493ef37cccf5a0315dce0e482335a"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/tests/research_provenance_tests.md",
+      "sha256": "41c81dad277657ff4aa7a4ce873b2e9d8a730cadfb173c811e5eccc5ec51960b"
+    },
+    {
+      "path": "upstream/skills/model-adaptation/tests/unknown_capability_tests.md",
+      "sha256": "edbefb78787a4e26a811afb3bc531621a1216f0c515be80ac2090c68b9842cb4"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/SKILL.md",
+      "sha256": "bbbb34552d722477424a76cf771ce7ca6598c28ab270f1ba91cb658b1cdb99bd"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/checklists/diagnostic_checklist.md",
+      "sha256": "204d83faff36e83310e85f078d273f8fa0347e77ed93809902dcc7761bc27391"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/checklists/release_quality_checklist.md",
+      "sha256": "567b6a4cf47235d374312b9faa702ad40b0ad8a6996b90e583fcd22eb1e1793f"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/examples/failed_output_to_revised_prompt.md",
+      "sha256": "f05a0218926b6cb4227d98c76e0d9468dadd9bf9a5475591110570424b7891d7"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/examples/final_prompt_package_export.md",
+      "sha256": "149927d81793d7322bdbc85a4894ce4ff3c3886c7138a7fd81e31e1a5664d209"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/references/failure_modes.md",
+      "sha256": "d3c4b821fbefbf2acf0d2af285c0a6d43b35cbccb06cd9df2420ca40615d0593"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/references/iteration_diagnostics.md",
+      "sha256": "789d7609128d51bc85dca5f3b20d0ccd8a63aaf474ef87e313fa3bebc8100d52"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/references/revision_loops.md",
+      "sha256": "8cf493ddabc762d274b44cdb60452422bb9844b42f03e54ce212c88dd5a1024b"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/references/story_voice_release_qc.md",
+      "sha256": "2ae7183defa8eb9b76ab099af4ccf0975a9185e39bf6c930251109b78881ee32"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/templates/failed_output_intake.md",
+      "sha256": "1aff6f7f58f0e3ee62c345a65011cc0e997d9a68878151e6ef7883991b9d117c"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/templates/final_production_package.md",
+      "sha256": "0e94cdf61f67551a6f8ef22c1e53b4b4508e68b99be967320b77ef3aed5393a6"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/templates/prompt_revision_report.md",
+      "sha256": "f4d72122449109ad206d43d4f888e0ad0ddf21bf8924889aa7ac1f3e3fee79c3"
+    },
+    {
+      "path": "upstream/skills/prompt-iteration-and-diagnostics/tests/prompt_quality_checklist_tests.md",
+      "sha256": "8907597d8ab81d616b50b202a103e143c67676bc45ec21eba2e586f7cc358035"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/SKILL.md",
+      "sha256": "0004c3cd66ba59c305bd8bc7fffb44c1f38174e8dd2fdfc25e0118049dfd96a6"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/checklists/scene_quality_checklist.md",
+      "sha256": "cdd6359c681cdc6e1bb4de25e36cf1e472d444746f0f84bc62e1b19505a9caee"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/examples/scene_to_screenplay_excerpt.md",
+      "sha256": "03957801371c1cf71fec04861c9a2b6b66ddf2b89305d5c7a495e94c4d25a000"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/references/dialogue_and_subtext.md",
+      "sha256": "a3af375eb9a96a8b728de03447111c50839d3cec3349c407fa6dc3db42e2ca0b"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/references/fountain_workflow.md",
+      "sha256": "3cdd3fa035e1e6ef0982e28165c23c7320e64a901566fb1c461b7f15c7646abe"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/references/scene_construction.md",
+      "sha256": "28a7562bdb9cd4a0d208c625868ec0515bced0aeee4182029a2772c2c1fd1992"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/references/screenplay_format.md",
+      "sha256": "ab2a9937cc3166cd74a3a245395227f18214639131196760680dbd3595fc24d2"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/templates/beat_sheet.md",
+      "sha256": "52fefb3a8d283b07ee38eb64007dcdf5fc717e61759f91f096520bd35d837a4c"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/templates/dialogue_pass.md",
+      "sha256": "a19374067b322cde198d9d80ce6d0e1277acf6ddd6484bd56b5847450fbdd290"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/templates/fountain_scene.md",
+      "sha256": "60af463514d75065d2dbb41cae58c0f8538eedd4360559eb5a999648caff9b5a"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/templates/screenplay_scene.md",
+      "sha256": "f80edd9e51975cc5749066716d5c9dfa10219e63b5341710c2fbb549be9d7f3b"
+    },
+    {
+      "path": "upstream/skills/screenplay-and-scene-writing/tests/screenplay_scene_tests.md",
+      "sha256": "dc7b0407ebcfbdaa028eae0326cb33b2857d135107dec9d88ce8f0bb49946db1"
+    },
+    {
+      "path": "upstream/skills/short-film-development/SKILL.md",
+      "sha256": "7092c4c43c286ba125822d7d912fa538f8651e0cd3fb279d91923d9d2867c661"
+    },
+    {
+      "path": "upstream/skills/short-film-development/checklists/concept_quality_checklist.md",
+      "sha256": "b7511b1d0efc781d13ed77aaaad743befd31676edd97a1d8b4ddaef1bcac7c73"
+    },
+    {
+      "path": "upstream/skills/short-film-development/examples/idea_to_logline.md",
+      "sha256": "24af82e6de66b74103f4897dd96366e564b1eeba17fd640562cb73156b414781"
+    },
+    {
+      "path": "upstream/skills/short-film-development/examples/logline_to_outline.md",
+      "sha256": "b35b0660c5a16e5007dbd245e1b98a171233bdc95dad91dbf9690b15fa1b7028"
+    },
+    {
+      "path": "upstream/skills/short-film-development/references/ai_storytelling_workflow.md",
+      "sha256": "4dabde5e931d5a96e7125a97f564428477e4947eee78b4cf49f25266b5aae9ed"
+    },
+    {
+      "path": "upstream/skills/short-film-development/references/continuity_handoff.md",
+      "sha256": "270b9f990062992baa798d1ca3a8f85ec9c662f3bdae7c05698b5153e4bfcfde"
+    },
+    {
+      "path": "upstream/skills/short-film-development/references/screenplay_structure.md",
+      "sha256": "b691af80c6d78998ff402290bb2cf9ad8c41c4e232356826f14b3fdc45870485"
+    },
+    {
+      "path": "upstream/skills/short-film-development/references/story_development_workflow.md",
+      "sha256": "64a44a44d053eb62b1f4a76e1905ff5f704c4d033e04f4b74c69b06e408a263e"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/beat_sheet.md",
+      "sha256": "b05ed38eb38b9eea28a2a7754f47cb7b9f9a9f9336bf5bb7ddb262c1d3954231"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/idea_intake.md",
+      "sha256": "fcba5f304fcc14a70c7cfe2a1a8bbf30839e679dbcf0313a0f701ea42056360d"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/logline.md",
+      "sha256": "210f37e8149e2873864a211ef3b17734e30c93d63ebc994fc4030f209c081ab0"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/short_film_treatment.md",
+      "sha256": "2887212dfd3722dbc13bbc7453ae750c79ab2654cbffa35394f4b335e3410a90"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/short_story_plan.md",
+      "sha256": "0cddab70fa2b71182d392b6c552058eb5329e9457b96d47aed6a8965a9e0ae38"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/story_premise.md",
+      "sha256": "e744f2a213c1863fc4e10e511de7126282ba8f8e4bcfba1d803fc5d5ee2538bc"
+    },
+    {
+      "path": "upstream/skills/short-film-development/templates/story_revision_audit.md",
+      "sha256": "58dd7f3b995d59fe1ba91b554d2c5b3a6485879f670addbbf03dc0945c3d95d4"
+    },
+    {
+      "path": "upstream/skills/short-film-development/tests/output_format_tests.md",
+      "sha256": "759c9ad26e72003dfbf55190c0c65561c62452304cf3ce21622ab01a9eead3a7"
+    },
+    {
+      "path": "upstream/skills/short-film-development/tests/routing_tests.md",
+      "sha256": "79f2bb6943c28c4c0f520682e3e579d8f67d985a3edc89ad9e778b7ed090b4ee"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/SKILL.md",
+      "sha256": "7993a6e76abd0553d7fea0dab74e0f0f923b2c71bef13e77ca6e981bbc872ee3"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/checklists/shotlist_quality_checklist.md",
+      "sha256": "07a1916538f48bac4eafd5a877cd58293cc045f55252ad554aa483ccd8a30d6a"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/examples/screenplay_scene_to_shot_list.md",
+      "sha256": "42239c6efae6b3107a362c9e271801b497dac5aa4d6bfb879f60f0539783c65e"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/references/camera_plan.md",
+      "sha256": "28c26b1100033aecdb0e6747fd7f7924d8b97934354c63a1cbf7760f142fb749"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/references/production_breakdown.md",
+      "sha256": "5cb8ab806cad23e53666d2cd130500dba969aa965db63736ecd82f7a27b4a9de"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/references/shotlist_schema.md",
+      "sha256": "fbd31d9d09538d305df53fffc1d427be8ca57343c80a40c648c96b4bee49aec4"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/templates/asset_list.md",
+      "sha256": "a1b538e5c42af746ba76fbb3acf8f3811eaa78ab21f4b289e132e4c1befba3cd"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/templates/camera_plan.md",
+      "sha256": "b826a8cb8e862c99676bf1377d2a3948140872789cc1b274b5e1c4e8e6400e23"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/templates/scene_breakdown.md",
+      "sha256": "3346bba0abc0b02bdf1e4097d94b4f0b68ebfdaea8c53f6e6bf750d49082a460"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/templates/shot_list.md",
+      "sha256": "67c06e7997964a50d731913b50a7136bd6d4560d4f165dab1815b96ee8e2ed8d"
+    },
+    {
+      "path": "upstream/skills/shotlist-and-visual-breakdown/tests/screenplay_to_shotlist_tests.md",
+      "sha256": "44696be82a980f1ab8114bec203aa1f3850d833e14414b93c7c9a2450426b0e8"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/SKILL.md",
+      "sha256": "575c1c42188658b9ee249b4296d57c794720814e64d434225638f163f97ebcbe"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/checklists/style_quality_checklist.md",
+      "sha256": "35952ed0cfe3cafa9b123927a6f6771cf0666601e88bd1485df6323f9f01707c"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/examples/genre_to_visual_direction.md",
+      "sha256": "ac347b1c71e6c71ea68512c3fae92e7bbbf488da6ffcf99c1a7b068d7b18b0bc"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/references/camera_lens_movement.md",
+      "sha256": "c257edfaec6d17bd708be107d3b86a8d2fa4b6cfdf0a47f737fde0896ec0446c"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/references/cinematic_language.md",
+      "sha256": "38c8a565ebb94ff0a79461651dd9df766d9801e7ec0e152a833964e22b2defbf"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/references/genre_style_tone.md",
+      "sha256": "7c2633965134622954ac5a18593a1d18c9710eab071aaaf7456acae7fda3174c"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/references/lighting_and_photorealism.md",
+      "sha256": "5cf854b7714429fb21ff854134833d5ddd58db3c43d4f4130354d4cf548f9fa7"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/templates/visual_style_bible.md",
+      "sha256": "d0f58b11851427418116937c1acbf013dbb22647b07b96f04d937216b7a755ce"
+    },
+    {
+      "path": "upstream/skills/style-cinematography-director/tests/style_translation_tests.md",
+      "sha256": "2270982e9c7db70dfe84825fe77c32001736edcce5fde205d2dcd1a84cc8def3"
+    },
+    {
+      "path": "upstream/tests/master_router_tests.md",
+      "sha256": "2ba34b5fa85555e1e90afe3330608009eaef645adb44505a0714e4783b7c979b"
+    }
+  ]
+}

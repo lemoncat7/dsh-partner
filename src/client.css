@@ -1055,6 +1055,14 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-concern-resolved article { display: grid; min-height: 38px; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--partner-border) 60%, transparent); }
 .dsh-partner-concern-resolved article > span { display: grid; width: 20px; height: 20px; border-radius: 7px; place-items: center; color: var(--partner-accent); background: color-mix(in srgb, var(--partner-accent) 8%, transparent); }
 .dsh-partner-concern-resolved article strong { overflow: hidden; font-size: var(--partner-font-caption); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-concern-resolved-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
+.dsh-partner-concern-resolved-actions > button { min-height: 32px; white-space: nowrap; }
+.dsh-partner-concern-resolved-actions > button.is-danger:hover { color: var(--partner-danger); border-color: var(--partner-danger); }
+@media (max-width: 600px) {
+  .dsh-partner-concern-resolved article { grid-template-columns: 22px minmax(0, 1fr); padding-block: 8px; }
+  .dsh-partner-concern-resolved-actions { grid-column: 2; }
+  .dsh-partner-concern-resolved-actions > button { min-height: 44px; }
+}
 .dsh-partner-concern-archive { min-width: 0; border-top: 1px solid var(--partner-border); }
 .dsh-partner-concern-archive-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 68px; padding: 14px 16px; border: 0; border-radius: 10px; text-align: left; color: var(--partner-text-secondary); background: transparent; font: inherit; cursor: pointer; transition: background .16s ease; }
 .dsh-partner-concern-archive-toggle > span { display: grid; gap: 5px; min-width: 0; }

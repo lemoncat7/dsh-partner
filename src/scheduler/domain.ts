@@ -23,6 +23,7 @@ export interface ScheduleContinuation {
   taskKey: string
   externalTaskId: string
   originSessionId: string
+  originChannel?: { routeId: string; channelId: string; userId: string }
   check: string
   nextStep: string
   completion?: string
@@ -36,4 +37,6 @@ export interface ScheduleContinuation {
   summary?: string
   notifiedAt?: number
   nextNotifyAt?: number
+  messageId?: string
+  finalReply?: { key: string; text: string; referenceTexts: string[]; notifiedAt?: number; nextNotifyAt?: number }
 }

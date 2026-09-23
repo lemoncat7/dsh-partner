@@ -107,6 +107,24 @@ test('internal task/review file delivery never calls the channel',async t=>{
   assert.equal(reply.channel,'none')
 })
 
+test('continuation attachment inherits saved origin and retry never follows latest channel',async t=>{
+  const f=await fixture(t), sends=[]
+  const route={id:'matrix',kind:'channel',companionId:'c1',sessionId:'s1',channelId:'mx',userId:'alice',cwd:f.cwd}
+  const state={companions:[{id:'c1'}],sessions:[route,{...route,id:'mm',channelId:'mm',userId:'bob'}],schedules:[{companionId:'c1',continuation:{originSessionId:'s1',messageId:'wake',state:'completed',originChannel:{routeId:'matrix',channelId:'mx',userId:'alice'}}}]}
+  let fail=true
+  const tool=attachmentTool('c1',{snapshot:()=>state,isCompanionRemoving:()=>false},f.service,{},
+    {sendExplicitAttachment:async(_s,_f,_signal,id)=>{sends.push(id);if(fail)throw Error('offline')}},'/api')
+  const exec={signal:f.signal,agent:{session:{id:'s1',header:{cwd:f.cwd},snapshotEvents:()=>[{seq:2,type:'user/message',data:{id:'wake',source:{kind:'plugin',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴长任务续接'}}}]}},deferContext:()=>{}}
+  const first=JSON.parse(await tool.execute({path:'report.md'},exec))
+  assert.equal(first.channel,'failed')
+  fail=false
+  assert.equal(JSON.parse(await tool.execute({deliveryId:first.deliveryId},exec)).channel,'sent')
+  assert.deepEqual(sends,['matrix','matrix'])
+  state.sessions=state.sessions.filter(s=>s.id!=='matrix')
+  await assert.rejects(tool.execute({deliveryId:first.deliveryId},exec),/原渠道已移除/)
+  assert.equal(sends.length,2)
+})
+
 test('download endpoint serves only recorded snapshots and rejects deleted owners',async t=>{
   const f=await fixture(t),item=await f.service.prepare(f.input,f.signal),headers={}
   let body

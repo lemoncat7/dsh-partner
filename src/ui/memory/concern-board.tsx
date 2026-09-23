@@ -98,7 +98,7 @@ export function ConcernBoard({ companionId, activity, value, busy, onValue, onAd
       })}
     </div>
     {(active.length > shown.length || visibleCount > 5) && <div className="dsh-partner-concern-more">{active.length > shown.length ? <button type="button" onClick={() => setVisibleCount(count => Math.min(active.length, count + 20))}>再显示 {Math.min(20, active.length - shown.length)} 条</button> : <button type="button" onClick={() => setVisibleCount(5)}>收起列表</button>}</div>}
-    {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong>{item.subject}</strong><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button><ConcernDeleteButton companionId={companionId} item={item} disabled={busy} onDeleted={onEdited}/></article>)}</div></details>}
+    {resolved.length > 0 && <details className="dsh-partner-concern-resolved"><summary>已经解决 <b>{resolved.length}</b></summary><div>{resolved.slice(0, 30).map(item => <article key={item.id}><span><IconCheckOutline14 size={13} /></span><strong title={item.subject}>{item.subject}</strong><div className="dsh-partner-concern-resolved-actions" role="group" aria-label={`${item.subject} 的操作`}><button type="button" disabled={busy} onClick={() => onAct(item, 'watch')}>重新留意</button><ConcernDeleteButton companionId={companionId} item={item} disabled={busy} onDeleted={onEdited}/></div></article>)}</div></details>}
     <ArchivedConcerns companionId={companionId} onChanged={onEdited}/>
   </section>
 }

@@ -325,11 +325,15 @@ export class PartnerAgentRuntime {
     const assembly = await agent.ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
     signal.throwIfAborted()
     assertWakeTools(entry, assembly.tools.map(tool => tool.name))
+    const message = createUserMessage({ content: [{ type: 'text', text: continuationPrompt(entry) }],
+      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴长任务续接' } })
+    await this.store.update(state => {
+      const current = state.schedules.find(s => s.id === entry.id)?.continuation
+      if (current && current.runToken === wake.runToken) current.messageId = message.id
+    })
     await deliverScheduledWake({ store: this.store, id: entry.id, token: wake.runToken!, signal,
       timeoutMs: entry.timeoutMinutes * 60_000,
       deliver: () => {
-        const message = createUserMessage({ content: [{ type: 'text', text: continuationPrompt(entry) }],
-          source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴长任务续接' } })
         if (agent.status === 'idle') agent.followup(message)
         else agent.steer(message)
       },

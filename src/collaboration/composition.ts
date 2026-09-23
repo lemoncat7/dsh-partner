@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
 import type { ToolDefinition, ToolRunContext, ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { optionalBoolean, record, requiredText } from '../core/validation.js'
 import type { Companion } from '../domain.js'
@@ -73,7 +74,7 @@ export class PartnerAgentComposition {
       disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
       disposers.push(ctx.tools.register(requirementTool(companion.id, this.requirements, this.tasks, () => this.collaboration.dispatchReadyTasks())))
       disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
-      if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler), 'schedules')
+      if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler, this.store), 'schedules')
       const directory = this.collaboration.directoryFor(companion.id)
       disposers.push(ctx.systemPrompt.section({
         name: 'partner-collaboration', order: -7,
@@ -367,7 +368,7 @@ function collaborationTool(companion: Companion, store: PartnerStore, collaborat
   })
 }
 
-function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService): ToolDefinition {
+function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService, store: PartnerStore): ToolDefinition {
   return textTool({
     name: 'partner_schedule',
     description: 'Manage this companion\'s schedules. create is only for explicitly requested scheduled work, never change-driven watches. defer creates an idempotent one-shot continuation for an already-submitted long task: taskKey, externalTaskId, title, check and nextStep are required; delayMinutes defaults to 2, deadlineMinutes to 1440, maxAttempts to 12. Origin is captured from the current session. On wake check the existing task, never resubmit it; resolve with scheduleId, runToken, summary and outcome pending/completed/blocked; pending reschedules the same entry and ends the turn. cancel stops a continuation. No Skill is required. Never store credentials or exceed current tool approvals.',
@@ -386,7 +387,11 @@ function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService):
       const input = record(raw, 'arguments')
       const action = requiredText(input.action, 'action', 20)
       if (action === 'list') return JSON.stringify(scheduler.list().filter(item => item.companionId === companion.id))
-      if (action === 'defer') return JSON.stringify(await scheduler.continuations.defer(companion.id, requireAgent(exec).session.id, input))
+      if (action === 'defer') {
+        const agent = requireAgent(exec)
+        return JSON.stringify(await scheduler.continuations.defer(companion.id, agent.session.id, input,
+          continuationChannelOrigin(store.snapshot(), companion.id, agent.session.id, agent.session.snapshotEvents())))
+      }
       if (action === 'resolve') return JSON.stringify(await scheduler.continuations.resolve(companion.id, requireAgent(exec).session.id, input))
       if (action === 'create') return JSON.stringify(await scheduler.create(input, companion.id))
       const id = requiredText(input.scheduleId, 'scheduleId', 160)

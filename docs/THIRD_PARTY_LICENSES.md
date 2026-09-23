@@ -1,5 +1,12 @@
 # Bundled third-party licenses
 
+## Director skill documentation bundles
+
+- **director-skills** — https://github.com/0xhughs/director-skills, commit `35ca0a2b4cd55b0668aa9ea0f40273324b774bb4`, MIT, Copyright (c) 2026 0xhughs. Complete license: `resources/skills/director-skills/upstream/LICENSE`.
+- **DirectorSKILL** — https://github.com/wuwangzhang1216/DirectorSKILL, commit `c65ae0d14457053efb1e354c7e7f7e120d97fad1`, MIT, Copyright (c) 2026 wangzhang-wu. Complete license: `resources/skills/cinematic-director/upstream/LICENSE`.
+
+Both licenses ship with the npm package and installed skill resources. Upstream Markdown remains intact apart from normalized line endings; DSH integration uses separate Chinese entrypoints. See `docs/director-skills.md` for scope and provenance.
+
 The pendant renderer bundles Three.js 0.185.1 (MIT) and Rapier 0.20.0 (Apache-2.0), and adapts the React Bits GlareHover gradient as an integrated pendant effect. Their licenses are reproduced below.
 
 ## React Bits — GlareHover reference

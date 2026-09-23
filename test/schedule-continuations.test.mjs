@@ -56,6 +56,54 @@ async function outcome(f, entry, result = 'completed', extra = {}) {
   return f.service.resolve(owner, session, { scheduleId: entry.id, runToken: entry.continuation.runToken, outcome: result, summary: '真实检查结果', ...extra })
 }
 
+test('origin channel persists across restart and idempotent defer cannot retarget it', async t => {
+  const f=await fixture(t)
+  const origin={id:'matrix',kind:'channel',companionId:owner,sessionId:session,channelId:'mx',userId:'alice',lastMessageAt:Date.now()}
+  const other={...origin,id:'mattermost',channelId:'mm',userId:'bob'}
+  await f.store.update(s=>s.sessions.push(origin,other))
+  const entry=await f.service.defer(owner,session,input,origin)
+  const retry=await f.service.defer(owner,session,input,other)
+  assert.deepEqual(retry.continuation.originChannel,{routeId:'matrix',channelId:'mx',userId:'alice'})
+  const reopened=await PartnerStore.open(f.path)
+  assert.deepEqual(reopened.snapshot().schedules[0].continuation.originChannel,entry.continuation.originChannel)
+  await assert.rejects(f.service.defer(owner,session,{...input,taskKey:'new'}, {...origin,userId:'forged'}),/来源渠道已变更/)
+})
+
+test('blocked standalone receipt can be verified completed, without stale tokens or foreign sessions', async t => {
+  const f = await fixture(t), entry = await f.service.defer(owner, session, input)
+  let notices = 0
+  f.service.configure({execute: e => outcome(f, e, 'blocked'), notify: async () => {notices++}})
+  await f.service.run(entry.id)
+  assert.equal(notices, 0)
+  const verified = {scheduleId: entry.id, externalTaskId: input.externalTaskId, outcome: 'completed', summary: '核实已有产出'}
+  await assert.rejects(f.service.resolve(owner, 'other', verified))
+  await assert.rejects(f.service.resolve(owner, session, {...verified, runToken: 'stale'}))
+  await assert.rejects(f.service.resolve(owner, session, {...verified, externalTaskId: 'other'}))
+  await f.service.resolve(owner, session, verified)
+  assert.equal(f.get(entry.id).continuation.state, 'completed')
+  assert.equal(f.get(entry.id).continuation.notifiedAt, undefined)
+})
+
+test('final reply retries durably after status notice and survives reopening storage', async t => {
+  const f = await fixture(t), entry = await f.service.defer(owner, session, input)
+  f.service.configure({execute: e => outcome(f, e, 'blocked'), notify: async () => {}})
+  await f.service.run(entry.id)
+  await f.store.update(s => {s.schedules[0].continuation.finalReply = {key: 'final-turn', text: 'final', referenceTexts: []}})
+  let attempts = 0
+  f.service.configure({execute: async () => assert.fail('must not rerun generation'), notify: async e => {
+    assert.equal(e.continuation.finalReply.text, 'final'); attempts++; if (attempts === 1) throw new Error('offline')
+  }})
+  await f.service.notify(entry.id)
+  assert.ok(f.get(entry.id).continuation.finalReply.nextNotifyAt > Date.now())
+  const reopened = await PartnerStore.open(f.path)
+  assert.equal(reopened.snapshot().schedules[0].continuation.finalReply.text, 'final')
+  await f.service.notify(entry.id); assert.equal(attempts, 1)
+  await f.store.update(s => {s.schedules[0].continuation.finalReply.nextNotifyAt = 0})
+  await f.service.notify(entry.id); await f.service.notify(entry.id)
+  assert.equal(attempts, 2)
+  assert.ok(f.get(entry.id).continuation.finalReply.notifiedAt)
+})
+
 test('defer needs schedules, owned session, valid bounds; concurrent retries share one durable entry', async t => {
   const f = await fixture(t)
   await assert.rejects(f.service.defer(owner, 'other-session', input), /正式会话/)
@@ -77,9 +125,9 @@ test('pending reuses entry, completion notifies once, late token and manual repl
   assert.ok(f.get(entry.id).nextRunAt > Date.now() + 230_000)
   await assert.rejects(outcome(f, stale), /轮次已结束/)
   await f.service.run(entry.id)
-  assert.equal(f.get(entry.id).continuation.state, 'completed'); assert.equal(notifications, 1)
+  assert.equal(f.get(entry.id).continuation.state, 'completed'); assert.equal(notifications, 0)
   await f.service.run(entry.id); await f.service.tick()
-  assert.equal(calls, 2); assert.equal(notifications, 1)
+  assert.equal(calls, 2); assert.equal(notifications, 0)
   assert.equal((await f.service.defer(owner, session, input)).continuation.attempts, 2)
 })
 

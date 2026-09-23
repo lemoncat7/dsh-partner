@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { record, requiredText } from '../core/validation.js'
 import { appendBounded } from '../core/collections.js'
-import type { Companion } from '../domain.js'
+import type { Companion, ChannelSession } from '../domain.js'
 import type { PartnerStore } from '../store.js'
 import type { ScheduledPartnerTask } from './domain.js'
 import { completionCondition, WakeToolsUnavailable } from './wakeup-context.js'
@@ -33,7 +33,7 @@ export class ScheduleContinuations {
   }
   close(): void { this.closed = true; this.unsubscribe?.(); this.unsubscribe = undefined; for (const c of this.active.values()) c.abort() }
 
-  async defer(owner: string, sessionId: string, value: unknown): Promise<ScheduledPartnerTask> {
+  async defer(owner: string, sessionId: string, value: unknown, origin?: ChannelSession): Promise<ScheduledPartnerTask> {
     const input = record(value, 'continuation')
     const now = Date.now(), delay = minutes(input.delayMinutes, 2, 1, 1440)
     const taskKey = requiredText(input.taskKey, 'taskKey', 200)
@@ -48,6 +48,7 @@ export class ScheduleContinuations {
     await this.store.update(state => {
       if (!state.companions.find(c => c.id === owner)?.capabilities.includes('schedules')) throw new Error('请先勾选伙伴的定时任务能力')
       if (!state.sessions.some(s => s.companionId === owner && s.sessionId === sessionId)) throw new Error('只能从当前伙伴的正式会话预约续接')
+      if (origin && !state.sessions.some(s => s.id === origin.id && s.kind === 'channel' && s.companionId === owner && s.sessionId === sessionId && s.channelId === origin.channelId && s.userId === origin.userId)) throw new Error('预约来源渠道已变更')
       const existing = state.schedules.find(s => s.companionId === owner && s.continuation?.taskKey === taskKey)
       if (existing) {
         if (existing.continuation!.externalTaskId !== externalTaskId || existing.continuation!.originSessionId !== sessionId) throw new Error('taskKey 已用于另一个任务或会话，请核实任务身份')
@@ -62,6 +63,7 @@ export class ScheduleContinuations {
         overlapPolicy: 'queue', timeoutMinutes, nextRunAt: now + delay * 60_000, createdAt: now, updatedAt: now,
         continuation: { taskKey, externalTaskId, originSessionId: sessionId, check, ...(completion === undefined ? {} : { completion }), nextStep, state: 'waiting', attempts: 0, checks: 0, maxAttempts, deadlineAt } }
       bindBoardContinuation(state, result, input.boardTaskId === undefined ? undefined : requiredText(input.boardTaskId, 'boardTaskId', 160))
+      if (origin && !result.continuation!.board) result.continuation!.originChannel = {routeId: origin.id, channelId: origin.channelId, userId: origin.userId}
       state.schedules.push(result)
     })
     return structuredClone(result)
@@ -80,7 +82,9 @@ export class ScheduleContinuations {
       // The originating conversation may verify an external result before its timer fires.
       // It can settle only a waiting task with an exact external identity, never a stale run token.
       const early = wake?.state === 'waiting' && token === undefined && input.externalTaskId === wake.externalTaskId && input.outcome !== 'pending'
-      if (!entry || !wake || !entry.enabled || (!running && !early) || wake.originSessionId !== sessionId) throw new Error('续接轮次已结束、已取消或不属于当前会话，请重新读取计划')
+      const recovered = wake?.state === 'blocked' && !wake.board && token === undefined && input.externalTaskId === wake.externalTaskId && input.outcome === 'completed'
+      if (!entry || !wake || (!recovered && (!entry.enabled || (!running && !early))) || wake.originSessionId !== sessionId) throw new Error('续接轮次已结束、已取消或不属于当前会话，请重新读取计划')
+      if (recovered) { delete wake.notifiedAt; delete wake.nextNotifyAt; delete wake.finalReply }
       const now = Date.now()
       wake.summary = summary; wake.checks = (wake.checks ?? 0) + 1; delete wake.runToken
       if (input.outcome === 'pending') {
@@ -173,14 +177,19 @@ export class ScheduleContinuations {
     const entry = this.store.snapshot().schedules.find(s => s.id === id), wake = entry?.continuation
     // Linked task delivery belongs to the requirement, never to each timer.
     if (wake?.board) return
+    const delivery = wake?.finalReply
     if (!this.runner || this.notifying.has(id) || !entry || !wake || !['completed', 'blocked'].includes(wake.state)
-      || wake.notifiedAt || (wake.nextNotifyAt ?? 0) > Date.now() || !this.store.hasCapability(entry.companionId, 'schedules')) return
+      || !delivery || delivery.notifiedAt || (delivery.nextNotifyAt ?? 0) > Date.now() || !this.store.hasCapability(entry.companionId, 'schedules')) return
     this.notifying.add(id)
     try {
       await this.runner.notify(entry)
-      await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation; if (current?.state === wake.state) current.notifiedAt = Date.now() })
+      await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation; if (current?.state !== wake.state) return
+        if (current.finalReply?.key === delivery.key) current.finalReply.notifiedAt = Date.now()
+      })
     } catch {
-      await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation; if (current) current.nextNotifyAt = Date.now() + 300_000 })
+      await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation
+        if (current?.finalReply?.key === delivery.key) current.finalReply.nextNotifyAt = Date.now() + 300_000
+      })
     } finally { this.notifying.delete(id) }
   }
 }
@@ -209,5 +218,6 @@ export function continuationPrompt(entry: ScheduledPartnerTask): string {
 仍在运行：调用 partner_schedule resolve，outcome=pending，summary 写真实检查结果，可指定 delayMinutes；工具保存延期成功后结束本轮，不睡眠轮询，不通知用户。
 已完成：只核实本预约自己的完成条件，立即调用 resolve，outcome=completed 关闭本预约，summary 写核实证据；然后才继续上述后续流程。不得等待整个对话或 Goal 完成，也不得把后续流程的新任务当成原任务延期。若后续步骤产生新的长任务，为新任务单独 defer。
 失败、无法核实或需新增授权：调用 resolve，outcome=blocked，summary 写原因。resolve 必须携带上述 scheduleId 和 runToken。不要仅口头声称已预约或完成。
-本次请求可能插入正在执行的会话；先用 partner_schedule list 核对本预约仍启用且 runToken 相同，过期或取消的请求直接跳过。这是已有预约的续接，不是新增关注，不调用 partner_concern_suggest，不编造 evidence 或占位参数。工具缺失时明确报告受阻，不使用无关工具代替。已有结果只核验，不重复生成后续已有产物。不得使用 sleep 等待；未完成即 pending 并释放检查。系统负责本预约完成/受阻后的通知，请勿另发重复通知。不要创建周期任务或新的同任务续接来绕过次数和期限。`
+只有形成面向用户的最终结论或最终需要用户处理的问题时，才写最终回答及产物路径；单个外部任务完成、受阻、检查失败都只记录在工具回执中，不为此单独写渠道通知。还有后续步骤或新预约时不要把阶段进展写成最终交付。系统仅投递最终回答及附件，不投递预约状态或原始错误，不要另调渠道发送工具。原会话后来核实独立预约的外部任务已完成，可对 blocked 状态使用 scheduleId、精确 externalTaskId、outcome=completed、summary（不传旧 runToken）补交证据；不重新提交生成任务，不以此恢复看板任务。
+本次请求可能插入正在执行的会话；先用 partner_schedule list 核对本预约仍启用且 runToken 相同，过期或取消的请求直接跳过。这是已有预约的续接，不是新增关注，不调用 partner_concern_suggest，不编造 evidence 或占位参数。工具缺失时明确记录受阻，不使用无关工具代替。已有结果只核验，不重复生成后续已有产物。不得使用 sleep 等待；未完成即 pending 并释放检查。预约状态只留在内部记录，渠道只接收最终面向用户的回答。不要创建周期任务或新的同任务续接来绕过次数和期限。`
 }

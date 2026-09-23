@@ -31,7 +31,7 @@
 - `scheduler/service` 保持统一入口和已有周期调度。
 - `scheduler/continuations` 负责持久化续接状态、幂等、预算、轮次 token、撤权取消、执行记录和终态通知重试。
 - `PartnerAgentRuntime.wakeSchedule` 复用原会话的工具与审批；空闲时 followup，运行时 steer 到下一处理点。`scheduler/wakeup` 只等待本计划持久化回执，不等待会话 idle 或 Goal 完成。超时暂停预约但不取消共享会话；原会话删除/归档不换会话。
-- `ChannelManager.notifyContinuation` 复用现有通知目标选择与分片收据。等待不通知，完成/受阻才通知；本地无通知目标时保留会话和计划记录。
+- `ChannelManager.notifyContinuation` 只投递与续接消息精确关联的最终回答及附件，复用通知目标选择与分片收据。等待、完成、受阻和原始错误均不产生状态通知；最终回复单独持久化、失败重试，不重新执行生成任务。本地无通知目标时保留会话和计划记录。
 - 内置技能只提供策略，不获得权限，不把所有工具加入白名单。
 
 数据复用已有 `schedules` 和 `executionRuns` 持久化/分区存储，不创建散落文件、不更改旧数据布局。新增 `schedule.kind=once` 和可选 continuation 字段；正常周期计划不转换。
