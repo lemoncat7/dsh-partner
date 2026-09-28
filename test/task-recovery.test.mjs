@@ -8,6 +8,44 @@ import { TaskBoardService } from '../lib/tasks/service.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 
 const actor = { kind: 'companion', companionId: 'companion-default' }
+
+test('formal submission is not overwritten by the final conversational acknowledgement', async t => {
+  const { store, board, task } = await fixture(t)
+  const service = serviceFor(t, store, board, async () => {
+    const current = board.require(task.id)
+    await board.completeExecution(task.id, { deliverable: '正式交付：job/asset/文件/附件信息', evidence: [] }, actor, undefined, current.revision)
+    return { run: { id: 'submitted-run' }, output: '已经提交了' }
+  })
+  await service.delegate({ taskId: task.id, initiatedBy: 'user', to: actor.companionId, request: '完成交付' })
+  await waitFor(() => store.snapshot().delegations.some(d => d.status === 'completed'))
+  assert.equal(board.require(task.id).resultSummary, '正式交付：job/asset/文件/附件信息')
+})
+
+test('result and evidence commit atomically and reject empty early review', async t => {
+  const { store, board, task } = await fixture(t)
+  await store.update(s => { Object.assign(s.tasks.find(x => x.id === task.id), { status: 'doing', assigneeCompanionId: actor.companionId, acceptanceCriteria: ['文件可读取'] }) })
+  const current = board.require(task.id)
+  await assert.rejects(board.update(task.id, { expectedRevision: current.revision, status: 'review' }, actor), /submit_result/)
+  await assert.rejects(board.completeExecution(task.id, { deliverable: '已有文件' }, actor, undefined, current.revision), /evidence/)
+  assert.equal(board.require(task.id).status, 'doing')
+  const submitted = await board.completeExecution(task.id, { deliverable: '已有文件 final.mp4', evidence: [{ criterion: 1, reference: 'final.mp4' }] }, actor, undefined, current.revision)
+  assert.equal(submitted.status, 'review'); assert.equal(submitted.evidence.length, 1)
+  await assert.rejects(board.completeExecution(task.id, '旧结果', actor, undefined, current.revision), /更新|改变|版本/)
+})
+
+test('durable pending output resumes board commit after restart without executing again', async t => {
+  const { root, store, board, task } = await fixture(t)
+  await store.update(s => {
+    Object.assign(s.tasks.find(x => x.id === task.id), { status: 'doing', assigneeCompanionId: actor.companionId })
+    s.delegations.push({ id: 'pending-output', taskId: task.id, kind: 'task', initiatedBy: 'user', toCompanionId: actor.companionId, status: 'running', attempts: 1, createdAt: Date.now(), request: '原任务', pendingResult: { output: '已生成的真实结果，无需重新执行', runId: 'original-run', workRevision: 1 } })
+  })
+  const restored = await PartnerStore.open(join(root, 'state.json')), recoveredBoard = new TaskBoardService(restored)
+  const service = serviceFor(t, restored, recoveredBoard, async () => assert.fail('must not regenerate'))
+  await service.start()
+  await waitFor(() => restored.snapshot().delegations.find(d => d.id === 'pending-output').status === 'completed')
+  assert.equal(recoveredBoard.require(task.id).resultSummary, '已生成的真实结果，无需重新执行')
+  assert.equal(restored.snapshot().delegations.find(d => d.id === 'pending-output').pendingResult, undefined)
+})
 for (const interrupted of [false, true]) test(`restart recovers automatic acceptance without rerunning executor (existing review: ${interrupted})`, async t => {
   const { root, store, task } = await fixture(t)
   await store.update(s => {
@@ -98,7 +136,7 @@ test('early review followed by graceful shutdown resumes from persisted queue', 
   const pending = new Promise((_, reject) => { interrupt = reject })
   const first = serviceFor(t, store, board, async () => {
     const current = board.require(task.id)
-    await board.update(task.id, { expectedRevision: current.revision, status: 'review' }, actor)
+    await store.update(state => { state.tasks.find(t => t.id === task.id).status = 'review' }) // Legacy persisted state, no longer allowed through update.
     return pending
   })
   await first.delegate({ taskId: task.id, initiatedBy: 'user', to: actor.companionId, request: '交付' })
@@ -120,7 +158,7 @@ test('transient failure after early review retries without restarting the servic
   const service = serviceFor(t, store, board, async () => {
     if (++calls === 1) {
       const current = board.require(task.id)
-      await board.update(task.id, { expectedRevision: current.revision, status: 'review' }, actor)
+      await store.update(state => { state.tasks.find(t => t.id === task.id).status = 'review' }) // Legacy persisted state, no longer allowed through update.
       throw new TypeError('fetch failed: ECONNRESET')
     }
     return { run: { id: 'retry' }, output: '网络恢复后交付' }

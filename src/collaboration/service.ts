@@ -292,7 +292,7 @@ export class PartnerCollaborationService {
       const task = state.tasks.find(task => task.id === item.taskId)
       const denied = taskDispatchDenied(state, item)
       const taskWork = delegationKind(item) === 'task'
-      const resumeReview = task && unfinishedReview(task, item)
+      const resumeReview = task && (unfinishedReview(task, item) || (Boolean(item.pendingResult) && task.status === 'review'))
       if (!task || denied || (taskWork ? (!['ready', 'doing'].includes(task.status) && !resumeReview) || (task.assigneeCompanionId !== item.toCompanionId && (task.assigneeCompanionId || !item.attempts)) : task.status !== 'review' || (task.reviewerCompanionId && task.reviewerCompanionId !== item.toCompanionId))) {
         item.status = 'canceled'; item.error = denied ?? '任务或负责人已改变，取消旧执行'; item.completedAt = Date.now()
         delete item.nextAttemptAt
@@ -304,10 +304,10 @@ export class PartnerCollaborationService {
       if (taskWork && !taskDependenciesDone(task, state.tasks)) return
       if (executionWait(state, task, [...this.liveClaims.values()])) return
       if (state.delegations.filter(value => value.status === 'running').length >= RECOVERY_CONCURRENCY) return
-      if (taskWork && (task.status === 'ready' || resumeReview)) {
+      if (taskWork && !item.pendingResult && (task.status === 'ready' || resumeReview)) {
         preserveTaskAttempt(task)
         task.status = 'doing'; task.updatedAt = Date.now(); task.revision += 1
-        delete task.resultAbstract; delete task.resultSummary; delete task.reviewSummary; delete task.reviewHandoff
+        delete task.resultAbstract; delete task.resultSummary; delete task.resultAttachmentIds; delete task.reviewSummary; delete task.reviewHandoff
       }
       const now = Date.now()
       item.status = 'running'
@@ -333,9 +333,19 @@ export class PartnerCollaborationService {
   }
 
   private async executeClaimed(delegation: PartnerDelegation, signal: AbortSignal): Promise<void> {
+    let outputAcquired = false
     try {
       const task = this.tasks.require(delegation.taskId)
       const kind = delegationKind(delegation)
+      if (kind === 'task' && delegation.pendingResult) {
+        const saved = delegation.pendingResult
+        if ((task.workRevision ?? 1) !== saved.workRevision || task.assigneeCompanionId !== delegation.toCompanionId || !['doing', 'review', 'done'].includes(task.status)) {
+          await this.cancel(delegation.id, '任务要求已改变，旧结果仅保留记录，不覆盖新任务'); return
+        }
+        if (!task.resultSummary?.trim() || task.status === 'doing') await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(saved.output), { kind: 'companion', companionId: delegation.toCompanionId }, saved.workRevision)
+        await this.complete(delegation.id, saved.runId, saved.output)
+        return
+      }
       if ((kind === 'task' && task.status !== 'doing') || (kind === 'review' && task.status !== 'review')) {
         await this.cancel(delegation.id, `任务状态已经变为 ${task.status}，不再恢复旧执行`)
         return
@@ -358,6 +368,7 @@ export class PartnerCollaborationService {
             kind: kind === 'review' ? 'review' : 'delegation', sourceId: delegation.id, companion: to, prompt, signal,
             ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}), destroyAfterRun: true,
           })
+      outputAcquired = kind === 'task'
       if (signal.aborted || !this.store.snapshot().delegations.some(d => d.id === delegation.id && d.status === 'running')) return
       const latest = this.tasks.require(task.id)
       if (kind === 'review') {
@@ -367,12 +378,20 @@ export class PartnerCollaborationService {
         await this.tasks.recordReview(task.id, result.output, { kind: 'companion', companionId: to.id }, task.revision)
       } else {
         if (latest.status !== 'doing' && latest.status !== 'review') { await this.cancel(delegation.id, `任务状态已经变为 ${latest.status}，忽略旧执行结果`); return }
-        await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(result.output), { kind: 'companion', companionId: to.id }, task.workRevision ?? 1)
+        // submit_result may already have committed the formal envelope during this turn.
+        // Never overwrite it with the assistant's short acknowledgement.
+        if (!(latest.status === 'review' && latest.resultSummary?.trim())) {
+          if (!parseTaskExecutionOutput(result.output).deliverable.trim()) throw new Error('执行结果正文为空，请补交已有成果，不要重新生成')
+          await this.mutate(delegation.id, item => { item.pendingResult = { output: result.output, runId: result.run.id, workRevision: task.workRevision ?? 1 } })
+          await this.tasks.completeExecution(task.id, parseTaskExecutionOutput(result.output), { kind: 'companion', companionId: to.id }, task.workRevision ?? 1)
+        }
       }
       await this.complete(delegation.id, result.run.id, result.output)
     } catch (error) {
       if (signal.aborted || !this.store.snapshot().tasks.some(t => t.id === delegation.taskId) || !this.store.snapshot().delegations.some(d => d.id === delegation.id && d.status === 'running')) return
       if (error instanceof TaskConflictError) { await this.cancel(delegation.id, '任务版本已更新，忽略旧执行/核验结论'); return }
+      if (this.store.snapshot().delegations.find(d => d.id === delegation.id)?.pendingResult) { await this.retry(delegation, error, this.closing); return }
+      if (outputAcquired) { await this.fail(delegation, new Error(`执行已返回，但结果保存失败；请从原会话补交成果，不要重新生成：${errorMessage(error)}`)); return }
       if (this.closing) await this.retry(delegation, error, true)
       else if (canRetryDelegation(error, delegation.attempts ?? 1)) await this.retry(delegation, error, false)
       else await this.fail(delegation, error)
@@ -396,6 +415,7 @@ export class PartnerCollaborationService {
   private async complete(id: string, runId: string, output: string): Promise<void> {
     await this.mutate(id, item => {
       item.status = 'completed'; item.completedAt = Date.now(); item.executionRunId = runId; item.resultSummary = output.slice(0, 2400)
+      delete item.pendingResult
       delete item.nextAttemptAt; delete item.error
     })
   }

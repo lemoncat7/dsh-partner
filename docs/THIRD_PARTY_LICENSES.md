@@ -1,5 +1,11 @@
 # Bundled third-party licenses
 
+## Drama Skills
+
+- **drama-skills** — https://github.com/zenstory-ai/drama-skills, commit `b71cb3ca9343eaf6c0375725ccc9261a4e79021e`, MIT, Copyright (c) 2026 drama-skills contributors.
+- All eleven skill directories (instructions, references, templates and scripts) are bundled under `resources/skills/drama-production/upstream/skills/`. Complete license: `resources/skills/drama-production/upstream/LICENSE`.
+- A separate Chinese DSH entrypoint exposes one optional “漫剧制作” skill. Upstream resources use normalized LF line endings and terminal newlines; the manifest records every bundled file's SHA-256. No runtime upstream download, automatic authorization, provider setup or Dashboard startup is performed.
+
 ## Director skill documentation bundles
 
 - **director-skills** — https://github.com/0xhughs/director-skills, commit `35ca0a2b4cd55b0668aa9ea0f40273324b774bb4`, MIT, Copyright (c) 2026 0xhughs. Complete license: `resources/skills/director-skills/upstream/LICENSE`.

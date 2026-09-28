@@ -163,6 +163,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const deliveries = migrated ? await AttachmentDeliveryService.openPartitioned(join(layout.publicRoot,'indexes','attachments'),layout.privateRoot) : await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
+    channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
       summarize: async (item, children, signal, stage) => {
         const companion = store.snapshot().companions.find(c => c.id === item.ownerCompanionId)

@@ -10,12 +10,14 @@ export async function loadBuiltinResources(id?: string): Promise<SkillPackageFil
   if (!/^[a-z0-9-]+$/.test(id)) throw new Error('Invalid built-in resource bundle')
   const root = fileURLToPath(new URL(`../../resources/skills/${id}/`, import.meta.url))
   const manifestBytes = await readFile(join(root, 'manifest.json'))
-  const manifest = JSON.parse(manifestBytes.toString('utf8')) as { schemaVersion: number; commit: string; files: Array<{ path: string; sha256: string }> }
-  if (manifest.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(manifest.commit) || !Array.isArray(manifest.files) || manifest.files.length > 500) throw new Error('Invalid built-in resource manifest')
+  const manifest = JSON.parse(manifestBytes.toString('utf8')) as { schemaVersion: number; commit?: string; source?: string; version?: string; files: Array<{ path: string; sha256: string }> }
+  const upstream = manifest.schemaVersion === 1 && /^[a-f0-9]{40}$/.test(manifest.commit ?? '')
+  const local = manifest.schemaVersion === 2 && manifest.source === 'builtin' && /^\d+\.\d+\.\d+$/.test(manifest.version ?? '')
+  if ((!upstream && !local) || !Array.isArray(manifest.files) || manifest.files.length > 500) throw new Error('Invalid built-in resource manifest')
   const files: SkillPackageFile[] = []
   for (const entry of manifest.files) {
     const path = packagePath(entry.path)
-    if (!path.startsWith('upstream/')) throw new Error('Invalid built-in resource path')
+    if (!path.startsWith(upstream ? 'upstream/' : 'references/')) throw new Error('Invalid built-in resource path')
     const bytes = await readFile(join(root, path))
     if (sha256(bytes) !== entry.sha256) throw new Error(`内置 Skill 资源校验失败：${id}/${path}`)
     files.push({ path, bytes })

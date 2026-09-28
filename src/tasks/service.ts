@@ -40,6 +40,7 @@ export class TaskBoardService {
     let task!: BoardTask
     await this.store.update(state => {
       task = taskDraft(input, actor, state)
+      if (task.status === 'review') throw new Error('新任务不能空结果进入待验收，请先执行并用 submit_result 提交成果')
       const dependencyTaskIds = task.dependencyTaskIds
       if (requireOwnership) requireTaskRequirement(input.requirementId, dependencyTaskIds, state.tasks)
       if (started(task.status)) this.assertDependenciesComplete(task, state.tasks)
@@ -90,6 +91,7 @@ export class TaskBoardService {
       if (input.description !== undefined) task.description = typeof input.description === 'string' ? input.description.trim().slice(0, 8000) : task.description
       if (input.status !== undefined) task.status = oneOf(input.status, TASK_STATUSES, 'status')
       if (['review', 'done'].includes(task.status) && state.schedules.some(s => s.continuation?.board?.taskId === task.id && ['waiting', 'running'].includes(s.continuation.state))) throw new Error('任务正在等待外部结果，不能提前送验收或标记完成')
+      if (task.status === 'review' && previousStatus !== 'review' && !task.resultSummary?.trim()) throw new Error('不能空结果进入待验收。请使用 partner_task_board submit_result 一次提交 resultSummary 和逐项 evidence；或保留 doing 并在本轮最终回答提交结果信封。不要重新生成已有产物。')
       if (input.priority !== undefined) task.priority = oneOf(input.priority, TASK_PRIORITIES, 'priority')
       if (input.autoRun !== undefined) {
         task.autoRun = optionalBoolean(input.autoRun, false)
@@ -149,6 +151,7 @@ export class TaskBoardService {
         preserveTaskAttempt(task)
         delete task.resultAbstract
         delete task.resultSummary
+        delete task.resultAttachmentIds
         delete task.reviewHandoff
         delete task.reviewSummary
         delete task.evidence
@@ -193,18 +196,24 @@ export class TaskBoardService {
     return task
   }
 
-  async completeExecution(taskId: string, result: string | TaskExecutionOutput, actor: TaskActor, workRevision?: number): Promise<BoardTask> {
+  async completeExecution(taskId: string, result: string | TaskExecutionOutput, actor: TaskActor, workRevision?: number, expectedRevision?: number): Promise<BoardTask> {
     let output!: BoardTask
     let previousStatus!: BoardTask['status']
     await this.store.update(state => {
       const task = state.tasks.find(item => item.id === taskId)
       if (!task) throw new TaskNotFoundError()
+      if (expectedRevision !== undefined && expectedRevision !== task.revision) throw new TaskConflictError(task)
+      if (expectedRevision !== undefined && actor.kind === 'companion' && task.assigneeCompanionId !== actor.companionId) throw new Error('只有执行伙伴可以提交任务结果')
       if (task.status !== 'doing' && task.status !== 'review') throw new Error('只有进行中或待验收的任务可以提交执行结果')
       if (state.schedules.some(s => s.continuation?.board?.taskId === task.id && ['waiting', 'running'].includes(s.continuation.state))) throw new Error('任务正在等待外部结果，不能把等待说明作为交付结果送验收')
       if (workRevision !== undefined && workRevision !== (task.workRevision ?? 1)) throw new TaskConflictError(task)
       previousStatus = task.status
       if (!task.reviewerCompanionId && task.creatorCompanionId) task.reviewerCompanionId = task.creatorCompanionId
       const execution = typeof result === 'string' ? { deliverable: result } : result
+      if (expectedRevision !== undefined) {
+        const submitted = taskEvidence(execution.evidence, task.acceptanceCriteria ?? [])
+        if ((task.acceptanceCriteria ?? []).some((_, index) => !submitted.some(e => e.criterion === index + 1))) throw new Error('请为每项验收条件提交 evidence；只补交已有证据，不要重新生成')
+      }
       let evidenceWarning = execution.evidenceWarning
       try { task.evidence = taskEvidence(execution.evidence, task.acceptanceCriteria ?? []) }
       catch { task.evidence = []; evidenceWarning = '证据结构或编号无效：交付已保留，验收者需实际核验或打回补证，不要重跑已完成的外部操作。' }

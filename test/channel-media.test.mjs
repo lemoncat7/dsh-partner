@@ -16,6 +16,14 @@ import { TaskBoardService } from '../lib/tasks/service.js'
 import { RequirementService } from '../lib/requirements/service.js'
 import { RequirementWorker } from '../lib/requirements/worker.js'
 import { assistantTextAfter } from '../lib/execution/agent-support.js'
+import { AttachmentDeliveryService } from '../lib/attachments/service.js'
+
+async function configureRequirementDelivery(t, channels, root) {
+  const service = await AttachmentDeliveryService.open(join(root, 'attachments'))
+  t.after(() => service.close())
+  channels.setRequirementDelivery(service, '/partner-api')
+  channels.agents.recordRequirementResult = async () => {}
+}
 
 function encrypt(value, key) {
   const cipher = createCipheriv('aes-128-ecb', key, null)
@@ -190,6 +198,7 @@ test('child acceptance stays silent and requirement summary sends one terminal r
   await store.update(s => s.sessions.push({ id: 'route', kind: 'channel', companionId: actor.companionId,
     sessionId: 'creator-session', channelId: 'channel', userId: 'user', cwd: root, lastMessageAt: 1 }))
   const channels = new ChannelManager({}, store, {}, {}, root)
+  await configureRequirementDelivery(t, channels, root)
   const delivered = []
   // Mock only transport; keep routing, rendering, queue and persistent receipts real.
   channels.sendProactiveReply = async (channelId, userId, reply) => delivered.push({ channelId, userId, reply })
@@ -213,6 +222,7 @@ test('child acceptance stays silent and requirement summary sends one terminal r
   assert.doesNotMatch(delivered[0].reply.text, /内部核验点/)
   const restored = await PartnerStore.open(join(root, 'state.json'))
   const afterRestart = new ChannelManager({}, restored, {}, {}, root)
+  await configureRequirementDelivery(t, afterRestart, root)
   afterRestart.sendProactiveReply = async () => assert.fail('must not redeliver after restart')
   await afterRestart.notifyRequirementResult(finished)
 })
@@ -226,6 +236,7 @@ test('stage reports route once before archiving; waiting/review suppresses deliv
   const req = await requirements.create({ title: '阶段交付' }, actor, 'creator-session')
   const task = await board.create({ title: '原型', requirementId: req.id }, actor)
   const channels = new ChannelManager({}, store, {}, {}, root), delivered = []
+  await configureRequirementDelivery(t, channels, root)
   channels.sendProactiveReply = async (_c, _u, reply) => delivered.push(reply)
   const worker = new RequirementWorker(store, requirements, { summarize: async () => '当前成果和阻塞说明', deliver: item => channels.notifyRequirementResult(item), warn() {} })
   const stateTo = async status => store.update(s => {
@@ -240,6 +251,7 @@ test('stage reports route once before archiving; waiting/review suppresses deliv
   await stateTo('done'); await worker.tick(); await worker.tick(); await worker.close()
   assert.equal(delivered.length, 2)
   const restored = await PartnerStore.open(join(root, 'state.json')), resumed = new ChannelManager({}, restored, {}, {}, root)
+  await configureRequirementDelivery(t, resumed, root)
   resumed.sendProactiveReply = async () => assert.fail('stage receipt survives restart')
   await resumed.notifyRequirementResult(requirements.require(req.id))
 })

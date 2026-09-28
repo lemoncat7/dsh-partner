@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "source": "builtin",
+  "version": "1.0.0",
+  "files": [
+    {
+      "path": "references/canvas-contract.md",
+      "sha256": "4670c94d24cc069e678df82bbbb0b0a25838c29bb4640bb0925a0a6c2d92dd47"
+    },
+    {
+      "path": "references/creative-production.md",
+      "sha256": "24cf5bebde37c0acfd3c6cdcbaaae0b002b6cbf0dcc85b549fa2f5f2f7d5b4b7"
+    },
+    {
+      "path": "references/generation-delivery.md",
+      "sha256": "f8e1252f9e68bec50ce820d7f6331bc7751ff21b471ac7737be7a0a01dea8ebd"
+    },
+    {
+      "path": "references/production-ledger.md",
+      "sha256": "fae6be18db3288c787ac8c2457c4b5f7c52a5028ce20ce6b26d1eae9bbb83eec"
+    }
+  ]
+}

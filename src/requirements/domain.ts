@@ -15,7 +15,7 @@ export interface BoardRequirement {
   summary?: string
   archivedAt?: number
   /** Immutable accepted deliverables survive deleting their original task cards. */
-  results?: Array<Pick<BoardTask, 'id' | 'title' | 'assigneeCompanionId' | 'resultSummary' | 'resultAbstract'>>
+  results?: Array<Pick<BoardTask, 'id' | 'title' | 'assigneeCompanionId' | 'resultSummary' | 'resultAbstract' | 'resultAttachmentIds'>>
   nextAttemptAt?: number
   attempts?: number
   lastError?: string

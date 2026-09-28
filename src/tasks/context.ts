@@ -17,7 +17,7 @@ export function invalidateTaskWork(state: PartnerState, task: BoardTask, reason:
   preserveTaskAttempt(task)
   task.workRevision = (task.workRevision ?? 1) + 1
   if (['doing', 'review', 'done'].includes(task.status)) task.status = 'ready'
-  delete task.resultSummary; delete task.resultAbstract; delete task.reviewSummary; delete task.reviewHandoff; delete task.completedAt
+  delete task.resultSummary; delete task.resultAbstract; delete task.resultAttachmentIds; delete task.reviewSummary; delete task.reviewHandoff; delete task.completedAt
   delete task.evidence; delete task.reviewChecks
   for (const job of state.delegations) {
     if (job.taskId !== task.id || !['running', 'queued'].includes(job.status)) continue

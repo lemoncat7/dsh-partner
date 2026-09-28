@@ -94,7 +94,7 @@ export class RequirementService {
     return this.change(id, revision, actor, (item, tasks) => {
       if (item.status === 'done' || !tasks.length || tasks.some(t => t.status !== 'done')) throw new RequirementError(409, '需求已归档或仍有未验收任务，不能完成归档')
       item.summary = text; item.status = 'done'; item.archivedAt = Date.now()
-      item.results = tasks.map(({ id, title, assigneeCompanionId, resultSummary, resultAbstract }) => ({ id, title, ...(assigneeCompanionId ? { assigneeCompanionId } : {}), ...(resultSummary ? { resultSummary } : {}), ...(resultAbstract ? { resultAbstract } : {}) }))
+      item.results = tasks.map(({ id, title, assigneeCompanionId, resultSummary, resultAbstract, resultAttachmentIds }) => ({ id, title, ...(assigneeCompanionId ? { assigneeCompanionId } : {}), ...(resultSummary ? { resultSummary } : {}), ...(resultAbstract ? { resultAbstract } : {}), ...(resultAttachmentIds?.length ? { resultAttachmentIds: [...resultAttachmentIds] } : {}) }))
       delete item.lastError; delete item.nextAttemptAt
     }, true)
   }
@@ -103,6 +103,8 @@ export class RequirementService {
       const item = state.requirements?.find(r => r.id === id)
       if (!item) throw new RequirementError(404, '需求已删除或不存在')
       delete item.nextAttemptAt; delete item.lastError
+      // Explicit retry can repair legacy text-only completion; v2 receipts still deduplicate successful parts.
+      if (item.status === 'done') delete item.notifiedAt
     })
   }
   private async change(id: string, revision: number, actor: TaskActor, change: (item: BoardRequirement, tasks: BoardTask[]) => void | false, snapshot = false): Promise<BoardRequirement> {

@@ -5,6 +5,7 @@ import { PartnerStore } from '../store.js'
 import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
+import { pollWeixin } from './weixin/poll.js'
 import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
 import { collectDirectBatch, groupDirectMessages } from './direct/inbound-batch.js'
 import { DirectDispatcher } from './direct/dispatcher.js'
@@ -32,6 +33,8 @@ import { continuationFinalReply } from '../scheduler/final-reply.js'
 import { savedContinuationRoute } from '../scheduler/channel-origin.js'
 import { prepareChannelReply } from './outbound-media.js'
 import { questionOrigin } from './question-origin.js'
+import type { AttachmentDeliveryService } from '../attachments/service.js'
+import { requirementAttachments } from '../requirements/attachments.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
 type ChannelContext = Context & { settings: SettingsProvider }
@@ -65,6 +68,9 @@ export class ChannelManager {
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
   private readonly notificationDelivery: NotificationDelivery
+  private requirementDelivery?: { service: AttachmentDeliveryService; prefix: string }
+
+  setRequirementDelivery(service: AttachmentDeliveryService, prefix: string): void { this.requirementDelivery = { service, prefix } }
 
   constructor(
     private readonly ctx: ChannelContext,
@@ -206,10 +212,12 @@ export class ChannelManager {
   async notifyRequirementResult(item: BoardRequirement): Promise<void> {
     const stage = item.status !== 'done'
     const summary = stage ? item.stageReport?.summary : item.summary
-    if (!summary || !item.creatorSessionId) return
+    if (!summary) throw new Error('需求缺少交付总结')
+    if (!item.creatorSessionId) return // Manual board entries have no conversation destination.
     // A manually created board requirement must not leak into an unrelated chat.
     const route = this.routeForSession(item.creatorSessionId)
-    if (!route || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
+    if (!route) throw new Error('原需求会话不存在，保留交付等待重试')
+    if (!this.requirementDelivery) throw new Error('需求附件交付服务尚未初始化')
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
     const delivery = await prepareTaskResultDelivery({ id: stage ? `${item.id}-stage-${item.stageReport!.key.slice(0, 16)}` : item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: summary }, cwd)
     const text = delivery.text.replace(/^看板任务已完成：/, stage ? '需求阶段结果：' : '需求已完成：')
@@ -217,11 +225,24 @@ export class ChannelManager {
     const latest = state.requirements?.find(r => r.id === item.id)
     if (!latest || latest.revision !== item.revision || latest.status !== item.status ||
       (stage && (!requirementIsIdle(state, latest) || requirementProgressKey(state, latest) !== item.stageReport!.key))) throw new Error('需求已调整，取消旧结果投递')
-    // queueProactive persists a stable receipt; retries do not re-summarize.
-    await this.queueProactive(route, stage ? `requirement-stage:${item.id}:${item.stageReport!.key}` : `requirement-result:${item.id}:${item.revision}`, { text, attachments: await extractOutboundAttachments(text, cwd) }, () => {
+    const receipt = stage ? `requirement-stage:${item.id}:${item.stageReport!.key}:delivery-v2` : `requirement-result:${item.id}:${item.revision}:delivery-v2`
+    const stillValid = () => {
       const state = this.store.snapshot(), latest = state.requirements?.find(r => r.id === item.id)
       return Boolean(latest && latest.revision === item.revision && latest.status === item.status &&
         (!stage || (requirementIsIdle(state, latest) && requirementProgressKey(state, latest) === item.stageReport!.key)))
+    }
+    const { service, prefix } = this.requirementDelivery
+    await service.serial(`requirement:${receipt}`, async () => {
+      if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
+      const files = await requirementAttachments(item, this.store.snapshot(), service)
+      if (delivery.documentPath) {
+        files.push(await service.serial('prepare', () => service.prepare({ companionId: route.companionId, sessionId: route.sessionId, turn: item.revision, cwd, path: delivery.documentPath!, channel: false }, this.notificationShutdown.signal)))
+      }
+      const attachments = await Promise.all(files.map(file => service.outbound(file)))
+      if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
+      await this.agents.recordRequirementResult(route, receipt, text, files, service, prefix)
+      const localOnly = route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === route.companionId)?.notificationDelivery
+      if (!localOnly) await this.queueProactive(route, receipt, { text, attachments }, stillValid)
     })
   }
 
@@ -305,25 +326,11 @@ export class ChannelManager {
   }
 
   private async pollLoop(channel: WeixinChannel, api: WeixinApi, signal: AbortSignal): Promise<void> {
-    let buffer = ''
-    let timeoutMs = 35_000
-    let failures = 0
-    this.runtime.set(channel.id, { status: 'running' })
-    while (!signal.aborted) {
-      try {
-        const response = await api.getUpdates(buffer, timeoutMs, signal)
-        if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) throw new Error(response.errmsg || `微信 getupdates 返回 ${response.errcode ?? response.ret}`)
-        failures = 0
-        if (response.get_updates_buf !== undefined) buffer = response.get_updates_buf
-        if (response.longpolling_timeout_ms !== undefined) timeoutMs = Math.min(120_000, Math.max(5_000, response.longpolling_timeout_ms))
-        for (const message of response.msgs ?? []) this.scheduleInbound(channel, api, message, signal)
-      } catch (error) {
-        if (signal.aborted) break
-        failures += 1
-        if (failures >= 6) throw error
-        await delay(Math.min(15_000, 1_000 * 2 ** (failures - 1)), signal)
-      }
-    }
+    await pollWeixin(signal, {
+      getUpdates: (buffer, timeoutMs, lifetime) => api.getUpdates(buffer, timeoutMs, lifetime),
+      state: state => { this.runtime.set(channel.id, state) },
+      receive: response => { for (const message of response.msgs ?? []) this.scheduleInbound(channel, api, message, signal) },
+    })
   }
 
   private scheduleInbound(channel: WeixinChannel, api: WeixinApi, message: WeixinRawMessage, signal: AbortSignal): void {

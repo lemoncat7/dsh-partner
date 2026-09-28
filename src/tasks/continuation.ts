@@ -43,6 +43,8 @@ export function reconcileBoardContinuations(state: PartnerState): void {
   }
   for (const delegation of state.delegations) {
     if (!delegation.continuationScheduleId) continue
+    // External work finished; durable result commit is now responsible for this lease.
+    if (delegation.pendingResult && delegation.pendingResult.workRevision === (state.tasks.find(t => t.id === delegation.taskId)?.workRevision ?? 1)) continue
     const entry = state.schedules.find(s => s.id === delegation.continuationScheduleId)
     const wake = entry?.continuation, link = wake?.board
     // Once resumed, normal execution/result handling owns the delegation again.

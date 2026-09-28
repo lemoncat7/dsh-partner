@@ -26,6 +26,8 @@ export interface BoardTask {
   reviewChecks?: import('./contract.js').TaskReviewCheck[]
   resultAbstract?: string
   resultSummary?: string
+  /** Explicit deliverables recorded by the executor's attachment tool. */
+  resultAttachmentIds?: string[]
   /** Internal execution notes for the reviewer; never included in user-facing result delivery. */
   reviewHandoff?: string
   reviewSummary?: string

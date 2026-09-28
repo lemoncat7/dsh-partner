@@ -121,6 +121,11 @@ export class AttachmentDeliveryService {
     if (data.length !== item.size || createHash('sha256').update(data).digest('hex') !== item.hash) throw new Error('交付附件校验失败，请重新提交原文件')
     return data
   }
+  /** Use the immutable delivery snapshot, never a different companion's workspace path. */
+  async outbound(item: AttachmentDelivery): Promise<PartnerOutboundAttachment> {
+    await this.bytes(item)
+    return { path: join(this.directory(item.companionId), item.id), name: item.name, kind: item.kind, mediaType: item.mediaType }
+  }
   async deliver(item: AttachmentDelivery, send: (file: PartnerOutboundAttachment) => Promise<void>): Promise<AttachmentDelivery> {
     if (item.channel === 'none' || item.channel === 'sent') return item
     await this.bytes(item)

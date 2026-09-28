@@ -19,6 +19,8 @@ export interface PartnerDelegation {
   startedAt?: number
   completedAt?: number
   resultSummary?: string
+  /** Durable execution output awaiting board commit; retries must not invoke the executor again. */
+  pendingResult?: { output: string; runId: string; workRevision: number }
   executionRunId?: string
   executionSessionId?: string
   continuationScheduleId?: string

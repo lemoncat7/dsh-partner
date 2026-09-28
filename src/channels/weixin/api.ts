@@ -4,6 +4,7 @@ import { basename } from 'node:path'
 import type { PartnerOutboundAttachment } from '../../channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES } from '../../channel-message.js'
 import type { GetUpdatesResponse, QrCodeData, QrCodeStatusData } from './types.js'
+import { WeixinHttpError } from './errors.js'
 
 export const WEIXIN_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
 const CLIENT_VERSION = String((0 << 16) | (1 << 8) | 0)
@@ -162,7 +163,12 @@ function baseInfo(): Record<string, string> {
 }
 
 async function responseJson(response: Response, path: string): Promise<unknown> {
-  if (!response.ok) throw new Error(`${path} HTTP ${response.status}: ${await response.text()}`)
+  if (!response.ok) {
+    const header = response.headers.get('retry-after')
+    const ms = header ? (/^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now()) : 0
+    await response.body?.cancel()
+    throw new WeixinHttpError(response.status, Number.isFinite(ms) ? Math.max(0, Math.min(900_000, ms)) : 0)
+  }
   return response.json()
 }
 

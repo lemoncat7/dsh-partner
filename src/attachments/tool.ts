@@ -34,6 +34,16 @@ export function attachmentTool(companionId: string, store: PartnerStore, service
         if(!cwd)throw new Error('当前会话缺少工作目录')
         let item = typeof input.deliveryId==='string' ? service.get(input.deliveryId) : await service.serial('prepare',()=>service.prepare({companionId,sessionId,turn:origin?.seq??agent.session.seq,cwd,path:input.path as string,channel,...(source?{channelRouteId:source.id}:{})},exec.signal))
         if (!item || item.companionId!==companionId || item.sessionId!==sessionId) throw new Error('附件交付不存在或不属于当前伙伴会话')
+        // Only the live task executor may register deliverables, never a reviewer.
+        if (origin && isInternalTaskNotice(origin) && state.delegations?.some(d => d.status === 'running' && (d.kind ?? 'task') === 'task' && d.toCompanionId === companionId && d.executionSessionId === sessionId)) {
+          await store.update(state => {
+            const runs = state.delegations.filter(d => d.status === 'running' && (d.kind ?? 'task') === 'task' && d.toCompanionId === companionId && d.executionSessionId === sessionId)
+            if (runs.length !== 1) return
+            const task = state.tasks.find(t => t.id === runs[0]!.taskId && t.assigneeCompanionId === companionId && t.status === 'doing')
+            if (!task) return
+            task.resultAttachmentIds = [...new Set([...(task.resultAttachmentIds ?? []), item!.id])]
+          })
+        }
         if (!channel && item.channel!=='none') throw new Error('当前执行不能向原渠道重发附件，请回到直接对话重试')
         if (channel && item.channel==='none' && typeof input.deliveryId==='string') throw new Error('这份附件原本仅供会话查看。若要正式发送到渠道，请使用 path 明确提交原文件')
         if(channel&&item.channelRouteId!==source?.id)throw new Error('附件原始投递渠道与当前来源不一致，请回到原渠道重试；旧版未记录目标的附件请用 path 重新提交')

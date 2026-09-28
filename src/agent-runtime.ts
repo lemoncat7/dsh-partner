@@ -528,6 +528,22 @@ export class PartnerAgentRuntime {
     return true
   }
 
+  /** Append a visible receipt without starting another agent turn; its receipt survives restarts. */
+  async recordRequirementResult(route: ChannelSession, receipt: string, text: string, files: import('./attachments/service.js').AttachmentDelivery[], service: import('./attachments/service.js').AttachmentDeliveryService, prefix: string): Promise<void> {
+    const companion = this.store.snapshot().companions.find(c => c.id === route.companionId)
+    if (!companion || this.isArchived(route)) throw new Error('原需求会话不存在或已归档，保留交付等待重试')
+    const agent = await this.ensureAgent(companion, route)
+    const id = `requirement-delivery-${createHash('sha256').update(receipt).digest('hex')}`
+    if (agent.session.snapshotEvents().some(e => e.type === 'user/message' && e.data.source.kind === 'plugin' && e.data.source.plugin === '@lemoncat7/dsh-partner' && 'requirementDeliveryReceipt' in e.data && e.data.requirementDeliveryReceipt === id)) return
+    const content: ContentBlock[] = [{ type: 'text', text }]
+    for (const file of files) {
+      const name = file.name.replace(/[\[\]\\]/g, '_')
+      content.push({ type: 'text', text: `[下载附件：${name}](${prefix.replace(/\/$/, '')}/attachments/${file.id})` })
+      if (file.kind === 'image') content.push({ type: 'image', attachment: await this.ctx.attachments.saveImage({ data: await service.bytes(file), mediaType: file.mediaType as ImageMediaType, name: file.name }) })
+    }
+    agent.session.append('user/message', createUserMessage({ requirementDeliveryReceipt: id, content, source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '需求成果交付' } }), { surfaceOp: 'append' })
+  }
+
   private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     const access = await resolveHeartbeatFileAccess(conversation.session.header.cwd!, concerns)
     return executeObservationLoop({ ctx: this.ctx, conversation, companion, concerns, guard: (name, args) => heartbeatToolDenial(name, args, access), parse: parseConcernObservations, checkpoint: async(item,snapshot)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.checkpointRecording(item,snapshot)} })

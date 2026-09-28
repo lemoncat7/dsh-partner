@@ -107,6 +107,20 @@ test('internal task/review file delivery never calls the channel',async t=>{
   assert.equal(reply.channel,'none')
 })
 
+test('task executor records explicit deliverables once; reviewer cannot add them',async t=>{
+  const f=await fixture(t)
+  const state={companions:[{id:'c1'}],sessions:[{companionId:'c1',sessionId:'s1',cwd:f.cwd}],tasks:[{id:'task',assigneeCompanionId:'c1',status:'doing'}],delegations:[{taskId:'task',status:'running',kind:'task',toCompanionId:'c1',executionSessionId:'s1'}]}
+  const store={snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}
+  const tool=attachmentTool('c1',store,f.service,{}, {sendExplicitAttachment:async()=>assert.fail('internal channel leak')},'/api')
+  const exec={signal:f.signal,agent:{session:{id:'s1',header:{cwd:f.cwd},snapshotEvents:()=>[{type:'user/message',seq:2,data:{source:{kind:'plugin',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴执行看板任务'}}}]}},deferContext:()=>{}}
+  const reply=JSON.parse(await tool.execute({path:'report.md'},exec))
+  await tool.execute({deliveryId:reply.deliveryId},exec)
+  assert.deepEqual(state.tasks[0].resultAttachmentIds,[reply.deliveryId])
+  state.delegations[0].kind='review'; state.tasks[0].resultAttachmentIds=[]
+  await tool.execute({deliveryId:reply.deliveryId},exec)
+  assert.deepEqual(state.tasks[0].resultAttachmentIds,[])
+})
+
 test('continuation attachment inherits saved origin and retry never follows latest channel',async t=>{
   const f=await fixture(t), sends=[]
   const route={id:'matrix',kind:'channel',companionId:'c1',sessionId:'s1',channelId:'mx',userId:'alice',cwd:f.cwd}

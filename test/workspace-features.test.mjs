@@ -199,7 +199,8 @@ test('submitting a result notifies review even when the worker moved the task ea
   board.setProgressNotifier(async (task, previousStatus) => { notifications.push({ task, previousStatus }) })
   const task = await board.create({ title: '提前转待验收' }, { kind: 'companion', companionId: 'companion-default' })
   const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'companion', companionId: 'companion-default' })
-  const premature = await board.update(doing.id, { expectedRevision: doing.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+  await assert.rejects(board.update(doing.id, { expectedRevision: doing.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' }), /submit_result/)
+  const premature = doing
   assert.equal(notifications.length, 0)
   await board.completeExecution(premature.id, '现在才有可验收的真实结果', { kind: 'companion', companionId: 'companion-default' })
   assert.equal(notifications.length, 1)
@@ -233,7 +234,7 @@ test('orchestrator preserves output when an executing companion moves its task t
   const service = new PartnerCollaborationService(item.store, skills, board, {})
   service.setSessionExecutor({ execute: async () => {
     const current = board.require(task.id)
-    await board.update(task.id, { expectedRevision: current.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+    await item.store.update(state => { state.tasks.find(t => t.id === task.id).status = 'review' }) // Legacy persisted state, no longer allowed through update.
     return { run: { id: 'session-run-early-review' }, output: '状态提前移动，但这个结果必须保留' }
   } })
   t.after(() => service.close())
@@ -276,7 +277,7 @@ test('startup repairs legacy canceled delegations that reached review without sa
   const board = new TaskBoardService(item.store)
   const task = await board.create({ title: '修复丢失结果' }, { kind: 'user' })
   const doing = await board.update(task.id, { expectedRevision: task.revision, status: 'doing' }, { kind: 'user' })
-  await board.update(task.id, { expectedRevision: doing.revision, status: 'review' }, { kind: 'companion', companionId: 'companion-default' })
+  await item.store.update(state => { state.tasks.find(t => t.id === task.id).status = 'review' }) // Legacy persisted state, no longer allowed through update.
   await item.store.update(state => state.delegations.push({
     id: 'delegation-lost-result', kind: 'task', taskId: task.id, initiatedBy: 'user', toCompanionId: 'companion-default',
     request: '恢复丢失的结果', status: 'canceled', attempts: 2, error: '任务状态已经变为 review，忽略旧执行结果',
