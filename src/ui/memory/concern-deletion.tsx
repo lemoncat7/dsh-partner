@@ -1,5 +1,5 @@
 import {useId, useRef, useState} from 'react'
-import {IconChevronDownOutline14} from '@deepseek-ai/dsh-client-ui-primitives'
+import {IconChevronDownOutlineRegular as IconChevronDownOutline14} from '@deepseek-ai/dsh-client-ui-primitives'
 import {api, type ConcernView} from '../../client-api.js'
 import {WorkspaceDialog, WorkspaceNotice, errorMessage} from '../workspace-components.js'
 import {useMemoryResource} from './use-memory-resource.js'

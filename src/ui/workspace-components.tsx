@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import { IconAgentPresetOutline16, IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular as IconAgentPresetOutline16, IconCloseOutlineRegular as IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 export function WorkspaceHero({ eyebrow, title, detail, actions }: { eyebrow: string; title: string; detail: string; actions?: ReactNode }): JSX.Element {
   return <header className="dsh-partner-feature-hero">

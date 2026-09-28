@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { IconCheckOutline14, IconChevronDownOutline14, IconCloseOutline16, IconLinkOutline16, IconNewChatOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutlineRegular as IconCheckOutline14, IconChevronDownOutlineRegular as IconChevronDownOutline14, IconCloseOutlineRegular as IconCloseOutline16, IconLinkOutlineRegular as IconLinkOutline16, IconNewChatOutlineRegular as IconNewChatOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PartnerInbox, PartnerNotice } from '../notifications/domain.js'
 import { readerPlacement } from './use-placement.js'
 import { NoticeMarkdown } from './markdown.js'

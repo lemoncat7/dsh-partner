@@ -39,7 +39,7 @@ function fixture(mode) {
     steer:async(_c,_channel,_peer,input)=>{events.push(['steer',input.text,input.attachments.length]);if(!active)return false;gate.resolve();return true},
     reply:async(_c,_channel,_peer,input)=>{events.push(['reply',input.text]);active=true;await gate.promise;active=false;return {text:'done',attachments:[]}},
   }
-  const manager=new ChannelManager({settings:{get:()=>({busyEnter:mode})}},store,{read:async()=>({baseUrl:'http://local',botToken:'test'})},agents,'/tmp')
+  const manager=new ChannelManager({settings:{describe:()=>[{ns:'ui-conversation',value:{busyEnter:mode}}]}},store,{read:async()=>({baseUrl:'http://local',botToken:'test'})},agents,'/tmp')
   return {channel,state,controller,events,gate,store,manager,agents}
 }
 

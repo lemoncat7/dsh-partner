@@ -18,7 +18,7 @@ import type { WeixinRawItem, WeixinRawMessage } from './weixin/types.js'
 import { receiveWeixinMedia } from './weixin/media.js'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import type { AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
-import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
+import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
 import type { PartnerReply, PartnerOutboundAttachment } from '../channel-message.js'
@@ -37,7 +37,7 @@ import type { AttachmentDeliveryService } from '../attachments/service.js'
 import { requirementAttachments } from '../requirements/attachments.js'
 export { isAutonomousDeliveryTurn } from './delivery-policy.js'
 
-type ChannelContext = Context & { settings: SettingsProvider }
+type ChannelContext = Context & { settings: SettingsForms }
 class DirectDeliveryError extends Error {
   constructor() { super('消息处理或发送未完成，渠道已暂停。请在 DSH 查看执行结果后重连；同一消息不会自动重复执行。') }
 }
@@ -770,8 +770,8 @@ function shortIdentity(value: string): string {
   return `微信用户 · ${[...value].slice(-6).join('')}`
 }
 
-export function busyEnterMode(settings: Pick<SettingsProvider, 'get'> | undefined): 'queue' | 'steer' {
-  const section = settings?.get('ui-conversation') as { busyEnter?: unknown } | undefined
+export function busyEnterMode(settings: Pick<SettingsForms, 'describe'> | undefined): 'queue' | 'steer' {
+  const section = settings?.describe().find(item => item.ns === 'ui-conversation')?.value as { busyEnter?: unknown } | undefined
   return section?.busyEnter === 'steer' ? 'steer' : 'queue'
 }
 

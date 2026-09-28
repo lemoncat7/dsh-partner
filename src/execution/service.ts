@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
-import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
+import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRuntime, ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -106,7 +106,7 @@ export class EphemeralExecutionService {
           ...(request.companion.presetId ? { agentPreset: request.companion.presetId } : {}),
         },
         agentOptions: resolvePartnerAgentOptions(this.ctx.agentDefaultModel, request.companion),
-        setup: async agentCtx => {
+        setup: async (agentCtx, agent) => {
           const presets = agentCtx.get('agentPresets') as AgentPresets | undefined
           if (!presets) throw new Error('Temporary partner session is missing Agent Presets')
           await presets.mount(agentCtx, request.companion.presetId)
@@ -115,7 +115,7 @@ export class EphemeralExecutionService {
           if (request.systemInstruction) agentCtx.systemPrompt.section({ name: 'partner-ephemeral-task', order: -8, text: request.systemInstruction })
           agentCtx.tools.presentAs('native')
           for (const tool of this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
-          if (request.allowedTools !== undefined) restrictTools(agentCtx as ExecutionContext, request.allowedTools)
+          if (request.allowedTools !== undefined) restrictTools(agentCtx as ExecutionContext, agent, request.allowedTools)
         },
       })
       this.active.set(sessionId, handle)
@@ -128,7 +128,7 @@ export class EphemeralExecutionService {
       request.signal?.throwIfAborted()
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: request.prompt }],
-        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: executionSummary(request.kind) },
+        source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: executionSummary(request.kind) },
       }))
       const timer = setTimeout(() => { timedOut = true; handle?.agent.cancel({ kind: 'hook', reason: 'partner temporary execution timed out' }) }, timeoutMs)
       timer.unref?.()
@@ -173,9 +173,7 @@ export class ExecutionFailedError extends Error {
   constructor(readonly run: ExecutionRun) { super(run.error ?? 'Temporary execution failed') }
 }
 
-function restrictTools(ctx: ExecutionContext, requested: string[]): void {
-  const agent = ctx.agent
-  if (!agent) throw new Error('Temporary agent scope is unavailable')
+function restrictTools(ctx: ExecutionContext, agent: Agent, requested: string[]): void {
   const visible = ctx.tools.schemas(agent).map(tool => tool.name).filter(name => name !== 'run_code')
   const requestedSet = new Set(requested)
   const allowed = visible.filter(name => requestedSet.has(name))

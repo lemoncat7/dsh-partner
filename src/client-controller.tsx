@@ -3,6 +3,7 @@ import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { api } from './client-api.js'
 import { registerMainPanel } from './main-panel-compat.js'
 import { activatePluginWorkspace } from './workspace-ownership.js'
@@ -47,19 +48,19 @@ export function createPartnerController(ctx: ClientContext, pluginId: string, re
       if (prepared.sessionId !== sessionId) throw new Error('伙伴会话标识不一致')
       await waitForClientSession(ctx, sessionId)
       controller.close()
-      sessions(ctx).open(sessionId as SessionId)
+      ctx.uiWorkspace.openSession(sessionId as SessionId)
     },
     async startSession(companionId) {
       const created = await api<{ routeId: string; sessionId: string }>(`/companions/${encodeURIComponent(companionId)}/session`, { method: 'POST' })
       await waitForClientSession(ctx, created.sessionId)
       controller.close()
-      sessions(ctx).open(created.sessionId as SessionId)
+      ctx.uiWorkspace.openSession(created.sessionId as SessionId)
     },
     async renewSession(routeId) {
       const renewed = await api<{ routeId: string; sessionId: string }>(`/sessions/${encodeURIComponent(routeId)}/renew`, { method: 'POST' })
       await waitForClientSession(ctx, renewed.sessionId)
       controller.close()
-      sessions(ctx).open(renewed.sessionId as SessionId)
+      ctx.uiWorkspace.openSession(renewed.sessionId as SessionId)
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
   }

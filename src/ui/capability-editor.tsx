@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconCheckOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutlineRegular as IconCheckOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type Capability, type CompanionView, type ModelCatalogView, type PartnerSnapshot } from '../client-api.js'
 import { CAPABILITY_LABELS } from '../capabilities.js'
 import { CapabilityResources } from './capability-resources.js'

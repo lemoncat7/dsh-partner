@@ -1,5 +1,5 @@
 import {useMemo, useRef, useState} from 'react'
-import {IconDataOutline16, IconBrowseOutline16, IconListPenOutline16, IconLinkOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
+import {IconDataOutlineRegular as IconDataOutline16, IconBrowseOutlineRegular as IconBrowseOutline16, IconListPenOutlineRegular as IconListPenOutline16, IconLinkOutlineRegular as IconLinkOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
 import type {MemoryView, MemoryGraphView} from '../../client-api.js'
 import {CollectionEmpty, WorkspaceDialog, WorkspaceNotice} from '../workspace-components.js'
 import {relativeTime} from '../partner-components.js'

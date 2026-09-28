@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconTrashOutlineRegular as IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type BoardTaskView, type PartnerDirectoryEntryView, type RequirementView } from '../client-api.js'
 import { WorkspaceNotice, errorMessage } from './workspace-components.js'
 

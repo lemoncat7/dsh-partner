@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { IconPlusOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlusOutlineRegular as IconPlusOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { WorkspaceDialog, WorkspaceNotice, errorMessage } from './workspace-components.js'
 
 export interface NewCompanionDraft {

@@ -1,4 +1,4 @@
-import { IconBrowseOutline16, IconEditOutline16, IconListPenOutline16, IconPlayOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBrowseOutlineRegular as IconBrowseOutline16, IconEditOutlineRegular as IconEditOutline16, IconListPenOutlineRegular as IconListPenOutline16, IconPlayOutlineRegular as IconPlayOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { TabButton } from './partner-components.js'
 export { GeneralSettingsPanel } from './storage-settings.js'
 

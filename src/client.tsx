@@ -8,9 +8,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { observePluginWorkspace } from './workspace-ownership.js'
 import {
-  IconAgentPresetOutline16, IconChevronDownOutline14, IconChevronLeftOutline14,
-  IconDataOutline16, IconEditOutline16, IconLinkOutline16, IconPlusOutline16,
-  IconRefreshOutline16, IconUserOutline16, IconBrowseOutline16, IconListPenOutline16, IconPlayOutline16,
+  IconAgentPresetOutlineRegular as IconAgentPresetOutline16, IconChevronDownOutlineRegular as IconChevronDownOutline14, IconChevronLeftOutlineRegular as IconChevronLeftOutline14,
+  IconDataOutlineRegular as IconDataOutline16, IconEditOutlineRegular as IconEditOutline16, IconLinkOutlineRegular as IconLinkOutline16, IconPlusOutlineRegular as IconPlusOutline16,
+  IconRefreshOutlineRegular as IconRefreshOutline16, IconUserOutlineRegular as IconUserOutline16, IconBrowseOutlineRegular as IconBrowseOutline16, IconListPenOutlineRegular as IconListPenOutline16, IconPlayOutlineRegular as IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
 import baseCssText from './client.css'
@@ -59,7 +59,7 @@ type View = CompanionTab | WorkspacePage
 
 const WORKSPACE_PAGES = new Set<View>(['skills', 'mcp', 'board', 'schedules', 'pendant', 'general'])
 
-export const inject = ['slots', 'layout', 'sessions']
+export const inject = ['slots', 'layout', 'sessions', 'uiWorkspace']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(installStyles, 'dsh-partner: styles')

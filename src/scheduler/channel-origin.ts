@@ -3,6 +3,7 @@ import type { ChannelSession, PartnerState } from '../domain.js'
 import type { ScheduleContinuation } from './domain.js'
 import { isInternalTaskNotice } from '../channels/delivery-policy.js'
 import { questionOrigin } from '../channels/question-origin.js'
+import { isPluginSource } from '../message-source.js'
 
 export function savedContinuationRoute(state: PartnerState, owner: string, wake: ScheduleContinuation): ChannelSession | undefined {
   if (wake.board || !wake.originChannel) return
@@ -17,7 +18,7 @@ export function savedContinuationRoute(state: PartnerState, owner: string, wake:
 export function continuationChannelOrigin(state: PartnerState, owner: string, sessionId: string, events: readonly SessionEvent[]): ChannelSession | undefined {
   const origin = [...events].reverse().find(e => e.type === 'user/message' && (e.data.source.kind === 'user' || isInternalTaskNotice(e)))
   if (origin && isInternalTaskNotice(origin) && origin.type === 'user/message') {
-    if (origin.data.source.kind !== 'plugin' || origin.data.source.form !== 'notice' || origin.data.source.summary !== '伙伴长任务续接') return
+    if (!isPluginSource(origin.data.source, '@lemoncat7/dsh-partner') || origin.data.source.form !== 'notice' || origin.data.source.summary !== '伙伴长任务续接') return
     const entry = state.schedules.find(s => s.companionId === owner && s.continuation?.originSessionId === sessionId && s.continuation.messageId === origin.data.id)
     if (!entry?.continuation || entry.continuation.state === 'cancelled') return
     return savedContinuationRoute(state, owner, entry.continuation)

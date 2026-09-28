@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isPluginSource } from './message-source.js'
 import { deliverScheduledWake } from './scheduler/wakeup.js'
 import { continuationPrompt } from './scheduler/continuations.js'
 import { assertWakeTools } from './scheduler/wakeup-context.js'
@@ -10,7 +11,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
-import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
+import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
@@ -202,13 +203,13 @@ export class PartnerAgentRuntime {
     const recalled = context?.relevant ?? []
     if (recalled.length > 0 || context?.scenes?.length || context?.history?.length) agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderMemory(recalled, context?.connections, context?.scenes, context?.history) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴为插话召回了相关长期记忆' },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴为插话召回了相关长期记忆' },
     }))
     const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
     if (deferred && deferred.length > 0) {
       agent.inject(createUserMessage({
         content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
-        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
+        source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
       }))
       await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     }
@@ -309,7 +310,7 @@ export class PartnerAgentRuntime {
         task.reviewSummary ? `验收：\n${task.reviewSummary.slice(0, 2000)}` : '',
         downstream.length > 0 ? `后续任务：\n${downstream.map(item => `- ${item.title}（${item.status}）`).join('\n')}` : '没有依赖此任务的后续任务。',
       ].filter(Boolean).join('\n\n') }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: taskProgressNoticeSummary(task.status) },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: taskProgressNoticeSummary(task.status) },
     }))
   }
 
@@ -326,7 +327,7 @@ export class PartnerAgentRuntime {
     signal.throwIfAborted()
     assertWakeTools(entry, assembly.tools.map(tool => tool.name))
     const message = createUserMessage({ content: [{ type: 'text', text: continuationPrompt(entry) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴长任务续接' } })
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴长任务续接' } })
     await this.store.update(state => {
       const current = state.schedules.find(s => s.id === entry.id)?.continuation
       if (current && current.runToken === wake.runToken) current.messageId = message.id
@@ -359,7 +360,7 @@ export class PartnerAgentRuntime {
       input.signal?.throwIfAborted()
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: input.prompt }],
-        source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
+        source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
       }))
       let timedOut = false
       const timer = setTimeout(() => {
@@ -523,7 +524,7 @@ export class PartnerAgentRuntime {
     if (conversation.status !== 'idle') await conversation.whenIdle()
     conversation.session.append('user/message', createUserMessage({
       content: [{ type: 'text', text: renderConcernCreatedNotice(concerns) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: CONCERN_CREATED_NOTICE },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: CONCERN_CREATED_NOTICE },
     }), { surfaceOp: 'append' })
     return true
   }
@@ -534,14 +535,14 @@ export class PartnerAgentRuntime {
     if (!companion || this.isArchived(route)) throw new Error('原需求会话不存在或已归档，保留交付等待重试')
     const agent = await this.ensureAgent(companion, route)
     const id = `requirement-delivery-${createHash('sha256').update(receipt).digest('hex')}`
-    if (agent.session.snapshotEvents().some(e => e.type === 'user/message' && e.data.source.kind === 'plugin' && e.data.source.plugin === '@lemoncat7/dsh-partner' && 'requirementDeliveryReceipt' in e.data && e.data.requirementDeliveryReceipt === id)) return
+    if (agent.session.snapshotEvents().some(e => e.type === 'user/message' && isPluginSource(e.data.source, '@lemoncat7/dsh-partner') && 'requirementDeliveryReceipt' in e.data && e.data.requirementDeliveryReceipt === id)) return
     const content: ContentBlock[] = [{ type: 'text', text }]
     for (const file of files) {
       const name = file.name.replace(/[\[\]\\]/g, '_')
       content.push({ type: 'text', text: `[下载附件：${name}](${prefix.replace(/\/$/, '')}/attachments/${file.id})` })
       if (file.kind === 'image') content.push({ type: 'image', attachment: await this.ctx.attachments.saveImage({ data: await service.bytes(file), mediaType: file.mediaType as ImageMediaType, name: file.name }) })
     }
-    agent.session.append('user/message', createUserMessage({ requirementDeliveryReceipt: id, content, source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '需求成果交付' } }), { surfaceOp: 'append' })
+    agent.session.append('user/message', createUserMessage({ requirementDeliveryReceipt: id, content, source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '需求成果交付' } }), { surfaceOp: 'append' })
   }
 
   private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
@@ -561,7 +562,7 @@ export class PartnerAgentRuntime {
     conversation.session.append('user/message', createUserMessage({
       content: [{ type: 'text', text: renderHeartbeatActivity(execution, outcome, deliveryError) }],
       source: {
-        kind: 'plugin',
+        kind: 'plugin:@lemoncat7/dsh-partner',
         plugin: '@lemoncat7/dsh-partner',
         form: 'notice',
         summary: '伙伴正在进行低打扰心跳检查',
@@ -705,12 +706,12 @@ export class PartnerAgentRuntime {
     const recalled = context?.relevant ?? []
     if (recalled.length > 0 || context?.scenes?.length || context?.history?.length) agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderMemory(recalled, context?.connections, context?.scenes, context?.history) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴回忆了与当前消息相关的长期记忆' },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴回忆了与当前消息相关的长期记忆' },
     }))
     const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
     if (deferred && deferred.length > 0) agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
     }))
     const startSeq = agent.session.seq
     let directProgress=false
@@ -897,7 +898,7 @@ export class PartnerAgentRuntime {
     if (previous === undefined && profile.entries.length === 0 && !profile.preferences?.length) return
     agent.inject(createUserMessage({
       content: [{ type: 'text', text: renderProfile(profile, previous !== undefined) }],
-      source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: previous === undefined ? '伙伴载入了联系人画像' : '伙伴的人物画像已更新' },
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: previous === undefined ? '伙伴载入了联系人画像' : '伙伴的人物画像已更新' },
     }))
   }
 

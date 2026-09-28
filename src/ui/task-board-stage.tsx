@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { IconChevronRightOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronRightOutlineRegular as IconChevronRightOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BoardTaskStatusView, BoardTaskView } from '../client-api.js'
 
 /** Bounded progressive disclosure; a single page scroll, no tiny inner scroll box. */

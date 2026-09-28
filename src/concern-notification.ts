@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { isPluginSource } from './message-source.js'
 import type { PartnerConcern } from './concern-domain.js'
 
 export const CONCERN_CREATED_NOTICE = '伙伴自动新增关注'
@@ -20,7 +21,7 @@ export function renderConcernCreatedNotice(concerns: readonly PartnerConcern[]):
 export function concernCreatedNoticeFromEvent(event: SessionEvent): string | undefined {
   if (event.type !== 'user/message') return undefined
   const source = event.data.source
-  if (source.kind !== 'plugin' || source.plugin !== '@lemoncat7/dsh-partner'
+  if (!isPluginSource(source, '@lemoncat7/dsh-partner')
     || source.form !== 'notice' || source.summary !== CONCERN_CREATED_NOTICE) return undefined
   const value = event.data.content
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text')

@@ -12,7 +12,10 @@ export function replyStage(event:SessionEvent):ReplyStage|undefined {
 }
 export function replyActivity(event:SessionEvent):ReplyActivity|undefined {
   if(event.type==='tool/call')return {kind:'tool-start',id:event.data.callId,name:/^[\w.:-]{1,100}$/.test(event.data.name)?event.data.name:'工具'}
-  if(event.type==='tool/result')return {kind:'tool-end',id:event.data.message.content[0].toolCallId,failed:!!event.data.error||!!event.data.message.content[0].isError}
+  if(event.type==='tool/result'){
+    const result=event.data.message
+    return {kind:'tool-end',id:result.toolCallId,failed:!!event.data.error||!!result.isError}
+  }
   if(event.type==='assistant/message'&&!event.data.interrupted&&event.data.message.content.some(block=>block.type==='tool-call')){
     const text=event.data.message.content.filter(block=>block.type==='text').map(block=>block.text).join('\n').trim()
     if(text)return {kind:'text',text}

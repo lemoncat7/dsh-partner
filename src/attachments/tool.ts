@@ -59,7 +59,7 @@ export function attachmentTool(companionId: string, store: PartnerStore, service
         catch (cause) { error=cause instanceof Error?cause.message:String(cause) }
         const status=item.channel==='sent'?'渠道附件已发送':item.channel==='none'?'仅交付到当前会话':`渠道发送未完成，请用 deliveryId 重试：${item.id}`
         content.push({type:'text',text:status})
-        exec.deferContext(createUserMessage({source:{kind:'plugin',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴附件交付'},content}))
+        exec.deferContext(createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴附件交付'},content}))
         return JSON.stringify({deliveryId:item.id,name:item.name,conversation:'attachment_recorded',channel:item.channel,...(error?{error,retry:{deliveryId:item.id}}:{})})
       })
     },

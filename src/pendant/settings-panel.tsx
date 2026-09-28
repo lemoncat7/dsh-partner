@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { IconAgentPresetOutline16, IconCheckOutline14, IconPlusOutline16, IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular as IconAgentPresetOutline16, IconCheckOutlineRegular as IconCheckOutline14, IconPlusOutlineRegular as IconPlusOutline16, IconRefreshOutlineRegular as IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { WorkspaceBlock, WorkspaceHero, WorkspaceNotice, errorMessage } from '../ui/workspace-components.js'
 import { DEFAULT_PENDANT_SETTINGS, normalizePendantSettings, samePendantSettings, type StrapMaterial, type PendantFps, type CardImageFit } from './settings.js'
 import { savePendantSettings, usePendantSettings } from './use-settings.js'

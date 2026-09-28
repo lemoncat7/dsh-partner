@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { IconChevronRightOutline14, IconPlusOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronRightOutlineRegular as IconChevronRightOutline14, IconPlusOutlineRegular as IconPlusOutline16, IconSearchOutlineRegular as IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type TaskBoardView, type PartnerDirectoryEntryView, type RequirementView } from '../client-api.js'
 import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 import { useBoardRefresh } from './board-refresh.js'

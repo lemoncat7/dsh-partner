@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { IconPlayOutline16, IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlayOutlineRegular as IconPlayOutline16, IconPlusOutlineRegular as IconPlusOutline16, IconRefreshOutlineRegular as IconRefreshOutline16, IconTrashOutlineRegular as IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type CompanionView, type ExecutionRunView, type ScheduledTaskView } from '../client-api.js'
 import { CollectionEmpty, CollectionSkeleton, WorkspaceBlock, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 

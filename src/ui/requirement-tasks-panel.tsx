@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { IconCheckOutline16, IconChevronRightOutline14, IconCloseOutline16, IconPlusOutline16, IconSearchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutlineRegular as IconCheckOutline16, IconChevronRightOutlineRegular as IconChevronRightOutline14, IconCloseOutlineRegular as IconCloseOutline16, IconPlusOutlineRegular as IconPlusOutline16, IconSearchOutlineRegular as IconSearchOutline16, IconTrashOutlineRegular as IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type BoardTaskStatusView, type BoardTaskView, type PartnerDelegationView, type PartnerDirectoryEntryView, type TaskActivityView, type TaskBoardView } from '../client-api.js'
 import { CollectionSkeleton, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'
 import { TaskBoardStage } from './task-board-stage.js'

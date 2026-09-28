@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { IconCheckOutline14, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutlineRegular as IconCheckOutline14, IconTrashOutlineRegular as IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type CompanionView } from '../client-api.js'
 import { companionDraft } from './companion-draft.js'
 import { FormField as Field, SectionHeading as Section } from './partner-components.js'

@@ -1,5 +1,5 @@
 import {useEffect, useId, useRef, useState, type FormEvent} from 'react'
-import {IconCheckOutline14, IconChevronDownOutline14, IconPlusOutline16, IconLinkOutline16, IconDataOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
+import {IconCheckOutlineRegular as IconCheckOutline14, IconChevronDownOutlineRegular as IconChevronDownOutline14, IconPlusOutlineRegular as IconPlusOutline16, IconLinkOutlineRegular as IconLinkOutline16, IconDataOutlineRegular as IconDataOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
 import {api, type ConcernActivityView, type ConcernView, type ConcernSourceView, type ConcernObservationView} from '../../client-api.js'
 import {futureTime} from '../../time-format.js'
 import {errorMessage as message} from '../workspace-components.js'

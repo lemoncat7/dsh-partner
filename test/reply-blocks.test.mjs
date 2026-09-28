@@ -51,7 +51,7 @@ test('steering fences block activity and final delivery until the boundary is co
 })
 test('event projection excludes tool arguments/results, reasoning and final prose',()=>{
  assert.deepEqual(replyActivity({type:'tool/call',data:{callId:'a',name:'bash',arguments:'password'}}),start('a','bash'))
- assert.deepEqual(replyActivity({type:'tool/result',data:{message:{content:[{toolCallId:'a',isError:true,content:[{text:'secret'}]}]}}}),end('a',true))
+ assert.deepEqual(replyActivity({type:'tool/result',data:{message:{role:'tool',toolCallId:'a',isError:true,content:[{type:'text',text:'secret'}]}}}),end('a',true))
  const message=content=>({type:'assistant/message',data:{message:{content}}})
  assert.equal(replyActivity(message([{type:'text',text:'final'}])),undefined)
  assert.deepEqual(replyActivity(message([{type:'reasoning',text:'private'},{type:'text',text:'说明'},{type:'tool-call'}])),{kind:'text',text:'说明'})

@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { isPluginSource } from '../message-source.js'
 
 const INTERNAL_TASK_NOTICES = new Set([
   '看板任务待验收', '看板任务已完成', '看板任务受阻', '伙伴执行看板任务', '伙伴核验看板任务', '伙伴汇总需求',
@@ -7,8 +8,8 @@ const INTERNAL_TASK_NOTICES = new Set([
 ])
 
 export function isInternalTaskNotice(event: SessionEvent): boolean {
-  return event.type === 'user/message' && event.data.source.kind === 'plugin'
-    && event.data.source.plugin === '@lemoncat7/dsh-partner' && event.data.source.form === 'notice'
+  return event.type === 'user/message' && isPluginSource(event.data.source, '@lemoncat7/dsh-partner')
+    && event.data.source.form === 'notice'
     && INTERNAL_TASK_NOTICES.has(event.data.source.summary ?? '')
 }
 
@@ -22,8 +23,8 @@ export function isAutonomousDeliveryTurn(events: readonly SessionEvent[], histor
     if (isInternalTaskNotice(event)) return false
     if (event.type === 'user/message' && event.data.source.kind === 'user') break
   }
-  return events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin'
-    && event.data.source.plugin === 'tool-goal' && event.data.source.form === 'notice'
+  return events.some(event => event.type === 'user/message' && isPluginSource(event.data.source, 'tool-goal')
+    && event.data.source.form === 'notice'
     && event.data.source.summary?.startsWith('complete:'))
 }
 

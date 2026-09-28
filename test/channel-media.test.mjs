@@ -112,7 +112,7 @@ test('channel tells the user when an attachment upload fails, without regenerati
   const store = await PartnerStore.open(join(root, 'state.json'))
   await store.update(state => state.pairings.push({ id: 'approved', channelId: 'channel', userId: 'user', displayName: 'User', status: 'approved', createdAt: 1, updatedAt: 1 }))
   let replies = 0
-  const manager = new ChannelManager({ settings: { get: () => 'queue' }, logger: { warn: () => {} } }, store, {}, {
+  const manager = new ChannelManager({ settings: { describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'queue' } }] }, logger: { warn: () => {} } }, store, {}, {
     reply: async () => { replies++; return { text: '完成，图片如下。', attachments: [{ path: join(root, 'image.png'), name: 'image.png', kind: 'image', mediaType: 'image/png' }] } },
   }, root)
   const messages = []
@@ -435,7 +435,7 @@ test('renders and parses DSH questions for a text-only channel', () => {
 })
 
 test('adopts the global busy-enter preference with a queue-safe fallback', () => {
-  assert.equal(busyEnterMode({ get: () => ({ busyEnter: 'steer' }) }), 'steer')
-  assert.equal(busyEnterMode({ get: () => ({ busyEnter: 'queue' }) }), 'queue')
-  assert.equal(busyEnterMode({ get: () => undefined }), 'queue')
+  assert.equal(busyEnterMode({ describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'steer' } }] }), 'steer')
+  assert.equal(busyEnterMode({ describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'queue' } }] }), 'queue')
+  assert.equal(busyEnterMode({ describe: () => [] }), 'queue')
 })

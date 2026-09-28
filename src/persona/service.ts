@@ -39,7 +39,7 @@ export class PersonaService {
         messages: [createUserMessage({content: [{type: 'text', text: JSON.stringify({
           sources: job.sources, previous: job.previous.map(({topic,basis,text}) => ({topic,basis,text})),
           corrections: job.corrections,
-        })}], source: {kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴综合画像'}})],
+        })}], source: {kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴综合画像'}})],
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
         if (output.length > 24_000) throw new Error('画像输出超出限制')

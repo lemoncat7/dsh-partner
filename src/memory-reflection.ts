@@ -96,7 +96,7 @@ export class MemoryReflectionService {
     try {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
-        messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
+        messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
         system: DAILY_REVIEW_SYSTEM, temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
@@ -127,7 +127,7 @@ export class MemoryReflectionService {
     try {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
-        messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
+        messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
         system: REFLECTION_SYSTEM + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
         temperature: 0.1,
         maxTokens: 1800,

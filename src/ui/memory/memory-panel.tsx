@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react'
 import {conversationMemoryScope} from '../../memory-scope.js'
-import {IconRefreshOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
+import {IconRefreshOutlineRegular as IconRefreshOutline16} from '@deepseek-ai/dsh-client-ui-primitives'
 import {api, type CompanionView, type PartnerSnapshot} from '../../client-api.js'
 import {WorkspaceHero, WorkspaceNotice, CollectionEmpty, errorMessage} from '../workspace-components.js'
 import {MemoryLibrary} from './memory-library.js'

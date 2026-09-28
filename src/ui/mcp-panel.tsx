@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { IconPlusOutline16, IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlusOutlineRegular as IconPlusOutline16, IconRefreshOutlineRegular as IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api } from '../client-api.js'
 import type { McpCatalog, McpServerView } from '../mcp/domain.js'
 import { CollectionEmpty, CollectionSkeleton, WorkspaceBlock, WorkspaceDialog, WorkspaceHero, WorkspaceNotice, errorMessage } from './workspace-components.js'

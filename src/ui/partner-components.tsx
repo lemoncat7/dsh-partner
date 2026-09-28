@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { IconAgentPresetOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular as IconAgentPresetOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChannelView } from '../client-api.js'
 
 export function ChannelStatus({ channel }: { channel: ChannelView | undefined }): JSX.Element {
