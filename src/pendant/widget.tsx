@@ -7,6 +7,7 @@ import { usePartnerInbox } from './use-inbox.js'
 import { usePendantPlacement } from './use-placement.js'
 import { PendantReader } from './reader.js'
 import { usePendantSettings } from './use-settings.js'
+import { waitForPendantStartup } from './startup.js'
 import type { PendantSettings } from './settings.js'
 
 function messageLabel(notice: PartnerNotice): string {
@@ -48,7 +49,7 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
   useEffect(() => {
     const abort = new AbortController()
     const url = `${PARTNER_API}/pendant/renderer.js`
-    void import(/* @vite-ignore */ url).then(async (module: { createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonElement, options: LanyardOptions): Promise<LanyardHandle> }) => {
+    void waitForPendantStartup(abort.signal).then(() => import(/* @vite-ignore */ url)).then(async (module: { createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonElement, options: LanyardOptions): Promise<LanyardHandle> }) => {
       if (abort.signal.aborted || !canvas.current || !hit.current) return
       const instance = await module.createLanyard(canvas.current, hit.current, {
         signal: abort.signal, onTap: () => toggle.current(), onFailure: () => { handle.current?.destroy(); handle.current = undefined; setReady(false); setFailed(true) },

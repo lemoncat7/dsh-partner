@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import RAPIER from '@dimforge/rapier3d-compat'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { yieldPendantStartup } from './startup.js'
 import { createLanyardPhysics, LANYARD_STEP } from './physics.js'
 import { createLanyardStrap } from './strap.js'
 import { createBadgeSheen } from './sheen.js'
@@ -25,7 +26,7 @@ let physicsReady: Promise<void> | undefined
 export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonElement, options: LanyardOptions): Promise<LanyardHandle> {
   physicsReady ??= RAPIER.init().catch(error => { physicsReady = undefined; throw error })
   await physicsReady
-  options.signal.throwIfAborted()
+  await yieldPendantStartup(options.signal)
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' })
   renderer.setClearColor(0x000000, 0)
   renderer.setPixelRatio(badgePixelRatio(devicePixelRatio))
@@ -40,7 +41,7 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   camera.position.set(0, 0, 10)
   const pmrem = new THREE.PMREMGenerator(renderer)
   const room = new RoomEnvironment()
-  const environment = pmrem.fromScene(room)
+  const environment = pmrem.fromScene(room, 0, .1, 100, { size: 128 })
   room.dispose()
   pmrem.dispose()
   scene.environment = environment.texture
@@ -212,6 +213,18 @@ export async function createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonEl
   const hide = (): void => { end(); if (document.hidden) { noticeMotion.cancel(); sheen.clear(); glare.clear(); loop.stop(); accumulator = 0 } else resize() }
   const blur = (): void => end()
   const lost = (event: Event): void => { event.preventDefault(); options.onFailure() }
+  // Compile before the first visible render; KHR_parallel_shader_compile
+  // allows the browser to process input while the driver prepares shaders.
+  try {
+    await yieldPendantStartup(options.signal)
+    await renderer.compileAsync(scene, camera)
+    options.signal.throwIfAborted()
+  } catch (error) {
+    strap.destroy(); world.free()
+    for (const disposable of disposables) disposable.dispose()
+    renderer.dispose()
+    throw error
+  }
   const observer = new ResizeObserver(resize); observer.observe(canvas.parentElement!)
   reduced.addEventListener('change', wake)
   hit.addEventListener('pointerdown', down); hit.addEventListener('pointermove', move)
