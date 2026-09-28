@@ -48,10 +48,17 @@ export async function migrateLayout(statePath:string,root:string,state:PartnerSt
   }
   const deliveryRoot=join(layout.legacyPublic,'attachment-deliveries'),deliveryDb=join(deliveryRoot,'deliveries.sqlite')
   let deliveries:AttachmentDelivery[]=[]
+  let attachmentLimitMiB=512
   if(await exists(deliveryDb)) {
     await safeTree(deliveryRoot)
     const db=new DatabaseSync(deliveryDb,{readOnly:true})
-    try{deliveries=db.prepare('SELECT payload FROM deliveries').all().map(row=>JSON.parse(String(row.payload)))}finally{db.close()}
+    try{
+      deliveries=db.prepare('SELECT payload FROM deliveries').all().map(row=>JSON.parse(String(row.payload)))
+      if(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='attachment_settings'").get()){
+        const setting=db.prepare("SELECT value FROM attachment_settings WHERE key='limitMiB'").get()
+        if(setting)attachmentLimitMiB=Number(setting.value)
+      }
+    }finally{db.close()}
     for(const item of deliveries)owners.add(item.companionId)
   }
   for(const owner of owners)layout.privateRoot(owner)
@@ -94,8 +101,14 @@ export async function migrateLayout(statePath:string,root:string,state:PartnerSt
   }
   const inbox=await PartnerInboxStore.openPartitioned(join(staging(layout.publicRoot),'indexes','inbox.sqlite'),privateStage)
   try{for(const notice of notices){inbox.append(notice);if(notice.readAt!==undefined)inbox.markRead([notice.id],notice.readAt)}}finally{inbox.close()}
-  const attachments=await AttachmentDeliveryService.openPartitioned(join(staging(layout.publicRoot),'indexes','attachments'),privateStage)
-  try{for(const item of deliveries){if(!/^[a-f0-9]{64}$/.test(item.id))throw Error('附件迁移标识无效');await safeTree(join(deliveryRoot,item.id));await attachments.importExisting(item,await readFile(join(deliveryRoot,item.id)))}}finally{attachments.close()}
+  const attachments=await AttachmentDeliveryService.openGrouped(join(staging(layout.publicRoot),'attachment-deliveries'))
+  attachments.setLimitMiB(attachmentLimitMiB)
+  try{for(const item of deliveries){
+    if(!/^[a-f0-9]{64}$/.test(item.id)||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,199}$/.test(item.companionId))throw Error('附件迁移标识无效')
+    const groupedSource=join(deliveryRoot,item.companionId,item.id)
+    const source=await exists(groupedSource)?groupedSource:join(deliveryRoot,item.id)
+    await safeTree(source);await attachments.importExisting(item,await readFile(source))
+  }}finally{attachments.close()}
   for(const target of targets)await verifyDatabases(staging(target))
   for(const target of targets){await rename(staging(target),target);await syncDirectory(dirname(target))}
   await atomicJson(journalPath,{...journal,phase:'installed'})

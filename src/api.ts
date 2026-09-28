@@ -183,7 +183,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       await runtime.companions.remove(id, {
         isBusy: target => runtime.agents.isCompanionBusy(target) || runtime.heartbeat.isRunning(target) || runtime.dailyReview.isRunning(target),
         validateDirectory: target => runtime.agents.validateCompanionDirectory(target),
-        ...(removeFiles === '1' ? { removeDirectory: async (target: string) => { runtime.inbox.releaseOwner(target); runtime.deliveries?.releaseOwner(target); await runtime.agents.removeCompanionDirectory(target) } } : {}),
+        ...(removeFiles === '1' ? { removeDirectory: async (target: string) => { runtime.inbox.releaseOwner(target); await runtime.deliveries?.removeOwner(target); await runtime.agents.removeCompanionDirectory(target) } } : {}),
         detachWorkspace: target => runtime.agents.removeCompanionWorkspace(target),
         resetSessions: target => runtime.agents.resetCompanion(target),
         clearMemory: target => runtime.memory.clear(target),

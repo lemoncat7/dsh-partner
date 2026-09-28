@@ -1605,3 +1605,38 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-record-options button small { flex-shrink: 0; color: var(--partner-text-tertiary); }
 .dsh-partner-record-selection, .dsh-partner-record-summary { margin: 0; padding: 8px 12px; font-size: var(--partner-font-caption); color: var(--partner-text-secondary); overflow-wrap: anywhere; }
 .dsh-partner-record-selection { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.dsh-partner-workspace .attachment-storage-block { padding: 16px; gap: 10px; }
+#partner-attachment-storage { min-width: 0; font: var(--partner-font-body)/1.5 var(--partner-font-family); }
+#partner-attachment-storage :is(form, label, p) { margin: 0; }
+#partner-attachment-storage :is(.attachment-storage-overview, form, .attachment-storage-filters, .attachment-storage-selection) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#partner-attachment-storage .attachment-storage-usage { flex: 1 1 180px; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+#partner-attachment-storage small { color: var(--partner-text-secondary); font-size: 12px; }
+#partner-attachment-storage label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: var(--partner-text-secondary); }
+#partner-attachment-storage :is(button, select, input[type=number]) { appearance: none !important; box-sizing: border-box; width: auto; min-width: 0; max-width: 100%; min-height: 32px; height: 32px; padding: 4px 10px !important; border: 1px solid var(--partner-border) !important; border-radius: 8px !important; background: var(--partner-control) !important; color: var(--partner-text) !important; box-shadow: none !important; font: 13px/1.4 var(--partner-font-family) !important; }
+#partner-attachment-storage button { cursor: pointer; white-space: nowrap; }
+#partner-attachment-storage button:hover:not(:disabled) { background: var(--partner-card-surface) !important; }
+#partner-attachment-storage input[type=number] { width: 86px; font-variant-numeric: tabular-nums; }
+#partner-attachment-storage select { max-width: 160px; padding-right: 28px !important; text-overflow: ellipsis; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23909095' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") !important; background-repeat: no-repeat !important; background-position: right 7px center !important; }
+#partner-attachment-storage :is(button,input,select,summary):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 2px; }
+#partner-attachment-storage :disabled { opacity: .5; cursor: not-allowed; }
+#attachment-storage-manager { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--partner-border); display: grid; gap: 10px; }
+#partner-attachment-storage .attachment-storage-list { max-height: 360px; overflow-y: auto; scrollbar-width: thin; }
+#partner-attachment-storage .attachment-storage-row { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--partner-border); }
+#partner-attachment-storage .attachment-storage-row > span { flex: 1; min-width: 0; }
+#partner-attachment-storage .attachment-storage-row strong { display: block; color: var(--partner-text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#partner-attachment-storage .attachment-storage-row small { display: block; overflow-wrap: anywhere; }
+#partner-attachment-storage input[type=checkbox] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--partner-accent-strong); }
+#partner-attachment-storage .attachment-storage-help { font-size: 12px; color: var(--partner-text-secondary); }
+#partner-attachment-storage .attachment-storage-help summary { cursor: pointer; padding: 4px 0; }
+#partner-attachment-storage .attachment-storage-help p { margin: 6px 0; }
+#partner-attachment-storage code { display: block; overflow-wrap: anywhere; font-size: 12px; }
+#partner-attachment-storage > :is([role=alert],[role=status]) { margin-top: 8px; font-size: 13px; }
+@media (pointer: coarse) {
+  #partner-attachment-storage :is(button,select,input[type=number]) { min-height: 40px; height: 40px; }
+  #partner-attachment-storage .attachment-storage-row { min-height: 44px; }
+}
+@media (max-width: 540px) {
+  #partner-attachment-storage .attachment-storage-usage { flex-basis: 100%; }
+  #partner-attachment-storage :is(select,input[type=number]) { font-size: 16px !important; }
+  #partner-attachment-storage select { max-width: 145px; }
+}

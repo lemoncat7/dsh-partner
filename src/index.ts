@@ -40,6 +40,7 @@ import { CompanionKnowledgeMounts } from './companions/knowledge-mounts.js'
 import { PartnerInboxStore } from './notifications/store.js'
 import { PartnerNoticeService } from './notifications/service.js'
 import { AttachmentDeliveryService } from './attachments/service.js'
+import { openSharedAttachmentStorage } from './attachments/shared-storage.js'
 import { attachmentTool } from './attachments/tool.js'
 import { StorageCoordinator } from './storage/coordinator.js'
 import { storageLayout, TARGET_STORAGE_VERSION } from './storage/layout.js'
@@ -160,7 +161,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       },
       warn: message => ctx.logger.warn(`dsh-partner: ${message}`),
     })
-    const deliveries = migrated ? await AttachmentDeliveryService.openPartitioned(join(layout.publicRoot,'indexes','attachments'),layout.privateRoot) : await AttachmentDeliveryService.open(join(dirname(resolved.statePath), 'attachment-deliveries'))
+    const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)

@@ -3,6 +3,7 @@ import { api } from '../client-api.js'
 import type { StorageInspection } from '../storage/preflight.js'
 import { WorkspaceBlock, WorkspaceDialog, errorMessage } from './workspace-components.js'
 import { waitForStorage } from './storage-recovery.js'
+import { AttachmentStoragePanel } from './attachment-storage.js'
 import { clearStorageRecovery, pendingStorageRecovery, rememberStorageRecovery } from './storage-recovery-marker.js'
 
 export function GeneralSettingsPanel() {
@@ -46,6 +47,7 @@ export function GeneralSettingsPanel() {
   }
   return <section className="dsh-partner-general-settings" aria-busy={busy}>
     <h2>基本设置</h2>
+    <AttachmentStoragePanel />
     <WorkspaceBlock title="升级迁移" detail="手动整理公共数据和每位伙伴的私有目录，不会自动执行。" actions={<button type="button" disabled={busy} onClick={()=>void inspect()}>{busy?'处理中…':'检查迁移'}</button>}>
       <p>数据存储版本：{version===undefined?'正在读取…':`v${version}${version===0?' · 待迁移':' · 已升级'}`}</p>
       <p>升级前请结束伙伴会话和后台执行。完整备份并校验后才清理已迁移的旧路径，不修改用户工作文档；服务重载后自动重新连接。</p>

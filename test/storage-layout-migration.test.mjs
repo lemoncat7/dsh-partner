@@ -55,7 +55,7 @@ test('complete migration preserves private data, read receipts, delivery status 
  const inbox=await PartnerInboxStore.openPartitioned(join(layout.publicRoot,'indexes','inbox.sqlite'),layout.privateRoot)
  assert.equal(inbox.snapshot().items[0].summary,'PRIVATE_NOTICE');assert.equal(inbox.snapshot().items[0].readAt,5)
  assert.equal(inbox.snapshot().items.find(item=>item.kind==='system')?.action,'storage-migration');inbox.close()
- const attachments=await AttachmentDeliveryService.openPartitioned(join(layout.publicRoot,'indexes','attachments'),layout.privateRoot)
+ const attachments=await AttachmentDeliveryService.openGrouped(join(layout.publicRoot,'attachment-deliveries'))
  assert.equal(attachments.get(item.id).channel,'sent');assert.deepEqual(await attachments.bytes(item),bytes);attachments.close()
  assert.equal(await readFile(join(layout.privateRoot(owner),'backups','legacy-memory','memory-backup','saved.txt'),'utf8'),'backup')
  const memory=new PartnerMemoryStore(root,'Asia/Shanghai',layout.privateRoot);assert.equal(await memory.hasPendingTurns(owner,'scope'),false)
