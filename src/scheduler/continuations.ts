@@ -57,13 +57,22 @@ export class ScheduleContinuations {
         if (input.boardTaskId !== undefined && existing.continuation?.board?.taskId !== input.boardTaskId) throw new Error('此预约未绑定当前看板任务，请先核实原预约，不可复用到其他任务')
         result = structuredClone(existing); return
       }
-      if (state.schedules.length >= 100) throw new Error('定时任务已达到 100 项，请先清理旧计划')
       result = { id: `schedule-${randomUUID()}`, companionId: owner, title, prompt: check,
         schedule: { kind: 'once', at: now + delay * 60_000 }, enabled: true, destroySessionAfterRun: false,
         overlapPolicy: 'queue', timeoutMinutes, nextRunAt: now + delay * 60_000, createdAt: now, updatedAt: now,
         continuation: { taskKey, externalTaskId, originSessionId: sessionId, check, ...(completion === undefined ? {} : { completion }), nextStep, state: 'waiting', attempts: 0, checks: 0, maxAttempts, deadlineAt } }
       bindBoardContinuation(state, result, input.boardTaskId === undefined ? undefined : requiredText(input.boardTaskId, 'boardTaskId', 160))
       if (origin && !result.continuation!.board) result.continuation!.originChannel = {routeId: origin.id, channelId: origin.channelId, userId: origin.userId}
+      const board = result.continuation!.board
+      // Reaching a new durable wait proves that the previous completed stage was consumed.
+      // Preserve standalone entries that already own an undelivered final reply.
+      state.schedules = state.schedules.filter(item => {
+        const previous = item.continuation
+        if (!previous || previous.state !== 'completed') return true
+        if (board) return previous.board?.delegationId !== board.delegationId
+        return Boolean(previous.board || previous.originSessionId !== sessionId || previous.finalReply)
+      })
+      if (state.schedules.length >= 100) throw new Error('定时任务已达到 100 项，请先清理旧计划')
       state.schedules.push(result)
     })
     return structuredClone(result)
@@ -184,7 +193,9 @@ export class ScheduleContinuations {
     try {
       await this.runner.notify(entry)
       await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation; if (current?.state !== wake.state) return
-        if (current.finalReply?.key === delivery.key) current.finalReply.notifiedAt = Date.now()
+        if (current.finalReply?.key !== delivery.key) return
+        if (current.state === 'completed') state.schedules = state.schedules.filter(s => s.id !== id)
+        else current.finalReply.notifiedAt = Date.now()
       })
     } catch {
       await this.store.update(state => { const current = state.schedules.find(s => s.id === id)?.continuation

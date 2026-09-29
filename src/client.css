@@ -642,8 +642,12 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-general-settings { padding: 16px clamp(20px, 4vw, 46px); color: var(--partner-text); }
 .dsh-partner-general-settings h2 { font-size: 18px; }
 .dsh-partner-general-settings p { color: var(--partner-text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
-.dsh-partner-migration-paths { display: grid; gap: 12px; margin-top: 12px; min-width: 0; }
-.dsh-partner-migration-paths > div { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--partner-border); border-radius: 10px; min-width: 0; }
+.dsh-partner-feature-block.is-storage-migration { gap: 10px; padding: 16px 18px; }
+.dsh-partner-feature-block.is-storage-migration > :is(p, details) { margin-block: 0; }
+.dsh-partner-feature-block.is-storage-migration p { margin-block: 0; line-height: 1.55; }
+.dsh-partner-feature-block.is-storage-migration details > p { margin-top: 6px; }
+.dsh-partner-migration-paths { display: grid; gap: 8px; margin-top: 6px; min-width: 0; }
+.dsh-partner-migration-paths > div { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--partner-border); border-radius: 10px; min-width: 0; }
 .dsh-partner-migration-paths code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .dsh-partner-general-settings :is(summary,button) { min-height: 44px; }
 .dsh-partner-general-settings [role="alert"] { color: var(--partner-danger); overflow-wrap: anywhere; }

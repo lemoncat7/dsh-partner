@@ -102,6 +102,27 @@ test('final reply retries durably after status notice and survives reopening sto
   await f.service.notify(entry.id); await f.service.notify(entry.id)
   assert.equal(attempts, 2)
   assert.ok(f.get(entry.id).continuation.finalReply.notifiedAt)
+  assert.equal((await PartnerStore.open(f.path)).snapshot().schedules.length, 1)
+})
+
+test('completed standalone continuation is removed only after its final reply is delivered', async t => {
+  const f = await fixture(t), entry = await f.service.defer(owner, session, input)
+  let notifications = 0
+  f.service.configure({execute: e => outcome(f, e, 'completed'), notify: async () => {notifications++}})
+  await f.service.run(entry.id)
+  assert.equal(f.get(entry.id).continuation.state, 'completed')
+  await f.store.update(s => {s.schedules[0].continuation.finalReply = {key: 'completed-final', text: 'done', referenceTexts: []}})
+  await f.service.notify(entry.id)
+  assert.equal(notifications, 1)
+  assert.equal(f.get(entry.id), undefined)
+  assert.equal((await PartnerStore.open(f.path)).snapshot().schedules.length, 0)
+})
+
+test('a new durable wait removes the completed standalone stage it has consumed', async t => {
+  const f = await fixture(t), first = await f.service.defer(owner, session, input)
+  await f.service.resolve(owner, session, {scheduleId: first.id, externalTaskId: input.externalTaskId, outcome: 'completed', summary: '第一阶段完成'})
+  const second = await f.service.defer(owner, session, {...input, taskKey: 'video:job-2', externalTaskId: 'job-2'})
+  assert.deepEqual(f.store.snapshot().schedules.map(item => item.id), [second.id])
 })
 
 test('defer needs schedules, owned session, valid bounds; concurrent retries share one durable entry', async t => {

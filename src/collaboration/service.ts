@@ -413,10 +413,17 @@ export class PartnerCollaborationService {
   }
 
   private async complete(id: string, runId: string, output: string): Promise<void> {
-    await this.mutate(id, item => {
+    await this.store.update(state => {
+      const item = state.delegations.find(value => value.id === id)
+      if (!item) return
       item.status = 'completed'; item.completedAt = Date.now(); item.executionRunId = runId; item.resultSummary = output.slice(0, 2400)
       delete item.pendingResult
       delete item.nextAttemptAt; delete item.error
+      const scheduleId = item.continuationScheduleId
+      if (scheduleId && state.schedules.find(schedule => schedule.id === scheduleId)?.continuation?.state === 'completed') {
+        state.schedules = state.schedules.filter(schedule => schedule.id !== scheduleId)
+        delete item.continuationScheduleId
+      }
     })
   }
 

@@ -16,7 +16,7 @@ try {
   for (const width of [375, 800, 1280]) for (const dark of [false, true]) {
     const page = await browser.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' })
     const errors = []; page.on('pageerror', e => errors.push(e.message))
-    let entries = ['waiting', 'completed', 'blocked'].map((state, i) => ({ id: `wake-${i}`, companionId: 'owner', title: `视频任务 ${i}`, prompt: '按任务 ID 查询服务状态，不重复提交', schedule: { kind: 'once', at: Date.now() }, enabled: state === 'waiting', nextRunAt: Date.now(), destroySessionAfterRun: false, continuation: { state, externalTaskId: 'job-123', attempts: 2, maxAttempts: 12, deadlineAt: Date.now() + 3600_000, nextStep: '核实已下载文件，完成后给出路径。'.repeat(35) + 'https://example.test/' + 'long-id'.repeat(40), summary: '已查询状态' } }))
+    let entries = ['waiting', 'completed', 'blocked', 'cancelled'].map((state, i) => ({ id: `wake-${i}`, companionId: 'owner', title: `视频任务 ${i}`, prompt: '按任务 ID 查询服务状态，不重复提交', schedule: { kind: 'once', at: Date.now() }, enabled: state === 'waiting', nextRunAt: Date.now(), destroySessionAfterRun: false, continuation: { state, externalTaskId: 'job-123', attempts: 2, maxAttempts: 12, deadlineAt: Date.now() + 3600_000, nextStep: '核实已下载文件，完成后给出路径。'.repeat(35) + 'https://example.test/' + 'long-id'.repeat(40), summary: '已查询状态' } }))
     entries.push({ ...entries[0], id: 'disabled', companionId: 'disabled', title: '能力已关闭的计划' })
     let lastRequest
     await page.route('**/partner-local/v1/schedules**', async route => {
@@ -27,9 +27,11 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}`); await page.addStyleTag({ content: css })
     await page.evaluate(d => document.body.toggleAttribute('data-ds-dark-theme', d), dark)
     const cards = page.locator('.dsh-partner-schedule-list > article'); await cards.first().waitFor()
-    assert.equal(await cards.count(), 4)
+    assert.equal(await cards.count(), 3)
+    assert.equal(await page.getByText('视频任务 1').count(), 0)
+    assert.equal(await page.getByText('视频任务 3').count(), 0)
     assert.equal(await cards.nth(1).getByRole('button', { name: '立即检查' }).isDisabled(), true)
-    assert.equal(await cards.nth(3).getByRole('button', { name: '立即检查' }).isDisabled(), true)
+    assert.equal(await cards.nth(2).getByRole('button', { name: '立即检查' }).isDisabled(), true)
     await cards.first().locator('summary').click()
     assert.equal(await cards.first().getByText('外部任务：job-123').isVisible(), true)
     assert.equal(await cards.first().evaluate(card => {

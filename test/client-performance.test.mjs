@@ -119,6 +119,24 @@ test('global workspaces stay in the roster while partner Skill bindings stay in 
   assert.match(scheduleSource, /name="companionId" required/)
 })
 
+test('feature pages avoid eager resource requests and remote market blocking', () => {
+  const market = skillSource.slice(skillSource.indexOf('export function SkillsPanel'), skillSource.indexOf('export function CompanionSkillSettings'))
+  assert.match(market, /const \[catalogLoading, setCatalogLoading\]/)
+  assert.match(market, /const \[marketLoading, setMarketLoading\]/)
+  assert.match(market, /catalogLoading \? <CollectionSkeleton/)
+  assert.match(market, /marketLoading \? <CollectionSkeleton/)
+  assert.doesNotMatch(market, /const \[nextCatalog, nextMarket, nextNetwork\] = await Promise\.all/)
+  assert.doesNotMatch(capabilityResources, /api</)
+})
+
+test('finished one-shot schedules leave the active list and migration copy stays compact', () => {
+  assert.match(scheduleSource, /item\.schedule\.kind !== 'once'.*\['completed', 'cancelled'\]/)
+  assert.match(scheduleSource, /visibleSchedules\.map/)
+  assert.match(clientCss, /\.dsh-partner-feature-block\.is-storage-migration \{[^}]*gap: 10px;[^}]*padding: 16px 18px;/)
+  assert.match(clientCss, /\.dsh-partner-feature-block\.is-storage-migration p \{[^}]*margin-block: 0;[^}]*line-height: 1\.55;/)
+  assert.doesNotMatch(clientCss, /\.dsh-partner-feature-block\.is-storage-migration \{[^}]*(?:height|max-height|overflow: hidden)/)
+})
+
 test('companion capabilities keep a four-card Skill overview and disclose selection near the header', () => {
   const settings = skillSource.slice(skillSource.indexOf('export function CompanionSkillSettings'), skillSource.indexOf('function NewSkillForm'))
   assert.match(settings, /enabledSkills\.slice\(0, 4\)/)

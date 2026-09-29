@@ -10,8 +10,12 @@ export function SkillsPanel(): JSX.Element {
   const [query, setQuery] = useState('')
   const [activeSource, setActiveSource] = useState('market-clawhub')
   const [busy, setBusy] = useState<string>()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>()
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [marketLoading, setMarketLoading] = useState(true)
+  const [networkLoading, setNetworkLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState<string>()
+  const [marketError, setMarketError] = useState<string>()
+  const [networkError, setNetworkError] = useState<string>()
   const [actionError, setActionError] = useState<{ kind: 'install' | 'uninstall'; id: string; message: string }>()
   const [addingSource, setAddingSource] = useState(false)
   const [creatingSkill, setCreatingSkill] = useState(false)
@@ -19,15 +23,26 @@ export function SkillsPanel(): JSX.Element {
   const [editingNetwork, setEditingNetwork] = useState(false)
   const [showAllInstalled, setShowAllInstalled] = useState(false)
   const [network, setNetwork] = useState<SkillMarketNetworkView>({})
-  const load = useCallback(async (refresh = false) => {
-    try {
-      const [nextCatalog, nextMarket, nextNetwork] = await Promise.all([
-        api<SkillCatalogView>('/skills'), api<SkillMarketView>(`/skills/market${refresh ? '?refresh=1' : ''}`), api<SkillMarketNetworkView>('/skill-markets/network'),
-      ])
-      setCatalog(nextCatalog); setMarket(nextMarket); setNetwork(nextNetwork); setError(undefined)
-    } catch (reason) { setError(errorMessage(reason)) } finally { setLoading(false) }
+  const loadCatalog = useCallback(async () => {
+    setCatalogLoading(true)
+    try { setCatalog(await api<SkillCatalogView>('/skills')); setCatalogError(undefined) }
+    catch (reason) { setCatalogError(errorMessage(reason)) } finally { setCatalogLoading(false) }
   }, [])
+  const loadMarket = useCallback(async (refresh = false) => {
+    setMarketLoading(true)
+    try { setMarket(await api<SkillMarketView>(`/skills/market${refresh ? '?refresh=1' : ''}`)); setMarketError(undefined) }
+    catch (reason) { setMarketError(errorMessage(reason)) } finally { setMarketLoading(false) }
+  }, [])
+  const loadNetwork = useCallback(async () => {
+    setNetworkLoading(true)
+    try { setNetwork(await api<SkillMarketNetworkView>('/skill-markets/network')); setNetworkError(undefined) }
+    catch (reason) { setNetworkError(errorMessage(reason)) } finally { setNetworkLoading(false) }
+  }, [])
+  const load = useCallback(async (refresh = false) => {
+    await Promise.all([loadCatalog(), loadMarket(refresh), loadNetwork()])
+  }, [loadCatalog, loadMarket, loadNetwork])
   useEffect(() => { void load() }, [load])
+  const loading = catalogLoading || marketLoading || networkLoading
   const installed = new Map(catalog.installed.map(item => [item.id, item]))
   const visibleInstalled = showAllInstalled ? catalog.installed : catalog.installed.slice(0, 4)
   const visible = useMemo(() => {
@@ -43,23 +58,25 @@ export function SkillsPanel(): JSX.Element {
     setBusy(entry.id); setActionError(undefined)
     try {
       await api('/skills/market/install', { method: 'POST', body: JSON.stringify({ sourceId: entry.sourceId, entryId: entry.id }) })
-      await load()
+      await loadCatalog()
     } catch (reason) { setActionError({ kind: 'install', id: entry.id, message: errorMessage(reason) }) } finally { setBusy(undefined) }
   }
   const uninstall = async (id: string): Promise<void> => {
     setBusy(id); setActionError(undefined)
-    try { await api(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }); await load() }
+    try { await api(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }); await loadCatalog() }
     catch (reason) { setActionError({ kind: 'uninstall', id, message: errorMessage(reason) }) } finally { setBusy(undefined) }
   }
   return <div className="dsh-partner-feature-page">
     <WorkspaceHero eyebrow="Capability catalog" title="Skill 市场" detail="集中安装和维护工作能力；安装后，再为需要它的伙伴单独启用。" actions={<button type="button" disabled={loading} onClick={() => { void load(true) }}><IconRefreshOutline16 size={15} />{loading ? '同步中…' : '刷新市场'}</button>} />
-    {error && <WorkspaceNotice>{error}</WorkspaceNotice>}
-    {importingSkill && <SkillImportDialog close={() => setImportingSkill(false)} changed={load} />}
-    {creatingSkill && <WorkspaceDialog title="新建 Skill" detail="创建一个可复用的工作流程，并明确执行上下文、工具边界和验收指令。" close={() => setCreatingSkill(false)} width="wide"><NewSkillForm existingIds={catalog.installed.map(skill => skill.id)} close={() => setCreatingSkill(false)} changed={load} /></WorkspaceDialog>}
-    {editingNetwork && <WorkspaceDialog title="市场网络设置" detail="配置 Skill 索引和安装包下载共用的 HTTP 代理，并在保存前测试连通性。" close={() => setEditingNetwork(false)}><NetworkSettingsForm value={network} close={() => setEditingNetwork(false)} changed={async next => { setNetwork(next); await load(true) }} /></WorkspaceDialog>}
+    {catalogError && <WorkspaceNotice>已安装 Skill 读取失败：{catalogError}</WorkspaceNotice>}
+    {marketError && <WorkspaceNotice>市场目录读取失败：{marketError}</WorkspaceNotice>}
+    {networkError && <WorkspaceNotice>市场网络设置读取失败：{networkError}</WorkspaceNotice>}
+    {importingSkill && <SkillImportDialog close={() => setImportingSkill(false)} changed={loadCatalog} />}
+    {creatingSkill && <WorkspaceDialog title="新建 Skill" detail="创建一个可复用的工作流程，并明确执行上下文、工具边界和验收指令。" close={() => setCreatingSkill(false)} width="wide"><NewSkillForm existingIds={catalog.installed.map(skill => skill.id)} close={() => setCreatingSkill(false)} changed={loadCatalog} /></WorkspaceDialog>}
+    {editingNetwork && <WorkspaceDialog title="市场网络设置" detail="配置 Skill 索引和安装包下载共用的 HTTP 代理，并在保存前测试连通性。" close={() => setEditingNetwork(false)}><NetworkSettingsForm value={network} close={() => setEditingNetwork(false)} changed={async next => { setNetwork(next); await loadMarket(true) }} /></WorkspaceDialog>}
     {addingSource && <WorkspaceDialog title="添加市场来源" detail="接入团队或个人维护的 Skill 索引。自定义来源默认按不可信来源隔离执行。" close={() => setAddingSource(false)}><MarketSourceForm close={() => setAddingSource(false)} changed={() => load(true)} /></WorkspaceDialog>}
     <WorkspaceBlock title="已安装" detail={`${catalog.installed.length} 个可供伙伴使用`} actions={<><button type="button" onClick={() => setImportingSkill(true)}>导入 Skill</button><button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建 Skill</button></>}>
-      {loading ? <CollectionSkeleton rows={2} /> : catalog.installed.length === 0 ? <CollectionEmpty title="还没有安装 Skill" detail="可以创建自己的 Skill，或从下方市场选择。" action={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建第一个 Skill</button>} /> : <><div className="dsh-partner-skill-installed is-market">{visibleInstalled.map(skill => <article key={skill.id}>
+      {catalogLoading ? <CollectionSkeleton rows={2} /> : catalog.installed.length === 0 ? <CollectionEmpty title="还没有安装 Skill" detail="可以创建自己的 Skill，或从下方市场选择。" action={<button type="button" onClick={() => setCreatingSkill(true)}><IconPlusOutline16 size={14} />新建第一个 Skill</button>} /> : <><div className="dsh-partner-skill-installed is-market">{visibleInstalled.map(skill => <article key={skill.id}>
         <span className="dsh-partner-skill-mark"><IconCheckOutline16 size={16} /></span><span><strong>{skill.displayName}</strong><p>{skill.description}</p><small>{skill.version} · {skill.executionContext === 'fork' ? '临时会话' : '当前会话'} · {skill.source}</small></span>
         <button type="button" className="is-icon" disabled={busy === skill.id} aria-label={`卸载 ${skill.displayName}`} onClick={() => { void uninstall(skill.id) }}><IconTrashOutline16 size={15} /></button>
         {actionError?.kind === 'uninstall' && actionError.id === skill.id && <p className="dsh-partner-skill-action-error" role="alert">卸载失败：{actionError.message}</p>}
@@ -67,17 +84,17 @@ export function SkillsPanel(): JSX.Element {
     </WorkspaceBlock>
     <WorkspaceBlock title="市场目录" detail="内置 ClawHub、LoopHub、SkillHub，与 nomifun 当前 Skill 榜单一致" actions={<><button type="button" onClick={() => setEditingNetwork(true)}>代理设置{network.proxyUrl ? ' · 已启用' : ''}</button><button type="button" onClick={() => setAddingSource(true)}><IconPlusOutline16 size={14} />自定义源</button></>}>
       <div className="dsh-partner-market-toolbar">
-        <SkillSearch value={query} change={setQuery} count={visible.length} label="搜索 Skill 市场" placeholder="搜索名称、说明或标签" loading={loading} />
+        <SkillSearch value={query} change={setQuery} count={visible.length} label="搜索 Skill 市场" placeholder="搜索名称、说明或标签" loading={marketLoading} />
         <nav className="dsh-partner-market-sources" aria-label="Skill 市场来源">{sources.map(source => <button type="button" key={source.id} className={activeSource === source.id ? 'is-active' : ''} aria-pressed={activeSource === source.id} onClick={() => setActiveSource(source.id)}><span>{source.name}</span><small>{sourceCounts.get(source.id) ?? 0}</small></button>)}</nav>
       </div>
       {market.errors.some(item => item.sourceId === activeSource) && <p className="dsh-partner-inline-warning">{market.errors.filter(item => item.sourceId === activeSource).map(item => item.error).join('；')}</p>}
-      {loading ? <CollectionSkeleton rows={4} /> : <div className="dsh-partner-market-grid">{visible.map(entry => {
+      {marketLoading ? <CollectionSkeleton rows={4} /> : <div className="dsh-partner-market-grid">{visible.map(entry => {
         const current = installed.get(entry.id)
         const cardError = actionError?.kind === 'install' && actionError.id === entry.id ? actionError.message : undefined
         const errorId = cardError ? `dsh-partner-skill-error-${entry.id}` : undefined
         return <article key={`${entry.sourceId}:${entry.id}`}><span><small>{entry.tags.slice(0, 3).join(' · ') || 'SKILL'}</small><strong>{entry.name}</strong><p>{entry.description}</p></span>{cardError && <p id={errorId} className="dsh-partner-market-card-error" role="alert">安装失败：{cardError}</p>}<footer><small>v{entry.version}</small>{current ? <button type="button" disabled><IconCheckOutline16 size={14} />已安装</button> : <button type="button" disabled={busy === entry.id} aria-describedby={errorId} onClick={() => { void install(entry) }}>{busy === entry.id ? '安装中…' : cardError ? '重试安装' : '安装'}</button>}</footer></article>
       })}</div>}
-      {!loading && visible.length === 0 && <CollectionEmpty title={query ? '没有匹配的 Skill' : '当前来源暂时不可用'} detail={query ? '换一个关键词，或切换市场来源。' : '刷新市场，或检查代理与来源配置。'} />}
+      {!marketLoading && visible.length === 0 && <CollectionEmpty title={query ? '没有匹配的 Skill' : '当前来源暂时不可用'} detail={query ? '换一个关键词，或切换市场来源。' : '刷新市场，或检查代理与来源配置。'} />}
     </WorkspaceBlock>
   </div>
 }
