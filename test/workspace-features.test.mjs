@@ -272,7 +272,9 @@ test('interrupted delegations are durably reclaimed after restart without blocki
 })
 
 test('startup repairs legacy canceled delegations that reached review without saving a result', async t => {
-  const item = await fixture(); t.after(item.close)
+  const item = await fixture()
+  let service
+  t.after(async () => { await service?.close(); await item.close() })
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   const board = new TaskBoardService(item.store)
   const task = await board.create({ title: '修复丢失结果' }, { kind: 'user' })
@@ -283,9 +285,8 @@ test('startup repairs legacy canceled delegations that reached review without sa
     request: '恢复丢失的结果', status: 'canceled', attempts: 2, error: '任务状态已经变为 review，忽略旧执行结果',
     createdAt: Date.now() - 30_000, completedAt: Date.now() - 10_000,
   }))
-  const service = new PartnerCollaborationService(item.store, skills, board, {})
+  service = new PartnerCollaborationService(item.store, skills, board, {})
   service.setSessionExecutor({ execute: async () => ({ run: { id: 'session-run-repaired' }, output: '重新恢复的完整结果' }) })
-  t.after(() => service.close())
   await service.start()
   await waitFor(() => board.require(task.id).resultSummary === '重新恢复的完整结果')
   assert.equal(board.require(task.id).status, 'review')
