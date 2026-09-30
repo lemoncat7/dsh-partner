@@ -38,6 +38,7 @@ import { TaskBoardPanel } from './ui/task-board-panel.js'
 import { SchedulePanel } from './ui/schedule-panel.js'
 import { CapabilityEditor } from './ui/capability-editor.js'
 import { IdentityEditor } from './ui/identity-editor.js'
+import { CompanionDeletion } from './ui/companion-deletion.js'
 import { ChannelsPanel } from './ui/channels-panel.js'
 import { useChannelStatus } from './ui/use-channel-status.js'
 import identityCssText from './ui/identity-editor.css'
@@ -205,8 +206,8 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
           </nav>
           <div className="dsh-partner-stage-scroll">
             {notice && <p className="dsh-partner-inline-notice" role="status">{notice}</p>}
-            {view === 'home' && <HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} />}
-            {view === 'identity' && <IdentityEditor companion={selected} count={snapshot?.companions.length ?? 1} onChanged={() => refresh(true)} onRemoved={companionRemoved} />}
+            {view === 'home' && <><CompanionDeletion key={selected.id} companion={selected} count={snapshot?.companions.length ?? 1} channelCount={snapshot!.channels.filter(channel => channel.companionId === selected.id).length} onRemoved={companionRemoved} /><HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} /></>}
+            {view === 'identity' && <IdentityEditor companion={selected} onChanged={() => refresh(true)} />}
             {view === 'capabilities' && <CapabilityEditor key={selected.id} companion={selected} presets={snapshot?.presets ?? []} onChanged={() => refresh(true)} />}
             {view === 'weixin' && <ChannelsPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} weixin={<WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />} />}
             {view === 'memory' && <MemoryPanel key={selected.id} companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
@@ -291,17 +292,32 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
   const [login, setLogin] = useState<LoginView>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const loginGeneration = useRef(0)
+  const changedRef = useRef(onChanged)
+  changedRef.current = onChanged
   useEffect(() => {
     if (!login || login.phase === 'confirmed' || login.phase === 'expired' || login.phase === 'error') return
-    const timer = window.setInterval(() => {
-      void api<{ login: LoginView; channel?: ChannelView }>(`/weixin/login/${login.id}`).then(async result => {
+    let disposed = false
+    let timer: number
+    const generation = loginGeneration.current
+    const poll = async (): Promise<void> => {
+      try {
+        const result = await api<{ login: LoginView; channel?: ChannelView }>(`/weixin/login/${login.id}`)
+        if (disposed || generation !== loginGeneration.current) return
+        setError(undefined)
         setLogin(result.login)
-        if (result.channel) { setLogin(undefined); await onChanged() }
-      }).catch(reason => setError(message(reason)))
-    }, 2_000)
-    return () => clearInterval(timer)
-  }, [login?.id, login?.phase, onChanged])
+        if (result.channel) { setLogin(undefined); await changedRef.current(); return }
+      } catch (reason) {
+        if (!disposed && generation === loginGeneration.current) setError(message(reason))
+      }
+      if (!disposed && generation === loginGeneration.current) timer = window.setTimeout(() => { void poll() }, 2_000)
+    }
+    timer = window.setTimeout(() => { void poll() }, 2_000)
+    return () => { disposed = true; clearTimeout(timer) }
+  }, [login?.id, login?.phase])
   const begin = async (): Promise<void> => {
+    loginGeneration.current += 1
+    setLogin(undefined)
     setBusy(true); setError(undefined)
     try { setLogin(await api('/weixin/login', { method: 'POST', body: JSON.stringify({ companionId: companion.id }) })) }
     catch (reason) { setError(message(reason)) } finally { setBusy(false) }
@@ -320,10 +336,11 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
     {!channel && !login && <GlassSurface as="div" interactive className="dsh-partner-weixin-connect" borderRadius={15} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><strong>把 {companion.name} 带到微信</strong><p>扫码后，机器人凭据直接保存进 DSH 凭据库，不会显示在浏览器或普通配置文件中。</p><ul><li>私聊首次联系必须审批</li><li>联系人之间上下文完全隔离</li><li>工具权限不会因微信身份自动扩大</li></ul></span><button type="button" disabled={busy} onClick={() => { void begin() }}>{busy ? '正在申请二维码…' : '扫码连接微信'}</button></GlassSurface>}
     {login && <GlassSurface as="div" interactive className="dsh-partner-qr" borderRadius={16} distortionScale={-10} saturation={1.06}><div className="dsh-partner-qr-code">{login.qrContent && <QRCodeSVG value={login.qrContent} size={176} level="M" />}</div><span><small>WECHAT ILINK BOT</small><strong>{login.phase === 'scanned' ? '已扫码，请在微信确认' : login.phase === 'expired' ? '二维码已过期' : login.phase === 'error' ? '连接失败' : '使用微信扫码'}</strong><p>{login.error || (login.phase === 'scanned' ? '确认后会自动启动渠道，不需要复制 Token。' : '二维码约 5 分钟有效。此页面可以安全地保持打开。')}</p>{(login.phase === 'expired' || login.phase === 'error') && <button type="button" onClick={() => { setLogin(undefined); void begin() }}><IconRefreshOutline16 size={16} />重新生成</button>}</span></GlassSurface>}
     {channel && <>
-      <GlassSurface as="div" interactive className="dsh-partner-channel-card" borderRadius={14} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><small>WECHAT CHANNEL</small><strong>{channel.name}</strong><p>{channel.accountId}</p></span><Status channel={channel} /><button type="button" className="dsh-partner-switch" data-on={channel.enabled} disabled={busy} aria-label={channel.enabled ? '停用微信渠道' : '启用微信渠道'} onClick={() => { void toggle() }}><i /></button></GlassSurface>
+      <GlassSurface as="div" interactive className="dsh-partner-channel-card" borderRadius={14} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><small>WECHAT CHANNEL</small><strong>{channel.name}</strong><p>{channel.accountId}</p></span><Status channel={channel} /><div className="dsh-partner-weixin-actions"><button type="button" className="dsh-partner-switch" data-on={channel.enabled} disabled={busy} role="switch" aria-checked={channel.enabled} aria-label={channel.enabled ? '停用微信渠道' : '启用微信渠道'} onClick={() => { void toggle() }}><i /></button><button type="button" className="dsh-partner-weixin-rescan" disabled={busy} title="更新当前机器人的登录凭据，保留联系人授权" onClick={() => { void begin() }}><IconRefreshOutline16 size={16} />{busy ? '请稍候…' : '重新扫码'}</button></div></GlassSurface>
+      {channel.enabled && channel.runtimeStatus === 'starting' && !channel.lastError && <p className="dsh-partner-weixin-help" role="status">登录凭据已保存，正在等待微信接收通道首次响应。长轮询可能需要几十秒；向机器人发送一条消息可帮助确认收发是否正常，无需重复扫码。</p>}
       {channel.lastError && <p className="dsh-partner-inline-error">{channel.lastError}</p>}
       <div className="dsh-partner-pairing-heading"><span><small>ACCESS</small><strong>私聊配对</strong></span><em>{pairings.filter(item => item.status === 'pending').length} 个待处理</em></div>
-      <div className="dsh-partner-pairings">{pairings.length === 0 ? <State title="还没有联系人" detail="有人首次向机器人发消息后，配对请求会出现在这里。" compact /> : pairings.map(pairing => <article key={pairing.id}><span className={`is-${pairing.status}`}><IconUserOutline16 size={16} /></span><div><strong>{pairing.displayName}</strong><small>{pairing.status === 'pending' ? '等待审批' : pairing.status === 'approved' ? '已授权独立会话' : '已阻止'} · {new Date(pairing.updatedAt).toLocaleString()}</small></div>{pairing.status === 'pending' && <><button onClick={() => { void actPairing(pairing.id, 'blocked') }}>拒绝</button><button className="is-primary" onClick={() => { void actPairing(pairing.id, 'approved') }}>批准</button></>}{pairing.status === 'approved' && <button onClick={() => { void actPairing(pairing.id, 'blocked') }}>撤销</button>}{pairing.status === 'blocked' && <button onClick={() => { void actPairing(pairing.id, 'approved') }}>重新批准</button>}</article>)}</div>
+      <div className="dsh-partner-pairings">{pairings.length === 0 ? <State title="等待首次消息" detail="扫码只完成机器人登录，不会自动授权联系人。请先在微信向机器人发送一条消息，再回到这里点击「批准」，之后即可对话。" compact /> : pairings.map(pairing => <article key={pairing.id}><span className={`is-${pairing.status}`}><IconUserOutline16 size={16} /></span><div><strong>{pairing.displayName}</strong><small>{pairing.status === 'pending' ? '等待审批' : pairing.status === 'approved' ? '已授权独立会话' : '已阻止'} · {new Date(pairing.updatedAt).toLocaleString()}</small></div>{pairing.status === 'pending' && <><button onClick={() => { void actPairing(pairing.id, 'blocked') }}>拒绝</button><button className="is-primary" onClick={() => { void actPairing(pairing.id, 'approved') }}>批准</button></>}{pairing.status === 'approved' && <button onClick={() => { void actPairing(pairing.id, 'blocked') }}>撤销</button>}{pairing.status === 'blocked' && <button onClick={() => { void actPairing(pairing.id, 'approved') }}>重新批准</button>}</article>)}</div>
     </>}
     {error && <p className="dsh-partner-inline-error">{error}</p>}
   </div>

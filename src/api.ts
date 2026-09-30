@@ -8,6 +8,7 @@ import { PartnerStore } from './store.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { ChannelManager, requiredCompanion } from './channels/manager.js'
 import { WeixinLoginManager } from './channels/weixin/login.js'
+import { connectWeixin } from './channels/weixin/connect.js'
 import { DirectTransport, directConfig } from './channels/direct/transport.js'
 import { DirectLoginCache } from './channels/direct/login-cache.js'
 import { memoryScope, PartnerAgentRuntime } from './agent-runtime.js'
@@ -181,6 +182,13 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const removeFiles = url.searchParams.get('removeFiles')
       if (removeFiles !== null && removeFiles !== '0' && removeFiles !== '1') throw httpError(400, 'removeFiles 必须为 0 或 1')
       await runtime.companions.remove(id, {
+        removeChannels: async target => {
+          const owned = runtime.store.snapshot().channels.filter(channel => channel.companionId === target)
+          for (const channel of owned) {
+            await runtime.channels.stop(channel.id)
+            await runtime.credentials.delete(channel.id)
+          }
+        },
         isBusy: target => runtime.agents.isCompanionBusy(target) || runtime.heartbeat.isRunning(target) || runtime.dailyReview.isRunning(target),
         validateDirectory: target => runtime.agents.validateCompanionDirectory(target),
         ...(removeFiles === '1' ? { removeDirectory: async (target: string) => { runtime.inbox.releaseOwner(target); await runtime.deliveries?.removeOwner(target); await runtime.agents.removeCompanionDirectory(target) } } : {}),
@@ -321,16 +329,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     if (method === 'GET' && loginId !== undefined && segments.length === 3) {
       const login = await runtime.login.poll(loginId)
       if (login.phase !== 'confirmed') return sendJson(res, 200, { login })
-      const confirmed = runtime.login.consume(loginId)
-      const now = Date.now()
-      const channel = {
-        id: createId('weixin'), companionId: confirmed.companionId, accountId: confirmed.accountId,
-        name: `微信 · ${confirmed.accountId.slice(-6)}`, enabled: true, createdAt: now, updatedAt: now,
-      }
-      await runtime.credentials.write(channel.id, { botToken: confirmed.botToken, baseUrl: confirmed.baseUrl })
-      try { await runtime.store.update(state => { state.channels.push(channel) }) }
-      catch (error) { await runtime.credentials.delete(channel.id).catch(() => {}); throw error }
-      await runtime.channels.start(channel.id)
+      const channel = await runtime.login.complete(loginId, confirmed => connectWeixin(confirmed, runtime))
       return sendJson(res, 200, { login, channel })
     }
   }

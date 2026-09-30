@@ -59,6 +59,32 @@ test('workspace cleanup failure preserves identity and session links for retry',
   assert.equal(store.snapshot().companions.length, 1)
 })
 
+test('confirmed deletion cleans all owned channel bindings without touching another companion', async t => {
+  const { store, service, lifecycle } = await fixture(t)
+  await store.update(state => {
+    state.channels.push({ id: 'wechat', companionId: 'other' }, { id: 'matrix', companionId: 'other', platform: 'matrix' }, { id: 'keep', companionId: 'companion-default' })
+    state.pairings.push({ id: 'p1', channelId: 'wechat' }, { id: 'p2', channelId: 'matrix' }, { id: 'p3', channelId: 'keep' })
+  })
+  const detached = []
+  await service.remove('other', { ...lifecycle, removeChannels: async id => {
+    assert.equal(store.isCompanionRemoving(id), true)
+    detached.push(...store.snapshot().channels.filter(c => c.companionId === id).map(c => c.id))
+  } })
+  assert.deepEqual(detached, ['wechat', 'matrix'])
+  assert.deepEqual(store.snapshot().channels.map(c => c.id), ['keep'])
+  assert.deepEqual(store.snapshot().pairings.map(c => c.id), ['p3'])
+})
+
+test('failed channel cleanup keeps companion and bindings available for retry', async t => {
+  const { store, service, lifecycle, calls } = await fixture(t)
+  await store.update(state => state.channels.push({ id: 'wechat', companionId: 'other' }))
+  await assert.rejects(service.remove('other', { ...lifecycle, removeChannels: async () => { throw Error('vault unavailable') } }), /vault unavailable/)
+  assert.equal(store.snapshot().channels.length, 1)
+  assert.equal(store.snapshot().companions.length, 2)
+  assert.equal(calls.length, 0)
+  assert.equal(store.isCompanionRemoving('other'), false)
+})
+
 test('dedicated workspace registration cleanup does not remove files or other registrations', async t => {
   const { root } = await fixture(t)
   const cwd = join(root, 'partners', 'other')

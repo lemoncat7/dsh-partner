@@ -882,6 +882,14 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-qr button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid var(--partner-border); border-radius: 9px; color: inherit; background: var(--partner-raised); cursor: pointer; }
 .dsh-partner-channel-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 15px; border: 1px solid var(--partner-border); border-radius: 14px; background: color-mix(in srgb, var(--partner-raised) 72%, transparent); }
 .dsh-partner-channel-card > span:nth-child(2) { display: grid; gap: 3px; }
+.dsh-partner-weixin-actions { display: flex; align-items: center; gap: 12px; }
+.dsh-partner-weixin-actions > .dsh-partner-switch { flex: none; }
+.dsh-partner-weixin-actions > .dsh-partner-weixin-rescan { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 9px; border: 1px solid var(--partner-border); border-radius: 9px; background: transparent; color: var(--partner-text-secondary); font: inherit; font-size: var(--partner-font-caption); white-space: nowrap; cursor: pointer; }
+.dsh-partner-weixin-actions > .dsh-partner-weixin-rescan:hover:not(:disabled) { background: var(--partner-raised); color: var(--partner-text); }
+.dsh-partner-weixin-actions > .dsh-partner-weixin-rescan:disabled { opacity: .5; cursor: wait; }
+.dsh-partner-weixin-help { margin: 8px 0 0; color: var(--partner-text-secondary); font-size: var(--partner-font-caption); line-height: 1.6; }
+.dsh-partner-overview-delete { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.dsh-partner-overview-delete > button { display: inline-flex; align-items: center; gap: 6px; }
 .dsh-partner-channel-card strong { font-size: var(--partner-font-label); }
 .dsh-partner-channel-card p { margin: 0; color: var(--partner-text-tertiary); font: var(--partner-font-caption)/1.4 ui-monospace, monospace; }
 .dsh-partner-switch { position: relative; width: 38px; height: 22px; padding: 0; border: 1px solid var(--partner-border); border-radius: 999px; background: color-mix(in srgb, var(--partner-text) 9%, transparent); cursor: pointer; transition: background .16s ease; }
@@ -1575,6 +1583,8 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
   .dsh-partner-qr > span { justify-items: center; }
   .dsh-partner-channel-card { grid-template-columns: 45px minmax(0, 1fr) auto; }
   .dsh-partner-channel-card > .dsh-partner-status { display: none; }
+  .dsh-partner-channel-card:has(> .dsh-partner-weixin-actions) { grid-template-columns: 45px minmax(0, 1fr); }
+  .dsh-partner-weixin-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .dsh-partner-library-header { display: grid; gap: 0; }
   .dsh-partner-library-header nav { min-height: 38px; }
   .dsh-partner-library-tools { display: grid; }

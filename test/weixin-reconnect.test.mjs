@@ -4,6 +4,16 @@ import { pollWeixin } from '../lib/channels/weixin/poll.js'
 import { WeixinApi } from '../lib/channels/weixin/api.js'
 import { WeixinHttpError, weixinTransientFailure } from '../lib/channels/weixin/errors.js'
 
+test('successful empty long poll establishes connection without a first message', async () => {
+  const controller = new AbortController(), states = []
+  await pollWeixin(controller.signal, {
+    getUpdates: async () => ({ ret: 0, msgs: [] }),
+    state: value => states.push(value),
+    receive: () => controller.abort(),
+  })
+  assert.deepEqual(states, [{ status: 'running' }])
+})
+
 test('network failures beyond six reconnect, preserve cursor and clear stale error', async () => {
   const controller = new AbortController(), states = [], delays = [], buffers = [], received = []
   let calls = 0

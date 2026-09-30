@@ -1,6 +1,6 @@
 # DSH Partner
 
-> 当前版本 **2.7.3**，已验证宿主 **DSH 0.2.0-rc.2**（宿主仍为 RC）。Node.js **^22.19.0 或 >=24.0.0**。详见 [兼容说明](docs/dsh-020-compatibility.md) 和 [发布说明](docs/releases/2.7.3.md)。
+> 当前版本 **2.7.4**，已验证宿主 **DSH 0.2.0-rc.2**（宿主仍为 RC）。Node.js **^22.19.0 或 >=24.0.0**。详见 [兼容说明](docs/dsh-020-compatibility.md) 和 [发布说明](docs/releases/2.7.4.md)。
 
 面向 DeepSeek Harness 的长期 AI 伙伴与多渠道插件。
 

@@ -9,6 +9,7 @@ export interface CompanionRemovalLifecycle {
   clearConcerns(id: string): Promise<void>
   validateDirectory?(id: string): Promise<void>
   removeDirectory?(id: string): Promise<void>
+  removeChannels?(id: string): Promise<void>
 }
 
 /** Serialize destructive lifecycle operations, including different targets. */
@@ -30,6 +31,7 @@ export class CompanionRemovalService {
   private async removeLocked(id: string, lifecycle: CompanionRemovalLifecycle): Promise<void> {
     assertRemovable(this.store.snapshot(), id, lifecycle)
     await lifecycle.validateDirectory?.(id)
+    await lifecycle.removeChannels?.(id)
     // Fail registration cleanup before removing identity/session links.
     await lifecycle.detachWorkspace(id)
     assertRemovable(this.store.snapshot(), id, lifecycle)
@@ -41,6 +43,9 @@ export class CompanionRemovalService {
     await this.store.update(state => {
       assertRemovable(state, id, lifecycle)
       state.companions = state.companions.filter(item => item.id !== id)
+      const channelIds = new Set(state.channels.filter(item => item.companionId === id).map(item => item.id))
+      state.channels = state.channels.filter(item => !channelIds.has(item.id))
+      state.pairings = state.pairings.filter(item => !channelIds.has(item.channelId))
       state.sessions = state.sessions.filter(item => item.companionId !== id)
       state.skillBindings = state.skillBindings.filter(item => item.companionId !== id)
       if (state.mcpBindings) state.mcpBindings = state.mcpBindings.filter(item => item.companionId !== id)
@@ -65,7 +70,7 @@ export class CompanionRemovalService {
 function assertRemovable(state: PartnerState, id: string, lifecycle: CompanionRemovalLifecycle): void {
   if (!state.companions.some(item => item.id === id)) throw failure(404, '伙伴不存在或已删除')
   if (state.companions.length <= 1) throw failure(409, '至少保留一个伙伴')
-  if (state.channels.some(item => item.companionId === id)) throw failure(409, '请先删除或换绑该伙伴的微信渠道')
+  if (!lifecycle.removeChannels && state.channels.some(item => item.companionId === id)) throw failure(409, '请先删除或换绑该伙伴的微信渠道')
   if (lifecycle.isBusy(id) || state.executionRuns.some(item => item.ownerCompanionId === id && item.status === 'running')
     || state.delegations.some(item => item.status === 'running' && (item.fromCompanionId === id || item.toCompanionId === id))) {
     throw failure(409, '伙伴仍有正在执行的会话或任务，请等待完成后再删除')
