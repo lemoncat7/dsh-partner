@@ -321,9 +321,12 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   if (segments[0] === 'weixin' && segments[1] === 'login') {
     if (method === 'POST' && segments.length === 2) {
       mutation(req)
-      const companionId = text((await readObject(req)).companionId, 'companionId', 120)
+      const body = await readObject(req)
+      const companionId = text(body.companionId, 'companionId', 120)
       requiredCompanion(runtime.store, companionId)
-      return sendJson(res, 201, await runtime.login.begin(companionId))
+      const channelId = body.channelId === undefined ? undefined : text(body.channelId, 'channelId', 120)
+      if (channelId && !runtime.store.snapshot().channels.some(c => c.id === channelId && c.companionId === companionId && (!c.platform || c.platform === 'weixin'))) throw httpError(404, '指定微信渠道不存在或不属于此伙伴')
+      return sendJson(res, 201, await runtime.login.begin(companionId, channelId))
     }
     const loginId = segments[2]
     if (method === 'GET' && loginId !== undefined && segments.length === 3) {

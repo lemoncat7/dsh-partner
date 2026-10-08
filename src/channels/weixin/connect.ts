@@ -12,13 +12,16 @@ export async function connectWeixin(login: ConfirmedLogin, runtime: {
   const { store, credentials, channels } = runtime
   const state = store.snapshot()
   const isWeixin = (c: typeof state.channels[number]) => !c.platform || c.platform === 'weixin'
-  const previous = state.channels.find(c => isWeixin(c) && c.companionId === login.companionId)
+  const owned = state.channels.filter(c => isWeixin(c) && c.companionId === login.companionId)
+  if (!login.channelId && owned.length > 1) throw httpError(409, '存在多个历史微信渠道，请在对应渠道上重新扫码')
+  const previous = login.channelId ? owned.find(c => c.id === login.channelId) : owned[0]
+  if (login.channelId && !previous) throw httpError(409, '指定微信渠道不存在或不属于此伙伴，请刷新后重试')
   const validate = (current: typeof state) => {
     if (store.isCompanionRemoving(login.companionId) || !current.companions.some(c => c.id === login.companionId)) throw httpError(409, '伙伴已删除或正在删除，请重新选择伙伴')
     if (current.channels.some(c => isWeixin(c) && c.accountId === login.accountId && c.companionId !== login.companionId)) throw httpError(409, '此微信机器人已绑定其他伙伴，请为新伙伴使用独立机器人，不能重复绑定')
     if (previous && previous.accountId !== login.accountId) throw httpError(409, '请扫描原微信机器人的二维码登录；不能将已有联系人授权转给不同机器人')
-    if (current.channels.some(c => isWeixin(c) && c.companionId === login.companionId && c.id !== previous?.id)) throw httpError(409, '此伙伴已连接微信，请刷新后重新扫码')
-    if (previous && !current.channels.some(c => c.id === previous.id)) throw httpError(409, '原渠道已删除，请刷新后重试')
+    if (current.channels.some(c => isWeixin(c) && c.companionId === login.companionId && c.id !== previous?.id && (!previous || c.enabled))) throw httpError(409, '此伙伴已有其他微信渠道启用，请先停用其他渠道，再重新扫码')
+    if (previous && !current.channels.some(c => c.id === previous.id && c.companionId === login.companionId && c.accountId === previous.accountId && isWeixin(c))) throw httpError(409, '原渠道已删除或变更，请刷新后重试')
   }
   validate(state)
   const now = Date.now()

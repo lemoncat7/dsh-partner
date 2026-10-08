@@ -106,6 +106,10 @@ export class ChannelManager {
   async start(channelId: string): Promise<void> {
     if (this.tasks.has(channelId)) return
     const channel = requiredChannel(this.store, channelId)
+    if ((!channel.platform || channel.platform === 'weixin') && this.store.snapshot().channels.some(c => c.id !== channelId && c.companionId === channel.companionId && (!c.platform || c.platform === 'weixin') && c.enabled)) {
+      this.runtime.set(channelId, { status: 'error', lastError: '此伙伴有多个微信渠道启用，请先停用其他渠道，再重新扫码连接需要保留的渠道' })
+      return
+    }
     const credential = await this.credentials.read(channelId)
     const controller = new AbortController()
     this.runtime.set(channelId, { status: 'starting' })
@@ -160,6 +164,7 @@ export class ChannelManager {
     requiredChannel(this.store, channelId)
     await this.store.update(state => {
       const channel = state.channels.find(item => item.id === channelId)
+      if (enabled && channel && (!channel.platform || channel.platform === 'weixin') && state.channels.some(c => c.id !== channelId && c.companionId === channel.companionId && (!c.platform || c.platform === 'weixin') && c.enabled)) throw new Error('此伙伴已有其他微信渠道启用，请先停用其他渠道')
       if (channel) { channel.enabled = enabled; channel.updatedAt = Date.now() }
     })
     if (enabled) await this.start(channelId)

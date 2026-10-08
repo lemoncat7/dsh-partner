@@ -9,6 +9,7 @@ import { connectWeixin } from '../lib/channels/weixin/connect.js'
 import { PartnerStore } from '../lib/store.js'
 import { Readable } from 'node:stream'
 import { registerPartnerApi } from '../lib/api.js'
+import { ChannelManager } from '../lib/channels/manager.js'
 
 async function loginFixture(t) {
   let now = 100000
@@ -84,6 +85,72 @@ test('new companion cannot reuse default companion robot; different robot works'
   await assert.rejects(connectWeixin(login, runtime), /已绑定其他伙伴/)
   await connectWeixin({ ...login, accountId: 'another-bot' }, runtime)
   assert.equal(runtime.store.snapshot().channels.length, 2)
+})
+
+test('legacy duplicates require an explicit target and disabled siblings; preserve contact ownership', async t => {
+  const { runtime, login, vault } = await connectionFixture(t)
+  const first = await connectWeixin(login, runtime)
+  await runtime.store.update(state => {
+    state.channels.push({ ...first, id: 'legacy-second', accountId: 'second-bot' })
+    state.pairings.push({ id: 'second-contact', channelId: 'legacy-second', userId: 'peer', status: 'approved' })
+  })
+  await assert.rejects(connectWeixin(login, runtime), /多个历史/)
+  const secondLogin = { ...login, channelId: 'legacy-second', accountId: 'second-bot', botToken: 'second-renewed' }
+  await assert.rejects(connectWeixin(secondLogin, runtime), /先停用/)
+  await runtime.store.update(state => { state.channels.find(c => c.id === first.id).enabled = false })
+  const result = await connectWeixin(secondLogin, runtime)
+  assert.equal(result.id, 'legacy-second')
+  assert.equal(runtime.store.snapshot().channels.length, 2)
+  assert.equal(vault.get('legacy-second').botToken, 'second-renewed')
+  assert.equal(vault.get(first.id).botToken, 'secret')
+  assert.equal(runtime.store.snapshot().pairings[0].channelId, 'legacy-second')
+  assert.equal(runtime.store.snapshot().pairings[0].status, 'approved')
+  await assert.rejects(connectWeixin({ ...secondLogin, accountId: 'different-bot' }, runtime), /不能将已有联系人授权/)
+  await assert.rejects(connectWeixin({ ...secondLogin, channelId: 'missing' }, runtime), /指定微信渠道/)
+})
+
+test('QR session retains explicit reauthentication target through confirmation', async t => {
+  const { manager, advance } = await loginFixture(t)
+  const target = await manager.begin('new-companion', 'legacy-second')
+  advance()
+  t.mock.method(WeixinApi.prototype, 'getQrCodeStatus', async () => ({ status: 'confirmed', ilink_bot_id: 'second-bot', bot_token: 'secret' }))
+  assert.equal((await manager.poll(target.id)).channelId, 'legacy-second')
+  assert.equal(manager.consume(target.id).channelId, 'legacy-second')
+})
+
+test('startup quarantines enabled legacy duplicates without reading tokens or polling', async t => {
+  const { runtime, login } = await connectionFixture(t)
+  const first = await connectWeixin(login, runtime)
+  await runtime.store.update(state => state.channels.push({ ...first, id: 'duplicate', accountId: 'other-bot' }))
+  const manager = new ChannelManager({ logger: { error() {} } }, runtime.store, {
+    read: async () => { throw new Error('must not read credentials') }, configured: async () => true,
+  }, {}, '/tmp')
+  await manager.startEnabled()
+  const views = await manager.views()
+  assert.ok(views.every(c => c.runtimeStatus === 'error' && /多个微信渠道/.test(c.lastError)))
+  await runtime.store.update(state => { state.channels.find(c => c.id === 'duplicate').enabled = false })
+  await assert.rejects(manager.setEnabled('duplicate', true), /先停用/)
+  assert.equal(runtime.store.snapshot().channels.find(c => c.id === 'duplicate').enabled, false)
+})
+
+test('login HTTP route binds channel target and rejects another companion channel', async t => {
+  const { runtime, login, defaultCompanion } = await connectionFixture(t)
+  const channel = await connectWeixin(login, runtime)
+  t.mock.method(WeixinApi.prototype, 'getQrCode', async () => ({ qrcode: 'private', qrcode_img_content: 'qr' }))
+  let handler
+  registerPartnerApi({ register: route => { handler = route.handler; return () => {} } }, '/api', { ...runtime, login: new WeixinLoginManager() })
+  const request = async companionId => {
+    const req = Object.assign(Readable.from([JSON.stringify({ companionId, channelId: channel.id })]), {
+      method: 'POST', url: '/api/weixin/login', headers: { 'x-dsh-partner-request': '1', 'content-type': 'application/json' },
+    })
+    const res = { setHeader() {}, end(data) { this.body = JSON.parse(data) } }
+    await handler(req, res)
+    return res
+  }
+  const accepted = await request(login.companionId)
+  assert.equal(accepted.statusCode, 201)
+  assert.equal(accepted.body.channelId, channel.id)
+  assert.equal((await request(defaultCompanion.id)).statusCode, 404)
 })
 
 test('credential write failure creates no channel and can be retried', async t => {

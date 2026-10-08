@@ -288,7 +288,15 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
 }
 
 function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionView; snapshot: PartnerSnapshot; onChanged(): Promise<void> }): JSX.Element {
-  const channel = snapshot.channels.find(item => item.companionId === companion.id && (!item.platform || item.platform==='weixin'))
+  const channels = snapshot.channels.filter(item => item.companionId === companion.id && (!item.platform || item.platform === 'weixin'))
+  return <>
+    {channels.length > 1 && <p className="dsh-partner-inline-error" role="alert">发现 {channels.length} 个历史微信渠道。请先停用不使用的渠道，再对需要保留的渠道重新扫码；联系人授权不会跨机器人迁移。</p>}
+    {channels.length ? channels.map(channel => <WeixinChannelPanel key={channel.id} companion={companion} snapshot={snapshot} onChanged={onChanged} channel={channel} />) : <WeixinChannelPanel companion={companion} snapshot={snapshot} onChanged={onChanged} />}
+  </>
+}
+
+function WeixinChannelPanel({ companion, snapshot, onChanged, channel }: { companion: CompanionView; snapshot: PartnerSnapshot; onChanged(): Promise<void>; channel?: ChannelView }): JSX.Element {
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [login, setLogin] = useState<LoginView>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -319,7 +327,7 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
     loginGeneration.current += 1
     setLogin(undefined)
     setBusy(true); setError(undefined)
-    try { setLogin(await api('/weixin/login', { method: 'POST', body: JSON.stringify({ companionId: companion.id }) })) }
+    try { setLogin(await api('/weixin/login', { method: 'POST', body: JSON.stringify({ companionId: companion.id, channelId: channel?.id }) })) }
     catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
   const toggle = async (): Promise<void> => {
@@ -329,6 +337,13 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
     catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
   const pairings = channel ? snapshot.pairings.filter(item => item.channelId === channel.id) : []
+  const remove = async (): Promise<void> => {
+    if (!channel || !confirmDelete) return
+    loginGeneration.current += 1
+    setLogin(undefined); setBusy(true); setError(undefined)
+    try { await api(`/channels/${channel.id}`, { method: 'DELETE' }); await onChanged() }
+    catch (reason) { setError(message(reason)) } finally { setBusy(false) }
+  }
   const actPairing = async (id: string, status: 'approved' | 'blocked'): Promise<void> => {
     try { await api(`/pairings/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); await onChanged() } catch (reason) { setError(message(reason)) }
   }
@@ -338,7 +353,11 @@ function WeixinPanel({ companion, snapshot, onChanged }: { companion: CompanionV
     {channel && <>
       <GlassSurface as="div" interactive className="dsh-partner-channel-card" borderRadius={14} distortionScale={-10} saturation={1.06}><div className="dsh-partner-weixin-mark"><WeixinGlyph large /></div><span><small>WECHAT CHANNEL</small><strong>{channel.name}</strong><p>{channel.accountId}</p></span><Status channel={channel} /><div className="dsh-partner-weixin-actions"><button type="button" className="dsh-partner-switch" data-on={channel.enabled} disabled={busy} role="switch" aria-checked={channel.enabled} aria-label={channel.enabled ? '停用微信渠道' : '启用微信渠道'} onClick={() => { void toggle() }}><i /></button><button type="button" className="dsh-partner-weixin-rescan" disabled={busy} title="更新当前机器人的登录凭据，保留联系人授权" onClick={() => { void begin() }}><IconRefreshOutline16 size={16} />{busy ? '请稍候…' : '重新扫码'}</button></div></GlassSurface>
       {channel.enabled && channel.runtimeStatus === 'starting' && !channel.lastError && <p className="dsh-partner-weixin-help" role="status">登录凭据已保存，正在等待微信接收通道首次响应。长轮询可能需要几十秒；向机器人发送一条消息可帮助确认收发是否正常，无需重复扫码。</p>}
-      {channel.lastError && <p className="dsh-partner-inline-error">{channel.lastError}</p>}
+      {channel.lastError && <p className="dsh-partner-inline-error" role="alert">{channel.lastError}</p>}
+      {confirmDelete ? <div role="group" aria-label="确认删除微信渠道">
+        <p className="dsh-partner-inline-error" role="alert">确认删除 {channel.accountId}？将移除该渠道凭据、联系人配对和渠道会话关联，不会迁移授权，且不可撤销。</p>
+        <div className="dsh-partner-weixin-actions"><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>取消</button><button type="button" disabled={busy} onClick={() => { void remove() }}>{busy ? '正在删除…' : '确认删除'}</button></div>
+      </div> : <div className="dsh-partner-weixin-actions"><button type="button" disabled={busy} onClick={() => setConfirmDelete(true)}>删除此渠道</button></div>}
       <div className="dsh-partner-pairing-heading"><span><small>ACCESS</small><strong>私聊配对</strong></span><em>{pairings.filter(item => item.status === 'pending').length} 个待处理</em></div>
       <div className="dsh-partner-pairings">{pairings.length === 0 ? <State title="等待首次消息" detail="扫码只完成机器人登录，不会自动授权联系人。请先在微信向机器人发送一条消息，再回到这里点击「批准」，之后即可对话。" compact /> : pairings.map(pairing => <article key={pairing.id}><span className={`is-${pairing.status}`}><IconUserOutline16 size={16} /></span><div><strong>{pairing.displayName}</strong><small>{pairing.status === 'pending' ? '等待审批' : pairing.status === 'approved' ? '已授权独立会话' : '已阻止'} · {new Date(pairing.updatedAt).toLocaleString()}</small></div>{pairing.status === 'pending' && <><button onClick={() => { void actPairing(pairing.id, 'blocked') }}>拒绝</button><button className="is-primary" onClick={() => { void actPairing(pairing.id, 'approved') }}>批准</button></>}{pairing.status === 'approved' && <button onClick={() => { void actPairing(pairing.id, 'blocked') }}>撤销</button>}{pairing.status === 'blocked' && <button onClick={() => { void actPairing(pairing.id, 'approved') }}>重新批准</button>}</article>)}</div>
     </>}

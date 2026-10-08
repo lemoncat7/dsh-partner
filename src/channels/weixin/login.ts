@@ -5,6 +5,7 @@ import { weixinTransientFailure } from './errors.js'
 export interface LoginView {
   id: string
   companionId: string
+  channelId?: string
   phase: 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'error'
   qrContent?: string
   accountId?: string
@@ -27,7 +28,7 @@ export class WeixinLoginManager {
   private readonly polls = new Map<string, Promise<LoginView>>()
   private readonly completions = new Map<string, Promise<unknown>>()
 
-  async begin(companionId: string): Promise<LoginView> {
+  async begin(companionId: string, channelId?: string): Promise<LoginView> {
     this.prune()
     const result = await new WeixinApi().getQrCode(AbortSignal.timeout(30_000))
     if (!result.qrcode || !result.qrcode_img_content) throw new Error('微信登录接口没有返回有效二维码')
@@ -35,6 +36,7 @@ export class WeixinLoginManager {
     const session: InternalLogin = {
       id: `login-${randomUUID()}`,
       companionId,
+      ...(channelId ? { channelId } : {}),
       phase: 'waiting',
       qrContent: result.qrcode_img_content,
       qrcode: result.qrcode,
