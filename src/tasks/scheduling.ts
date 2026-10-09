@@ -34,7 +34,12 @@ export function taskScheduling(state: PartnerState, task: BoardTask, liveClaims?
   if (!task.assigneeCompanionId) return { code: 'unassigned', message: '尚未指定执行伙伴' }
   if (!job && !task.autoRun && task.status !== 'doing') return { code: 'planning', message: '仅保存规划，尚未提交执行' }
   const pending = task.dependencyTaskIds.filter(id => state.tasks.find(t => t.id === id)?.status !== 'done')
-  if (pending.length && task.status !== 'review') return { code: 'dependencies', message: `等待 ${pending.length} 项前置任务通过验收`, taskIds: pending }
+  if (pending.length && task.status !== 'review') {
+    const blocked = pending.filter(id => state.tasks.find(t => t.id === id)?.status === 'blocked')
+    return blocked.length
+      ? { code: 'dependencies_blocked', message: '前置任务受阻，请先修复并重试前置任务；本任务尚未启动', taskIds: blocked }
+      : { code: 'dependencies', message: `等待 ${pending.length} 项前置任务通过验收`, taskIds: pending }
+  }
   const target = job?.toCompanionId ?? task.assigneeCompanionId
   const probe: PartnerDelegation = job ?? { id: '', taskId: task.id, initiatedBy: task.creatorCompanionId ? 'companion' : 'user', ...(task.creatorCompanionId ? { fromCompanionId: task.creatorCompanionId } : {}), toCompanionId: target, status: 'queued', request: '', createdAt: 0 }
   const denied = taskDispatchDenied(state, probe)

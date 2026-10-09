@@ -2,10 +2,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import type { ToolDefinition, ToolRunContext, ToolRuntime } from '@deepseek-ai/dsh-tools'
-import { extractConcernResources, type ConcernCandidate, type ConcernWatchKind } from './concern-domain.js'
+import { extractConcernResources, hasSustainedConcernEvidence, type ConcernCandidate, type ConcernWatchKind } from './concern-domain.js'
 import type { PartnerConcernStore } from './concern-store.js'
 import { explicitConcernDirective } from './memory-reflection.js'
 import type { PartnerStore } from './store.js'
+import { concernManagementTool } from './concern-management-tool.js'
+import { isInternalTaskNotice, isRequirementDeliveryReceipt } from './channels/delivery-policy.js'
 
 const TOOL_NAME = 'partner_concern_suggest'
 
@@ -23,9 +25,10 @@ export interface ConcernSuggestion {
 
 /** One concern entry point for explicit watches and evidence-backed implicit candidates. */
 export function registerPartnerConcernTool(ctx: ConcernToolContext, store: PartnerStore, concerns: PartnerConcernStore): () => void {
+  const disposeManagement = ctx.tools.register(concernManagementTool(store, concerns))
   const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()))
   const disposeVisibility = installVisibility(ctx, store)
-  return () => { disposeVisibility(); disposeTool() }
+  return () => { disposeVisibility(); disposeTool(); disposeManagement() }
 }
 
 function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStore, submissions: ConcernTurnSubmissionGate): ToolDefinition {
@@ -60,6 +63,7 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       const currentUserText = currentUser.text
       const suggestion = validateConcernSuggestion(raw, currentUserText)
       const explicit = explicitConcernDirective(currentUserText) && explicitConcernDirective(suggestion.evidence)
+      if (!explicit && !hasSustainedConcernEvidence(currentUserText)) return JSON.stringify({ outcome: 'rejected', reason: '当前是一次性工作或缺少持续观察依据，请完成工作，不要新增关注。' })
       if (!explicit && !submissions.claim(agent, currentUser.seq)) return JSON.stringify({
         outcome: 'already_processed_this_turn',
         reason: '本轮已经提交过关注候选，请继续处理用户当前任务；仍可调用其他所需工具。',
@@ -109,7 +113,7 @@ export function validateConcernSuggestion(value: unknown, currentUserText: strin
 }
 
 export function applyConcernToolVisibility(assembly: PromptAssembly, enabled: boolean): void {
-  if (!enabled) assembly.tools = assembly.tools.filter(schema => schema.name !== TOOL_NAME)
+  if (!enabled) assembly.tools = assembly.tools.filter(schema => schema.name !== TOOL_NAME && schema.name !== 'partner_concerns')
 }
 
 function installVisibility(ctx: ConcernToolContext, store: PartnerStore): () => void {
@@ -148,7 +152,11 @@ function latestUserMessage(agent: Agent): { seq: number; text: string } {
   const events = agent.session.snapshotEvents()
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type !== 'user/message' || event.data.source.kind !== 'user') continue
+    if (event?.type !== 'user/message') continue
+    if (event.data.source.kind !== 'user') {
+      if (isInternalTaskNotice(event) && !isRequirementDeliveryReceipt(event)) throw new Error('后台任务、定时唤醒或看板协调不能借用旧用户消息新建关注；请继续当前工作')
+      continue // Knowledge recall and delivery receipts do not replace the user's intent.
+    }
     return { seq: event.seq, text: event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() }
   }
   throw new Error('current partner turn has no user message evidence')

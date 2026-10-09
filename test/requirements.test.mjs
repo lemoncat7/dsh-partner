@@ -9,7 +9,7 @@ import { RequirementService } from '../lib/requirements/service.js'
 import { RequirementWorker, requirementSummaryPrompt } from '../lib/requirements/worker.js'
 import { PartnerCollaborationService } from '../lib/collaboration/service.js'
 import { taskWorkContext } from '../lib/tasks/context.js'
-import { requirementIsIdle, requirementProgressKey } from '../lib/requirements/progress.js'
+import { requirementCanReportStage, requirementIsIdle, requirementProgressKey } from '../lib/requirements/progress.js'
 import { consolidateCompletedRequirements } from '../lib/requirements/consolidation.js'
 import { requirementTool } from '../lib/requirements/tool.js'
 
@@ -328,6 +328,50 @@ test('stage notifications require ONLY done/blocked tasks; waiting and review ar
   assert.equal(requirementIsIdle(store.snapshot(), current()), false)
   await tasks.removeRequirement(requirement.id)
   assert.equal(requirementIsIdle(store.snapshot(), { id: requirement.id }), false)
+})
+
+test('blocked chains report once without starting dependencies or archiving', async t => {
+  const { store, service, tasks, requirement, add, current } = await fixture(t)
+  const source = await add('健康检查'), dependent = await add('正式生成')
+  await store.update(s => {
+    Object.assign(s.tasks.find(t => t.id === source.id), { status: 'blocked', resultSummary: 'TLS failed', blockedRecovery: { workRevision: 1, handledBy: [], attempts: 1, needsUser: true } })
+    Object.assign(s.tasks.find(t => t.id === dependent.id), { status: 'ready', autoRun: true, dependencyTaskIds: [source.id] })
+    s.requirements[0].updatedAt = Date.now() - 30_000
+  })
+  assert.equal(requirementIsIdle(store.snapshot(), current()), false)
+  assert.equal(requirementCanReportStage(store.snapshot(), current()), true)
+  let deliveries = 0
+  const worker = new RequirementWorker(store, service, { summarize: async () => '健康检查受阻，正式生成未提交', deliver: async () => { deliveries++ }, warn() {} })
+  await worker.tick(); await worker.tick(); await worker.close()
+  assert.equal(deliveries, 1)
+  assert.equal(tasks.require(dependent.id).status, 'ready')
+  assert.notEqual(current().status, 'done')
+  for (const status of ['backlog', 'doing', 'review']) {
+    await store.update(s => { s.tasks.find(t => t.id === dependent.id).status = status })
+    assert.equal(requirementCanReportStage(store.snapshot(), current()), false, status)
+  }
+  await store.update(s => { Object.assign(s.tasks.find(t => t.id === dependent.id), { status: 'ready', dependencyTaskIds: [] }) })
+  assert.equal(requirementCanReportStage(store.snapshot(), current()), false)
+  await store.update(s => {
+    s.tasks.find(t => t.id === dependent.id).dependencyTaskIds = [source.id]
+    s.delegations.push({ taskId: source.id, status: 'queued' })
+  })
+  assert.equal(requirementCanReportStage(store.snapshot(), current()), false)
+})
+
+test('retrying a blocked downstream task returns actionable prerequisites without changing state', async t => {
+  const { store, tasks, add } = await fixture(t)
+  const source = await add('健康检查'), dependent = await add('正式生成')
+  await store.update(s => {
+    s.tasks.find(t => t.id === source.id).status = 'blocked'
+    Object.assign(s.tasks.find(t => t.id === dependent.id), { status: 'blocked', dependencyTaskIds: [source.id] })
+  })
+  await assert.rejects(tasks.update(dependent.id, { expectedRevision: tasks.require(dependent.id).revision, status: 'ready' }, actor), e => {
+    assert.equal(e.code, 'DEPENDENCIES_NOT_READY')
+    assert.equal(e.current.dependencies[0].id, source.id)
+    return true
+  })
+  assert.equal(tasks.require(dependent.id).status, 'blocked')
 })
 
 test('stage report is durable, deduplicated, retries after restart, and does not archive planning scope', async t => {

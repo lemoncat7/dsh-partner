@@ -55,10 +55,22 @@ export class NotificationDelivery {
         await send(target,frozen.reply,async(index,perform)=>{
           if(target.sentParts.includes(index))return
           currentPart=index
-          await perform()
+          const hash = index > 0 ? frozen.reply.attachments[index - 1]?.contentHash : undefined
+          const scope = frozen.reply.attachmentScope
+          const recipient = JSON.stringify([target.channelId, target.userId])
+          const alreadySent = scope && hash && this.store.snapshot().requirements?.find(r => r.id === scope)?.attachmentReceipts?.[recipient]?.includes(hash)
+          if (!alreadySent) await perform()
           await this.store.update(state=>{
             const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
             if(!saved.sentParts.includes(index))saved.sentParts.push(index)
+            if (scope && hash) {
+              const requirement = state.requirements?.find(r => r.id === scope)
+              if (requirement) {
+                const receipts = requirement.attachmentReceipts ??= {}
+                const hashes = receipts[recipient] ??= []
+                if (!hashes.includes(hash)) hashes.push(hash)
+              }
+            }
           })
           target.sentParts.push(index)
         })

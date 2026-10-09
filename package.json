@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.7.5",
+  "version": "2.8.0",
   "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -26,6 +26,8 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "docs/releases/2.8.0.md",
+    "docs/lifecycle-recovery.md",
     "docs/releases/2.7.5.md",
     "docs/weixin-recovery.md",
     "docs/releases/2.7.4.md",

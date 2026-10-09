@@ -185,7 +185,7 @@ export class AttachmentDeliveryService {
   /** Use the immutable delivery snapshot, never a different companion's workspace path. */
   async outbound(item: AttachmentDelivery): Promise<PartnerOutboundAttachment> {
     await this.bytes(item)
-    return { path: join(this.directory(item.companionId), item.id), name: item.name, kind: item.kind, mediaType: item.mediaType }
+    return { path: join(this.directory(item.companionId), item.id), name: item.name, kind: item.kind, mediaType: item.mediaType, contentHash: item.hash }
   }
   async deliver(item: AttachmentDelivery, send: (file: PartnerOutboundAttachment) => Promise<void>): Promise<AttachmentDelivery> {
     return this.serial('storage', async () => {

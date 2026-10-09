@@ -13,6 +13,12 @@ export function isInternalTaskNotice(event: SessionEvent): boolean {
     && INTERNAL_TASK_NOTICES.has(event.data.source.summary ?? '')
 }
 
+/** Appended delivery bookkeeping, not a new agent instruction or turn owner. */
+export function isRequirementDeliveryReceipt(event: SessionEvent): boolean {
+  return isInternalTaskNotice(event) && event.type === 'user/message' && event.data.source.kind !== 'user'
+    && 'summary' in event.data.source && event.data.source.summary === '需求成果交付'
+}
+
 /** Goal completion may share a turn with review; it must not bypass silence. */
 export function isAutonomousDeliveryTurn(events: readonly SessionEvent[], history: readonly SessionEvent[] = events): boolean {
   if (events.some(isInternalTaskNotice)) return false
@@ -55,6 +61,7 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
       flush(); direct = false
     }
     else if (event.type === 'user/message' && event.data.source.kind === 'user') direct = true
+    else if (isRequirementDeliveryReceipt(event) && direct && !autonomous) { /* Preserve the current user's final answer. */ }
     else if (isInternalTaskNotice(event)) { answer = ''; references = []; direct = false }
     else if (direct && event.type === 'tool/result') answer = ''
     else if (direct && event.type === 'assistant/message' && !event.data.interrupted) {

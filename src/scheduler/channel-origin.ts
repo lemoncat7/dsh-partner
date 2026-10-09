@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ChannelSession, PartnerState } from '../domain.js'
 import type { ScheduleContinuation } from './domain.js'
-import { isInternalTaskNotice } from '../channels/delivery-policy.js'
+import { isInternalTaskNotice, isRequirementDeliveryReceipt } from '../channels/delivery-policy.js'
 import { questionOrigin } from '../channels/question-origin.js'
 import { isPluginSource } from '../message-source.js'
 
@@ -16,7 +16,7 @@ export function savedContinuationRoute(state: PartnerState, owner: string, wake:
 
 /** Unknown/browser origins stay local; only the exact wake inherits a saved channel. */
 export function continuationChannelOrigin(state: PartnerState, owner: string, sessionId: string, events: readonly SessionEvent[]): ChannelSession | undefined {
-  const origin = [...events].reverse().find(e => e.type === 'user/message' && (e.data.source.kind === 'user' || isInternalTaskNotice(e)))
+  const origin = [...events].reverse().find(e => e.type === 'user/message' && !isRequirementDeliveryReceipt(e) && (e.data.source.kind === 'user' || isInternalTaskNotice(e)))
   if (origin && isInternalTaskNotice(origin) && origin.type === 'user/message') {
     if (!isPluginSource(origin.data.source, '@lemoncat7/dsh-partner') || origin.data.source.form !== 'notice' || origin.data.source.summary !== '伙伴长任务续接') return
     const entry = state.schedules.find(s => s.companionId === owner && s.continuation?.originSessionId === sessionId && s.continuation.messageId === origin.data.id)

@@ -10,7 +10,8 @@ export function requirementTool(companionId: string, service: RequirementService
     name: 'partner_requirements',
     description: 'Manage one requirement containing all tasks for a user deliverable. submit_plan atomically saves 1–40 tasks with local dependency keys, authorized executor IDs, acceptanceCriteria and optional exclusive resourceKeys. Use one stable submissionKey on retries; replay returns existing IDs, never restarts deleted work. New goals use title/description; continuation uses requirementId/expectedRevision after reopen. autoRun defaults true; completeScope defaults false and must only confirm a fully planned requirement. Keep decomposition policy in the enabled Skill. Single create plus child tasks remains supported. submit confirms the complete scope: when all children are accepted the system summarizes and archives automatically. A requirement containing only done/blocked tasks sends one stage result per changed batch even without submit. Any backlog, ready, doing, review or queued execution suppresses stage delivery. Never report individual review/rework steps. Stage delivery does NOT require archiving and permits further tasks. When the owner confirms the whole requirement is complete, finish saves a real final summary and archives if all children are done, including planning requirements. Never finish merely because work is queued or blocked. update changes the authoritative requirement and invalidates old child execution/reviews; use it for changed scope, not a comment alone. For continued work on the same user goal, list and reuse the original requirement instead of creating another per specialist phase. reopen supports submitted AND archived requirements, preserving previous archives and accepted tasks; optional title/description extends the overall scope for NEW work without invalidating old deliverables. Use update only when changing acceptance requirements for existing work. remove permanently deletes only on explicit user request and is idempotent. Use the enabled task-planning Skill for decomposition.',
     parameters: { type: 'object', additionalProperties: false, required: ['action'], properties: {
-      action: { type: 'string', enum: ['list', 'create', 'submit_plan', 'update', 'submit', 'reopen', 'finish', 'retry', 'remove'] },
+      action: { type: 'string', enum: ['list', 'create', 'submit_plan', 'update', 'submit', 'reopen', 'finish', 'prepare_delivery', 'retry', 'remove'] },
+      attachmentIds: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'prepare_delivery: owner-selected final attachment IDs from accepted tasks. Required, use [] for text-only. This saves a durable outbound draft; transport sends only these files, with retry/dedup. Do not also send them using partner_send_attachment. Before finish, prepare_delivery if files should accompany the summary.' },
       ...planParameters,
       requirementId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
       expectedRevision: { type: 'integer', description: 'Use revision returned by create/list or a board response requirement. submit/update/reopen tolerate child creation and progress since that read, but not intervening scope/control edits or task removal. finish requires the exact snapshot reviewed. A conflict returns current content and recovery instructions: reconcile before retrying, never repeatedly list or recreate the requirement.' }, summary: { type: 'string' },
@@ -44,10 +45,16 @@ export function requirementTool(companionId: string, service: RequirementService
       const revision = input.expectedRevision
       if (!Number.isInteger(revision)) throw new Error('请先查询需求并提供 expectedRevision')
       try {
+        if (action === 'prepare_delivery') return JSON.stringify(await service.prepareDelivery(id, revision as number, requiredMarkdown(input.summary, 'summary', 12000), input.attachmentIds, actor))
         if (action === 'update') return JSON.stringify(await service.update(id, revision as number, input, actor))
         if (action === 'submit') return JSON.stringify(await service.submit(id, revision as number, actor))
         if (action === 'reopen') return JSON.stringify(await service.reopen(id, revision as number, actor, input))
-        if (action === 'finish') return JSON.stringify(await service.finish(id, revision as number, requiredMarkdown(input.summary, 'summary', 12000), actor))
+        if (action === 'finish') {
+          const summary = requiredMarkdown(input.summary, 'summary', 12000)
+          const hasFiles = tasks.snapshot().tasks.some(t => t.requirementId === id && t.resultAttachmentIds?.length)
+          if (hasFiles && (!item.deliveryDraft || item.deliveryDraft.summary !== summary)) throw new Error('此需求有正式附件，请先 prepare_delivery 提交同一份 summary 和要交付的 attachmentIds（不发附件则 []），再 finish；不要额外单独发送一遍')
+          return JSON.stringify(await service.finish(id, revision as number, summary, actor))
+        }
         throw new Error('需求操作无效')
       } catch (error) {
         if (!(error instanceof RequirementConflictError)) throw error

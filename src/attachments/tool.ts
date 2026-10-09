@@ -4,7 +4,7 @@ import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { PartnerStore } from '../store.js'
 import type { ChannelManager } from '../channels/manager.js'
-import { isInternalTaskNotice } from '../channels/delivery-policy.js'
+import { isInternalTaskNotice, isRequirementDeliveryReceipt } from '../channels/delivery-policy.js'
 import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
 import type { AttachmentDeliveryService } from './service.js'
 
@@ -27,7 +27,8 @@ export function attachmentTool(companionId: string, store: PartnerStore, service
         const state=store.snapshot(), route=state.sessions.find(s=>s.sessionId===sessionId&&s.companionId===companionId)
         if (!route || !state.companions.some(c=>c.id===companionId) || store.isCompanionRemoving(companionId)) throw new Error('当前会话不属于有效伙伴，不能交付附件')
         const events=agent.session.snapshotEvents()
-        const origin=[...events].reverse().find(e=>e.type==='user/message' && (e.data.source.kind==='user'||isInternalTaskNotice(e)))
+        const origin=[...events].reverse().find(e=>e.type==='user/message' && !isRequirementDeliveryReceipt(e) && (e.data.source.kind==='user'||isInternalTaskNotice(e)))
+        if (origin?.type === 'user/message' && isInternalTaskNotice(origin) && 'summary' in origin.data.source && origin.data.source.summary === '伙伴汇总需求') throw new Error('需求汇报请用 partner_requirements prepare_delivery 提交总结和正式附件 ID 清单；不要再次单独发送附件')
         const source = continuationChannelOrigin(state, companionId, sessionId, events)
         const channel = !!source
         const cwd=route.cwd??agent.session.header.cwd

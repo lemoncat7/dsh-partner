@@ -158,7 +158,7 @@ export class PartnerConcernStore {
     return concern
   }
 
-  async editExplicit(companionId: string, id: string, input: {subject: string; reason: string; sources: string; expectedUpdatedAt: number; recordTarget?: PartnerConcern['recordTarget']}): Promise<PartnerConcern> {
+  async editExplicit(companionId: string, id: string, input: {subject: string; reason: string; sources: string; expectedUpdatedAt: number; recordTarget?: PartnerConcern['recordTarget']; watchKind?: PartnerConcern['watchKind']; watchQuery?: string}): Promise<PartnerConcern> {
     let edited: PartnerConcern | undefined
     await this.serial(this.path(companionId), async () => {
       const database = await this.open(companionId)
@@ -182,6 +182,11 @@ export class PartnerConcernStore {
         if (JSON.stringify(old.recordTarget) !== JSON.stringify(input.recordTarget)) database.prepare('UPDATE concerns SET recording_pending = ?, recording_snapshot_json=NULL, recording_retry_at=0 WHERE id = ?').run(input.recordTarget ? 1 : 0, id)
         database.prepare('UPDATE concerns SET subject = ?, normalized_subject = ?, reason = ?, resources_json = ?, watch_kind = ?, watch_query = ?, record_target_json = ?, updated_at = ? WHERE id = ? AND companion_id = ?').run(subject, normalized, input.reason.trim(), resourcesJson(descriptor.resources), descriptor.watchKind, subject, input.recordTarget ? JSON.stringify(input.recordTarget) : null, updated, id, companionId)
         const result = concernFromRow(database.prepare('SELECT * FROM concerns WHERE id = ?').get(id) as SqlRow)
+        if (input.watchKind !== undefined || input.watchQuery !== undefined) {
+          result.watchKind = input.watchKind ?? result.watchKind
+          result.watchQuery = input.watchQuery ?? result.watchQuery
+          database.prepare('UPDATE concerns SET watch_kind = ?, watch_query = ? WHERE id = ?').run(result.watchKind, result.watchQuery, id)
+        }
         database.exec('COMMIT')
         edited = result
       } catch (error) { rollback(database); throw error }
@@ -448,12 +453,16 @@ export class PartnerConcernStore {
     })
   }
 
-  async act(companionId: string, concernId: string, action: 'watch' | 'ignore' | 'prioritize' | 'resolve', now = Date.now()): Promise<void> {
+  async act(companionId: string, concernId: string, action: 'watch' | 'ignore' | 'prioritize' | 'resolve', now = Date.now(), expectedUpdatedAt?: number): Promise<void> {
     await this.serial(this.path(companionId), async () => {
       const database = await this.open(companionId)
       try {
         const concern = database.prepare('SELECT * FROM concerns WHERE companion_id = ? AND id = ?').get(companionId, concernId) as SqlRow | undefined
         if (!concern) throw new Error('concern was not found')
+        if (expectedUpdatedAt !== undefined) {
+          if (number(concern.updated_at) !== expectedUpdatedAt) throw new Error('关注已变化，请重新 list')
+          now = Math.max(now, expectedUpdatedAt + 1)
+        }
         if (number(concern.updated_at) > now) return
         if (action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', updated_at = ? WHERE id = ?").run(now, concernId)
         if (action === 'resolve') database.prepare("UPDATE concerns SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").run(now, now, concernId)

@@ -27,7 +27,7 @@ import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
 import type { BoardRequirement } from '../requirements/domain.js'
-import { requirementIsIdle, requirementProgressKey } from '../requirements/progress.js'
+import { requirementCanReportStage, requirementProgressKey } from '../requirements/progress.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
 import { continuationFinalReply } from '../scheduler/final-reply.js'
 import { savedContinuationRoute } from '../scheduler/channel-origin.js'
@@ -223,31 +223,29 @@ export class ChannelManager {
     const route = this.routeForSession(item.creatorSessionId)
     if (!route) throw new Error('原需求会话不存在，保留交付等待重试')
     if (!this.requirementDelivery) throw new Error('需求附件交付服务尚未初始化')
-    const cwd = route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)
-    const delivery = await prepareTaskResultDelivery({ id: stage ? `${item.id}-stage-${item.stageReport!.key.slice(0, 16)}` : item.id, title: item.title, description: item.description, status: 'done', priority: 'normal', createdBy: 'companion', skillIds: [], dependencyTaskIds: [], revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, resultSummary: summary }, cwd)
-    const text = delivery.text.replace(/^看板任务已完成：/, stage ? '需求阶段结果：' : '需求已完成：')
+    // The owner authors the reply. Transport neither rewrites it nor invents extra documents.
+    const text = summary
     const state = this.store.snapshot()
     const latest = state.requirements?.find(r => r.id === item.id)
     if (!latest || latest.revision !== item.revision || latest.status !== item.status ||
-      (stage && (!requirementIsIdle(state, latest) || requirementProgressKey(state, latest) !== item.stageReport!.key))) throw new Error('需求已调整，取消旧结果投递')
+      (stage && (!requirementCanReportStage(state, latest) || requirementProgressKey(state, latest) !== item.stageReport!.key))) throw new Error('需求已调整，取消旧结果投递')
     const receipt = stage ? `requirement-stage:${item.id}:${item.stageReport!.key}:delivery-v2` : `requirement-result:${item.id}:${item.revision}:delivery-v2`
     const stillValid = () => {
       const state = this.store.snapshot(), latest = state.requirements?.find(r => r.id === item.id)
       return Boolean(latest && latest.revision === item.revision && latest.status === item.status &&
-        (!stage || (requirementIsIdle(state, latest) && requirementProgressKey(state, latest) === item.stageReport!.key)))
+        (!stage || (requirementCanReportStage(state, latest) && requirementProgressKey(state, latest) === item.stageReport!.key)))
     }
     const { service, prefix } = this.requirementDelivery
-    await service.serial(`requirement:${receipt}`, async () => {
+    await service.serial(`requirement:${item.id}`, async () => {
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
-      const files = await requirementAttachments(item, this.store.snapshot(), service)
-      if (delivery.documentPath) {
-        files.push(await service.serial('prepare', () => service.prepare({ companionId: route.companionId, sessionId: route.sessionId, turn: item.revision, cwd, path: delivery.documentPath!, channel: false }, this.notificationShutdown.signal)))
-      }
+      const draft = item.deliveryDraft
+      const selected = draft && draft.summary === summary && (!stage || draft.progressKey === requirementProgressKey(this.store.snapshot(), item)) ? draft.attachmentIds : []
+      const files = await requirementAttachments(item, this.store.snapshot(), service, selected)
       const attachments = await Promise.all(files.map(file => service.outbound(file)))
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
       await this.agents.recordRequirementResult(route, receipt, text, files, service, prefix)
       const localOnly = route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === route.companionId)?.notificationDelivery
-      if (!localOnly) await this.queueProactive(route, receipt, { text, attachments }, stillValid)
+      if (!localOnly) await this.queueProactive(route, receipt, { text, attachments, attachmentScope: item.id }, stillValid)
     })
   }
 

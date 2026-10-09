@@ -45,7 +45,7 @@ test('three rejected attempts stop auto-dispatch; only owner can explicitly resu
   assert.equal(task.replanRequested, true)
   assert.equal(autoRunCandidates(f.store.snapshot()).length, 0)
   assert.match(taskDispatchDenied(f.store.snapshot(), { taskId: task.id }), /重规划/)
-  await assert.rejects(f.tasks.update(task.id, { expectedRevision: task.revision, autoRun: true }, executor), /仅需求负责人/)
+  await assert.rejects(f.tasks.update(task.id, { expectedRevision: task.revision, autoRun: true }, executor), /仅创建者、需求负责人/)
   const resumed = await f.tasks.update(task.id, { expectedRevision: task.revision, assigneeCompanionId: 'other', autoRun: true }, owner)
   assert.equal(resumed.status, 'ready'); assert.equal(resumed.replanRequested, false)
   assert.equal(resumed.reworkCount, 0)

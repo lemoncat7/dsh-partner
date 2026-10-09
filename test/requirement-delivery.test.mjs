@@ -28,6 +28,8 @@ async function fixture(t) {
     s.channels.push({ id: 'matrix', companionId: 'companion-default', enabled: true })
     s.pairings.push({ channelId: 'matrix', userId: 'user', status: 'approved', lastInboundAt: 1 })
   })
+  const prepared = await new RequirementService(store).prepareDelivery(item.id, item.revision, item.summary, [file.id], { kind: 'companion', companionId: item.ownerCompanionId })
+  item.deliveryDraft = prepared.deliveryDraft
   return { root, cwd, service, file, store, task, item }
 }
 
@@ -41,6 +43,16 @@ test('accepted explicit snapshots survive source deletion; legacy delivery IDs w
   assert.equal((await requirementAttachments({ ...legacy, results: [{ ...legacy.results[0], resultSummary: '/other/private.md' }] }, f.store.snapshot(), f.service)).length, 0)
   await assert.rejects(requirementAttachments({ ...f.item, results: [{ ...f.task, assigneeCompanionId: 'other' }] }, f.store.snapshot(), f.service), /不属于/)
   await assert.rejects(requirementAttachments({ ...f.item, results: [{ ...f.task, resultAttachmentIds: ['a'.repeat(64)] }] }, f.store.snapshot(), f.service), /不存在/)
+})
+
+test('owner prepares exact delivery manifest; unrelated or unaccepted attachments are rejected', async t => {
+  const f=await fixture(t), service=new RequirementService(f.store), owner={kind:'companion',companionId:f.item.ownerCompanionId}
+  await assert.rejects(service.prepareDelivery(f.item.id,1,'reply',['not-accepted'],owner),/已验收/)
+  await assert.rejects(service.prepareDelivery(f.item.id,1,'reply',[f.file.id],{kind:'companion',companionId:'worker'}),/负责人/)
+  await assert.rejects(service.prepareDelivery(f.item.id,0,'reply',[f.file.id],owner),/变化/)
+  await service.prepareDelivery(f.item.id,1,'只交付文字',[],owner)
+  assert.deepEqual(service.require(f.item.id).deliveryDraft.attachmentIds,[])
+  assert.equal((await requirementAttachments(f.item,f.store.snapshot(),f.service,[])).length,0)
 })
 
 test('original conversation receives summary and download link exactly once, without another model turn', async t => {

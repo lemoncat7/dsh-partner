@@ -4,12 +4,14 @@ import type { EphemeralExecutionService } from '../execution/service.js'
 import type { PartnerStore } from '../store.js'
 import type { ScheduledPartnerTask } from './domain.js'
 import { ScheduleContinuations } from './continuations.js'
+import { cleanupObsoleteSchedules } from './cleanup.js'
 
 const OVERLAP_POLICIES = ['skip', 'queue'] as const
 
 export class PartnerSchedulerService {
   private timer: NodeJS.Timeout | undefined
   private readonly running = new Set<string>()
+  private readonly controllers = new Map<string, AbortController>()
   private readonly queued = new Set<string>()
   private closed = false
 
@@ -27,6 +29,7 @@ export class PartnerSchedulerService {
   async close(): Promise<void> {
     this.closed = true
     this.continuations.close()
+    for (const controller of this.controllers.values()) controller.abort()
     if (this.timer) clearInterval(this.timer)
     this.timer = undefined
   }
@@ -41,6 +44,7 @@ export class PartnerSchedulerService {
     const schedule = parseSchedule(input.schedule)
     const entry: ScheduledPartnerTask = {
       id: `schedule-${randomUUID()}`, companionId: owner, title: requiredText(input.title, 'title', 160),
+      ...(input.boardTaskId === undefined ? {} : { boardTaskId: requiredText(input.boardTaskId, 'boardTaskId', 160) }),
       prompt: requiredText(input.prompt, 'prompt', 12_000), schedule,
       enabled: optionalBoolean(input.enabled, true), destroySessionAfterRun: optionalBoolean(input.destroySessionAfterRun, true),
       overlapPolicy: input.overlapPolicy === undefined ? 'skip' : oneOf(input.overlapPolicy, OVERLAP_POLICIES, 'overlapPolicy'),
@@ -49,6 +53,7 @@ export class PartnerSchedulerService {
     }
     await this.store.update(state => {
       if (!state.companions.find(c => c.id === owner)?.capabilities.includes('schedules')) throw new Error('请先勾选伙伴的定时任务能力')
+      if (entry.boardTaskId && !state.tasks.some(t => t.id === entry.boardTaskId && t.status !== 'done' && (t.creatorCompanionId === owner || t.assigneeCompanionId === owner))) throw new Error('只能关联自己创建或执行的未完成看板任务')
       if (state.schedules.length >= 100) throw new Error('Scheduled task limit reached; remove an obsolete schedule first')
       state.schedules.push(entry)
     })
@@ -96,6 +101,9 @@ export class PartnerSchedulerService {
 
   private async tick(): Promise<void> {
     if (this.closed) return
+    const snapshot = this.store.snapshot(), before = snapshot.schedules.length
+    cleanupObsoleteSchedules(snapshot)
+    if (snapshot.schedules.length !== before) await this.store.update(state => cleanupObsoleteSchedules(state))
     await this.continuations.tick()
     const due = this.store.snapshot().schedules.filter(item => !item.continuation && item.enabled && item.nextRunAt <= Date.now() && this.store.hasCapability(item.companionId, 'schedules'))
     for (const entry of due) void this.run(entry).catch(() => {})
@@ -108,10 +116,16 @@ export class PartnerSchedulerService {
       return
     }
     this.running.add(entry.id)
+    const controller = new AbortController()
+    this.controllers.set(entry.id, controller)
+    const unsubscribe = this.store.subscribe(state => {
+      const current = state.schedules.find(s => s.id === entry.id)
+      if (!current || !current.enabled || !state.companions.find(c => c.id === entry.companionId)?.capabilities.includes('schedules')) controller.abort()
+    }, () => {})
     try {
       const companion = this.requireCompanion(entry.companionId)
       await this.executor.execute({
-        kind: 'schedule', sourceId: entry.id, companion, prompt: entry.prompt,
+        kind: 'schedule', sourceId: entry.id, companion, prompt: entry.prompt, signal: controller.signal,
         timeoutMinutes: entry.timeoutMinutes, destroyAfterRun: entry.destroySessionAfterRun,
         systemInstruction: `这是定时任务「${entry.title}」。只执行本次计划内容；不要自行修改调度规则。`,
       })
@@ -120,6 +134,7 @@ export class PartnerSchedulerService {
       await this.advance(entry.id, 'failed')
       throw new Error(`Scheduled task failed: ${entry.title}`)
     } finally {
+      unsubscribe(); this.controllers.delete(entry.id)
       this.running.delete(entry.id)
       if (this.queued.delete(entry.id)) {
         const current = this.store.snapshot().schedules.find(item => item.id === entry.id && item.enabled)

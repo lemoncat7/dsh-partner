@@ -26,6 +26,24 @@ test('notification diagnostics never expose upstream tokens or signed URLs',()=>
 })
 
 const targets=[{channelId:'a',userId:'alice'},{channelId:'b',userId:'bob'}]
+test('same requirement attachment content is sent once per recipient across stage and archive, including restart', async t => {
+  const dir=await mkdtemp(join(tmpdir(),'requirement-dedupe-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+  const path=join(dir,'state.json'),store=await PartnerStore.open(path)
+  await store.update(s=>{s.requirements=[{id:'r'}]})
+  const sends=[]
+  const send=async(target,reply,part)=>{
+    await part(0,async()=>sends.push(`${target.userId}:text`))
+    for(let i=0;i<reply.attachments.length;i++)await part(i+1,async()=>sends.push(`${target.userId}:${reply.attachments[i].contentHash}`))
+  }
+  const file={path:'/tmp/file',name:'file',mediaType:'video/mp4',kind:'file',contentHash:'hash1'}
+  await new NotificationDelivery(store).deliver('stage','c',()=>[targets[0]],{text:'阶段结论',attachmentScope:'r',attachments:[file,{...file,path:'/tmp/copy'}]},send)
+  const restored=await PartnerStore.open(path)
+  await new NotificationDelivery(restored).deliver('final','c',()=>targets,{text:'完整结论',attachmentScope:'r',attachments:[file,{...file,contentHash:'hash2'}]},send)
+  assert.equal(sends.filter(x=>x==='alice:hash1').length,1)
+  assert.equal(sends.filter(x=>x==='bob:hash1').length,1)
+  assert.equal(sends.filter(x=>x==='alice:hash2').length,1)
+  assert.equal(sends.filter(x=>x==='alice:text').length,2)
+})
 test('notification settings fan out; recent mode replaces legacy per-contact routing',()=>{
   const state={companions:[{id:'c',notificationDelivery:{mode:'selected',targets}}],channels:targets.map(t=>({id:t.channelId,companionId:'c',enabled:true})),pairings:targets.map((t,i)=>({...t,status:'approved',lastInboundAt:i+1,deliveryTarget:targets[0]}))}
   assert.deepEqual(notificationRoutes(state,'a','alice'),targets)

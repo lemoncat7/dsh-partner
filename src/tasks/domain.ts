@@ -38,6 +38,7 @@ export interface BoardTask {
   /** Consecutive rejected attempts; reset only by an explicit replanning decision. */
   reworkCount?: number
   replanRequested?: boolean
+  blockedRecovery?: { workRevision: number; handledBy: string[]; running?: string; attempts: number; nextAttemptAt?: number; summary?: string; needsUser?: boolean }
   previousAttempt?: { resultSummary?: string; reviewSummary?: string; reviewHandoff?: string; evidence?: import('./contract.js').TaskEvidence[]; reviewChecks?: import('./contract.js').TaskReviewCheck[] }
   dueAt?: number
   revision: number

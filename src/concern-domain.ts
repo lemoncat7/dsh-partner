@@ -86,6 +86,9 @@ export function implicitConcernRejection(candidate: ConcernCandidate, directEvid
 export function hasSustainedConcernEvidence(value: string): boolean {
   const text = value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/\s+/gu, ' ').trim()
   if (!text) return false
+  // A complaint followed by an execution request is work, not permission to watch it.
+  const observation = /(?:持续|长期|后续|继续).{0,12}(?:关注|留意|观察|监控)|(?:有变化|有更新).{0,8}(?:告诉|通知)|keep an eye|keep monitoring/iu.test(text)
+  if (!observation && /(?:帮我|请|赶紧|马上|现在|继续|去|再).{0,12}(?:修复|修改|优化|实现|开发|生成|部署|排查|调研|写|做)|(?:修复|优化|部署|生成|实现|改)(?:一下|吧|下)|(?:please|can you|could you).{0,30}(?:fix|build|generate|deploy|implement)/iu.test(text)) return false
   return [
     /(?:还|仍|依旧|一直|再次|又).{0,24}(?:没|未|不|失败|异常|问题|卡住|报错|无效|不稳)/u,
     /(?:反复|频繁|偶尔|偶发|时不时|多次).{0,24}(?:失败|异常|问题|报错|不稳|丢失|复现)/u,

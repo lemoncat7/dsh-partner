@@ -84,7 +84,7 @@ export class TaskBoardService {
       const originalReviewer = task.reviewerCompanionId ?? task.creatorCompanionId
       if (task.replanRequested) {
         const owner = state.requirements?.find(r => r.id === task.requirementId)?.ownerCompanionId ?? task.creatorCompanionId
-        if (actor.kind !== 'user' && actor.companionId !== owner) throw new Error('任务已暂停等待重规划，仅需求负责人或用户可以调整和恢复；不要重复执行')
+        if (actor.kind !== 'user' && actor.companionId !== owner && actor.companionId !== task.creatorCompanionId) throw new Error('任务已暂停等待重规划，仅创建者、需求负责人或用户可以调整和恢复；不要重复执行')
       }
       const previousSpec = JSON.stringify([task.title, task.description, task.assigneeCompanionId, task.skillIds, task.dependencyTaskIds, task.acceptanceCriteria, task.resourceKeys])
       if (input.title !== undefined) task.title = requiredText(input.title, 'title', 200)
@@ -133,6 +133,14 @@ export class TaskBoardService {
       if (task.replanRequested && input.autoRun === true) {
         task.replanRequested = false; task.reworkCount = 0
         if (task.status === 'blocked') task.status = 'ready'
+      }
+      if (previousStatus === 'blocked' && task.status === 'ready') {
+        if (actor.kind === 'user') delete task.blockedRecovery
+        const pending = task.dependencyTaskIds.map(id => state.tasks.find(t => t.id === id)).filter(t => t && t.status !== 'done')
+        if (pending.length) throw new TaskWorkflowError('DEPENDENCIES_NOT_READY',
+          `无法重试下游任务：请先处理前置任务 ${pending.map(t => t!.title).join('、')}`,
+          { taskId: task.id, dependencies: pending.map(t => ({ id: t!.id, title: t!.title, status: t!.status, reason: t!.resultSummary?.slice(0, 600) })) },
+          '查看这些前置任务的失败原因，修复后只重试阻塞源；不要重复提交下游生成或重做已完成产物。')
       }
       if (input.autoRun === true && !task.assigneeCompanionId) throw new Error('提交执行需要指定负责人')
       if (task.status === 'done' && previousStatus !== 'done' && previousStatus !== 'review') throw new Error('任务必须先进入待验收，才能标记为已完成')

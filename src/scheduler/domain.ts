@@ -3,6 +3,8 @@ export type ScheduleOverlapPolicy = 'skip' | 'queue'
 export interface ScheduledPartnerTask {
   id: string
   companionId: string
+  /** Temporary scheduled work ends with its explicitly linked board task. */
+  boardTaskId?: string
   title: string
   prompt: string
   schedule: { kind: 'interval'; minutes: number } | { kind: 'daily'; hour: number; minute: number } | { kind: 'once'; at: number }

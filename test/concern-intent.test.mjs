@@ -24,6 +24,8 @@ test('explicit concerns save directly, support multiple subjects and preserve me
     assert.equal(first.destination, '在意的事')
     await tool.execute({ ...input, subject: '项目 B 版本变化' }, { agent })
     assert.deepEqual(calls.map(args => args[3]), ['explicit', 'explicit'])
+    const background = { session: { id: 's', snapshotEvents: () => [...agent.session.snapshotEvents(), { type: 'user/message', seq: 2, data: { source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴执行看板任务' }, content: [] } }] } }
+    await assert.rejects(tool.execute(input, { agent: background }), /不能借用旧用户消息/)
     enabled = false
     await assert.rejects(tool.execute(input, { agent }), /不要改用定时任务/)
     assert.equal(calls.length, 2)

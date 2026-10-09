@@ -28,7 +28,9 @@ import { SkillRepository } from './skills/repository.js'
 import { SkillService } from './skills/service.js'
 import { TaskBoardService } from './tasks/service.js'
 import { createTaskProgressNotifier } from './tasks/progress-notifier.js'
+import { BlockedTaskRecovery } from './tasks/blocked-recovery.js'
 import { RequirementService } from './requirements/service.js'
+import { requirementProgressKey } from './requirements/progress.js'
 import { RequirementWorker, requirementSummaryPrompt } from './requirements/worker.js'
 import { EphemeralExecutionService } from './execution/service.js'
 import { PartnerCollaborationService } from './collaboration/service.js'
@@ -169,10 +171,21 @@ export function apply(context: Context, config: PartnerConfig): void {
       summarize: async (item, children, signal, stage) => {
         const companion = store.snapshot().companions.find(c => c.id === item.ownerCompanionId)
         if (!companion) throw new Error('需求负责人不存在，请在需求中重新选择')
-        return (await agents.executeTask({ sourceId: `requirement:${item.id}`, companion, prompt: requirementSummaryPrompt(item, children, stage), signal })).output
+        await agents.executeTask({ sourceId: `requirement:${item.id}`, companion, prompt: requirementSummaryPrompt(item, children, stage), signal })
+        const draft = requirements.require(item.id).deliveryDraft
+        if (!draft || draft.progressKey !== requirementProgressKey(store.snapshot(), item)) throw new Error('负责人尚未提交有效交付清单，将重试整理；未发送渠道')
+        return draft.summary
       },
       deliver: item => channels.notifyRequirementResult(item), warn: message => ctx.logger.warn(message),
       isBusy: id => agents.isCompanionBusy(id),
+    })
+    const blockedRecovery = new BlockedTaskRecovery(store, {
+      execute: async (owner, task, prompt, signal) => {
+        const companion = store.snapshot().companions.find(c => c.id === owner)
+        if (!companion) throw new Error('协调伙伴不存在')
+        return (await agents.executeTask({ sourceId: `blocked:${task.id}`, companion, prompt, signal })).output
+      },
+      isBusy: id => agents.isCompanionBusy(id), warn: message => ctx.logger.warn(message),
     })
     agents.setQuestionAnswerer((agentCtx, route) => channels.attachQuestionAnswerer(agentCtx, route))
     collaboration.setAccessChangeNotifier(id => agents.reloadCompanion(id))
@@ -212,12 +225,14 @@ export function apply(context: Context, config: PartnerConfig): void {
     memoryWorker.start()
     scheduler.start()
     requirementWorker.start()
+    blockedRecovery.start()
     ctx.logger.info(`dsh-partner: ready with ${store.snapshot().companions.length} companion(s)`)
     function closeRuntime(removeApi=true):Promise<void> {
       if(removeApi)disposeApi?.()
       return closing ??= (async()=>{
       collaboration.beginShutdown()
       requirementWorker.beginShutdown()
+      blockedRecovery.beginShutdown()
       disposeSessionObserver()
       disposeConcernTool()
       reflection.close()
@@ -228,6 +243,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       await executor.close()
       await collaboration.close()
       await requirementWorker.close()
+      await blockedRecovery.close()
       })()
     }
     return async () => {try{await closeRuntime()}finally{releaseStorageLease()}}

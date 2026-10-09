@@ -13,6 +13,7 @@ export interface PartnerInboundMessage {
 }
 
 export interface PartnerOutboundAttachment {
+  contentHash?: string
   path: string
   name: string
   mediaType: string
@@ -20,6 +21,7 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  attachmentScope?: string
   text: string
   attachments: PartnerOutboundAttachment[]
 }

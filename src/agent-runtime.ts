@@ -42,7 +42,7 @@ import { type NoteRecordingBridge } from './concern-recording.js'
 import { executeObservationLoop } from './observation-loop.js'
 import { waitForBoardTurn } from './tasks/continuation-yield.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
-import { channelReplyPartsAfter, isInternalTaskNotice } from './channels/delivery-policy.js'
+import { channelReplyPartsAfter, isInternalTaskNotice, isRequirementDeliveryReceipt } from './channels/delivery-policy.js'
 import { prepareChannelReply } from './channels/outbound-media.js'
 import {replyStage,replyActivity,reportProgress,type ReplyProgress} from './execution/reply-progress.js'
 export { extractOutboundAttachments } from './channels/outbound-media.js'
@@ -272,7 +272,9 @@ export class PartnerAgentRuntime {
   }
 
   async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {
-    if (task.status !== 'review' && task.status !== 'done' && task.status !== 'blocked') return
+    // BlockedTaskRecovery owns retries/escalation, including writes without this callback.
+    if (task.status === 'blocked') return
+    if (task.status !== 'review' && task.status !== 'done') return
     // Automatic reviews have durable ownership; do not also wake the creator
     // into a second, untracked acceptance round.
     if (task.status === 'review' && task.autoRun && task.reviewerCompanionId) return
@@ -717,7 +719,7 @@ export class PartnerAgentRuntime {
     let directProgress=false
     const detach=progress?this.ctx.on('session/event',(current,event)=>{
       if(current.id!==agent.session.id||event.seq<startSeq)return
-      if(event.type==='turn/start'||event.type==='turn/end'||isInternalTaskNotice(event))directProgress=false
+      if(event.type==='turn/start'||event.type==='turn/end'||(isInternalTaskNotice(event)&&!isRequirementDeliveryReceipt(event)))directProgress=false
       if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=true
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
       if(directProgress){const activity=replyActivity(event);if(activity)reportProgress(progress,activity)}

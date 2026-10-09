@@ -66,6 +66,16 @@ const channelUser = () => ({ type: 'user/message', data: { source: { kind: 'user
 const channelAnswer = (text, extra = []) => ({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }, ...extra] } } })
 const numbered = events => events.map((event, index) => ({ ...event, seq: index + 1 }))
 
+test('delivery receipt during a user turn does not suppress its final answer or expose receipt text', () => {
+  const receipt = { type: 'user/message', data: { requirementDeliveryReceipt: 'receipt-1', source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '需求成果交付' }, content: [{ type: 'text', text: '系统已发送的回执内容' }] } }
+  const end = { type: 'turn/end', data: { reason: { kind: 'completed' } } }
+  const events = numbered([{ type: 'turn/start' }, channelUser(), channelAnswer('正在关闭', [{ type: 'tool-call', id: 'close', name: 'partner_requirements', arguments: {} }]), { type: 'tool/result' }, receipt, channelAnswer('已关闭相关看板任务，保留已有成果。'), end])
+  assert.equal(channelReplyPartsAfter(events, 0).text, '已关闭相关看板任务，保留已有成果。')
+  assert.equal(channelReplyPartsAfter(numbered([{ type: 'turn/start' }, channelUser(), channelAnswer('完成'), receipt, end]), 0).text, '完成')
+  assert.equal(channelReplyPartsAfter(numbered([{ type: 'turn/start' }, receipt, channelAnswer('内部流程'), end]), 0).text, '')
+  assert.equal(channelReplyPartsAfter(numbered([{ type: 'turn/start' }, receipt, channelAnswer('内部流程'), end]), 0, true).text, '')
+})
+
 test('channel final selection omits preambles and tool results, preserving only assistant attachment references', () => {
   const events = numbered([
     { type: 'turn/start' }, channelUser(), channelAnswer('我先查资料。'),
@@ -217,7 +227,7 @@ test('child acceptance stays silent and requirement summary sends one terminal r
   await Promise.all([channels.notifyRequirementResult(finished), channels.notifyRequirementResult(finished)])
   assert.equal(delivered.length, 1)
   assert.equal(delivered[0].channelId, 'channel')
-  assert.match(delivered[0].reply.text, /需求已完成：资料整理/)
+  assert.equal(delivered[0].reply.text, '完整结论与来源', 'transport preserves the owner-authored answer')
   assert.match(delivered[0].reply.text, /完整结论与来源/)
   assert.doesNotMatch(delivered[0].reply.text, /内部核验点/)
   const restored = await PartnerStore.open(join(root, 'state.json'))
@@ -245,7 +255,10 @@ test('stage reports route once before archiving; waiting/review suppresses deliv
   })
   for (const status of ['backlog', 'ready', 'doing', 'review']) { await stateTo(status); await worker.tick(); assert.equal(delivered.length, 0) }
   await stateTo('blocked'); await worker.tick(); await worker.tick()
-  assert.equal(delivered.length, 1); assert.match(delivered[0].text, /需求阶段结果：阶段交付/)
+  assert.equal(delivered.length, 0, 'creator/owner remediation precedes channel escalation')
+  await store.update(s => { s.tasks[0].blockedRecovery = { workRevision: 1, handledBy: [actor.companionId], attempts: 1, needsUser: true, summary: '需要用户补充输入' } })
+  await worker.tick()
+  assert.equal(delivered.length, 1); assert.equal(delivered[0].text, '当前成果和阻塞说明')
   assert.doesNotMatch(delivered[0].text, /需求已完成|待验收/)
   assert.equal(requirements.require(req.id).status, 'planning')
   await stateTo('done'); await worker.tick(); await worker.tick(); await worker.close()

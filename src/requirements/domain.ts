@@ -13,6 +13,10 @@ export interface BoardRequirement {
   createdAt: number
   updatedAt: number
   summary?: string
+  /** Authored by the owner, not inferred by channel transport. */
+  deliveryDraft?: { progressKey: string; summary: string; attachmentIds: string[] }
+  /** Content hashes acknowledged per recipient across stage/final reports. */
+  attachmentReceipts?: Record<string, string[]>
   archivedAt?: number
   /** Immutable accepted deliverables survive deleting their original task cards. */
   results?: Array<Pick<BoardTask, 'id' | 'title' | 'assigneeCompanionId' | 'resultSummary' | 'resultAbstract' | 'resultAttachmentIds'>>

@@ -80,6 +80,9 @@ export class PartnerAgentComposition {
         name: 'partner-collaboration', order: -7,
         text: [
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
+        '持续关注不是待办清单：用户让你修复、生成、部署、调研时先完成工作，不因为工作尚未完成就新增关注。已有关注用 partner_concerns list/update/resolve/stop/delete 管理；修改或停止不能靠再添加一条代替。删除必须有用户明确要求。',
+        companion.capabilities.includes('schedules') ? '定时计划须有明确生命周期。当前工作已完成、不再需要时取消并删除对应临时计划；不得清理用户仍要求的周期交付。为看板创建临时计划时填写 boardTaskId，任务完成或删除后系统自动清理。外部任务等待仍用 defer，不要用周期 create 轮询。续接最终答复未送达、看板尚未消费回执时不要手动删除计划。' : '',
+        '看板受阻由系统持久化协调：先唤醒任务创建者排查与调整，再升级给需求负责人；只有确实无法解决或需要用户决策时由需求负责人统一汇报，不要让子伙伴直接逐项发渠道错误。保留已完成产物，不原样循环重试。',
         companion.capabilities.includes('schedules') ? '看板内长任务等待必须使用 partner_schedule defer 并填写 boardTaskId，不用 create 周期任务轮询。系统将此任务挂起，等待说明不是交付物，不送验收。关联看板的定时唤醒只检查外部状态并 resolve 后结束，由看板恢复原任务执行 nextStep，不在唤醒里再执行一遍。未关联看板的预约才在 resolve completed 后自行继续 nextStep。completion 仅描述外部任务自己的完成条件，仍运行则 pending 保存延期；不 sleep、不为等待创建或修改 Goal。后续自动轮次先 list，未到期不重复查询。原会话提前核实 waiting 任务已完成/失败，可用 scheduleId、精确 externalTaskId、summary、outcome=completed/blocked 提前关闭且不传 runToken；running 状态必须使用当前 token。过期唤醒不执行。' : '',
         companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限。若你另获伙伴管理能力，可在创建后按用户明确要求配置身份与能力；否则由用户在管理台单独授权。' : '',
         companion.capabilities.includes('administration') ? COMPANION_MANAGEMENT_PROMPT : '',
@@ -399,7 +402,12 @@ function scheduleTool(companion: Companion, scheduler: PartnerSchedulerService, 
           continuationChannelOrigin(store.snapshot(), companion.id, agent.session.id, agent.session.snapshotEvents())))
       }
       if (action === 'resolve') return JSON.stringify(await scheduler.continuations.resolve(companion.id, requireAgent(exec).session.id, input))
-      if (action === 'create') return JSON.stringify(await scheduler.create(input, companion.id))
+      if (action === 'create') {
+        const sessionId = requireAgent(exec).session.id
+        const jobs = store.snapshot().delegations.filter(d => d.kind !== 'review' && d.status === 'running' && d.toCompanionId === companion.id && d.executionSessionId === sessionId)
+        if (jobs.length > 1 && input.boardTaskId === undefined) throw new Error('请填写当前 boardTaskId，临时计划必须跟随任务结束清理')
+        return JSON.stringify(await scheduler.create({ ...input, ...(input.boardTaskId === undefined && jobs[0] ? { boardTaskId: jobs[0].taskId } : {}) }, companion.id))
+      }
       const id = requiredText(input.scheduleId, 'scheduleId', 160)
       const owned = scheduler.list().find(item => item.id === id && item.companionId === companion.id)
       if (!owned) throw new Error('Schedule does not exist for this companion')

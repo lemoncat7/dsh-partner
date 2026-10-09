@@ -14,6 +14,22 @@ export { RequirementError } from './revisions.js'
 
 export class RequirementService {
   constructor(private readonly store: PartnerStore) {}
+  async prepareDelivery(id: string, revision: number, summary: string, attachmentIds: unknown, actor: TaskActor): Promise<BoardRequirement> {
+    const text = requiredMarkdown(summary, 'summary', 12000)
+    if (!Array.isArray(attachmentIds) || attachmentIds.length > 50 || attachmentIds.some(id => typeof id !== 'string')) throw new Error('attachmentIds 必须是最多 50 项的附件 ID 数组；无附件用 []')
+    let result!: BoardRequirement
+    await this.store.update(state => {
+      const item = state.requirements?.find(r => r.id === id)
+      if (!item || item.ownerCompanionId !== actor.companionId) throw new Error('只有需求负责人能提交最终交付清单')
+      if (item.revision !== revision) throw new Error('需求已变化，请重新读取后整理交付')
+      const tasks = item.status === 'done' && item.results ? item.results : state.tasks.filter(t => t.requirementId === id && t.status === 'done')
+      const available = new Set(tasks.flatMap(t => t.resultAttachmentIds ?? []))
+      if (attachmentIds.some(id => !available.has(id))) throw new Error('只能选择本需求已验收任务正式提交的附件；不能交付中间产物或其他需求文件')
+      item.deliveryDraft = { progressKey: requirementProgressKey(state, item), summary: text, attachmentIds: [...new Set(attachmentIds as string[])] }
+      result = structuredClone(item)
+    })
+    return result
+  }
   submitPlan(value: unknown, actor: TaskActor, sessionId?: string) { return submitRequirementPlan(this.store, value, actor, sessionId) }
   list(): BoardRequirement[] { return this.store.snapshot().requirements ?? [] }
   require(id: string): BoardRequirement {
@@ -85,6 +101,7 @@ export class RequirementService {
       if (input.title !== undefined) item.title = requiredText(input.title, 'title', 200)
       if (input.description !== undefined) item.description = optionalText(input.description, 'description', 8000) ?? ''
       item.reportBaselineKey = requirementProgressKey(this.store.snapshot(), item)
+      delete item.deliveryDraft
       item.status = 'planning'; delete item.lastError; delete item.nextAttemptAt
       delete item.attempts
     })
