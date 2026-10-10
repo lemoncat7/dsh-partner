@@ -5,13 +5,15 @@
 .dsh-partner-pendant button:disabled { opacity: .45; cursor: default; }
 .dsh-partner-pendant .dsh-partner-pendant-canvas { position: fixed; left: 0; top: 0; display: block; width: 164px; height: 164px; pointer-events: none; transition: none !important; background: transparent !important; opacity: 1 !important; filter: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 .dsh-partner-pendant .dsh-partner-pendant-strap { position: fixed; left: 0; top: 0; width: 100vw; height: 100dvh; overflow: hidden; pointer-events: none; }
-.dsh-partner-pendant-hit { position: absolute; top: 0; left: 0; width: 84px; height: 116px; transform: translate(130px, 210px) translate(-50%, -50%); padding: 0; border: 0; border-radius: 12px; background: var(--partner-solid-panel); pointer-events: auto; touch-action: none !important; user-select: none; -webkit-user-select: none; cursor: grab !important; }
-.dsh-partner-pendant-hit:active, .dsh-partner-pendant-anchor:active { cursor: grabbing !important; }
+.dsh-partner-pendant-hit { position: absolute; top: 0; left: 0; width: 84px; height: 116px; transform: translate(130px, 210px) translate(-50%, -50%); padding: 0; border: 0; border-radius: 12px; background: var(--partner-solid-panel); pointer-events: auto; touch-action: none !important; user-select: none; -webkit-user-select: none; }
+/* Match the base button specificity: preserve drag feedback without forcing theme cursors. */
+.dsh-partner-pendant button:where(.dsh-partner-pendant-hit, .dsh-partner-pendant-anchor):where(:enabled) { cursor: grab; }
+.dsh-partner-pendant button:where(.dsh-partner-pendant-hit, .dsh-partner-pendant-anchor):where(:enabled:active) { cursor: grabbing; }
 .dsh-partner-pendant button.dsh-partner-pendant-hit.is-rendered { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transition: none !important; }
 .dsh-partner-pendant button.dsh-partner-pendant-hit.is-rendered:not(:focus-visible) { outline: none !important; }
 .dsh-partner-pendant-fallback { display: grid; gap: 8px; }
 .dsh-partner-pendant-fallback small { color: var(--partner-text-secondary); font-size: 12px; }
-.dsh-partner-pendant button.dsh-partner-pendant-anchor { position: absolute; left: 50%; top: 2.42%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0 !important; border-radius: 50%; background: transparent !important; box-shadow: none !important; pointer-events: auto; touch-action: none; cursor: grab; }
+.dsh-partner-pendant button.dsh-partner-pendant-anchor { position: absolute; left: 50%; top: 2.42%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0 !important; border-radius: 50%; background: transparent !important; box-shadow: none !important; pointer-events: auto; touch-action: none; }
 .dsh-partner-pendant-anchor > span { width: 14px; height: 6px; border: 1px solid #71817e; border-radius: 4px; background: #c3ced0; }
 .dsh-partner-pendant-anchor:hover > span { background: #e4ece8; }
 .dsh-partner-pendant-unread { position: absolute; left: 0; top: 0; transform: translate(130px, 144px) translate(-50%, -100%); display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid rgb(255 255 255 / 70%); border-radius: 9px; background: #435950; color: #fff; font: 600 11px/1 var(--partner-font-family); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; user-select: none; transition: none !important; }
