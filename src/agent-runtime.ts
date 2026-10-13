@@ -39,6 +39,9 @@ import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { type NoteRecordingBridge } from './concern-recording.js'
+import {concernExecutionNotes} from './concern-execution-notes.js'
+import type {ConcernExecutionReceipt} from './concern-execution.js'
+import {hasConcernReply} from './concern-execution-receipt.js'
 import { executeObservationLoop } from './observation-loop.js'
 import { waitForBoardTurn } from './tasks/continuation-yield.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
@@ -97,6 +100,8 @@ export interface HeartbeatExecution {
   rounds?: Array<{round: number; phase: 'check' | 'final'; modelMs: number; outputChars: number}>
   blocked?: string[]
   blockedReasons?: Record<string, string>
+  checkOutcomes?: Record<string, string>
+  failures?: Record<string, { kind: string; retryAt?: number }>
   concerns: PartnerConcern[]
   candidates: ConcernObservationCandidate[]
   observations?: ConcernObservation[]
@@ -343,6 +348,42 @@ export class PartnerAgentRuntime {
     })
   }
 
+  async executeConcern(receipt: ConcernExecutionReceipt, concern: PartnerConcern, prompt: string): Promise<void> {
+    const key = receipt.sessionId
+    const previous = this.taskQueues.get(key) ?? Promise.resolve()
+    const current = previous.catch(() => {}).then(async () => {
+      const state = this.store.snapshot()
+      const companion = state.companions.find(c => c.id === receipt.companionId)
+      const route = state.sessions.find(r => r.sessionId === key && r.companionId === receipt.companionId)
+      if (!companion || !route || !this.concerns) throw new Error('关注执行会话不可用')
+      const agent = await this.ensureAgent(companion, route)
+      if (agent.status !== 'idle') await agent.whenIdle()
+      const latest = (await this.concerns.list(companion.id)).find(c => c.id === concern.id)
+      if (!latest?.executionInstructions || latest.control === 'stopped' || !['active','watching'].includes(latest.state) || latest.executionInstructions !== concern.executionInstructions || JSON.stringify(latest.resources) !== JSON.stringify(concern.resources)) throw new Error('关注已关闭或要求已变化，请重新检查后执行')
+      const delivered = agent.session.snapshotEvents().find(e => e.type === 'user/message' && e.data.id === receipt.messageId)
+      if (delivered) {
+        // After restart never blindly replay external effects from a delivered message.
+        if (!hasConcernReply(agent.session.snapshotEvents(), receipt.messageId)) throw new Error('上次执行已注入但结果未确认，请核对已有产物后手动重试')
+        await this.store.update(s => {const r=s.concernExecutions?.find(r=>r.id===receipt.id);if(r){r.status='completed';r.updatedAt=Date.now()}})
+        return
+      }
+      if (receipt.reconcileOnly) throw new Error('未找到原注入消息，仅核对结果，不重新执行')
+      await this.store.update(s => {const r=s.concernExecutions?.find(r=>r.id===receipt.id);if(!r)throw new Error('关注执行已取消');r.status='running';r.updatedAt=Date.now()})
+      const access = await concernExecutionNotes({store:this.store, concerns:this.concerns, companionId:companion.id, sourceId:receipt.id, sessionId:key, bridge:()=>this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined})
+      const disposers: Array<() => void> = []
+      try {
+        for (const tool of access.tools) disposers.push((agent.ctx as RuntimeContext).tools.register(tool))
+        const message = createUserMessage({content:[{type:'text',text:prompt+access.prompt}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'关注变化 · 直接执行'}})
+        agent.followup({...message,id:receipt.messageId as typeof message.id})
+        await agent.whenIdle()
+        if (!hasConcernReply(agent.session.snapshotEvents(),receipt.messageId)) throw new Error('关注执行未返回最终答复，请核对后重试')
+        await this.store.update(s => {const r=s.concernExecutions?.find(r=>r.id===receipt.id);if(r){r.status='completed';r.updatedAt=Date.now()}})
+      } finally { access.dispose(); for(const dispose of disposers.reverse())dispose() }
+    })
+    this.taskQueues.set(key,current)
+    try {await current} finally {if(this.taskQueues.get(key)===current)this.taskQueues.delete(key)}
+  }
+
   async executeTask(input: { sourceId: string; companion: Companion; prompt: string; parentSessionId?: string; signal?: AbortSignal }): Promise<{ run: { id: string }; output: string }> {
     input.signal?.throwIfAborted()
     const route = await this.createLocalSession(input.companion.id)
@@ -360,25 +401,33 @@ export class PartnerAgentRuntime {
         if (delegation) delegation.executionSessionId = route.sessionId
       })
       input.signal?.throwIfAborted()
-      agent.followup(createUserMessage({
-        content: [{ type: 'text', text: input.prompt }],
-        source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
-      }))
-      let timedOut = false
-      const timer = setTimeout(() => {
-        timedOut = true
-        agent.cancel({ kind: 'hook', reason: 'partner task execution timed out' })
-      }, PARTNER_TASK_TIMEOUT_MS)
-      timer.unref?.()
-      const cancel = (): void => { agent.cancel({ kind: 'hook', reason: 'partner task removed' }) }
-      input.signal?.addEventListener('abort', cancel, { once: true })
-      if (input.signal?.aborted) cancel()
-      let deferred = false
-      try { deferred = await waitForBoardTurn(this.store, input.sourceId, agent.whenIdle(), input.signal); input.signal?.throwIfAborted() } finally { clearTimeout(timer); input.signal?.removeEventListener('abort', cancel) }
-      if (deferred) return
-      if (timedOut) throw new Error('伙伴看板任务执行超时')
-      output = assistantTextAfter(agent, startSeq).trim()
-      if (!output) throw new Error('伙伴会话没有产生任务结果')
+      const noteAccess = this.concerns ? await concernExecutionNotes({store: this.store, concerns: this.concerns, companionId: input.companion.id, sourceId: input.sourceId, sessionId: route.sessionId, bridge: () => this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined}) : undefined
+      const noteDisposers: Array<() => void> = []
+      try {
+        for (const tool of noteAccess?.tools ?? []) noteDisposers.push((agent.ctx as RuntimeContext).tools.register(tool))
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: input.prompt + (noteAccess?.prompt ?? '') }],
+          source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
+        }))
+        let timedOut = false
+        const timer = setTimeout(() => {
+          timedOut = true
+          agent.cancel({ kind: 'hook', reason: 'partner task execution timed out' })
+        }, PARTNER_TASK_TIMEOUT_MS)
+        timer.unref?.()
+        const cancel = (): void => { agent.cancel({ kind: 'hook', reason: 'partner task removed' }) }
+        input.signal?.addEventListener('abort', cancel, { once: true })
+        if (input.signal?.aborted) cancel()
+        let deferred = false
+        try { deferred = await waitForBoardTurn(this.store, input.sourceId, agent.whenIdle(), input.signal); input.signal?.throwIfAborted() } finally { clearTimeout(timer); input.signal?.removeEventListener('abort', cancel) }
+        if (deferred) return
+        if (timedOut) throw new Error('伙伴看板任务执行超时')
+        output = assistantTextAfter(agent, startSeq).trim()
+        if (!output) throw new Error('伙伴会话没有产生任务结果')
+      } finally {
+        noteAccess?.dispose()
+        for (const dispose of noteDisposers.reverse()) dispose()
+      }
     })
     this.taskQueues.set(key, current)
     try {
@@ -423,7 +472,9 @@ export class PartnerAgentRuntime {
     const root = routes[0]?.cwd ?? partnerCwd(this.defaultCwd, companion.id)
     const files = await listConcernFileSources(root, query, 24)
     const service = this.ctx.get('dshKnowledgeTracking') as KnowledgeTrackingService | undefined
-    if (service?.list === undefined || routes[0] === undefined) return files
+    const bridge = this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined
+    const notes: ConcernSource[] = bridge?.version === 1 ? await bridge.list(query, AbortSignal.timeout(8000)).then(items => items.slice(0,16).map(item => ({kind:'note' as const,label:item.name,detail:'笔记文档 · 只读检查依据',token:`@笔记[${item.id}]`}))).catch(() => []) : []
+    if (service?.list === undefined || routes[0] === undefined) return [...notes, ...files]
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(new Error('知识文档候选查询超时')), 8_000)
     timeout.unref?.()
@@ -433,7 +484,7 @@ export class PartnerAgentRuntime {
         this.ctx.logger.warn(`dsh-partner: knowledge concern sources unavailable: ${errorMessage(error)}`)
         return []
       })
-      return [...files, ...knowledge].slice(0, 40)
+      return [...notes, ...files, ...knowledge].slice(0, 56)
     } finally { clearTimeout(timeout) }
   }
 
@@ -491,12 +542,11 @@ export class PartnerAgentRuntime {
     if (!userText || !assistantText) return
     const scopeId = memoryScope(route.channelId, route.userId)
     const concernDirective = await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)
-    if (!companion.automation.memory.enabled || this.reflection === undefined) return
-    const created = await this.reflection.reflect(companion, {
+    const created = companion.automation.memory.enabled && this.reflection !== undefined ? await this.reflection.reflect(companion, {
       id: `turn-${createHash('sha256').update(JSON.stringify([session.id, event.time, userText])).digest('hex').slice(0, 32)}`, companionId: companion.id, scopeId: conversationMemoryScope(route, this.store.snapshot().sessions),
       sessionId: session.id, at: event.time, user: userText, assistant: assistantText, concernScopeId: scopeId,
       ...(concernDirective === undefined ? {} : { concernDirective }),
-    })
+    }) : []
     const pendingToolNotices = await this.concerns?.pendingToolCreationNotices(companion.id, scopeId, session.id).catch(() => ({ auditIds: [], concerns: [] }))
     const notices = uniqueConcerns([...(pendingToolNotices?.concerns ?? []), ...created])
     if (notices.length > 0) {
@@ -1156,6 +1206,10 @@ export function renderHeartbeatActivity(
     )
   })
   for (const id of execution.blocked ?? []) lines.push(`受阻事项：${execution.concerns.find(item => item.id === id)?.subject ?? id}；${execution.blockedReasons?.[id] ?? '目标数据尚未核实'}`)
+  for (const [id, outcome] of Object.entries(execution.checkOutcomes ?? {})) {
+    const label: Record<string, string> = { baseline_initialized: '首次基线已建立', already_processed: '已处理，本轮跳过', unchanged: '核验完成，无新增', changed: '已核实新变化' }
+    if (label[outcome]) lines.push(`检查结果：${execution.concerns.find(item => item.id === id)?.subject ?? id}；${label[outcome]}`)
+  }
   const changed = execution.observations ?? []
   const conclusion = execution.error || deliveryError
     ? `失败原因：${deliveryError ?? execution.error}`

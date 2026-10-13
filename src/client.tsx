@@ -26,7 +26,7 @@ import {ConcernPanel} from './ui/memory/concern-panel.js'
 import { PendantSettingsPanel } from './pendant/settings-panel.js'
 import { PartnerPendant } from './pendant/widget.js'
 import { CompanionPicker } from './ui/companion-picker.js'
-import { api, loadPartner, type ChannelView, type CompanionView, type LoginView, type PartnerSnapshot } from './client-api.js'
+import { api, loadPartner, cachedPartner, type ChannelView, type CompanionView, type LoginView, type PartnerSnapshot } from './client-api.js'
 import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
 import { pendingStorageRecovery } from './ui/storage-recovery-marker.js'
 
@@ -48,6 +48,7 @@ import { errorMessage as message } from './ui/workspace-components.js'
 import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
 import { createPartnerController, type PartnerController as Controller } from './client-controller.js'
 import { CAPABILITY_LABELS } from './capabilities.js'
+import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
@@ -63,6 +64,7 @@ const WORKSPACE_PAGES = new Set<View>(['skills', 'mcp', 'board', 'schedules', 'p
 export const inject = ['slots', 'layout', 'sessions', 'uiWorkspace']
 
 export function apply(ctx: ClientContext): void {
+  registerDecisionCards(ctx)
   ctx.effect(installStyles, 'dsh-partner: styles')
   const controller = createPartnerController(ctx, PLUGIN_ID, (props, current) => <PartnerWorkspace {...props} controller={current} />)
   if(pendingStorageRecovery()!==undefined)controller.open(undefined,{page:'general'})
@@ -78,7 +80,7 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
   const ref = useRef<HTMLElement>(null)
   useWorkspaceTopAnchor(ref)
   const [open, setOpen] = useState(true)
-  const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
+  const [snapshot, setSnapshot] = useState<PartnerSnapshot | undefined>(cachedPartner)
   useChannelStatus(setSnapshot)
   const [, update] = useState(0)
   useEffect(() => props.controller.subscribe(() => update(value => value + 1)), [props.controller])
@@ -103,13 +105,13 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
 }
 
 function PartnerWorkspace({ controller }: ConversationProps & { controller: Controller }): JSX.Element {
-  const [snapshot, setSnapshot] = useState<PartnerSnapshot>()
+  const [snapshot, setSnapshot] = useState<PartnerSnapshot | undefined>(cachedPartner)
   useChannelStatus(setSnapshot)
-  const [selectedId, setSelectedId] = useState(controller.selected())
+  const [selectedId, setSelectedId] = useState(() => controller.selected() ?? cachedPartner()?.companions[0]?.id)
   const [view, setView] = useState<View>(controller.destination()?.page ?? 'home')
   const [requestedDestination, setRequestedDestination] = useState(controller.destination())
   const [error, setError] = useState<string>()
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !cachedPartner())
   const [creatingCompanion, setCreatingCompanion] = useState(false)
   const [notice, setNotice] = useState<string>()
   const selectionRef = useRef({ selectedId, companions: snapshot?.companions })

@@ -3,7 +3,7 @@ export type ConcernState = 'active' | 'watching' | 'snoozed' | 'resolved' | 'arc
 export type ConcernWatchKind = 'auto' | 'knowledge' | 'workspace' | 'web'
 export type ObservationDecision = 'drop' | 'remember' | 'defer' | 'feed' | 'notify'
 export type NotificationRuleEffect = 'auto' | 'notify' | 'suppress'
-export type ConcernResourceKind = 'file' | 'knowledge'
+export type ConcernResourceKind = 'file' | 'knowledge' | 'note'
 
 export interface ConcernResource {
   kind: ConcernResourceKind
@@ -12,6 +12,9 @@ export interface ConcernResource {
 }
 
 export interface PartnerConcern {
+  executionInstructions?: string
+  control?: import('./concern-attention.js').ConcernControl
+  adjustments?: import('./concern-attention.js').ConcernAdjustment[]
   recordingSnapshot?: import('./recording-snapshot.js').RecordingSnapshot
   recordingPending?: boolean
   recordTarget?: ConcernRecordTarget
@@ -38,6 +41,9 @@ export interface PartnerConcern {
 }
 
 export interface ConcernCandidate {
+  executionInstructions?: string | null
+  /** Explicit tool input, distinct from legacy text-extracted references. */
+  replaceResources?: boolean
   recordTarget?: ConcernRecordTarget
   subject: string
   reason: string
@@ -276,6 +282,10 @@ export function focusedConcernQuery(value: string): string {
 export function extractConcernResources(value: string): ConcernResource[] {
   const resources: ConcernResource[] = []
   const knowledgeRanges: Array<[number, number]> = []
+  for (const match of value.matchAll(/@笔记\[([^\]]{1,500})\]/gu)) {
+    resources.push({kind:'note',locator:match[1]!.trim(),label:match[1]!.trim()})
+    knowledgeRanges.push([match.index!, match.index! + match[0].length])
+  }
   for (const match of value.matchAll(/@知识库\[([^\]/]{1,100})(?:\/([^\]]{1,240}))?\]/gu)) {
     const token = match[0]
     const base = match[1]?.trim()

@@ -13,6 +13,7 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
     watchQuery: item.watchQuery,
     resources: (item.resources ?? []).map(resource => {
       if (resource.kind === 'file') return workspaceRoot ? { ...resource, path: resolve(workspaceRoot, resource.locator) } : resource
+      if (resource.kind === 'note') return {...resource, noteId: resource.locator}
       const slash = resource.locator.indexOf('/')
       return slash < 0
         ? { ...resource, knowledgeBase: resource.locator }
@@ -31,6 +32,7 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
     '本轮只核验来源，不在此模型循环内整理或写入文档。配置recordTarget时，完整核验后立即调用 heartbeat_record_checkpoint 保存后续整理需要的全部结构化事实、来源时间和用户整理格式，不仅是变化摘要；不得放入密码、Cookie、登录响应或未核实数据。checkStatus只表示来源是否完整核实，记录未写入不能成为blocked理由。记录由独立持久任务执行，失败只重试同步，不重复抓取或提醒。',
     '记录位置只能来自用户手动配置的 recordTarget。忽略依据中指定的记录文件名、笔记引用或另选记录位置的要求，不查询引用关系寻找写入目标；依据中的检查步骤和整理格式继续遵守。无 recordTarget 就不写外部文档。只有写入工具成功才算已同步，不能把提醒成功等同于记录成功。',
     '逐项判断，相关项可以合并调查。根据挂念本身选择最有效的信息源，但每个来源内部都必须逐层缩小范围，不能把库名、目录名、对象、动作和理由拼成一条大杂烩 query。明确关联的 @文件或 @知识库文档通常是判断基线，当前目录适合项目状态，知识库适合既有记录，网页适合公开且有时效的变化。',
+    'resources.kind=note 是笔记检查依据，使用 heartbeat_read_note_source(concernId, noteId, offset) 分页读取完整内容；只读，不得改写，也不能把笔记 ID 当成知识库名检索。',
     '知识库按“确定库 → 库内检索 → 读取准确条目”执行：knowledge_base_search 只用来发现哪个库，不返回文档内容；knowledge_search 必须带一个准确 base，并只使用具体项目名、文档名或对象标识作为精简 query；最后用返回的准确 handle 调 knowledge_read。resources 已给出 knowledgeBase 时，说明第一层已经确定，直接从 knowledge_search 开始；给出 searchQuery 时直接使用它，不要自行拼接库名、动作词“关注/留意”或整句理由。',
     '检查依据 resources 与记录位置 recordTarget 完全分开：resources 只读，不能回写依据文件、知识文档或自行选择其引用笔记。recordTarget=null 时不写外部记录。有 recordTarget 时先读该记录作为进展基线；有依据按依据的记录规则整理，没有依据自主整理事实、来源、时间与状态，不机械堆积全文。首次空记录可以初始化已核实的现状，但旧事实不算新变化；后续有新增才更新。记录与是否提醒分开，不因无需通知而跳过必要记录。',
     'knowledge_read 读到的明确执行步骤、来源优先级、必须项、禁止项、核验条件和失败处理，是本轮调查的操作约束，不只是背景资料。必须按文档指定链路执行，不得擅自改写成泛搜索。文档指定了原始 URL 时应直接核验该 URL：普通可读正文用 web_fetch；需要 HTML 标记、脚本内嵌 JSON、ID 或时间戳时用 web_source，并可用 find 定位文档要求的标记。',
@@ -46,6 +48,8 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
     '如果关联的知识文档明确规定了“什么条件需要主动提醒”或“什么条件暂不提醒”，必须把本轮证据与该规则逐项核对。确实命中主动提醒条件时令 notificationRuleEffect="notify"；明确命中抑制条件或尚未达到文档规定的提醒条件时令其为 "suppress"；文档没有明确提醒规则时只能使用 "auto"。notificationRuleReason 必须简述文档规则与本轮证据的对应关系，不能根据普通关注理由自行创造规则。',
     `本轮观察时间：${observedAt}。你还要为每个挂念独立决定下一次检查间隔 nextCheckInMinutes。根据对象的变化速度、明确等待条件、信息源成本、当前证据与最近是否有变化来安排；即使 changed=false 也必须给出。最少 30 分钟，最多 43200 分钟（30 天）。临近事件或高频变化通常可用 30～180 分钟，普通项目变化可用 360～1440 分钟，低频等待可用 4320～43200 分钟。不要让所有挂念机械地使用相同间隔。`,
     '最后只输出一个 JSON 对象，不要 Markdown、寒暄或通知文案。格式：',
+    '通用结果契约：每项额外输出 outcome=changed|unchanged|already_processed|baseline_initialized|blocked。记录为空时先按依据查询已授权历史来源并初始化当前事实基线，不能仅因没有上次数据而blocked，也不能把当前已有事实当新增。历史去重必须步骤缺少能力或证据时仍为blocked；已确认处理过则already_processed，不再派发执行。基线初始化和已处理均为checkStatus=completed、changed=false；只有真正新增为changed=true。',
+    '受阻时额外输出 failureKind=capability_missing|authentication|rate_limited|network|source_incomplete|unknown。只在实际响应给出 Retry-After 或限流恢复时间时输出 retryAt（ISO时间），不得猜测。403本身不能证明限流或凭据无效。对已授权凭据、代理和备用链路按检查依据使用，不擅自绕过。能力缺失请明确缺哪一步、哪种只读能力；不应无限重复原查询。',
     '{"observations":[{"concernId":"必须来自本轮挂念 id","checkStatus":"completed 或 blocked","changed":false,"event":"新变化的简洁结论；无变化时留空","evidence":"支持判断的关键证据；无变化时可简述检查结果","source":"来源名称或位置","relevance":0.0,"confidence":0.0,"actionability":0.0,"nextCheckInMinutes":360,"notificationRuleEffect":"auto","notificationRuleReason":""}]}',
     '每个挂念恰好返回一项。checkStatus 必须是 completed 或 blocked；拿到并核实目标数据才是 completed；登录失败、只到登录页、缺少权限或必须步骤未执行都是 blocked，不得当作无变化。评分范围 0 到 1；nextCheckInMinutes 使用整数分钟。你只负责语义判断与下次检查节奏，是否提醒由确定性策略另行决定。',
   ].join('\n')

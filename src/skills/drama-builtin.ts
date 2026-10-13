@@ -1,6 +1,6 @@
 import type { BuiltinSkill } from './director-builtins.js'
 
-export const DRAMA_BUILTIN: BuiltinSkill = {
+const BASE_DRAMA_BUILTIN: BuiltinSkill = {
   entry: { id: 'drama-production', name: '漫剧制作', description: '短剧与漫剧创作：原著改编、剧本、人物场景、分镜、跨镜一致性、图片与视频提示词、生产和剪辑。按阶段读取上游资料。', version: '1.0.0', tags: ['漫剧', '短剧', '分镜', '制作'], skillUrl: 'builtin:drama-production', sourceId: 'builtin' },
   resourceBundle: 'drama-production',
   document: `---
@@ -46,5 +46,18 @@ context: inline
 上游脚本需要 Python 3.9+，剪辑另需 ffmpeg/ffprobe；调用前检查当前执行环境是否具备。仅有文件读取能力时仍可使用创作资料，但不得声称已运行检查或生成媒体。
 脚本、模板和参考资料按原目录保留，使用绝对技能路径调用脚本，创作产物写入用户项目或会话目录，不写回内置资源目录。
 不默认启动上游 Dashboard、安装依赖或调用付费服务。用户明确需要时才处理这些操作；不改变宿主权限、审批及渠道交付规则。
+`,
+}
+
+export const DRAMA_BUILTIN: BuiltinSkill = {
+  ...BASE_DRAMA_BUILTIN,
+  entry: { ...BASE_DRAMA_BUILTIN.entry, version: '1.1.0' },
+  document: BASE_DRAMA_BUILTIN.document.replace('version: 1.0.0', 'version: 1.1.0') + `
+## 小说改编与画布交接
+
+接收小说时保留章节路径、版本、原文定位、人物设定和不可改事实；用户只要写作时不扩展成制作。已有分镜直接沿用，不重新改编。
+向画布交付实际剧本、图片提示词、分镜、视频提示词和参考文件清单，保留分集、SHOT/IMG/MOTION/REF/PLAN 编号以及用途/顺序；IMG 是提示词条目，PLAN 是计划素材，不标成已生成参考。
+“画布创作与分镜生产”启用时，由它读取自身 references/story-handoff.md，维护来源版本到节点/任务/结果的映射。未启用时先交付上述文件和缺项，不假定已建画布或自动启用技能。
+改稿只标记受影响镜头和下游待复核；已接受任务先查询，保留认可结果，不自动重拍整集。冻结文档遵守原项目修订批准规则。
 `,
 }

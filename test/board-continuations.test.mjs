@@ -39,6 +39,22 @@ async function waitFor(predicate) {
   assert.fail('condition did not become true')
 }
 
+test('read-only board check failures retry the same external ID within budget, then block', async t => {
+  const f = await fixture(t); await f.seed(); const entry = await f.defer()
+  let calls = 0
+  f.timers.configure({ execute: async e => { calls++; assert.equal(e.continuation.externalTaskId, input.externalTaskId); throw new Error('temporary network error') }, notify: async () => assert.fail('no intermediate channel delivery') })
+  await f.timers.run(entry.id)
+  let current = f.store.snapshot().schedules.find(s => s.id === entry.id)
+  assert.equal(current.continuation.state, 'waiting'); assert.equal(current.enabled, true)
+  assert.ok(current.nextRunAt > Date.now()); assert.equal(current.continuation.runToken, undefined)
+  assert.equal(f.board.require(f.task.id).status, 'doing')
+  await f.store.update(s => { const wake = s.schedules.find(s => s.id === entry.id).continuation; wake.attempts = wake.maxAttempts - 1 })
+  await f.timers.run(entry.id)
+  current = f.store.snapshot().schedules.find(s => s.id === entry.id)
+  assert.equal(current.continuation.state, 'blocked'); assert.equal(current.enabled, false)
+  assert.equal(f.board.require(f.task.id).status, 'blocked'); assert.equal(calls, 2)
+})
+
 test('deferral releases execution and blocks redispatch/review until original task resumes once', async t => {
   const f = await fixture(t)
   let calls = 0, entry, notices = 0

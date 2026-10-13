@@ -15,8 +15,8 @@ test('resolved concern actions occupy one grid cell and reflow together on mobil
 
 test('stopped concern cleanup keeps historical access without an empty archive entry', async () => {
   const ui = await source('ui/memory/concern-deletion.tsx')
-  assert.doesNotMatch(ui, /已归档关注/)
-  assert.match(ui, /<strong>已停止关注<\/strong>/)
+  assert.match(ui, /<strong>已归档关注<\/strong>/)
+  assert.match(ui, /恢复关注/)
   assert.match(ui, /offset===0 && resource.data.items.length===0/)
   assert.match(ui, /concerns\/archived\?offset=/)
   assert.match(ui, /setOffset\(offset-50\)/)

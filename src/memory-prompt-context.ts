@@ -112,6 +112,7 @@ function compactConcerns(concerns: PartnerConcern[], limit: number, charBudget: 
     origin: concern.origin,
     state: concern.state,
     priority: precision(concern.priority),
+    control: concern.control ?? 'auto',
     watchKind: concern.watchKind,
   }, entryBudget, [['subject', concern.subject, .34], ['reason', concern.reason, .42], ['watchQuery', concern.watchQuery, .24]]))
 }

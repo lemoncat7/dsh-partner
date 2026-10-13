@@ -1,9 +1,11 @@
+import { validateConcernResources } from './concern-resources.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { reviseConcern, type ConcernRevision } from './concern-attention.js'
 import {
-  boundedConcernCheckMinutes, clamp, concernDecay, concernInterval, extractConcernResources, focusedConcernQuery, implicitConcernRejection,
+  boundedConcernCheckMinutes, clamp, concernInterval, extractConcernResources, focusedConcernQuery, implicitConcernRejection,
   interruptDecision, MAX_IMPLICIT_CONCERNS_PER_BATCH, normalizeConcernSubject,
   concernLifecycleRequest, selectConcernLifecycleTarget,
   type ConcernActivity, type ConcernCandidate, type ConcernObservation, type ConcernObservationCandidate,
@@ -100,12 +102,18 @@ export class PartnerConcernStore {
         for (const candidate of candidates.slice(0, 12)) {
           const normalized = normalizeConcernSubject(compact(candidate.subject, 300))
           const existing = normalized ? this.existing(database, companionId, scopeId, normalized) : undefined
+          if (existing?.control === 'stopped' || (existing?.control === 'pinned' && candidate.operation !== 'upsert') || (existing?.origin === 'explicit' && candidate.operation === 'dismiss')) {
+            const entry: ConcernApplyEntry = {subject: candidate.subject, decision: 'ignored', reason: '保留用户停止、置顶或明确交代的关注；结束需通过管理工具说明结论', concern: existing}
+            entries.push(entry)
+            this.audit(database, companionId, scopeId, origin, candidate, entry, at, options)
+            continue
+          }
           if (options.batchId && existing && existing.updatedAt > at) {
             entries.push({ subject: candidate.subject, decision: 'ignored', reason: '已有更新的关注状态，不重放旧轮次' })
             continue
           }
           const directEvidence = source === 'tool' || source === 'reflection' ? options.evidence : undefined
-          const rejection = origin === 'implicit' ? implicitConcernRejection(candidate, directEvidence) : undefined
+          const rejection = origin === 'implicit' && existing === undefined ? implicitConcernRejection(candidate, directEvidence) : undefined
           if (rejection !== undefined || (origin === 'implicit' && candidate.operation === 'upsert' && existing === undefined && created.length >= maxImplicitCreates)) {
             const reason = rejection ?? `每批最多新增 ${maxImplicitCreates} 条隐式关注`
             const entry: ConcernApplyEntry = { subject: compact(candidate.subject, 300), decision: 'rejected', reason }
@@ -121,8 +129,18 @@ export class PartnerConcernStore {
               target.recordTarget = candidate.recordTarget
             }
           }
+          if (source === 'ui' && candidate.executionInstructions !== undefined) {
+            const value = candidate.executionInstructions
+            if (value !== null && (typeof value !== 'string' || !value.trim() || value.length > 4000)) throw new Error('后续执行要求应为 1–4000 字，停用请传 null')
+            const target = concern ?? existing
+            if (target) {
+              database.prepare('UPDATE concerns SET execution_instructions=? WHERE id=?').run(value?.trim() ?? null, target.id)
+              if (value === null) delete target.executionInstructions
+              else target.executionInstructions = value.trim()
+            }
+          }
           if (concern !== undefined) created.push(concern)
-          const current = concern ?? existing
+          const current = concern ?? this.existing(database, companionId, scopeId, normalized)
           const decision: ConcernAuditDecision = candidate.operation === 'resolve'
             ? existing === undefined ? 'ignored' : 'resolved'
             : candidate.operation === 'dismiss'
@@ -146,19 +164,20 @@ export class PartnerConcernStore {
     })
   }
 
-  async createExplicit(companionId: string, scopeId: string, subject: string, reason = '', recordTarget?: PartnerConcern['recordTarget']): Promise<PartnerConcern> {
+  async createExplicit(companionId: string, scopeId: string, subject: string, reason = '', recordTarget?: PartnerConcern['recordTarget'], executionInstructions?: string | null): Promise<PartnerConcern> {
     const descriptor = explicitConcernDescriptor(subject)
     await this.applyCandidates(companionId, scopeId, [{
       subject: descriptor.subject, reason: reason || '用户明确要求伙伴留意', operation: 'upsert', priority: .9,
       confidence: 1, watchKind: descriptor.watchKind, watchQuery: descriptor.watchQuery, resources: descriptor.resources,
       ...(recordTarget ? { recordTarget } : {}),
+      ...(executionInstructions === undefined ? {} : {executionInstructions}),
     }], 'explicit', Date.now(), { source: 'ui' })
     const concern = (await this.list(companionId, scopeId)).find(item => normalizeConcernSubject(item.subject) === normalizeConcernSubject(descriptor.subject))
     if (!concern) throw new Error('concern could not be created')
     return concern
   }
 
-  async editExplicit(companionId: string, id: string, input: {subject: string; reason: string; sources: string; expectedUpdatedAt: number; recordTarget?: PartnerConcern['recordTarget']; watchKind?: PartnerConcern['watchKind']; watchQuery?: string}): Promise<PartnerConcern> {
+  async editExplicit(companionId: string, id: string, input: {subject: string; reason: string; sources: string; expectedUpdatedAt: number; recordTarget?: PartnerConcern['recordTarget']; watchKind?: PartnerConcern['watchKind']; watchQuery?: string; executionInstructions?: string | null}): Promise<PartnerConcern> {
     let edited: PartnerConcern | undefined
     await this.serial(this.path(companionId), async () => {
       const database = await this.open(companionId)
@@ -176,6 +195,10 @@ export class PartnerConcernStore {
         if (duplicate && duplicate.state !== 'archived') throw new Error('另有一条未归档的同名关注，请换一个名称；本次未新建或覆盖任何关注')
         // Retain archived identity, title and history; release only its deduplication key.
         if (duplicate) database.prepare('UPDATE concerns SET normalized_subject = ? WHERE id = ?').run(`archived:${String(duplicate.id)}:${normalized}`, String(duplicate.id))
+        if(input.executionInstructions !== undefined) {
+          if(input.executionInstructions !== null && (typeof input.executionInstructions !== 'string' || !input.executionInstructions.trim() || input.executionInstructions.length>4000)) throw new Error('后续执行要求应为 1–4000 字，停用请传 null')
+          database.prepare('UPDATE concerns SET execution_instructions=? WHERE id=?').run(input.executionInstructions?.trim()??null,id)
+        }
         const descriptor = explicitConcernDescriptor(input.sources)
         if (input.sources.trim() && descriptor.resources.length === 0) throw new Error('未识别到检查依据，请使用 @知识库[库名/文档名] 或 @"文件路径"')
         const updated = Math.max(Date.now(), old.updatedAt + 1)
@@ -211,7 +234,7 @@ export class PartnerConcernStore {
           AND state != 'archived' ORDER BY score DESC, updated_at DESC LIMIT 80`).all(companionId, scopeId) as SqlRow[]
         const target = selectConcernLifecycleTarget(request, rows.map(concernFromRow))
         if (target === undefined) return undefined
-        if (request.action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', updated_at = ? WHERE id = ?").run(now, target.id)
+        if (request.action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', control='stopped', updated_at = ? WHERE id = ?").run(now, target.id)
         else database.prepare("UPDATE concerns SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").run(now, now, target.id)
         return { ...request, concernId: target.id, subject: target.subject }
       } finally { database.close() }
@@ -257,16 +280,10 @@ export class PartnerConcernStore {
           companionId, scopeId, options.includeFuture ? 1 : 0, now, options.concernId ?? null, options.concernId ?? null, Math.max(limit, 24),
         ) as SqlRow[]
         const due: PartnerConcern[] = []
-        const update = database.prepare('UPDATE concerns SET score = ?, state = ? WHERE id = ?')
         for (const row of rows) {
           const item = concernFromRow(row)
-          const score = concernDecay(item.score, item.lastActivityAt, now, item.origin)
-          if (item.origin === 'implicit' && score < .18) {
-            update.run(score, 'archived', item.id)
-            continue
-          }
-          if (score !== item.score) update.run(score, item.state, item.id)
-          if (due.length < limit) due.push({ ...item, score })
+          // Silence is not evidence of completion. Only reasoned revisions change attention.
+          if (due.length < limit) due.push(item)
         }
         database.exec('COMMIT')
         return due
@@ -283,8 +300,12 @@ export class PartnerConcernStore {
       try {
         database.exec('BEGIN IMMEDIATE')
         const byConcern = new Map(candidates.map(item => [item.concernId, item]))
-        for (const concern of concerns) {
-          if (!database.prepare('SELECT id FROM concerns WHERE id = ? AND companion_id = ?').get(concern.id, companionId)) continue
+        for (const snapshot of concerns) {
+          const row = database.prepare('SELECT * FROM concerns WHERE id = ? AND companion_id = ?').get(snapshot.id, companionId) as SqlRow | undefined
+          if (!row) continue
+          const concern = concernFromRow(row)
+          // An in-flight check must never revive a stopped/archived or edited concern.
+          if (concern.updatedAt !== snapshot.updatedAt || !['active', 'watching'].includes(concern.state)) continue
           const candidate = byConcern.get(concern.id)
           const chosenMinutes = boundedConcernCheckMinutes(candidate?.nextCheckInMinutes)
           const nextCheckAt = now + (chosenMinutes === undefined ? concernInterval(concern.priority, concern.origin) : chosenMinutes * 60_000)
@@ -424,6 +445,7 @@ export class PartnerConcernStore {
     const database = await this.open(companionId)
     try {
       const rows = database.prepare(`SELECT * FROM concern_observations WHERE companion_id = ? AND scope_id IN (?, '*')
+        AND concern_id IN (SELECT id FROM concerns WHERE state IN ('active','watching'))
         AND decision = 'defer' AND mentioned_at IS NULL ORDER BY interrupt_score DESC, created_at DESC LIMIT 30`).all(companionId, scopeId) as SqlRow[]
       const terms = tokens(query)
       return rows.map(observationFromRow).map(item => ({ item, score: lexicalScore(`${item.event} ${item.evidence}`, terms) + item.interruptScore }))
@@ -435,6 +457,7 @@ export class PartnerConcernStore {
     const database = await this.open(companionId)
     try {
       return (database.prepare(`SELECT * FROM concern_observations WHERE companion_id = ? AND scope_id IN (?, '*')
+        AND concern_id IN (SELECT id FROM concerns WHERE state IN ('active','watching'))
         AND decision = 'notify' AND mentioned_at IS NULL ORDER BY interrupt_score DESC, created_at ASC LIMIT ?`).all(companionId, scopeId, limit) as SqlRow[]).map(observationFromRow)
     } finally { database.close() }
   }
@@ -464,10 +487,12 @@ export class PartnerConcernStore {
           now = Math.max(now, expectedUpdatedAt + 1)
         }
         if (number(concern.updated_at) > now) return
-        if (action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', updated_at = ? WHERE id = ?").run(now, concernId)
+        if (action === 'ignore') database.prepare("UPDATE concerns SET state = 'archived', control='stopped', updated_at = ? WHERE id = ?").run(now, concernId)
         if (action === 'resolve') database.prepare("UPDATE concerns SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").run(now, now, concernId)
-        if (action === 'watch') database.prepare("UPDATE concerns SET state = 'watching', score = MAX(score, .72), last_activity_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?").run(now, now, now, concernId)
-        if (action === 'prioritize') database.prepare("UPDATE concerns SET state = 'active', priority = 1, score = 1, last_activity_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?").run(now, now, now, concernId)
+        if (action === 'watch') database.prepare("UPDATE concerns SET state = 'watching', control='auto', resolved_at=NULL, score = MAX(score, .72), last_activity_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?").run(now, now, now, concernId)
+        if (action === 'prioritize') database.prepare("UPDATE concerns SET state = 'active', control='pinned', priority = 1, score = 1, last_activity_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?").run(now, now, now, concernId)
+        const updated = concernFromRow(database.prepare('SELECT * FROM concerns WHERE id=?').get(concernId) as SqlRow)
+        database.prepare('UPDATE concerns SET adjustments_json=? WHERE id=?').run(JSON.stringify([...(updated.adjustments ?? []), {at: now, actor: 'user', reason: ({watch:'用户恢复关注／交由伙伴管理', ignore:'用户停止关注', prioritize:'用户置顶关注', resolve:'用户确认已解决'})[action], priority: updated.priority, state: updated.state}].slice(-20)), concernId)
       } finally { database.close() }
     })
   }
@@ -476,33 +501,63 @@ export class PartnerConcernStore {
     await this.serial(this.path(companionId), () => rm(this.directory(companionId), { recursive: true, force: true }))
   }
 
+  async revise(companionId: string, id: string, expectedUpdatedAt: number, change: ConcernRevision & { subject?: string; watchQuery?: string; details?: string; resources?: PartnerConcern['resources'] }): Promise<PartnerConcern> {
+    return this.serialValue(this.path(companionId), async () => {
+      const db = await this.open(companionId)
+      try {
+        db.exec('BEGIN IMMEDIATE')
+        const row = db.prepare('SELECT * FROM concerns WHERE companion_id=? AND id=?').get(companionId, id) as SqlRow | undefined
+        if (!row) throw new Error('当前伙伴没有此关注')
+        const old = concernFromRow(row)
+        if (old.updatedAt !== expectedUpdatedAt) throw new Error('关注已变化，请 list 后重试')
+        const next = reviseConcern(old, change, Date.now())
+        const resources = change.resources === undefined ? old.resources : validateConcernResources(change.resources)
+        const subject = change.subject?.trim() ?? old.subject
+        if (!normalizeConcernSubject(subject) || subject.length > 300) throw new Error('关注主题无效')
+        const query = change.watchQuery?.trim() ?? old.watchQuery
+        if (!query || query.length > 500) throw new Error('观察目标无效')
+        if (change.details !== undefined && (!change.details.trim() || change.details.length > 800)) throw new Error('关注说明无效')
+        db.prepare(`UPDATE concerns SET subject=?, normalized_subject=?, watch_query=?, reason=?, priority=?, state=?, updated_at=?,
+          next_check_at=?, resolved_at=?, adjustments_json=?, resources_json=? WHERE id=?`).run(subject, normalizeConcernSubject(subject), query,
+          change.details?.trim() ?? old.reason, next.priority, next.state, next.updatedAt,
+          next.updatedAt + concernInterval(next.priority, next.origin), next.state === 'resolved' ? next.updatedAt : null,
+          JSON.stringify(next.adjustments), resourcesJson(resources), id)
+        db.exec('COMMIT')
+        return concernFromRow(db.prepare('SELECT * FROM concerns WHERE id=?').get(id) as SqlRow)
+      } catch (error) { rollback(db); throw error } finally { db.close() }
+    })
+  }
+
   private upsert(database: DatabaseSync, companionId: string, scopeId: string, candidate: ConcernCandidate, origin: ConcernOrigin, at: number): PartnerConcern | undefined {
     const subject = compact(candidate.subject, 300)
     const normalized = normalizeConcernSubject(subject)
     if (!normalized) return undefined
     const existing = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND normalized_subject = ? AND scope_id IN (?, '*')
       ORDER BY CASE WHEN origin = 'explicit' THEN 0 ELSE 1 END LIMIT 1`).get(companionId, normalized, scopeId) as SqlRow | undefined
+    if (existing) {
+      const old = concernFromRow(existing)
+      if (old.control === 'stopped') return undefined
+      const revision: ConcernRevision = {
+        action: candidate.operation === 'resolve' ? 'resolve' : candidate.operation === 'dismiss' ? 'archive' : old.state === 'archived' || old.state === 'resolved' ? 'restore' : 'update',
+        reason: compact(candidate.reason || '根据相关对话与进展重新评估', 800),
+        priority: old.control === 'pinned' ? old.priority : clamp(candidate.priority),
+      }
+      const next = reviseConcern(old, revision, at)
+      const resources = resourcesJson(candidate.resources)
+      database.prepare(`UPDATE concerns SET reason=?, origin=?, priority=?, confidence=?, state=?, watch_kind=?, watch_query=?,
+        resources_json=CASE WHEN ?='[]' THEN resources_json ELSE ? END, updated_at=?, last_activity_at=?, next_check_at=?,
+        resolved_at=?, adjustments_json=? WHERE id=?`).run(compact(candidate.reason,800), old.origin === 'explicit' ? 'explicit' : origin,
+        next.priority, clamp(candidate.confidence), next.state, candidate.watchKind, compact(candidate.watchQuery || subject,500),
+        candidate.replaceResources ? 'replace' : resources, resources, next.updatedAt, at, at + concernInterval(next.priority,old.origin), next.state === 'resolved' ? at : null, JSON.stringify(next.adjustments), old.id)
+      return undefined
+    }
     if (candidate.operation === 'resolve' || candidate.operation === 'dismiss') {
-      if (!existing) return undefined
-      const state = candidate.operation === 'resolve' ? 'resolved' : 'archived'
-      database.prepare('UPDATE concerns SET state = ?, resolved_at = ?, updated_at = ? WHERE id = ?').run(state, state === 'resolved' ? at : null, at, string(existing.id))
       return undefined
     }
     const priority = clamp(candidate.priority)
     const confidence = clamp(candidate.confidence)
     const score = clamp(priority * .55 + confidence * .45)
     const nextCheckAt = at + concernInterval(priority, origin)
-    if (existing && string(existing.scope_id) !== scopeId) {
-      const resources = resourcesJson(candidate.resources)
-      database.prepare(`UPDATE concerns SET subject = ?, reason = ?, state = 'watching', priority = MAX(priority, ?),
-        confidence = MAX(confidence, ?), score = MAX(score, ?), watch_kind = ?, watch_query = ?,
-        resources_json = CASE WHEN ? = '[]' THEN resources_json ELSE ? END, updated_at = ?,
-        last_activity_at = ?, next_check_at = MIN(next_check_at, ?), resolved_at = NULL WHERE id = ?`).run(
-        subject, compact(candidate.reason, 800), priority, confidence, score, candidate.watchKind,
-        compact(candidate.watchQuery || subject, 500), resources, resources, at, at, nextCheckAt, string(existing.id),
-      )
-      return undefined
-    }
     const id = `concern-${randomUUID()}`
     database.prepare(`INSERT INTO concerns
       (id, companion_id, scope_id, normalized_subject, subject, reason, origin, state, priority, confidence, score,
@@ -630,7 +685,13 @@ export class PartnerConcernStore {
       CREATE INDEX IF NOT EXISTS concern_audit_session ON concern_audit(companion_id, scope_id, session_id, source, decision, notified_at, created_at);
       PRAGMA user_version = 4;`)
     ensureColumn(database, 'concerns', 'resources_json', "TEXT NOT NULL DEFAULT '[]'")
+    ensureColumn(database, 'concerns', 'control', "TEXT NOT NULL DEFAULT 'auto'")
+    ensureColumn(database, 'concerns', 'adjustments_json', "TEXT NOT NULL DEFAULT '[]'")
+    if (!database.prepare("SELECT value FROM concern_meta WHERE key='attention-controls-v1'").get()) {
+      database.exec("UPDATE concerns SET control='stopped' WHERE state='archived'; UPDATE concerns SET control='pinned' WHERE state='active' AND priority=1; INSERT INTO concern_meta VALUES ('attention-controls-v1','1')")
+    }
     ensureColumn(database, 'concerns', 'record_target_json', 'TEXT')
+    ensureColumn(database, 'concerns', 'execution_instructions', 'TEXT')
     ensureColumn(database, 'concerns', 'recording_pending', 'INTEGER NOT NULL DEFAULT 0')
     ensureColumn(database, 'concerns', 'recording_snapshot_json', 'TEXT')
     ensureColumn(database, 'concerns', 'recording_retry_at', 'INTEGER NOT NULL DEFAULT 0')
@@ -657,8 +718,11 @@ export class PartnerConcernStore {
 
 function concernFromRow(row: SqlRow): PartnerConcern {
   return {
+    control: (row.control ?? 'auto') as NonNullable<PartnerConcern['control']>,
+    adjustments: JSON.parse(String(row.adjustments_json ?? '[]')),
     ...(row.record_target_json && number(row.recording_pending) === 1 ? {recordingPending: true} : {}),
     ...(typeof row.record_target_json === 'string' ? { recordTarget: JSON.parse(row.record_target_json) as NonNullable<PartnerConcern['recordTarget']> } : {}),
+    ...(typeof row.execution_instructions === 'string' ? {executionInstructions: row.execution_instructions} : {}),
     id: string(row.id), companionId: string(row.companion_id), scopeId: string(row.scope_id), subject: string(row.subject), reason: string(row.reason),
     origin: string(row.origin) as PartnerConcern['origin'], state: string(row.state) as ConcernState,
     priority: number(row.priority), confidence: number(row.confidence), score: number(row.score),
@@ -707,7 +771,7 @@ function compact(value: string, max: number): string { const text = value.replac
 function explicitConcernDescriptor(value: string): Pick<ConcernCandidate, 'subject' | 'watchKind' | 'watchQuery'> & { resources: PartnerConcern['resources'] } {
   const resources = extractConcernResources(value)
   const remainder = compact(value
-    .replace(/@知识库\[[^\]]+\]/gu, ' ')
+    .replace(/@(?:知识库|笔记)\[[^\]]+\]/gu, ' ')
     .replace(/(?:^|\s)@(?:"[^"]+"|[^\s]+)/gu, ' ')
     .replace(/^(?:(?:请|麻烦|帮我|替我|让(?:伙伴|你)?)[，,：:\s]*)?(?:关注|留意|盯着|跟进|惦记|记着)[，,：:\s]*/u, '')
     .replace(/(?:一下|这件事|这个|这些)[。！!？?\s]*$/u, ''), 300)
@@ -748,7 +812,7 @@ function migrateReferenceOnlyConcerns(database: DatabaseSync): void {
 }
 function resourcesJson(value: ConcernCandidate['resources']): string {
   return JSON.stringify((value ?? []).slice(0, 8).map(item => ({ kind: item.kind, locator: compact(item.locator, 500), label: compact(item.label, 240) }))
-    .filter(item => (item.kind === 'file' || item.kind === 'knowledge') && item.locator))
+    .filter(item => (item.kind === 'file' || item.kind === 'knowledge' || item.kind === 'note') && item.locator))
 }
 function parseResources(value: unknown): PartnerConcern['resources'] {
   if (typeof value !== 'string') return []
@@ -758,8 +822,8 @@ function parseResources(value: unknown): PartnerConcern['resources'] {
     return parsed.flatMap(item => {
       if (typeof item !== 'object' || item === null) return []
       const resource = item as Record<string, unknown>
-      if ((resource.kind !== 'file' && resource.kind !== 'knowledge') || typeof resource.locator !== 'string' || typeof resource.label !== 'string') return []
-      return [{ kind: resource.kind as 'file' | 'knowledge', locator: compact(resource.locator, 500), label: compact(resource.label, 240) }]
+      if ((resource.kind !== 'file' && resource.kind !== 'knowledge' && resource.kind !== 'note') || typeof resource.locator !== 'string' || typeof resource.label !== 'string') return []
+      return [{ kind: resource.kind as 'file' | 'knowledge' | 'note', locator: compact(resource.locator, 500), label: compact(resource.label, 240) }]
     }).slice(0, 8)
   } catch { return [] }
 }

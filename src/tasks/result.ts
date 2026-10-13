@@ -59,7 +59,7 @@ export async function prepareTaskResultDelivery(task: BoardTask, cwd: string): P
   const deliverable = task.resultSummary ? publicTaskDeliverable(task.resultSummary) : ''
   const review = task.reviewSummary?.trim() || (task.status === 'done' ? '已通过' : '')
   const direct = renderDirectResult(task, deliverable, review)
-  if (direct.length <= INLINE_RESULT_LIMIT) return { text: direct }
+  if (task.status !== 'done' || direct.length <= INLINE_RESULT_LIMIT) return { text: direct }
   const document = renderResultDocument(task, deliverable, review)
   const documentPath = await writeResultDocument(cwd, task, document)
   return {

@@ -3,12 +3,27 @@ import assert from 'node:assert/strict'
 import { registerPartnerConcernTool } from '../lib/concern-tool.js'
 import { explicitConcernDirective } from '../lib/memory-reflection.js'
 
+test('existing partner sessions retain concern tools with learning and heartbeat disabled', async () => {
+  let assemble
+  let owned = true
+  const agent = {session:{id:'s'},ctx:{on(_name, handler){assemble=handler;return ()=>{}}}}
+  const ctx = {tools:{register:()=>()=>{}},agents:{list:()=>[agent]},on:()=>()=>{}}
+  const store = {snapshot:()=>({sessions:owned?[{sessionId:'s',companionId:'c'}]:[],companions:[{id:'c',automation:{memory:{enabled:false},heartbeat:{enabled:false}}}]})}
+  const dispose=registerPartnerConcernTool(ctx,store,{})
+  const make=()=>({tools:[{name:'partner_concern_suggest'},{name:'partner_concerns'},{name:'other'}]})
+  try {
+    assert.equal((await assemble({}, {}, async()=>make())).tools.length,3)
+    owned=false
+    assert.deepEqual((await assemble({}, {}, async()=>make())).tools,[{name:'other'}])
+  } finally {dispose()}
+})
+
 test('explicit watch phrases are recognized without treating fixed reports as watches', () => {
   for (const text of ['关注一些项目的版本变化', '帮我关注项目更新', '有变化告诉我', '每天检查一下，有更新再通知我']) assert.equal(explicitConcernDirective(text), true, text)
   for (const text of ['每天九点生成并发送日报', '不用再关注这个项目了', '总结这篇文章']) assert.equal(explicitConcernDirective(text), false, text)
 })
 
-test('explicit concerns save directly, support multiple subjects and preserve memory permissions', async () => {
+test('explicit concerns save with learning disabled and remain scoped to partner sessions', async () => {
   let tool, enabled = true
   const calls = []
   const ctx = { tools: { register(value) { tool = value; return () => {} } }, agents: { list: () => [] }, on: () => () => {} }
@@ -27,7 +42,8 @@ test('explicit concerns save directly, support multiple subjects and preserve me
     const background = { session: { id: 's', snapshotEvents: () => [...agent.session.snapshotEvents(), { type: 'user/message', seq: 2, data: { source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴执行看板任务' }, content: [] } }] } }
     await assert.rejects(tool.execute(input, { agent: background }), /不能借用旧用户消息/)
     enabled = false
-    await assert.rejects(tool.execute(input, { agent }), /不要改用定时任务/)
-    assert.equal(calls.length, 2)
+    await tool.execute({ ...input, subject: '项目 C 版本变化' }, { agent })
+    assert.equal(calls.length, 3)
+    await assert.rejects(tool.execute(input, {agent:{session:{id:'ordinary'}}}), /partner-owned/)
   } finally { dispose() }
 })

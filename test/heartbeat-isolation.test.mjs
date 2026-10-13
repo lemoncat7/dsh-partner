@@ -6,6 +6,23 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+test('a rate-limited concern wakes at reset instead of the six-hour default', async () => {
+  const retryAt = Date.now() + 120000
+  const companion = { id:'c', automation:{ heartbeat:{enabled:true,intervalMinutes:360,dailyLimit:0} } }
+  const state = { companions:[companion], heartbeatStates:[], sessions:[{companionId:'c',channelId:'w',userId:'u',lastMessageAt:0}], channels:[{id:'w',enabled:true}], pairings:[{channelId:'w',userId:'u',status:'approved'}] }
+  let deferred
+  const scheduler = new HeartbeatScheduler({}, {snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {
+    heartbeat:async (_c,_r,items)=>({concerns:items,candidates:[],tools:[],startedAt:0,completedAt:1,blocked:['a'],blockedReasons:{a:'upstream limit'},failures:{a:{kind:'rate_limited',retryAt}}}),
+    recordHeartbeatActivity:async()=>{},
+  }, {}, {pendingNotifications:async()=>[],due:async()=>[{id:'a',subject:'source'}],deferFailedCheck:async (_item,at)=>{deferred=at}})
+  const result=await scheduler.trigger('c',{manual:true})
+  assert.equal(deferred,retryAt)
+  assert.equal(state.heartbeatStates[0].nextCheckAt,retryAt)
+  assert.match(result.reason,/rate_limited.*计划复查/)
+  assert.doesNotMatch(result.reason,/等待重试/)
+  await scheduler.close()
+})
+
 for (const failure of ['blocked', 'throw']) test(`healthy notifications are sent in the same batch as a ${failure} concern`, async () => {
   const companion = {id:'c',automation:{heartbeat:{enabled:true,intervalMinutes:30,dailyLimit:0}}}
   const state={companions:[companion],heartbeatStates:[{companionId:'c',consecutiveFailures:10,sentCount:0}],sessions:[{companionId:'c',channelId:'w',userId:'u',lastMessageAt:0}],channels:[{id:'w',enabled:true}],pairings:[{channelId:'w',userId:'u',status:'approved'}]}
@@ -23,6 +40,7 @@ for (const failure of ['blocked', 'throw']) test(`healthy notifications are sent
   })
   const result=await scheduler.trigger('c',{manual:true})
   assert.equal(result.sent,true)
+  assert.equal(result.outcome,'partial')
   assert.match(result.reason,/unavailable/)
   assert.deepEqual(sent,['verified change'])
   assert.deepEqual(mentioned,['event'])

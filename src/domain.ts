@@ -46,6 +46,7 @@ export interface CompanionAutomation {
 }
 
 export interface HeartbeatRuntimeState {
+  lastOutcome?: 'success' | 'partial' | 'blocked'
   companionId: string
   lastCheckedAt?: number
   lastSentAt?: number
@@ -100,6 +101,7 @@ export interface ChannelSession {
 }
 
 export interface PartnerState {
+  concernExecutions?: import('./concern-execution.js').ConcernExecutionReceipt[]
   mcpServers?: import('./mcp/domain.js').McpServer[]
   mcpBindings?: import('./mcp/domain.js').McpBinding[]
   schemaVersion: 14

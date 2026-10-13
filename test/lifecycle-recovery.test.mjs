@@ -16,19 +16,19 @@ test('ordinary repair work is not an implicit watch, explicit ongoing observatio
   assert.equal(hasSustainedConcernEvidence('修复后继续关注，有变化通知我'), true)
 })
 
-test('concern management edits stable identity, checks revisions, resolves and deletes only owned entries', async t => {
+test('concern management edits stable identity, checks revisions, resolves and leaves deletion to UI', async t => {
   const root = await mkdtemp(join(tmpdir(), 'partner-concern-tool-')); t.after(() => rm(root, { recursive: true, force: true }))
   const concerns = new PartnerConcernStore(root)
   const store = { snapshot: () => ({ sessions: [{ sessionId: 's', companionId: 'c' }], companions: [{ id: 'c', automation: { memory: { enabled: true } } }] }) }
   const tool = concernManagementTool(store, concerns), exec = { agent: { session: { id: 's' } } }
   const old = await concerns.createExplicit('c', '*', '版本更新', '留意更新')
-  const edited = JSON.parse(await tool.execute({ action: 'update', concernId: old.id, expectedUpdatedAt: old.updatedAt, subject: '稳定版本更新', watchQuery: '仅正式版本' }, exec))
+  const edited = JSON.parse(await tool.execute({ action: 'update', concernId: old.id, expectedUpdatedAt: old.updatedAt, subject: '稳定版本更新', watchQuery: '仅正式版本', reason:'聚焦稳定版发布' }, exec))
   assert.equal(edited.id, old.id); assert.equal(edited.watchQuery, '仅正式版本')
   await assert.rejects(tool.execute({ action: 'delete', concernId: old.id, expectedUpdatedAt: old.updatedAt }, exec), /变化/)
-  await tool.execute({ action: 'resolve', concernId: edited.id, expectedUpdatedAt: edited.updatedAt }, exec)
+  await tool.execute({ action: 'resolve', concernId: edited.id, expectedUpdatedAt: edited.updatedAt, reason:'已核实发布完成' }, exec)
   const [resolved] = JSON.parse(await tool.execute({ action: 'list' }, exec)); assert.equal(resolved.state, 'resolved')
-  await tool.execute({ action: 'delete', concernId: resolved.id, expectedUpdatedAt: resolved.updatedAt }, exec)
-  assert.deepEqual(JSON.parse(await tool.execute({ action: 'list' }, exec)), [])
+  await assert.rejects(tool.execute({ action: 'delete', concernId: resolved.id, expectedUpdatedAt: resolved.updatedAt }, exec),/永久删除/)
+  assert.equal(JSON.parse(await tool.execute({ action: 'list' }, exec)).length, 1)
   const foreign = await concerns.createExplicit('other', '*', '其他伙伴关注')
   await assert.rejects(tool.execute({ action: 'delete', concernId: foreign.id, expectedUpdatedAt: foreign.updatedAt }, exec), /没有此关注/)
 })

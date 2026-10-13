@@ -10,6 +10,14 @@ import { PartnerAgentRuntime } from '../lib/agent-runtime.js'
 import { ChannelManager } from '../lib/channels/manager.js'
 import { RequirementWorker } from '../lib/requirements/worker.js'
 import { RequirementService } from '../lib/requirements/service.js'
+import { requirementProgressKey } from '../lib/requirements/progress.js'
+import { prepareTaskResultDelivery } from '../lib/tasks/result.js'
+
+test('blocked task does not manufacture a long report attachment', async () => {
+  const delivery = await prepareTaskResultDelivery({ title: '受阻', status: 'blocked', resultSummary: '说明'.repeat(10000) }, '/does-not-exist')
+  assert.equal(delivery.documentPath, undefined)
+  assert.match(delivery.text, /受阻/)
+})
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'requirement-delivery-'))
@@ -64,6 +72,34 @@ test('original conversation receives summary and download link exactly once, wit
   assert.equal(events.length, 1)
   assert.match(events[0].data.content[0].text, /最终总结/)
   assert.match(events[0].data.content[1].text, new RegExp(`/attachments/${f.file.id}`))
+})
+
+test('blocked requirement rejects attachment manifests and accepts text-only reporting', async t => {
+  const f = await fixture(t), service = new RequirementService(f.store)
+  await f.store.update(s => {
+    s.requirements[0].status = 'active'
+    s.tasks = [{ ...f.task, requirementId: f.item.id, status: 'done' }, { id: 'blocked', requirementId: f.item.id, status: 'blocked' }]
+  })
+  const actor = { kind: 'companion', companionId: f.item.ownerCompanionId }
+  await assert.rejects(service.prepareDelivery(f.item.id, 1, '需要协调', [f.file.id], actor), /只能发送文字/)
+  assert.deepEqual((await service.prepareDelivery(f.item.id, 1, '需要协调', [], actor)).deliveryDraft.attachmentIds, [])
+})
+
+test('stage delivery ignores legacy attachment selection and records text only', async t => {
+  const f = await fixture(t), recorded = [], sent = []
+  await f.store.update(s => {
+    const item = s.requirements[0]; item.status = 'planning'
+    s.tasks = [{ ...f.task, requirementId: item.id, status: 'done' }, { id: 'blocked', requirementId: item.id, status: 'blocked', blockedRecovery: { needsUser: true, handledBy: [], attempts: 1 } }]
+    const key = requirementProgressKey(s, item)
+    item.stageReport = { key, summary: '等待处理', createdAt: Date.now() }
+    item.deliveryDraft = { progressKey: key, summary: '等待处理', attachmentIds: [f.file.id] }
+  })
+  const channels = new ChannelManager({}, f.store, {}, { recordRequirementResult: async (...args) => recorded.push(args[3]) }, f.root)
+  channels.setRequirementDelivery(f.service, '/partner')
+  channels.queueProactive = async (_route, _receipt, reply) => sent.push(reply)
+  await channels.notifyRequirementResult(f.store.snapshot().requirements[0])
+  assert.deepEqual(recorded, [[]])
+  assert.equal(sent[0].attachmentPolicy, 'text-only'); assert.deepEqual(sent[0].attachments, [])
 })
 
 test('channel attachment failure never completes requirement; restart retries only missing channel parts', async t => {

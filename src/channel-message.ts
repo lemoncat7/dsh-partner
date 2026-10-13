@@ -21,6 +21,8 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  /** Status-only delivery must suppress even previously queued attachment parts. */
+  attachmentPolicy?: 'text-only'
   attachmentScope?: string
   text: string
   attachments: PartnerOutboundAttachment[]

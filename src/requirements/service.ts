@@ -22,6 +22,8 @@ export class RequirementService {
       const item = state.requirements?.find(r => r.id === id)
       if (!item || item.ownerCompanionId !== actor.companionId) throw new Error('只有需求负责人能提交最终交付清单')
       if (item.revision !== revision) throw new Error('需求已变化，请重新读取后整理交付')
+      if (attachmentIds.length && item.status !== 'done' && state.tasks.some(t => t.requirementId === id && t.status !== 'done'))
+        throw new Error('需求尚未全部成功完成；受阻或阶段汇报只能发送文字，attachmentIds 请传 []，成品附件留到完成后交付')
       const tasks = item.status === 'done' && item.results ? item.results : state.tasks.filter(t => t.requirementId === id && t.status === 'done')
       const available = new Set(tasks.flatMap(t => t.resultAttachmentIds ?? []))
       if (attachmentIds.some(id => !available.has(id))) throw new Error('只能选择本需求已验收任务正式提交的附件；不能交付中间产物或其他需求文件')

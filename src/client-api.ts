@@ -1,3 +1,4 @@
+import { createSnapshotCache } from './snapshot-cache.js'
 export const PARTNER_API = '/partner-local/v1'
 
 export type { CompanionCapability as Capability } from './capabilities.js'
@@ -33,7 +34,7 @@ export interface ChannelSessionView {
 }
 export interface HeartbeatStateView {
   companionId: string; lastCheckedAt?: number; lastSentAt?: number; nextCheckAt: number
-  sentDay: string; sentCount: number; consecutiveFailures: number; lastError?: string
+  sentDay: string; sentCount: number; consecutiveFailures: number; lastError?: string; lastOutcome?: 'success' | 'partial' | 'blocked'
 }
 export type MemoryKindView = 'profile' | 'preference' | 'task' | 'event' | 'relationship' | 'emotion'
 export interface MemoryEvidenceView { turnId: string; at: number; excerpt: string }
@@ -43,11 +44,14 @@ export interface MemoryRelationView { id: string; scopeId: string; sourceMemoryI
 export interface MemoryGraphView { memories: MemoryView[]; relations: MemoryRelationView[] }
 export interface DailyReflectionView { scopeId: string; date: string; summary: string; events: string[]; openTasks: string[]; completedTasks: string[]; learnings: string[]; updatedAt: number; turnCount: number }
 export interface ConcernView {
+  executionInstructions?: string
+  control?: import('./concern-attention.js').ConcernControl
+  adjustments?: import('./concern-attention.js').ConcernAdjustment[]
   recordingPending?: boolean
   recordTarget?: ConcernRecordTargetView
   id: string; subject: string; reason: string; origin: 'explicit' | 'implicit'; state: 'active' | 'watching' | 'snoozed' | 'resolved' | 'archived'
   priority: number; confidence: number; score: number; watchKind: 'auto' | 'knowledge' | 'workspace' | 'web'; updatedAt: number; nextCheckAt: number; lastCheckedAt?: number
-  resources: Array<{ kind: 'file' | 'knowledge'; locator: string; label: string }>
+  resources: Array<{ kind: 'file' | 'knowledge' | 'note'; locator: string; label: string }>
 }
 export interface ConcernRecordTargetView { kind: 'file' | 'note'; locator: string; label: string }
 export interface ConcernObservationView {
@@ -56,7 +60,7 @@ export interface ConcernObservationView {
   notificationRuleReason: string; decisionReason: string; createdAt: number; mentionedAt?: number
 }
 export interface ConcernActivityView { concerns: ConcernView[]; observations: ConcernObservationView[] }
-export interface ConcernSourceView { kind: 'file' | 'knowledge'; label: string; detail: string; token: string }
+export interface ConcernSourceView { kind: 'file' | 'knowledge' | 'note'; label: string; detail: string; token: string }
 export interface PresetView { id: string; name: string; broken?: string }
 export interface ModelCatalogView { providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>; defaultSelection: { provider: string; model: string } }
 export interface PartnerSnapshot {
@@ -106,6 +110,7 @@ export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' 
 
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'
+  if (method !== 'GET') partnerSnapshotCache.invalidate()
   const response = await fetch(`${PARTNER_API}${path}`, {
     ...init,
     headers: {
@@ -114,10 +119,13 @@ export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
       ...init.headers,
     },
   })
+  if (method !== 'GET' || response.status === 401 || response.status === 403) partnerSnapshotCache.invalidate()
   if (response.status === 204) return undefined as T
   const body = await response.json().catch(() => ({})) as Record<string, unknown>
   if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${response.status}`)
   return body as T
 }
 
-export function loadPartner(): Promise<PartnerSnapshot> { return api() }
+const partnerSnapshotCache = createSnapshotCache<PartnerSnapshot>(() => api('', {signal: AbortSignal.timeout(15_000)}))
+export const cachedPartner = partnerSnapshotCache.peek
+export function loadPartner(): Promise<PartnerSnapshot> { return partnerSnapshotCache.load() }

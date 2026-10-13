@@ -1,3 +1,4 @@
+import {ConcernExecutionDispatcher} from './concern-execution.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { conversationMemoryScope } from './memory-scope.js'
 import {PersonaService} from './persona/service.js'
@@ -206,6 +207,8 @@ export function apply(context: Context, config: PartnerConfig): void {
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
     const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, concerns, resolved.timeZone)
+    const concernExecution = new ConcernExecutionDispatcher(store, concerns, agents)
+    heartbeat.setExecutionDispatcher(id => concernExecution.dispatch(id))
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, agents, resolved.timeZone)
     const login = new WeixinLoginManager()
     let disposeApi: (() => void) | undefined

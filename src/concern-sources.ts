@@ -3,7 +3,7 @@ import type { Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 export interface ConcernSource {
-  kind: 'file' | 'knowledge'
+  kind: 'file' | 'knowledge' | 'note'
   label: string
   detail: string
   token: string

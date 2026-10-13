@@ -41,6 +41,14 @@ export class NotificationDelivery {
       })
       record=saved.notificationDeliveries!.find(r=>r.id===id)!
     }
+    if (reply.attachmentPolicy === 'text-only') {
+      await this.store.update(state => {
+        const saved = state.notificationDeliveries!.find(r => r.id === id)!
+        saved.reply.attachments = []; saved.reply.attachmentPolicy = 'text-only'
+        for (const target of saved.targets) target.sentParts = target.sentParts.filter(part => part === 0)
+      })
+      record = this.store.snapshot().notificationDeliveries!.find(r => r.id === id)!
+    }
     const frozen=record
     const parts=frozen.reply.attachments.length+1
     const failures:unknown[]=[]

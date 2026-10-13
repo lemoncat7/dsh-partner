@@ -1,3 +1,4 @@
+import { concernResourcesSchema, validateConcernResources } from './concern-resources.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
@@ -21,6 +22,7 @@ export interface ConcernSuggestion {
   watchQuery: string
   priority: number
   confidence: number
+  resources?: import('./concern-domain.js').ConcernResource[]
 }
 
 /** One concern entry point for explicit watches and evidence-backed implicit candidates. */
@@ -38,6 +40,7 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
+        resources: concernResourcesSchema,
         subject: { type: 'string', description: 'Specific unresolved matter, at most 120 characters.' },
         reason: { type: 'string', description: 'Why it remains open and merits later observation, at most 400 characters.' },
         evidence: { type: 'string', description: 'Exact supporting excerpt from the current user message, at most 500 characters.' },
@@ -58,7 +61,7 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       const route = store.snapshot().sessions.find(item => item.sessionId === agent.session.id)
       if (route === undefined) throw new Error('partner_concern_suggest is only available in a partner-owned conversation')
       const companion = store.snapshot().companions.find(item => item.id === route.companionId)
-      if (companion === undefined || !companion.automation.memory.enabled) throw new Error('伙伴记忆未启用，不能保存关注；请开启记忆，不要改用定时任务代替')
+      if (companion === undefined) throw new Error('当前会话所属伙伴不存在，不能保存关注')
       const currentUser = latestUserMessage(agent)
       const currentUserText = currentUser.text
       const suggestion = validateConcernSuggestion(raw, currentUserText)
@@ -71,7 +74,8 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
       const candidate: ConcernCandidate = {
         subject: suggestion.subject, reason: suggestion.reason, operation: 'upsert', priority: suggestion.priority,
         confidence: suggestion.confidence, watchKind: suggestion.watchKind, watchQuery: suggestion.watchQuery,
-        resources: extractConcernResources(`${suggestion.subject} ${suggestion.reason} ${suggestion.evidence}`),
+        resources: suggestion.resources ?? extractConcernResources(`${suggestion.subject} ${suggestion.reason} ${suggestion.evidence}`),
+        replaceResources: suggestion.resources !== undefined,
       }
       let result: Awaited<ReturnType<PartnerConcernStore['ingestCandidates']>>
       try {
@@ -105,6 +109,7 @@ export function validateConcernSuggestion(value: unknown, currentUserText: strin
     watchQuery: text(input.watchQuery, 'watchQuery', 300),
     priority: score(input.priority, 'priority'),
     confidence: score(input.confidence, 'confidence'),
+    ...(input.resources === undefined ? {} : {resources: validateConcernResources(input.resources)}),
   }
   if (!normalized(currentUserText).includes(normalized(suggestion.evidence))) {
     throw new Error('evidence must be an exact excerpt from the current user message')
@@ -124,7 +129,7 @@ function installVisibility(ctx: ConcernToolContext, store: PartnerStore): () => 
       const result = await next()
       const route = store.snapshot().sessions.find(item => item.sessionId === agent.session.id)
       const companion = route === undefined ? undefined : store.snapshot().companions.find(item => item.id === route.companionId)
-      applyConcernToolVisibility(result, route !== undefined && companion?.automation.memory.enabled === true)
+      applyConcernToolVisibility(result, route !== undefined && companion !== undefined)
       return result
     })
     attached.set(agent, dispose)

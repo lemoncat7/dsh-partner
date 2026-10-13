@@ -15,6 +15,16 @@ Both licenses ship with the npm package and installed skill resources. Upstream 
 
 The pendant renderer bundles Three.js 0.185.1 (MIT) and Rapier 0.20.0 (Apache-2.0), and adapts the React Bits GlareHover gradient as an integrated pendant effect. Their licenses are reproduced below.
 
+## Oh Story offline creative skill resources
+
+Three optional built-in skill bundles preserve byte-verified resources and original MIT licenses from:
+
+- `story-creation`: zenstory-ai/oh-story-claudecode, commit `4a50d5583590eb7f207037e35136c1168bc02201` (0.8.4).
+- `novel-game-creation`: zenstory-ai/novel-to-game, commit `d76cdca5b54edbdb15ef5ce7618a83b281415d21` (0.4.0).
+- `video-recap-production`: zenstory-ai/video-recap-skills, commit `e7eb0a82f13aab930f64a669e91ece78b82f65f5` (0.6.0).
+
+Snapshot provenance: `@oh-story/dsh@0.1.12-cjsfix.1`; missing packaged files were restored from the exact upstream commits and verified against the snapshot manifests. Each bundle contains its original license and SHA-256 manifest. Chinese entrypoints adapt the instructions to Partner without importing the Oh Story plugin runtime, routes or custom tools. Short-drama production remains the existing separate `drama-production` bundle.
+
 ## React Bits — GlareHover reference
 
 Source: https://github.com/DavidHDev/react-bits/tree/main/src/content/Animations/GlareHover

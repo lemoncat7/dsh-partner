@@ -4,16 +4,20 @@ import { PartnerStore } from './store.js'
 import { memoryScope, PartnerAgentRuntime } from './agent-runtime.js'
 import { PartnerConcernStore } from './concern-store.js'
 import type { ConcernObservation } from './concern-domain.js'
+import { observationRetryAt } from './observation-contract.js'
 import { ChannelManager } from './channels/manager.js'
 
 const TICK_MS = 60_000
+export interface HeartbeatResult { checked: boolean; sent: boolean; reason?: string; outcome?: 'success' | 'partial' | 'blocked' }
 export interface HeartbeatTriggerOptions { manual?: boolean; concernId?: string; recordingOnly?: boolean }
 
 export class HeartbeatScheduler {
+  private executionDispatcher?: (companionId: string) => Promise<void>
+  setExecutionDispatcher(dispatch: (companionId: string) => Promise<void>): void { this.executionDispatcher = dispatch }
   private timer: ReturnType<typeof setTimeout> | undefined
   private closed = false
   private readonly running = new Set<string>()
-  private readonly manualResults = new Map<string, {checked: boolean; sent: boolean; reason?: string}>()
+  private readonly manualResults = new Map<string, HeartbeatResult>()
 
   private async deliverNotifications(companionId:string, route:ChannelSession, items:ConcernObservation[]):Promise<void> {
     const failures:unknown[]=[]
@@ -39,7 +43,7 @@ export class HeartbeatScheduler {
     // trigger acquires the companion lock synchronously, before its first await.
     void this.trigger(id, { manual: true, ...(concernId ? { concernId } : {}) })
       .then(result => { this.manualResults.set(id, result) })
-      .catch(() => { this.manualResults.set(id, { checked: false, sent: false, reason: '检查受阻，请查看关注活动记录' }) })
+      .catch(() => { this.manualResults.set(id, { checked: false, sent: false, outcome: 'blocked', reason: '检查受阻，请查看关注活动记录' }) })
     for (const key of this.manualResults.keys()) if (!this.store.snapshot().companions.some(item => item.id === key)) this.manualResults.delete(key)
     return { accepted: true, running: true, reason: '已开始后台检查' }
   }
@@ -73,7 +77,7 @@ export class HeartbeatScheduler {
     finally { this.running.delete(companionId) }
   }
 
-  async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
+  async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<HeartbeatResult> {
     if (this.store.isCompanionRemoving(companionId)) return { checked: false, sent: false, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { checked: false, sent: false, reason: '心跳正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
@@ -97,6 +101,7 @@ export class HeartbeatScheduler {
     const now = Date.now()
     for (const companion of this.store.snapshot().companions) {
       if (!companion.automation.heartbeat.enabled) continue
+      if(!this.running.has(companion.id)) await this.executionDispatcher?.(companion.id).catch(error=>this.ctx.logger.warn(`关注后续任务调度失败：${message(error)}`))
       if(!this.running.has(companion.id) && await this.concerns.pendingRecording(companion.id,now)) {
         void this.trigger(companion.id,{recordingOnly:true}).catch(error=>this.ctx.logger.warn(`记录同步未完成：${message(error)}`))
         continue
@@ -112,12 +117,26 @@ export class HeartbeatScheduler {
     }
   }
 
-  private async run(companion: Companion, options: HeartbeatTriggerOptions): Promise<{ checked: boolean; sent: boolean; reason?: string }> {
+  private async executionRoutes(companionId: string): Promise<ChannelSession[]> {
+    const state = this.store.snapshot()
+    const routes = state.sessions.filter(route => route.companionId === companionId &&
+      (route.kind === 'local' || state.pairings.some(pairing => pairing.channelId === route.channelId && pairing.userId === route.userId && pairing.status === 'approved')))
+      .sort((a,b) => b.lastMessageAt - a.lastMessageAt)
+    return routes.length ? routes : [await this.agents.ensureLocalSessionRecord(companionId)]
+  }
+
+  private canNotify(companion: Companion, route: ChannelSession, manual: boolean | undefined, sentCount: number): boolean {
+    const policy = companion.automation.heartbeat
+    return deliverableRoutes(this.store.snapshot(), companion.id).some(item => item.channelId === route.channelId && item.userId === route.userId)
+      && (manual === true || (!quiet(Date.now(), policy.quietStartHour, policy.quietEndHour, this.timeZone) && (policy.dailyLimit <= 0 || sentCount < policy.dailyLimit)))
+  }
+
+  private async run(companion: Companion, options: HeartbeatTriggerOptions): Promise<HeartbeatResult> {
     const now = Date.now()
     if(options.recordingOnly) {
       const item=await this.concerns.pendingRecording(companion.id,now)
       if(!item)return {checked:false,sent:false,reason:'没有待同步任务'}
-      const route=deliverableRoutes(this.store.snapshot(),companion.id).find(route=>item.scopeId==='*'||memoryScope(route.channelId,route.userId)===item.scopeId)
+      const route=(await this.executionRoutes(companion.id)).find(route=>item.scopeId==='*'||memoryScope(route.channelId,route.userId)===item.scopeId)
       if(!route){await this.concerns.settleRecording(item,false);return {checked:false,sent:false,reason:'记录任务缺少原授权会话，已退避等待'}}
       let execution: Awaited<ReturnType<PartnerAgentRuntime['heartbeat']>>|undefined
       try {
@@ -132,24 +151,13 @@ export class HeartbeatScheduler {
     const existing = heartbeatState(this.store.snapshot().heartbeatStates, companion, now, this.timeZone)
     const today = localDay(now, this.timeZone)
     const sentCount = existing.sentDay === today ? existing.sentCount : 0
-    if (!options.manual && quiet(now, policy.quietStartHour, policy.quietEndHour, this.timeZone)) {
-      await this.saveState(companion, { ...existing, nextCheckAt: nextAllowedTime(now, policy.quietEndHour, this.timeZone), sentDay: today, sentCount })
-      return { checked: false, sent: false, reason: '静默时段' }
-    }
-    if (!options.manual && policy.dailyLimit > 0 && sentCount >= policy.dailyLimit) {
-      await this.saveState(companion, { ...existing, nextCheckAt: nextDay(now, policy.quietEndHour, this.timeZone), sentDay: today, sentCount })
-      return { checked: false, sent: false, reason: '达到今日主动提醒上限' }
-    }
-    const routes = deliverableRoutes(this.store.snapshot(), companion.id)
-    if (routes.length === 0) {
-      await this.saveState(companion, successState(existing, companion, now, today, sentCount, false))
-      return { checked: false, sent: false, reason: '没有可投递的已批准微信会话' }
-    }
+    const routes = await this.executionRoutes(companion.id)
     let route = routes[0]!
     let execution: Awaited<ReturnType<PartnerAgentRuntime['heartbeat']>> | undefined
     try {
       if (options.concernId === undefined) {
         for (const candidate of routes) {
+          if (!this.canNotify(companion, candidate, options.manual, sentCount)) continue
           const pending = await this.concerns.pendingNotifications(companion.id, memoryScope(candidate.channelId, candidate.userId))
           if (pending.length === 0) continue
           await this.deliverNotifications(companion.id, candidate, pending)
@@ -179,6 +187,8 @@ export class HeartbeatScheduler {
       }
       const recorded: { observations: ConcernObservation[]; notifications: ConcernObservation[] } = { observations: [], notifications: [] }
       const failures: string[] = []
+      const retryTimes: number[] = []
+      let completedChecks = 0
       execution = { concerns: due, candidates: [], tools: [], rounds: [], startedAt: Date.now(), completedAt: Date.now(), blocked: [] }
       for (const { recordingSnapshot: _snapshot, ...item } of due) {
         if (this.closed || this.store.isCompanionRemoving(companion.id)) { failures.push('关注服务已停止'); break }
@@ -187,11 +197,17 @@ export class HeartbeatScheduler {
           execution.tools!.push(...single.tools ?? [])
           execution.rounds!.push(...single.rounds ?? [])
           execution.completedAt = single.completedAt
+          execution.checkOutcomes = { ...execution.checkOutcomes, ...single.checkOutcomes }
+          execution.blockedReasons = { ...execution.blockedReasons, ...single.blockedReasons }
+          execution.failures = { ...execution.failures, ...single.failures }
           if (single.recording?.length) await this.concerns.recordSyncState([item], single.recording)
           if (single.error || single.blocked?.includes(item.id)) {
             execution.blocked!.push(item.id)
-            failures.push(`${item.subject}：${single.error || single.blockedReasons?.[item.id] || '来源核验未完成'}`)
-            await this.concerns.deferFailedCheck(item, Date.now() + policy.intervalMinutes * 60_000)
+            const detail = single.failures?.[item.id]
+            const retryAt = observationRetryAt(Date.now(), policy.intervalMinutes, detail)
+            retryTimes.push(retryAt)
+            failures.push(`${item.subject}：${single.error || single.blockedReasons?.[item.id] || '来源核验未完成'}（${detail?.kind ?? 'unknown'}；计划复查 ${new Date(retryAt).toLocaleString('zh-CN', {timeZone: this.timeZone})}）`)
+            await this.concerns.deferFailedCheck(item, retryAt)
             continue
           }
           // Commit each concern before starting the next; interrupted batches resume only due work.
@@ -199,29 +215,41 @@ export class HeartbeatScheduler {
           execution.candidates.push(...single.candidates)
           recorded.observations.push(...saved.observations)
           recorded.notifications.push(...saved.notifications)
+          completedChecks++
         } catch (error) {
           execution.blocked!.push(item.id)
           failures.push(`${item.subject}：${message(error)}`)
-          await this.concerns.deferFailedCheck(item, Date.now() + policy.intervalMinutes * 60_000)
+          const retryAt = Date.now() + policy.intervalMinutes * 60_000
+          retryTimes.push(retryAt)
+          failures[failures.length - 1] += `（计划复查 ${new Date(retryAt).toLocaleString('zh-CN', {timeZone: this.timeZone})}）`
+          await this.concerns.deferFailedCheck(item, retryAt)
         }
       }
       execution.observations = recorded.observations
+      await this.executionDispatcher?.(companion.id)
       // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
-      const partialError = failures.length ? `部分关注受阻：${failures.join('；')}。失败项独立等待重试，其他关注的结果和通知正常处理。` : undefined
-      if (recorded.notifications.length === 0) {
-        await this.saveState(companion, { ...successState(existing, companion, now, today, sentCount, false), ...(partialError ? {lastError: partialError} : {}) })
+      const outcome = failures.length === 0 ? 'success' : completedChecks > 0 ? 'partial' : 'blocked'
+      const partialError = failures.length ? `${outcome === 'partial' ? '部分完成，部分关注受阻' : '检查受阻'}：${failures.join('；')}。仅复查失败项；能力或授权缺失需补齐后才能成功，实际检查还受静默时段及运行状态限制。其他关注正常处理。` : undefined
+      const scheduled = (sent: boolean) => {
+        const next = successState(existing, companion, now, today, sentCount + (sent ? 1 : 0), sent)
+        if (retryTimes.length) next.nextCheckAt = Math.min(next.nextCheckAt, ...retryTimes)
+        return next
+      }
+      const notificationAllowed = this.canNotify(companion, route, options.manual, sentCount)
+      if (recorded.notifications.length === 0 || !notificationAllowed) {
+        await this.saveState(companion, { ...scheduled(false), ...(partialError ? {lastError: partialError, lastOutcome: outcome} : {}) })
         await this.recordActivity(companion, route, execution, partialError ? 'failed' : 'quiet', partialError)
-        return { checked: true, sent: false, reason: partialError ?? (recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化') }
+        return { checked: true, sent: false, outcome, reason: partialError ?? (!notificationAllowed ? '关注检查已完成，结果已保留；当前不投递通知' : recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化') }
       }
       await this.deliverNotifications(companion.id, route, recorded.notifications)
-      await this.saveState(companion, { ...successState(existing, companion, now, today, sentCount + 1, true), ...(partialError ? {lastError: partialError} : {}) })
+      await this.saveState(companion, { ...scheduled(true), ...(partialError ? {lastError: partialError, lastOutcome: outcome} : {}) })
       await this.recordActivity(companion, route, execution, 'notified', partialError)
-      return { checked: true, sent: true, ...(partialError ? {reason: partialError} : {}) }
+      return { checked: true, sent: true, outcome, ...(partialError ? {reason: partialError} : {}) }
     } catch (error) {
       const failures = existing.consecutiveFailures + 1
       await this.saveState(companion, {
         ...existing, companionId: companion.id, lastCheckedAt: now, sentDay: today, sentCount,
-        consecutiveFailures: failures, lastError: message(error),
+        consecutiveFailures: failures, lastError: message(error), lastOutcome: 'blocked',
         nextCheckAt: heartbeatRetryAt(Date.now(), policy.intervalMinutes, failures),
       })
       if (execution) await this.recordActivity(companion, route, execution, 'failed', message(error))
@@ -262,7 +290,7 @@ function successState(previous: HeartbeatRuntimeState, companion: Companion, now
     ...rest, companionId: companion.id, lastCheckedAt: now,
     ...(sent ? { lastSentAt: now } : {}),
     nextCheckAt: now + companion.automation.heartbeat.intervalMinutes * 60_000,
-    sentDay, sentCount, consecutiveFailures: 0,
+    sentDay, sentCount, consecutiveFailures: 0, lastOutcome: 'success',
   }
 }
 

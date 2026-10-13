@@ -153,10 +153,11 @@ export class ScheduleContinuations {
       const companion = this.store.snapshot().companions.find(c => c.id === claimed!.companionId)!
       await this.runner.execute(claimed, companion, controller.signal)
       // A natural-language promise is not a durable outcome. Never silently mark it completed.
-      await this.blockUnresolved(id, claimed.continuation!.runToken!, '本轮未提交续接结果，已暂停；请核实执行记录后处理')
+      await this.blockUnresolved(id, claimed.continuation!.runToken!, '本轮未提交续接结果；请核实执行记录', true)
     } catch (error) {
       const message = error instanceof WakeToolsUnavailable || (error instanceof Error && error.message.startsWith('本次定时检查超过')) ? error.message : '本轮续接执行失败，已暂停以避免重复执行后续动作'
-      if (claimed && !this.closed) await this.blockUnresolved(id, claimed.continuation!.runToken!, controller.signal.aborted ? '执行被取消或能力已关闭；请核实执行记录后处理' : message)
+      if (claimed && !this.closed) await this.blockUnresolved(id, claimed.continuation!.runToken!, controller.signal.aborted ? '执行被取消或能力已关闭；请核实执行记录后处理' : message,
+        !controller.signal.aborted && !(error instanceof WakeToolsUnavailable))
     } finally {
       this.active.delete(id)
       if (claimed && !this.closed) await this.store.update(state => {
@@ -173,10 +174,20 @@ export class ScheduleContinuations {
     }
   }
 
-  private async blockUnresolved(id: string, token: string, summary: string): Promise<void> {
+  private async blockUnresolved(id: string, token: string, summary: string, retryReadOnly = false): Promise<void> {
     await this.store.update(state => {
       const entry = state.schedules.find(s => s.id === id), wake = entry?.continuation
       if (!entry || !wake || wake.state !== 'running' || wake.runToken !== token) return
+      // Board wakes only query the existing external ID. Never replay a general continuation
+      // that may already have performed follow-up actions or submitted another paid job.
+      if (retryReadOnly && wake.board && entry.enabled && wake.attempts < wake.maxAttempts && Date.now() < wake.deadlineAt
+        && this.store.hasCapability(entry.companionId, 'schedules')) {
+        wake.state = 'waiting'; wake.summary = '本轮只读检查未完成，将延期核实同一外部任务；不代表生成失败，不重新提交生成。'
+        delete wake.runToken
+        entry.nextRunAt = Math.min(wake.deadlineAt, Date.now() + Math.min(15, 2 ** Math.min(wake.attempts, 4)) * 60_000)
+        entry.lastRunStatus = 'failed'; entry.lastRunAt = Date.now(); entry.updatedAt = Date.now()
+        return
+      }
       wake.state = 'blocked'; wake.summary = summary; delete wake.runToken
       entry.enabled = false; entry.lastRunStatus = 'failed'; entry.lastRunAt = Date.now(); entry.updatedAt = Date.now()
     })
@@ -218,6 +229,7 @@ export function continuationPrompt(entry: ScheduledPartnerTask): string {
 先调用 partner_schedule list 确认本计划仍启用且 token 一致；过期请求直接结束。
 完成条件：${completionCondition(entry)}
 只读检查方法：${wake.check}
+查询超时、断网或临时服务错误不等于生成任务失败；未取得明确终态时 resolve outcome=pending，延后核实同一外部任务。只有明确失败终态、权限缺失或不可恢复错误才 blocked；记录 jobId、原始错误、上游是否已接单/扣费及已尝试措施，交给创建者协调，不在核验轮换 ID 重提付费任务。
 上次结果：${wake.summary ?? '首次检查'}
 只核实已有外部任务，禁止重新提交、创建新预约或执行 nextStep。仍未完成调用 resolve outcome=pending 保存延期；已完成调用 resolve outcome=completed 并在 summary 写结果路径、外部 ID 和核实证据；失败调用 resolve outcome=blocked。每次 resolve 携带 scheduleId 和当前 runToken。
 提交回执后立即结束本轮。看板会恢复原任务执行后续步骤；等待不送验收，不向渠道发送中间通知，不使用 sleep 或 Goal 持续轮询。`

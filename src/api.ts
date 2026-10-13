@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { conversationMemoryScope } from './memory-scope.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
@@ -253,7 +253,19 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && segments[2] === 'concerns') {
       requiredCompanion(runtime.store, id)
-      if (method === 'GET' && segments.length === 3) return sendJson(res, 200, await runtime.concerns.activity(id))
+      if (method === 'GET' && segments.length === 3) return sendJson(res, 200, {...await runtime.concerns.activity(id), executions: (runtime.store.snapshot().concernExecutions ?? []).filter(r=>r.companionId===id)})
+      if (method === 'POST' && segments.length === 5 && segments[4] === 'retry-execution') {
+        mutation(req)
+        const body = await readObject(req)
+        await runtime.store.update(s => {
+          const receipt=s.concernExecutions?.find(r=>r.id===body.executionId && r.companionId===id && r.concernId===segments[3])
+          if(!receipt || !['failed','completed'].includes(receipt.status)) throw httpError(409, '执行不存在或仍在进行中')
+          receipt.status='pending';receipt.updatedAt=Date.now();delete receipt.error
+          if(body.checkResultOnly === true) receipt.reconcileOnly=true
+          else {receipt.messageId=randomUUID();delete receipt.reconcileOnly}
+        })
+        return sendJson(res,200,{ok:true})
+      }
       if (method === 'GET' && segments.length === 4 && segments[3] === 'archived') {
         const offset = Number(url.searchParams.get('offset') ?? 0)
         if (!Number.isSafeInteger(offset) || offset < 0) throw httpError(400, '分页参数无效')
@@ -272,20 +284,22 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
         if (!Number.isSafeInteger(body.expectedUpdatedAt)) throw httpError(400, '缺少关注版本，请刷新后重试')
         if (typeof body.reason !== 'string' || body.reason.length > 800 || typeof body.sources !== 'string' || body.sources.length > 4000) throw httpError(400, '关注说明或依据格式无效')
         const recordTarget = await runtime.agents.validateRecordingTarget(requiredCompanion(runtime.store, id), body.recordTarget)
-        return sendJson(res, 200, await runtime.concerns.editExplicit(id, segments[3], {subject:text(body.subject, 'subject', 300), reason:body.reason, sources:body.sources, expectedUpdatedAt:body.expectedUpdatedAt as number, ...(recordTarget ? {recordTarget} : {})}))
+        return sendJson(res, 200, await runtime.concerns.editExplicit(id, segments[3], {subject:text(body.subject, 'subject', 300), reason:body.reason, sources:body.sources, ...(body.executionInstructions === undefined ? {} : {executionInstructions: body.executionInstructions as string | null}), expectedUpdatedAt:body.expectedUpdatedAt as number, ...(recordTarget ? {recordTarget} : {})}))
       }
       if (method === 'POST' && segments.length === 3) {
         mutation(req)
         const body = await readObject(req)
         const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 800) : ''
         const recordTarget = await runtime.agents.validateRecordingTarget(requiredCompanion(runtime.store, id), body.recordTarget)
-        return sendJson(res, 201, await runtime.concerns.createExplicit(id, '*', text(body.subject, 'subject', 300), reason, recordTarget))
+        return sendJson(res, 201, await runtime.concerns.createExplicit(id, '*', text(body.subject, 'subject', 300), reason, recordTarget, body.executionInstructions as string | null | undefined))
       }
       if (method === 'POST' && segments[3] !== undefined && segments[4] === 'action' && segments.length === 5) {
         mutation(req)
-        const action = text((await readObject(req)).action, 'action', 20)
+        const body = await readObject(req)
+        const action = text(body.action, 'action', 20)
+        if (body.expectedUpdatedAt !== undefined && !Number.isSafeInteger(body.expectedUpdatedAt)) throw httpError(400, '关注版本无效')
         if (action !== 'watch' && action !== 'ignore' && action !== 'prioritize' && action !== 'resolve') throw httpError(400, 'concern action is invalid')
-        await runtime.concerns.act(id, segments[3], action)
+        await runtime.concerns.act(id, segments[3], action, Date.now(), body.expectedUpdatedAt as number | undefined)
         return sendJson(res, 200, { ok: true })
       }
     }

@@ -26,6 +26,21 @@ test('notification diagnostics never expose upstream tokens or signed URLs',()=>
 })
 
 const targets=[{channelId:'a',userId:'alice'},{channelId:'b',userId:'bob'}]
+test('text-only blocked retry drops frozen attachments without resending acknowledged text', async t => {
+  const dir=await mkdtemp(join(tmpdir(),'blocked-notice-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+  const store=await PartnerStore.open(join(dir,'state.json')), delivery=new NotificationDelivery(store)
+  let text=0, files=0
+  await assert.rejects(delivery.deliver('blocked','c',()=>[targets[0]],{text:'受阻',attachments:[{path:'/old/file',name:'old',kind:'file',mediaType:'text/plain'}]},async(target,reply,part)=>{
+    await part(0,async()=>{text++});await part(1,async()=>{throw Error('network')})
+  }))
+  await new NotificationDelivery(store).deliver('blocked','c',()=>[targets[0]],{text:'受阻',attachments:[],attachmentPolicy:'text-only'},async(target,reply,part)=>{
+    assert.equal(reply.attachments.length,0)
+    await part(0,async()=>{text++})
+    for(const file of reply.attachments) files++
+  })
+  assert.equal(text,1);assert.equal(files,0)
+  assert.ok(store.snapshot().notificationDeliveries[0].completedAt)
+})
 test('same requirement attachment content is sent once per recipient across stage and archive, including restart', async t => {
   const dir=await mkdtemp(join(tmpdir(),'requirement-dedupe-'));t.after(()=>rm(dir,{recursive:true,force:true}))
   const path=join(dir,'state.json'),store=await PartnerStore.open(path)

@@ -655,14 +655,16 @@ test('stores concerns by scope, deduplicates observations and defers relevant me
     const now = Date.now()
     await store.applyCandidates('companion-1', 'weixin:user-a', [{ subject: 'Canvas 拖动稳定性', reason: '仍未解决', operation: 'upsert', priority: .8, confidence: .8, watchKind: 'workspace', watchQuery: 'Canvas 拖动变化' }], 'implicit', now - 10 * 3_600_000)
     assert.equal((await store.due('companion-1', 'weixin:user-b', { now, limit: 12, includeFuture: true })).length, 0)
-    const [target] = await store.due('companion-1', 'weixin:user-a', { now, limit: 12, includeFuture: true })
+    let [target] = await store.due('companion-1', 'weixin:user-a', { now, limit: 12, includeFuture: true })
     const first = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 90 }], now)
     assert.equal(first.observations[0]?.decision, 'defer')
     assert.equal((await store.activity('companion-1')).observations[0]?.decision, 'defer')
     assert.equal((await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)?.nextCheckAt, now + 90 * 60_000)
     assert.equal((await store.deferred('companion-1', 'weixin:user-a', 'Canvas 拖动怎么了'))[0]?.id, first.observations[0]?.id)
+    target = (await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)
     assert.equal((await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '拖动控制器有一处新修改', evidence: 'interaction-controller.ts 更新', source: 'workspace', relevance: .7, confidence: .8, actionability: .6, nextCheckInMinutes: 120 }], now + 1)).observations.length, 0)
     assert.equal((await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)?.nextCheckAt, now + 1 + 120 * 60_000)
+    target = (await store.list('companion-1', 'weixin:user-a')).find(item => item.id === target.id)
     const second = await store.recordObservations([target], [{ concernId: target.id, changed: true, event: '新版明确修复拖动丢帧', evidence: '测试与发行说明均已确认', source: 'workspace', relevance: 1, confidence: 1, actionability: 1 }], now + 2)
     assert.equal(second.notifications.length, 1)
     assert.equal((await store.pendingNotifications('companion-1', 'weixin:user-a')).length, 1)
@@ -756,7 +758,8 @@ test('honors explicit notification rules only for knowledge-linked concerns', as
     }
     const initialResult = await store.recordObservations([linked], [baselineCandidate], now)
     assert.equal(initialResult.observations[0]?.decision, 'feed')
-    const linkedResult = await store.recordObservations([linked], [{
+    // Each completed observation advances the version; subsequent checks reload it.
+    const linkedResult = await store.recordObservations(await store.list('companion-1'), [{
       ...baselineCandidate,
       notificationRuleEffect: 'notify', notificationRuleReason: '知识文档规定版本号高于基线时立即提醒',
     }], now + 1)
@@ -764,7 +767,7 @@ test('honors explicit notification rules only for knowledge-linked concerns', as
     assert.equal(linkedResult.observations[0]?.notificationRuleEffect, 'notify')
     assert.match(linkedResult.observations[0]?.decisionReason ?? '', /知识文档/)
     await store.markMentioned('companion-1', linkedResult.notifications.map(item => item.id), now + 2)
-    const deliveredResult = await store.recordObservations([linked], [{
+    const deliveredResult = await store.recordObservations(await store.list('companion-1'), [{
       ...baselineCandidate,
       notificationRuleEffect: 'suppress', notificationRuleReason: '后续核验暂未达到新的提醒条件',
     }], now + 3)
@@ -799,7 +802,7 @@ test('reschedules unchanged concerns using the interval selected by the model', 
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('keeps explicit concerns stable, ages implicit concerns and supports lifecycle actions', async () => {
+test('keeps concerns stable through silence and supports lifecycle actions', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-concern-life-'))
   try {
     const store = new PartnerConcernStore(directory)
@@ -816,8 +819,8 @@ test('keeps explicit concerns stable, ages implicit concerns and supports lifecy
     await store.applyCandidates('companion-1', 'weixin:user', [{ subject: '很久以前的临时问题', reason: '问题长期没有变化', operation: 'upsert', priority: .6, confidence: .76, watchKind: 'auto', watchQuery: '旧问题' }], 'implicit', now - 100 * 86_400_000)
     await store.due('companion-1', 'weixin:user', { now })
     const archived = (await store.list('companion-1', undefined, true)).find(item => item.subject === '很久以前的临时问题')
-    assert.equal(archived?.state, 'archived')
-    assert.equal((await store.list('companion-1')).some(item => item.subject === '很久以前的临时问题'), false)
+    assert.equal(archived?.state, 'watching')
+    assert.equal((await store.list('companion-1')).some(item => item.subject === '很久以前的临时问题'), true)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 

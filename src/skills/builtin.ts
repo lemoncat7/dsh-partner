@@ -1,12 +1,14 @@
 import { DIRECTOR_BUILTINS, type BuiltinSkill } from './director-builtins.js'
 import { VIORA_CANVAS_BUILTIN } from './viora-canvas-builtin.js'
 import { DRAMA_BUILTIN } from './drama-builtin.js'
+import { STORY_BUILTINS } from './story-builtins.js'
 import { TASK_PLANNING_DESCRIPTION, TASK_PLANNING_DOCUMENT, TASK_PLANNING_VERSION } from './task-planning.js'
 import { LONG_TASK_DESCRIPTION, LONG_TASK_DOCUMENT, LONG_TASK_VERSION } from './long-task-continuation.js'
 
 export const BUILTIN_SKILL_SOURCE = 'builtin'
 
 export const BUILTIN_SKILLS = new Map<string, BuiltinSkill>([
+  ...STORY_BUILTINS,
   ['drama-production', DRAMA_BUILTIN],
   ['viora-canvas-production', VIORA_CANVAS_BUILTIN],
   ...DIRECTOR_BUILTINS,

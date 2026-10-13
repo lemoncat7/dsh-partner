@@ -210,7 +210,8 @@ export class ChannelManager {
     const delivery = await prepareTaskResultDelivery(task, cwd)
     await this.queueProactive(route, `task-result:${task.id}:${task.revision}:${task.status}`, {
       text: delivery.text,
-      attachments: await extractOutboundAttachments(delivery.text, cwd),
+      attachments: task.status === 'done' ? await extractOutboundAttachments(delivery.text, cwd) : [],
+      ...(task.status === 'blocked' ? { attachmentPolicy: 'text-only' as const } : {}),
     })
   }
 
@@ -239,13 +240,13 @@ export class ChannelManager {
     await service.serial(`requirement:${item.id}`, async () => {
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
       const draft = item.deliveryDraft
-      const selected = draft && draft.summary === summary && (!stage || draft.progressKey === requirementProgressKey(this.store.snapshot(), item)) ? draft.attachmentIds : []
+      const selected = !stage && draft && draft.summary === summary ? draft.attachmentIds : []
       const files = await requirementAttachments(item, this.store.snapshot(), service, selected)
       const attachments = await Promise.all(files.map(file => service.outbound(file)))
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
       await this.agents.recordRequirementResult(route, receipt, text, files, service, prefix)
       const localOnly = route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === route.companionId)?.notificationDelivery
-      if (!localOnly) await this.queueProactive(route, receipt, { text, attachments, attachmentScope: item.id }, stillValid)
+      if (!localOnly) await this.queueProactive(route, receipt, { text, attachments, attachmentScope: item.id, ...(stage ? { attachmentPolicy: 'text-only' as const } : {}) }, stillValid)
     })
   }
 
