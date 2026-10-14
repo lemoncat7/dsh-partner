@@ -226,7 +226,6 @@ export class HeartbeatScheduler {
         }
       }
       execution.observations = recorded.observations
-      await this.executionDispatcher?.(companion.id)
       // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
       const outcome = failures.length === 0 ? 'success' : completedChecks > 0 ? 'partial' : 'blocked'
       const partialError = failures.length ? `${outcome === 'partial' ? '部分完成，部分关注受阻' : '检查受阻'}：${failures.join('；')}。仅复查失败项；能力或授权缺失需补齐后才能成功，实际检查还受静默时段及运行状态限制。其他关注正常处理。` : undefined
@@ -239,11 +238,13 @@ export class HeartbeatScheduler {
       if (recorded.notifications.length === 0 || !notificationAllowed) {
         await this.saveState(companion, { ...scheduled(false), ...(partialError ? {lastError: partialError, lastOutcome: outcome} : {}) })
         await this.recordActivity(companion, route, execution, partialError ? 'failed' : 'quiet', partialError)
+        await this.executionDispatcher?.(companion.id)
         return { checked: true, sent: false, outcome, reason: partialError ?? (!notificationAllowed ? '关注检查已完成，结果已保留；当前不投递通知' : recorded.observations.length > 0 ? '变化已进入伙伴动态或顺手一提' : '没有发现可靠的新变化') }
       }
       await this.deliverNotifications(companion.id, route, recorded.notifications)
       await this.saveState(companion, { ...scheduled(true), ...(partialError ? {lastError: partialError, lastOutcome: outcome} : {}) })
       await this.recordActivity(companion, route, execution, 'notified', partialError)
+      await this.executionDispatcher?.(companion.id)
       return { checked: true, sent: true, outcome, ...(partialError ? {reason: partialError} : {}) }
     } catch (error) {
       const failures = existing.consecutiveFailures + 1

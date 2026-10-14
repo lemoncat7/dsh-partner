@@ -7,6 +7,15 @@ await build({ entryPoints: ['src/channels/direct/message-format.ts'], outfile: '
 
 await build({ entryPoints: ['src/pendant/renderer.ts'], outfile: 'lib/pendant-renderer.js', bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true })
 
+// Versioned native chunk on both Web and Desktop. Keep the legacy ESM asset
+// above for already-open clients; build all chunks before stamping client.js.
+await build({
+  entryPoints: ['src/pendant/renderer.ts'], outfile: 'lib/client.pendant.js',
+  bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', minify: true,
+  banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pluginId)}, chunk: 'client.pendant.js', factory: (require) => { var module = { exports: {} }; var exports = module.exports;` },
+  footer: { js: 'return module.exports; } });' },
+})
+
 await build({
   entryPoints: ['src/client.tsx'],
   outfile: 'lib/client.js',

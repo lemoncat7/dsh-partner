@@ -3,9 +3,10 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { pendantFixtureOptions } from './pendant-fixture.mjs'
 const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const root = fileURLToPath(new URL('../', import.meta.url))
-const result = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {PartnerPendant} from './src/pendant/widget'; const controller={open:(id,destination)=>{window.visited={id,destination}},openSession:async(route,id)=>{window.visited={route,id}}}; const root=createRoot(document.getElementById('app')); window.unmountPendant=()=>root.unmount(); root.render(<PartnerPendant controller={controller}/>);`, loader: 'tsx', resolveDir: root }, bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'text', '.module.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } })
+const result = await build({ ...pendantFixtureOptions, stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {PartnerPendant} from './src/pendant/widget'; const controller={open:(id,destination)=>{window.visited={id,destination}},openSession:async(route,id)=>{window.visited={route,id}}}; const root=createRoot(document.getElementById('app')); window.unmountPendant=()=>root.unmount(); root.render(<PartnerPendant controller={controller}/>);`, loader: 'tsx', resolveDir: root }, bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'text', '.module.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } })
 const renderer = await readFile(new URL('../lib/pendant-renderer.js', import.meta.url))
 const styles = (await Promise.all(['src/client.css', 'src/pendant/widget.css'].map(path => readFile(new URL('../' + path, import.meta.url), 'utf8')))).join('\n')
 let items = [], version = 1, polls = 0

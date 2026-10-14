@@ -3,9 +3,10 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { pendantFixtureOptions } from './pendant-fixture.mjs'
 const { chromium } = await import(pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href)
 const notice = { id:'system:storage-migration:1', kind:'system', action:'storage-migration', companionId:'', companionName:'伙伴插件', title:'需要升级数据目录', summary:'当前版本 **0**，目标版本 **1**。不会自动迁移，请先备份。', createdAt:1 }
-const bundle = await build({stdin:{resolveDir:process.cwd(),loader:'tsx',contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {PartnerPendant} from './src/pendant/widget';import {GeneralSettingsPanel} from './src/ui/storage-settings';function App(){const [page,setPage]=React.useState('');return <><PartnerPendant controller={{open:(id,d)=>{window.destination=d;setPage(d.page)}}}/>{page==='general'&&<main className="dsh-partner-workspace"><GeneralSettingsPanel/></main>}</>}createRoot(document.getElementById('app')).render(<App/>);`},bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'}})
+const bundle = await build({ ...pendantFixtureOptions,stdin:{resolveDir:process.cwd(),loader:'tsx',contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {PartnerPendant} from './src/pendant/widget';import {GeneralSettingsPanel} from './src/ui/storage-settings';function App(){const [page,setPage]=React.useState('');return <><PartnerPendant controller={{open:(id,d)=>{window.destination=d;setPage(d.page)}}}/>{page==='general'&&<main className="dsh-partner-workspace"><GeneralSettingsPanel/></main>}</>}createRoot(document.getElementById('app')).render(<App/>);`},bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'}})
 const css=(await Promise.all(['client.css','pendant/widget.css'].map(p=>readFile('src/'+p,'utf8')))).join('\n')
 let read=false, migrations=0
 const server=createServer((req,res)=>{

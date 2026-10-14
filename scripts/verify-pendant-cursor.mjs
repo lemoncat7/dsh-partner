@@ -21,15 +21,21 @@ try {
         const button = page.locator(selector)
         const cursor = () => button.evaluate(el => getComputedStyle(el).cursor)
         await button.hover()
-        assert.equal(await cursor(), themed ? 'crosshair' : 'grab')
+        const isStatic = selector === '.dsh-partner-pendant-hit'
+        assert.equal(await cursor(), themed ? 'crosshair' : isStatic ? 'pointer' : 'grab')
         await page.mouse.down()
-        assert.equal(await cursor(), themed ? 'crosshair' : 'grabbing')
+        assert.equal(await cursor(), themed ? 'crosshair' : isStatic ? 'pointer' : 'grabbing')
         await page.mouse.up()
-        assert.equal(await cursor(), themed ? 'crosshair' : 'grab')
+        assert.equal(await cursor(), themed ? 'crosshair' : isStatic ? 'pointer' : 'grab')
         if (!themed) {
           await button.evaluate(el => { el.disabled = true })
           assert.equal(await cursor(), 'default')
           await button.evaluate(el => { el.disabled = false })
+          if (isStatic) {
+            await button.evaluate(el => el.classList.add('is-rendered'))
+            assert.equal(await cursor(), 'grab')
+            await button.evaluate(el => el.classList.remove('is-rendered'))
+          }
         }
       }
     }

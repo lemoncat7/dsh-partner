@@ -3,9 +3,10 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { pendantFixtureOptions } from './pendant-fixture.mjs'
 const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const root = fileURLToPath(new URL('../', import.meta.url))
-const app = await build({ stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import{PartnerPendant}from'./src/pendant/widget';import{PendantSettingsPanel}from'./src/pendant/settings-panel';import{drawCardImage}from'./src/pendant/card-image';window.drawCardImage=drawCardImage;createRoot(document.getElementById('app')).render(<><div className="dsh-partner-workspace"><PendantSettingsPanel/></div><PartnerPendant controller={{}}/></>);`, loader:'tsx',resolveDir:root },bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'},define:{'process.env.NODE_ENV':'"production"'}})
+const app = await build({ ...pendantFixtureOptions, stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import{PartnerPendant}from'./src/pendant/widget';import{PendantSettingsPanel}from'./src/pendant/settings-panel';import{drawCardImage}from'./src/pendant/card-image';window.drawCardImage=drawCardImage;createRoot(document.getElementById('app')).render(<><div className="dsh-partner-workspace"><PendantSettingsPanel/></div><PartnerPendant controller={{}}/></>);`, loader:'tsx',resolveDir:root },bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.css':'text','.module.css':'text'},define:{'process.env.NODE_ENV':'"production"'}})
 const renderer=await readFile(new URL('../lib/pendant-renderer.js',import.meta.url))
 const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css','src/pendant/widget.css','src/pendant/settings-panel.css'].map(p=>readFile(new URL('../'+p,import.meta.url),'utf8')))).join('\n')
 let polls=0

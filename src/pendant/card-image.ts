@@ -48,13 +48,15 @@ export async function prepareCardImage(file: File, maxDimension = 1536): Promise
     context.imageSmoothingQuality = 'high'
     context.fillStyle = CARD_IMAGE_BACKGROUND; context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(image, 0, 0, canvas.width, canvas.height)
-    // Prefer lossless for text/illustrations; bounded high-quality compression
-    // for photos avoids silently consuming the browser's storage quota.
-    const png = canvas.toDataURL('image/png')
-    if (png.length <= MAX_CARD_IMAGE_LENGTH) return png
-    for (const quality of [.94, .88, .8]) {
-      const result = canvas.toDataURL('image/webp', quality)
-      if (result.length <= MAX_CARD_IMAGE_LENGTH) return result
+    // A small display card does not need a full lossless source. Keep its
+    // aspect ratio/resolution and fitting reversible; bound storage usage.
+    for (const type of ['image/webp', 'image/jpeg']) {
+      for (const quality of [.85, .78, .7]) {
+        const result = canvas.toDataURL(type, quality)
+        if (result.startsWith(`data:${type};`) && result.length <= MAX_CARD_IMAGE_LENGTH) return result
+        // Unsupported formats silently fall back to PNG in some browsers.
+        if (!result.startsWith(`data:${type};`)) break
+      }
     }
     throw new Error('图片压缩后仍然过大，请缩小图片或使用更简洁的图案。')
   } finally { URL.revokeObjectURL(url) }

@@ -44,6 +44,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  concernExecution?: import('./concern-execution.js').ConcernExecutionDispatcher
   mcp?: McpService
   ctx: Context & { agentPresets: AgentPresets }
   store: PartnerStore
@@ -257,6 +258,12 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       if (method === 'POST' && segments.length === 5 && segments[4] === 'retry-execution') {
         mutation(req)
         const body = await readObject(req)
+        if(body.mode==='recover') {
+          if(!runtime.concernExecution)throw httpError(503,'执行恢复服务不可用')
+          if(typeof body.executionId!=='string' || !body.executionId || !Number.isSafeInteger(body.expectedUpdatedAt))throw httpError(400,'缺少执行标识或状态版本')
+          try {await runtime.concernExecution.recover(id,segments[3]!,body.executionId,body.expectedUpdatedAt as number)}catch(error){throw httpError(409,error instanceof Error?error.message:'恢复失败')}
+          return sendJson(res,202,{ok:true,reason:'已请求恢复：先核对已有产物，再继续缺失步骤；不是从头重跑'})
+        }
         await runtime.store.update(s => {
           const receipt=s.concernExecutions?.find(r=>r.id===body.executionId && r.companionId===id && r.concernId===segments[3])
           if(!receipt || !['failed','completed'].includes(receipt.status)) throw httpError(409, '执行不存在或仍在进行中')

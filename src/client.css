@@ -1049,6 +1049,8 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-concern-decision strong { color: var(--partner-accent-strong); font-weight: 620; white-space: nowrap; }
 .dsh-partner-concern-decision span { min-width: 0; color: var(--partner-text-secondary); line-height: 1.45; }
 .dsh-partner-concern-decision small { grid-column: 1 / -1; color: var(--partner-text-tertiary); line-height: 1.45; overflow-wrap: anywhere; }
+.dsh-partner-concern-execution-status { grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0 12px 10px; overflow-wrap: anywhere; }
+.dsh-partner-concern-execution-status strong { white-space: normal; }
 .dsh-partner-concern-resources { display: flex; flex-wrap: wrap; gap: 5px; }
 .dsh-partner-concern-resources span { max-width: 100%; overflow: hidden; padding: 4px 7px; border-radius: 6px; color: var(--partner-accent-strong); background: color-mix(in srgb, var(--partner-accent) 8%, transparent); font-size: var(--partner-font-caption); text-overflow: ellipsis; white-space: nowrap; }
 .dsh-partner-concern-actions { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 2px; }

@@ -2,7 +2,7 @@ import { CHECK_OUTCOMES, FAILURE_KINDS } from './observation-contract.js'
 /** Missing/duplicate/invalid statuses cannot silently become successful no-change checks. */
 export function parseObservationStatuses(output: string, expected: Set<string>) {
   const text = output.trim().replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '')
-  const value = JSON.parse(text) as { observations?: Array<{concernId?: unknown; checkStatus?: unknown; evidence?: unknown; outcome?: unknown; changed?: unknown; failureKind?: unknown; retryAt?: unknown}> }
+  const value = JSON.parse(text) as { observations?: Array<{concernId?: unknown; checkStatus?: unknown; evidence?: unknown; outcome?: unknown; changed?: unknown; failureKind?: unknown; retryAt?: unknown; executionNeeded?: unknown; executionKey?: unknown; event?: unknown; source?: unknown}> }
   if (!Array.isArray(value.observations)) throw new Error('关注结果缺少 observations')
   const completed = new Set<string>()
   const blocked: string[] = []
@@ -19,6 +19,10 @@ export function parseObservationStatuses(output: string, expected: Set<string>) 
       || (row.changed === true && outcome !== 'changed')
       || (outcome === 'changed' && row.changed !== true)) throw new Error('关注结果状态矛盾：基线初始化、已处理、无变化不能标成新增')
     outcomes[id] = String(outcome)
+    if (row.executionNeeded !== undefined && typeof row.executionNeeded !== 'boolean') throw new Error('关注执行判定必须是布尔值')
+    if (row.executionNeeded === true && (row.checkStatus !== 'completed' || outcome === 'already_processed'
+      || ![row.executionKey, row.event, row.evidence, row.source].every(v => typeof v === 'string' && v.trim().length > 0)
+      || String(row.executionKey).length > 400)) throw new Error('关注待执行事项缺少稳定标识或证据，或与检查状态矛盾')
     if (row.checkStatus === 'blocked') {
       const kind = (FAILURE_KINDS as readonly unknown[]).includes(row.failureKind) ? String(row.failureKind) : 'unknown'
       const retryAt = typeof row.retryAt === 'string' ? Date.parse(row.retryAt) : NaN

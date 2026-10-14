@@ -9,10 +9,13 @@
 /* Match the base button specificity: preserve drag feedback without forcing theme cursors. */
 .dsh-partner-pendant button:where(.dsh-partner-pendant-hit, .dsh-partner-pendant-anchor):where(:enabled) { cursor: grab; }
 .dsh-partner-pendant button:where(.dsh-partner-pendant-hit, .dsh-partner-pendant-anchor):where(:enabled:active) { cursor: grabbing; }
+.dsh-partner-pendant button:where(.dsh-partner-pendant-hit:not(.is-rendered)):where(:enabled) { cursor: pointer; }
 .dsh-partner-pendant button.dsh-partner-pendant-hit.is-rendered { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transition: none !important; }
 .dsh-partner-pendant button.dsh-partner-pendant-hit.is-rendered:not(:focus-visible) { outline: none !important; }
-.dsh-partner-pendant-fallback { display: grid; gap: 8px; }
-.dsh-partner-pendant-fallback small { color: var(--partner-text-secondary); font-size: 12px; }
+.dsh-partner-pendant[data-rendered="false"] > :is(.dsh-partner-pendant-canvas, .dsh-partner-pendant-strap) { visibility: hidden; }
+.dsh-partner-pendant button.dsh-partner-pendant-hit:not(.is-rendered) { background: #253235 !important; border: 1px solid #667578 !important; box-shadow: 0 3px 8px rgb(0 0 0 / 12%) !important; }
+.dsh-partner-pendant-static-art { display: block; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
+.dsh-partner-pendant-static-strap { position: absolute; left: 50%; top: var(--pendant-static-hook); width: var(--pendant-static-strap-width); height: var(--pendant-static-strap-height); transform: translateX(-50%); border: 1px solid rgb(0 0 0 / 25%); border-radius: 3px; background-size: 100% auto; pointer-events: none; }
 .dsh-partner-pendant button.dsh-partner-pendant-anchor { position: absolute; left: 50%; top: 2.42%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0 !important; border-radius: 50%; background: transparent !important; box-shadow: none !important; pointer-events: auto; touch-action: none; }
 .dsh-partner-pendant-anchor > span { width: 14px; height: 6px; border: 1px solid #71817e; border-radius: 4px; background: #c3ced0; }
 .dsh-partner-pendant-anchor:hover > span { background: #e4ece8; }

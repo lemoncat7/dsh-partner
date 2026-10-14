@@ -20,13 +20,14 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
         : { ...resource, knowledgeBase: resource.locator.slice(0, slash), document: resource.locator.slice(slash + 1), searchQuery: focusedConcernQuery(resource.locator.slice(slash + 1)) }
     }),
     lastCheckedAt: item.lastCheckedAt ?? null,
+    executionInstructions: item.executionInstructions ?? null,
     currentNextCheckAt: new Date(item.nextCheckAt).toISOString(),
     recordTarget: item.recordTarget ? { ...item.recordTarget, ...(item.recordTarget.kind === 'file' && workspaceRoot ? { path: resolve(workspaceRoot, item.recordTarget.locator) } : {}) } : null,
     recordingPending: item.recordingPending === true,
   }))
   return [
     '执行一次独立的伙伴变化观察。目标不是找话说，而是判断这些尚未闭环的事情自上次观察后是否出现了真实、相关、可验证的新变化。',
-    '执行效率：读清依据和记录基线后，不需要中途语义判断的连续操作应尽量合并在一次已授权工具调用中执行，例如连续读取、请求、分页、解析和去重；需要依据返回值重新决策时再交回模型。不强制使用 Node，不改变依据规定的方法，也不合并需要不同审批的操作。命令须设置超时、有限分页和输出上限；返回步骤状态、完整性、必要事实和精确失败位置，不打印凭据、Cookie 或整页 HTML。不得省略成功判定所需证据。不要重复读取已有完整依据，不输出冗长过程解说。总预算180秒，前150秒检查及暂存核验结果，最后时间用于无工具收尾。',
+    '执行效率：读清依据和记录基线后，不需要中途语义判断的连续操作应尽量合并在一次已授权工具调用中执行，例如连续读取、请求、分页、解析和去重；需要依据返回值重新决策时再交回模型。不强制使用 Node，不改变依据规定的方法，也不合并需要不同审批的操作。命令须设置超时、有限分页和输出上限；返回步骤状态、完整性、必要事实和精确失败位置，不打印凭据、Cookie 或整页 HTML。不得省略成功判定所需证据。不要重复读取已有完整依据，不输出冗长过程解说。预算为12轮检查加1轮无工具收尾，不是全部流程只有180秒；单次模型及工具调用分别有超时。',
     '若关注关联了知识文档，先读该文档，把其中检查方式、来源、代理、步骤、判定条件、记录和失败处理作为本项观察的执行依据。仅在文档未规定的部分自主选择方法；不得越过用户授权或工具安全限制。无法执行指定方式时如实报告缺少能力或检查受阻，不擅自换成搜索。文档明确允许备用链路时才使用该备用方式。',
     `本轮挂念：${JSON.stringify(targets)}`,
     '本轮只核验来源，不在此模型循环内整理或写入文档。配置recordTarget时，完整核验后立即调用 heartbeat_record_checkpoint 保存后续整理需要的全部结构化事实、来源时间和用户整理格式，不仅是变化摘要；不得放入密码、Cookie、登录响应或未核实数据。checkStatus只表示来源是否完整核实，记录未写入不能成为blocked理由。记录由独立持久任务执行，失败只重试同步，不重复抓取或提醒。',
@@ -49,8 +50,9 @@ export function concernObservationPrompt(concerns: PartnerConcern[], workspaceRo
     `本轮观察时间：${observedAt}。你还要为每个挂念独立决定下一次检查间隔 nextCheckInMinutes。根据对象的变化速度、明确等待条件、信息源成本、当前证据与最近是否有变化来安排；即使 changed=false 也必须给出。最少 30 分钟，最多 43200 分钟（30 天）。临近事件或高频变化通常可用 30～180 分钟，普通项目变化可用 360～1440 分钟，低频等待可用 4320～43200 分钟。不要让所有挂念机械地使用相同间隔。`,
     '最后只输出一个 JSON 对象，不要 Markdown、寒暄或通知文案。格式：',
     '通用结果契约：每项额外输出 outcome=changed|unchanged|already_processed|baseline_initialized|blocked。记录为空时先按依据查询已授权历史来源并初始化当前事实基线，不能仅因没有上次数据而blocked，也不能把当前已有事实当新增。历史去重必须步骤缺少能力或证据时仍为blocked；已确认处理过则already_processed，不再派发执行。基线初始化和已处理均为checkStatus=completed、changed=false；只有真正新增为changed=true。',
+    '独立判断后续执行：每项输出 executionNeeded（布尔值）。仅当配置了 executionInstructions、已核实存在符合这些要求且尚未完成的具体事项时为 true；首次基线或无来源变化也可以需要执行。记录过、观察过、已通知不等于已交付。不得仅因没有新增而忽略未处理事项，也不得仅因配置了执行要求就强制执行。已交付、明确跳过、必要证据缺失时为 false。为 true 时必须提供非空 event、evidence、source 和稳定 executionKey：用来源对象的规范标识+目标动作+必要版本，不包含本轮时间、星数或随机值；同一事项重查沿用同一键。每轮选择一个明确待办，其余待办保留待核验状态，不能统称已处理。执行阶段负责成稿等重工作，检查阶段只核实进入执行的条件；不要求检查阶段先完成交付。',
     '受阻时额外输出 failureKind=capability_missing|authentication|rate_limited|network|source_incomplete|unknown。只在实际响应给出 Retry-After 或限流恢复时间时输出 retryAt（ISO时间），不得猜测。403本身不能证明限流或凭据无效。对已授权凭据、代理和备用链路按检查依据使用，不擅自绕过。能力缺失请明确缺哪一步、哪种只读能力；不应无限重复原查询。',
-    '{"observations":[{"concernId":"必须来自本轮挂念 id","checkStatus":"completed 或 blocked","changed":false,"event":"新变化的简洁结论；无变化时留空","evidence":"支持判断的关键证据；无变化时可简述检查结果","source":"来源名称或位置","relevance":0.0,"confidence":0.0,"actionability":0.0,"nextCheckInMinutes":360,"notificationRuleEffect":"auto","notificationRuleReason":""}]}',
+    '{"observations":[{"concernId":"必须来自本轮挂念 id","checkStatus":"completed 或 blocked","changed":false,"executionNeeded":false,"executionKey":"仅待执行时提供稳定对象+动作+版本标识","event":"新变化或待执行事项的简洁结论；两者都无时留空","evidence":"支持变化与执行资格判断的关键证据","source":"来源名称或位置","relevance":0.0,"confidence":0.0,"actionability":0.0,"nextCheckInMinutes":360,"notificationRuleEffect":"auto","notificationRuleReason":""}]}',
     '每个挂念恰好返回一项。checkStatus 必须是 completed 或 blocked；拿到并核实目标数据才是 completed；登录失败、只到登录页、缺少权限或必须步骤未执行都是 blocked，不得当作无变化。评分范围 0 到 1；nextCheckInMinutes 使用整数分钟。你只负责语义判断与下次检查节奏，是否提醒由确定性策略另行决定。',
   ].join('\n')
 }

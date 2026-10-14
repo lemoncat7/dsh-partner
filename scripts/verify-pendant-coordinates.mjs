@@ -3,9 +3,10 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { pendantFixtureOptions } from './pendant-fixture.mjs'
 const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const root = fileURLToPath(new URL('../', import.meta.url))
-const bundle = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {PartnerPendant} from './src/pendant/widget'; const root=createRoot(document.getElementById('overlay')); window.disposeFixture=()=>root.unmount(); root.render(<PartnerPendant controller={{open(){},openSession:async()=>{}}}/>);`, loader: 'tsx', resolveDir: root }, bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'text', '.module.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } })
+const bundle = await build({ ...pendantFixtureOptions, stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {PartnerPendant} from './src/pendant/widget'; const root=createRoot(document.getElementById('overlay')); window.disposeFixture=()=>root.unmount(); root.render(<PartnerPendant controller={{open(){},openSession:async()=>{}}}/>);`, loader: 'tsx', resolveDir: root }, bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'text', '.module.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } })
 const renderer = await readFile(new URL('../lib/pendant-renderer.js', import.meta.url))
 const styles = await readFile(new URL('../src/pendant/widget.css', import.meta.url), 'utf8')
 const server = createServer((req, res) => {
@@ -52,7 +53,7 @@ try {
     }, { name, style })
     await check(name + ' containing block')
   }
-  const hook = page.getByRole('button', { name: '移动挂饰位置', exact: true })
+  const hook = page.getByRole('button', { name: '移动挂饰位置，回车吸附侧栏', exact: true })
   const before = await hook.boundingBox()
   await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2)
   await page.mouse.down(); await page.mouse.move(before.x + before.width / 2 + 70, before.y + before.height / 2 + 40, { steps: 10 }); await page.mouse.up()

@@ -12,6 +12,7 @@ export interface ConcernResource {
 }
 
 export interface PartnerConcern {
+  observationProgress?: import('./observation-progress.js').ObservationProgress
   executionInstructions?: string
   control?: import('./concern-attention.js').ConcernControl
   adjustments?: import('./concern-attention.js').ConcernAdjustment[]
@@ -111,6 +112,8 @@ export function hasSustainedConcernEvidence(value: string): boolean {
 export interface ConcernObservationCandidate {
   concernId: string
   changed: boolean
+  executionNeeded?: boolean
+  executionKey?: string
   event: string
   evidence: string
   source: string

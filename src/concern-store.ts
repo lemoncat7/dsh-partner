@@ -309,11 +309,14 @@ export class PartnerConcernStore {
           const candidate = byConcern.get(concern.id)
           const chosenMinutes = boundedConcernCheckMinutes(candidate?.nextCheckInMinutes)
           const nextCheckAt = now + (chosenMinutes === undefined ? concernInterval(concern.priority, concern.origin) : chosenMinutes * 60_000)
-          if (!candidate?.changed || !candidate.event.trim()) {
+          const executable = !!(concern.executionInstructions && candidate?.executionNeeded && candidate.executionKey?.trim() && candidate.evidence.trim() && candidate.source.trim())
+          if ((!candidate?.changed && !executable) || !candidate?.event.trim()) {
             database.prepare('UPDATE concerns SET last_checked_at = ?, next_check_at = ?, score = ? WHERE id = ?').run(now, nextCheckAt, concern.score, concern.id)
             continue
           }
-          const fingerprint = observationFingerprint(candidate)
+          const fingerprint = executable
+            ? 'execution:' + createHash('sha256').update(`${concern.id}\n${candidate.executionKey!.trim()}`).digest('hex')
+            : (candidate.executionNeeded === false ? 'observation:' : '') + observationFingerprint(candidate)
           const duplicateRow = database.prepare('SELECT * FROM concern_observations WHERE concern_id = ? AND fingerprint = ?').get(concern.id, fingerprint) as SqlRow | undefined
           const previousCount = number((database.prepare('SELECT COUNT(*) AS count FROM concern_observations WHERE concern_id = ?').get(concern.id) as SqlRow | undefined)?.count)
           const recentlyMentioned = concern.lastMentionedAt !== undefined && now - concern.lastMentionedAt < 72 * 3_600_000
@@ -341,6 +344,12 @@ export class PartnerConcernStore {
             notificationRuleReason: ruleReason, decisionReason: decision.reason,
             createdAt: duplicateRow ? number(duplicateRow.created_at) : now,
             ...(duplicateRow?.mentioned_at === null || duplicateRow?.mentioned_at === undefined ? {} : { mentionedAt: number(duplicateRow.mentioned_at) }),
+          }
+          // Execution eligibility and notification score are independent. Baseline
+          // work enters the activity queue, without pretending it is new news.
+          if (executable && (!candidate.changed || observation.decision === 'drop' || observation.decision === 'remember')) {
+            observation.decision = 'feed'
+            observation.decisionReason = '已核实存在待执行事项；记录基线不等于已经交付'
           }
           if (duplicateRow) {
             const previousDecision = string(duplicateRow.decision) as ObservationDecision
@@ -613,6 +622,14 @@ export class PartnerConcernStore {
     })
   }
 
+  async saveObservationProgress(item: PartnerConcern, progress: import('./observation-progress.js').ObservationProgress | null): Promise<void> {
+    await this.serialValue(this.path(item.companionId),async()=>{
+      const db=await this.open(item.companionId)
+      try {db.prepare('UPDATE concerns SET observation_progress_json=? WHERE id=? AND companion_id=? AND updated_at=?').run(progress?JSON.stringify(progress):null,item.id,item.companionId,item.updatedAt)}
+      finally {db.close()}
+    })
+  }
+
   async pendingRecording(companionId: string, now=Date.now()): Promise<PartnerConcern | undefined> {
     return this.serialValue(this.path(companionId),async()=>{
       const db=await this.open(companionId)
@@ -699,6 +716,7 @@ export class PartnerConcernStore {
     ensureColumn(database, 'concern_observations', 'rule_effect', "TEXT NOT NULL DEFAULT 'auto'")
     ensureColumn(database, 'concern_observations', 'rule_reason', "TEXT NOT NULL DEFAULT ''")
     ensureColumn(database, 'concern_observations', 'decision_reason', "TEXT NOT NULL DEFAULT ''")
+    ensureColumn(database, 'concerns', 'observation_progress_json', 'TEXT')
     migrateReferenceOnlyConcerns(database)
     return database
   }
@@ -718,6 +736,7 @@ export class PartnerConcernStore {
 
 function concernFromRow(row: SqlRow): PartnerConcern {
   return {
+    ...(typeof row.observation_progress_json === 'string' ? {observationProgress: JSON.parse(row.observation_progress_json)} : {}),
     control: (row.control ?? 'auto') as NonNullable<PartnerConcern['control']>,
     adjustments: JSON.parse(String(row.adjustments_json ?? '[]')),
     ...(row.record_target_json && number(row.recording_pending) === 1 ? {recordingPending: true} : {}),

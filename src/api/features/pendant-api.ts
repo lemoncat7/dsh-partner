@@ -1,18 +1,25 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import type { PartnerInboxStore } from '../../notifications/store.js'
 import { mutation, readObject, sendJson, httpError } from '../http.js'
 
-let renderer: Promise<Buffer> | undefined
+let renderer: Promise<{ body: Buffer; etag: string }> | undefined
 export async function dispatchPendantApi(req: IncomingMessage, res: ServerResponse, segments: string[], inbox: PartnerInboxStore): Promise<boolean> {
   if (segments[0] !== 'pendant') return false
   if (req.method === 'GET' && segments.length === 2 && segments[1] === 'renderer.js') {
     // Fixed packaged asset only: no client-controlled filesystem path or CDN.
-    renderer ??= readFile(new URL('../../pendant-renderer.js', import.meta.url)).catch(error => { renderer = undefined; throw error })
+    renderer ??= readFile(new URL('../../pendant-renderer.js', import.meta.url)).then(body => ({ body, etag: `"${createHash('sha256').update(body).digest('hex')}"` })).catch(error => { renderer = undefined; throw error })
+    const asset = await renderer
     res.setHeader('content-type', 'text/javascript; charset=utf-8')
     res.setHeader('cache-control', 'no-cache')
     res.setHeader('x-content-type-options', 'nosniff')
-    res.end(await renderer)
+    res.setHeader('etag', asset.etag)
+    const condition = req.headers['if-none-match']
+    if (typeof condition === 'string' && condition.split(',').some(tag => tag.trim() === '*' || tag.trim().replace(/^W\//, '') === asset.etag)) {
+      res.statusCode = 304; res.end(); return true
+    }
+    res.end(asset.body)
     return true
   }
   if (req.method === 'GET' && segments.length === 2 && segments[1] === 'inbox') {

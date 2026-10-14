@@ -217,7 +217,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

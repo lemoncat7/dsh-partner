@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { PARTNER_API } from '../client-api.js'
 import type { PartnerNotice } from '../notifications/domain.js'
 import type { PartnerController } from '../client-controller.js'
-import type { BadgeMessage, LanyardHandle, LanyardOptions } from './renderer.js'
+import type { BadgeMessage, LanyardHandle } from './renderer.js'
 import { usePartnerInbox } from './use-inbox.js'
 import { usePendantPlacement } from './use-placement.js'
 import { PendantReader } from './reader.js'
 import { usePendantSettings } from './use-settings.js'
 import { waitForPendantStartup } from './startup.js'
 import type { PendantSettings } from './settings.js'
+import { loadPendantRenderer } from './renderer-loader.js'
+import { StaticPendantCard, useStaticPendantLayout } from './static-card.js'
 
 function messageLabel(notice: PartnerNotice): string {
   if (notice.kind === 'system') return '需要升级迁移'
@@ -37,6 +38,7 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
   settingsRef.current = settings
   messageRef.current = badgeMessage
   const placement = usePendantPlacement(root, handle)
+  useStaticPendantLayout(root, hit, unreadBadge, !ready, settings.strapLength)
   const close = useCallback((keyboard = false): void => {
     setOpen(false)
     if (keyboard) requestAnimationFrame(() => hit.current?.focus({ preventScroll: true }))
@@ -48,8 +50,10 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
   }
   useEffect(() => {
     const abort = new AbortController()
-    const url = `${PARTNER_API}/pendant/renderer.js`
-    void waitForPendantStartup(abort.signal).then(() => import(/* @vite-ignore */ url)).then(async (module: { createLanyard(canvas: HTMLCanvasElement, hit: HTMLButtonElement, options: LanyardOptions): Promise<LanyardHandle> }) => {
+    void waitForPendantStartup(abort.signal).then(() => {
+      abort.signal.throwIfAborted()
+      return loadPendantRenderer()
+    }).then(async module => {
       if (abort.signal.aborted || !canvas.current || !hit.current) return
       const instance = await module.createLanyard(canvas.current, hit.current, {
         signal: abort.signal, onTap: () => toggle.current(), onFailure: () => { handle.current?.destroy(); handle.current = undefined; setReady(false); setFailed(true) },
@@ -72,10 +76,11 @@ function ActivePendant({ controller, settings }: { controller: PartnerController
     } catch (reason) { setNavigationError(reason instanceof Error ? reason.message : '无法打开来源') }
   }
   const label = `伙伴消息，${inbox.unread} 条未读${latestUnread ? `，${latestUnread.companionName}：${latestUnread.title}` : ''}；点击查看，拖动卡牌玩耍`
-  return <aside ref={root} className="dsh-partner-pendant" aria-label="伙伴挂饰">
+  return <aside ref={root} className="dsh-partner-pendant" data-rendered={ready} aria-label="伙伴挂饰">
     <canvas ref={canvas} className="dsh-partner-pendant-canvas" aria-hidden="true" />
-    <button ref={hit} type="button" className={`dsh-partner-pendant-hit${ready ? ' is-rendered' : ''}`} aria-label={label} aria-expanded={open} aria-controls={open ? 'dsh-partner-pendant-inbox' : undefined} onClick={() => { if (!ready) toggle.current() }}>
-      {!ready && <span className="dsh-partner-pendant-fallback">伙伴<small>{failed ? inbox.unread ? `${inbox.unread} 条消息` : '消息' : '加载挂饰…'}</small></span>}
+    {!ready && <span className="dsh-partner-pendant-static-strap" aria-hidden="true" style={{ backgroundColor: settings.color, ...(settings.strapImage ? { backgroundImage: `url("${settings.strapImage}")` } : {}) }} />}
+    <button ref={hit} type="button" className={`dsh-partner-pendant-hit${ready ? ' is-rendered' : ''}`} title={failed ? '3D 暂不可用，仍可点击查看伙伴消息' : ready ? undefined : '点击查看伙伴消息，动态效果准备中'} aria-label={label} aria-expanded={open} aria-controls={open ? 'dsh-partner-pendant-inbox' : undefined} onClick={() => { if (!ready) toggle.current() }}>
+      {!ready && <StaticPendantCard settings={settings} message={badgeMessage} />}
     </button>
     <button type="button" className="dsh-partner-pendant-anchor" aria-label="移动挂饰位置，回车吸附侧栏" title="拖近侧栏松手吸附；方向键微调，回车吸附侧栏" {...placement}><span aria-hidden="true" /></button>
     <span ref={unreadBadge} className="dsh-partner-pendant-unread" hidden={inbox.unread === 0} aria-hidden="true">{inbox.unread > 99 ? '99+' : inbox.unread}</span>

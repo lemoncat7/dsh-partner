@@ -599,7 +599,7 @@ export class PartnerAgentRuntime {
 
   private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     const access = await resolveHeartbeatFileAccess(conversation.session.header.cwd!, concerns)
-    return executeObservationLoop({ ctx: this.ctx, conversation, companion, concerns, guard: (name, args) => heartbeatToolDenial(name, args, access), parse: parseConcernObservations, checkpoint: async(item,snapshot)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.checkpointRecording(item,snapshot)} })
+    return executeObservationLoop({ ctx: this.ctx, conversation, companion, concerns, guard: (name, args) => heartbeatToolDenial(name, args, access), parse: parseConcernObservations, checkpoint: async(item,snapshot)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.checkpointRecording(item,snapshot)}, saveProgress: async(item,progress)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.saveObservationProgress(item,progress)} })
   }
 
   async recordHeartbeatActivity(
@@ -1100,6 +1100,7 @@ export function parseConcernObservations(raw: string, allowedIds: Set<string>): 
     if (!allowedIds.has(concernId) || seen.has(concernId)) return []
     seen.add(concernId)
     const changed = value.changed === true
+    const executionNeeded = value.executionNeeded === true
     const nextCheckInMinutes = boundedConcernCheckMinutes(value.nextCheckInMinutes)
     const notificationRuleEffect = value.notificationRuleEffect === 'notify' || value.notificationRuleEffect === 'suppress'
       ? value.notificationRuleEffect
@@ -1107,7 +1108,9 @@ export function parseConcernObservations(raw: string, allowedIds: Set<string>): 
     return [{
       concernId,
       changed,
-      event: changed && typeof value.event === 'string' ? value.event.trim().slice(0, 800) : '',
+      ...(typeof value.executionNeeded === 'boolean' ? {executionNeeded} : {}),
+      ...(executionNeeded && typeof value.executionKey === 'string' ? {executionKey: value.executionKey.trim().slice(0, 400)} : {}),
+      event: (changed || executionNeeded) && typeof value.event === 'string' ? value.event.trim().slice(0, 800) : '',
       evidence: typeof value.evidence === 'string' ? value.evidence.trim().slice(0, 2_000) : '',
       source: typeof value.source === 'string' ? value.source.trim().slice(0, 240) : '',
       relevance: boundedScore(value.relevance),
@@ -1211,10 +1214,11 @@ export function renderHeartbeatActivity(
     if (label[outcome]) lines.push(`检查结果：${execution.concerns.find(item => item.id === id)?.subject ?? id}；${label[outcome]}`)
   }
   const changed = execution.observations ?? []
+  for (const item of execution.candidates.filter(item => item.executionNeeded && execution.concerns.some(c => c.id === item.concernId && c.executionInstructions))) lines.push(`后续执行：${item.event}；已提交派发检查，同一事项按回执去重（不代表交付完成）`)
   const conclusion = execution.error || deliveryError
     ? `失败原因：${deliveryError ?? execution.error}`
     : changed.length > 0
-      ? `新变化：\n${changed.map(item => `- ${item.event}（${decisionLabel(item.decision)} · ${Math.round(item.interruptScore * 100)}）`).join('\n')}`
+      ? `观察结果／待执行事项：\n${changed.map(item => `- ${item.event}（${decisionLabel(item.decision)} · ${Math.round(item.interruptScore * 100)}）`).join('\n')}`
       : execution.concerns.some(item=>item.recordingSnapshot) ? '最终结论：本轮仅执行记录同步，未抓取来源或发送变化提醒。' : '最终结论：本轮没有发现经过校验的新变化。'
   lines.push('', conclusion)
   return lines.join('\n')
