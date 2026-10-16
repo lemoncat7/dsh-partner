@@ -9,7 +9,7 @@
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; margin: 0; padding: 0; }
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form > p:not([role="alert"]) { color: var(--partner-text-secondary); background: transparent; padding: 0; }
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-delivery-form > p { grid-column: 1 / -1; margin: 0; }
-.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog:has(.dsh-partner-delivery-form) { width: min(560px, 100%); height: auto; align-self: center; max-height: calc(100% - 24px); border-radius: 16px !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog:has(.dsh-partner-delivery-form) { width: min(640px, 100%); height: auto; align-self: center; max-height: 100%; border-radius: var(--partner-radius-dialog, 24px) !important; }
 .dsh-partner-workspace #dsh-partner-identity-editor.dsh-partner-form,
 .dsh-partner-workspace #dsh-partner-channels.dsh-partner-form {
   background: transparent !important;
@@ -31,14 +31,14 @@
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
-  min-height: 40px;
-  padding: 10px 12px !important;
+  min-height: var(--partner-control-height, 38px);
+  padding: 6px 11px !important;
   color: var(--partner-text) !important;
   background-color: var(--partner-control) !important;
   border: 1px solid var(--partner-border) !important;
-  border-radius: 10px !important;
+  border-radius: var(--partner-radius-control, 12px) !important;
   box-shadow: inset 0 1px 0 var(--partner-glass-highlight) !important;
-  font: var(--partner-font-label)/1.5 var(--partner-font-family) !important;
+  font: var(--partner-control-font-size, 13px)/1.4 var(--partner-font-family) !important;
 }
 .dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-field :is(input, textarea),
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-field > input { background-image: none !important; }
@@ -58,7 +58,7 @@
   min-height: 40px;
   padding: 8px 14px !important;
   border: 1px solid var(--partner-border) !important;
-  border-radius: 10px !important;
+  border-radius: var(--partner-radius-control, 12px) !important;
   color: var(--partner-text) !important;
   background: var(--partner-control) !important;
   box-shadow: none !important;
@@ -91,17 +91,33 @@
   background: var(--partner-solid-panel) !important;
   color: var(--partner-text) !important;
   border: 1px solid var(--partner-border) !important;
-  border-radius: 16px !important;
+  border-radius: var(--partner-radius-dialog, 24px) !important;
   font-family: var(--partner-font-family) !important;
   box-shadow: 0 22px 58px color-mix(in srgb, #000 18%, transparent), 0 4px 14px color-mix(in srgb, #000 8%, transparent), inset 0 1px 0 var(--partner-card-highlight) !important;
 }
+/* The native top-layer wrapper is not the visible panel. Host dialog resets
+   must not paint it as a full-screen form surface. */
+.dsh-partner-workspace #dsh-partner-channels dialog.dsh-partner-workspace-dialog-layer {
+  background: var(--partner-interaction-veil, var(--partner-dialog-veil)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: var(--partner-text) !important;
+  font-family: var(--partner-font-family) !important;
+}
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog > header {
-  background: var(--partner-solid-raised) !important;
+  background: transparent !important;
   color: var(--partner-text) !important;
 }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog.is-confirmation button.is-danger {
+  color: var(--partner-danger) !important;
+  border-color: color-mix(in srgb, var(--partner-danger) 30%, var(--partner-border)) !important;
+  background: color-mix(in srgb, var(--partner-danger) 8%, var(--partner-control)) !important;
+}
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog > header button {
-  width: 32px; min-height: 32px; padding: 0 !important;
-  background: transparent !important; border-color: transparent !important;
+  width: 34px; min-width: 34px; min-height: 34px; padding: 0 !important;
+  border-radius: 50% !important;
+  background: var(--partner-interaction-well, var(--partner-hover)) !important; border-color: transparent !important;
 }
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-form {
   background: transparent !important; box-shadow: none !important; border: 0 !important;
@@ -111,7 +127,7 @@
 @media (max-width: 640px) {
   .dsh-partner-workspace #dsh-partner-channels button,
   .dsh-partner-workspace #dsh-partner-identity-editor button { min-height: 44px; }
-  .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog { border-radius: 0 !important; border-width: 0 !important; }
+  .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog { border-radius: var(--partner-radius-dialog, 22px) !important; border-width: 1px !important; }
   .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-toolbar { align-items: flex-start; flex-wrap: wrap; }
 }
 

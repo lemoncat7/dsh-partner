@@ -43,6 +43,8 @@ import { ChannelsPanel } from './ui/channels-panel.js'
 import { useChannelStatus } from './ui/use-channel-status.js'
 import identityCssText from './ui/identity-editor.css'
 import formSurfaceCssText from './ui/form-surface.css'
+import interactionThemeCssText from './ui/interaction-theme.css'
+import controlSurfacesCssText from './ui/control-surfaces.css'
 import { Avatar, ChannelStatus as Status, ContentState as State, SectionHeading as Section, TabButton, WeixinGlyph, relativeTime } from './ui/partner-components.js'
 import { errorMessage as message } from './ui/workspace-components.js'
 import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
@@ -52,7 +54,7 @@ import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${formSurfaceCssText}\n${mcpCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns'

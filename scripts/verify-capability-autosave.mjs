@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'esbuild'
+import { build as esbuildBuild } from 'esbuild'
+const build = options => esbuildBuild({nodePaths:(process.env.DSH_UI_TEST_NODE_PATH??'').split(':').filter(Boolean),alias:{react:fileURLToPath(new URL('../node_modules/react',import.meta.url))},...options})
 import { readFile } from 'node:fs/promises'
 const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const bundle = await build({ stdin: { resolveDir: fileURLToPath(new URL('../', import.meta.url)), loader: 'tsx', contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CapabilityEditor} from './src/ui/capability-editor';const companion={id:'fixture',name:'测试',role:'',description:'',instructions:'',capabilities:[],updatedAt:1};createRoot(document.getElementById('app')).render(<CapabilityEditor companion={companion} presets={[]} onChanged={async()=>{}}/>);` }, bundle: true, write: false, format: 'iife', jsx: 'automatic', platform: 'browser', loader: { '.css': 'text', '.module.css': 'text' } })
@@ -18,7 +19,7 @@ try {
       writes++; submitted = req.postDataJSON()
       await route.fulfill(fail ? { status: 400, json: { error: 'fixture save failure' } } : { json: {} }); return
     }
-    await route.fulfill({ json: url.endsWith('/models') ? { defaultSelection: {}, providers: [] } : url.endsWith('/mcp') ? { servers: [], bindings: [] } : url.endsWith('/skills') ? { installed: [], bindings: [], sources: [] } : { targetIds: [], companions: [] } })
+    await route.fulfill({ json: url.endsWith('/models') ? { defaultSelection: {provider:'local',model:'one'}, providers: [{id:'local',name:'本地',models:[{id:'one',name:'默认模型'},{id:'two',name:'精细推理模型'}]},{id:'cloud',name:'云端',models:[{id:'fast',name:'快速模型'}]}] } : url.endsWith('/mcp') ? { servers: [], bindings: [] } : url.endsWith('/skills') ? { installed: [], bindings: [], sources: [] } : { targetIds: [], companions: [] } })
   })
   await page.goto(`http://127.0.0.1:${server.address().port}`)
   assert.equal(await page.getByRole('button', { name: '应用能力组合' }).count(), 0)
@@ -40,12 +41,40 @@ try {
   assert.deepEqual(submitted.companion.capabilities, ['mcp', 'ssh'])
   await page.getByRole('button', { name: /^Skill/ }).click()
   await page.getByRole('button', { name: '管理Skill', exact: true }).waitFor()
-  const styles = (await Promise.all(['src/client.css', 'src/ui/workspace-ui.css', 'src/ui/responsive-ui.css', 'src/ui/form-surface.css', 'src/ui/mcp.css'].map(path => readFile(new URL('../' + path, import.meta.url), 'utf8')))).join('\n')
+  const styles = (await Promise.all(['src/client.css', 'src/ui/workspace-ui.css', 'src/ui/responsive-ui.css', 'src/ui/form-surface.css', 'src/ui/mcp.css', 'src/ui/interaction-theme.css', 'src/ui/control-surfaces.css'].map(path => readFile(new URL('../' + path, import.meta.url), 'utf8')))).join('\n')
   await page.addStyleTag({ content: styles })
   await page.evaluate(() => { document.querySelector('#app').className = 'dsh-partner-workspace'; document.head.insertAdjacentHTML('beforeend', '<meta name="viewport" content="width=device-width,initial-scale=1">') })
+  assert.equal(await page.locator('select').count(),0,'runtime controls are not permanently spread across the page')
+  await page.getByRole('button',{name:'调整运行配置'}).click()
+  await page.getByPlaceholder('搜索模型名称或 ID').fill('精细')
+  const modelButton=page.getByRole('button',{name:/精细推理模型/})
+  fail=true
+  await modelButton.click()
+  await page.getByRole('dialog').getByRole('alert').waitFor()
+  assert.equal(await modelButton.getAttribute('aria-pressed'),'false','failed model change rolls back')
+  fail=false
+  await modelButton.click()
+  await page.getByRole('dialog').getByText('已保存，下一轮生效',{exact:true}).waitFor()
+  assert.equal(submitted.companion.model,'two')
+  await page.getByLabel('模型提供方',{exact:true}).selectOption('cloud')
+  await page.getByRole('button',{name:/快速模型/}).waitFor()
+  assert.equal(submitted.companion.provider,'cloud')
+  assert.equal(submitted.companion.model,'','provider change clears the previous model')
+  assert.equal(await page.getByRole('button',{name:'完成',exact:true}).count(),0)
+  await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click()
+  assert.equal(await page.locator('select').count(),0)
   for (const dark of [false, true]) for (const width of [375, 844, 1440]) {
     await page.setViewportSize({width, height: width === 844 ? 390 : 900})
     await page.evaluate(dark => document.body.toggleAttribute('data-ds-dark-theme', dark), dark)
+    assert.ok((await page.locator('.dsh-partner-runtime-summary').boundingBox()).height < 140,'runtime summary stays compact')
+    await page.getByRole('button',{name:'调整运行配置'}).click()
+    const runtime=page.locator('.dsh-partner-runtime-dialog')
+    assert.ok(await runtime.evaluate(el=>el.scrollWidth<=el.clientWidth))
+    const controlStyles=await runtime.locator('select').first().evaluate(el=>({radius:getComputedStyle(el).borderRadius,height:getComputedStyle(el).height}))
+    assert.equal(controlStyles.radius,'12px')
+    assert.equal(controlStyles.height,width<=760?'44px':'38px')
+    await page.screenshot({path:`/tmp/partner-runtime-${width}-${dark?'dark':'light'}.png`})
+    await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click()
     assert.equal(await page.locator('.dsh-partner-capability-save-status').evaluate(el => getComputedStyle(el).position), 'static', 'save feedback stays in normal flow instead of overlapping content')
     for (const name of ['管理Skill', '管理可访问伙伴', '管理MCP 服务']) {
       const trigger = page.getByRole('button', {name, exact:true})

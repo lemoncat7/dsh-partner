@@ -3,7 +3,8 @@ import { IconCheckOutlineRegular as IconCheckOutline14 } from '@deepseek-ai/dsh-
 import { api, type Capability, type CompanionView, type ModelCatalogView, type PartnerSnapshot } from '../client-api.js'
 import { CAPABILITY_LABELS } from '../capabilities.js'
 import { CapabilityResources } from './capability-resources.js'
-import { FormField as Field, SectionHeading as Section } from './partner-components.js'
+import { SectionHeading as Section } from './partner-components.js'
+import { RuntimeSettings } from './runtime-settings.js'
 import { errorMessage as message } from './workspace-components.js'
 import { companionDraft } from './companion-draft.js'
 
@@ -54,12 +55,9 @@ export function CapabilityEditor({ companion, presets, onChanged }: { companion:
       { id: 'administration', title: CAPABILITY_LABELS.administration, detail: '修改其他伙伴的身份、能力与 Preset、协作、Skill 和知识库挂载。不共享会话、记忆或凭据；不能自改或转授本权限。' },
     ] },
   ]
-  const selectedProvider = form.provider || modelCatalog?.defaultSelection.provider || ''
-  const modelOptions = modelCatalog?.providers.find(item => item.id === selectedProvider)?.models ?? []
-  const currentModelMissing = Boolean(form.model) && !modelOptions.some(item => item.id === form.model)
   return <div className="dsh-partner-form is-capabilities"><Section eyebrow="COMPOSITION" title="能力组合" detail="伙伴声明意图范围；真正可调用的工具仍来自所选 Agent Preset，并继续执行各插件权限。" />
     <div className="dsh-partner-capability-save-status" role="status" aria-live="polite" aria-atomic="true">{saving ? '正在保存…' : saved ? '已保存，下一轮生效' : '修改自动保存，无需应用组合。'}{error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}</div>
-    <div className="dsh-partner-runtime-fields"><Field label="Agent Preset" hint="工具、Skill 与系统提示"><select disabled={saving} value={form.presetId} onChange={event => edit({ ...form, presetId: event.target.value })}><option value="">跟随 DSH 默认 Preset</option>{presets.filter(item => !item.broken).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><Field label="模型提供方" hint="来自当前客户端"><select disabled={saving} value={form.provider} onChange={event => edit({ ...form, provider: event.target.value, model: '' })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.provider || '正在读取'}</option>{modelCatalog?.providers.map(provider => <option value={provider.id} key={provider.id}>{provider.name || provider.id}</option>)}</select></Field><Field label="模型" hint="随提供方联动"><select disabled={saving} value={form.model} onChange={event => edit({ ...form, model: event.target.value })}><option value="">跟随 DSH 默认 · {modelCatalog?.defaultSelection.model || '正在读取'}</option>{currentModelMissing && <option value={form.model}>当前配置 · {form.model}</option>}{modelOptions.map(model => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></Field></div>
+    <RuntimeSettings value={form} catalog={modelCatalog} presets={presets} saving={saving} saved={saved} error={error} change={patch => edit({...form, ...patch})} />
     <p className="dsh-partner-inline-note">身份与能力在下一轮执行前更新；Preset 与模型作为会话默认配置，不覆盖已有会话的选择。</p>
     <CapabilityResources key={companion.id} companionId={companion.id} capabilities={persistedCapabilities} disabled={saving}>{manage => <div className="dsh-partner-capability-groups">{groups.map(group => {
       const enabled = group.choices.filter(choice => form.capabilities.includes(choice.id)).length

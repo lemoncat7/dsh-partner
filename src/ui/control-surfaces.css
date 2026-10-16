@@ -1,0 +1,66 @@
+/* One control surface across feature pages and dialogs. Composite searches
+   keep a single outer border; switches, ranges and file pickers are excluded. */
+.dsh-partner-workspace {
+  --partner-control-height: 38px;
+  --partner-control-font-size: 13px;
+  --partner-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%238a8f98' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.dsh-partner-workspace :is(input:not([type]), input[type=text], input[type=search], input[type=url], input[type=password], input[type=email], input[type=number], input[type=datetime-local], input[type=time], select, textarea) {
+  box-sizing: border-box; min-width: 0; max-width: 100%; border: 1px solid var(--partner-border);
+  border-radius: var(--partner-radius-control); color: var(--partner-text); background-color: var(--partner-control);
+  box-shadow: inset 0 1px 0 var(--partner-glass-highlight); font-size: var(--partner-control-font-size);
+}
+.dsh-partner-workspace :is(input:not([type]), input[type=text], input[type=search], input[type=url], input[type=password], input[type=email], input[type=number], input[type=datetime-local], input[type=time], select) { min-height: var(--partner-control-height); height: var(--partner-control-height); padding: 6px 11px; line-height: 1.4; }
+.dsh-partner-workspace textarea { padding: 10px 11px; line-height: 1.6; resize: vertical; }
+.dsh-partner-workspace select:not([multiple]) { appearance: none; padding-right: 34px; background-image: var(--partner-select-arrow); background-position: right 10px center; background-size: 16px; background-repeat: no-repeat; text-overflow: ellipsis; cursor: pointer; }
+.dsh-partner-workspace select option { color: var(--partner-text); background: var(--partner-solid-panel); }
+.dsh-partner-workspace :is(input:not([type]), input[type=text], input[type=search], input[type=url], input[type=password], input[type=email], input[type=number], select, textarea):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 2px; box-shadow: inset 0 1px 0 var(--partner-glass-highlight); }
+.dsh-partner-workspace :is(input, textarea)::placeholder { color: var(--partner-text-tertiary); opacity: 1; }
+.dsh-partner-workspace :is(input, select, textarea):disabled { opacity: .55; cursor: not-allowed; }
+.dsh-partner-workspace .dsh-partner-field { min-width: 0; }
+.dsh-partner-workspace .dsh-partner-field > span { gap: 4px; }
+.dsh-partner-workspace .dsh-partner-board-search > input { padding-left: 34px; padding-right: 38px; }
+.dsh-partner-workspace :is(.dsh-partner-skill-search, .dsh-partner-skill-search.is-compact) { box-sizing: border-box; min-height: 40px; gap: 6px; padding: 4px 8px; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-control); background: var(--partner-control); box-shadow: inset 0 1px 0 var(--partner-glass-highlight); }
+.dsh-partner-workspace .dsh-partner-skill-search input { min-height: 30px; height: 30px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; }
+.dsh-partner-workspace .dsh-partner-skill-search:focus-within { outline: 2px solid var(--partner-focus-ring); outline-offset: 2px; }
+.dsh-partner-workspace .dsh-partner-skill-search-icon { width: 28px; height: 28px; background: transparent; box-shadow: none; }
+.dsh-partner-workspace .dsh-partner-memory-toolbar > label:not(.dsh-partner-memory-search) { flex: 0 1 190px; min-width: 0; }
+.dsh-partner-workspace .dsh-partner-memory-toolbar select { width: 100%; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-body > .dsh-partner-memory-settings > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid var(--partner-separator); }
+.dsh-partner-workspace .dsh-partner-memory-settings .dsh-partner-automation-fields.is-memory-model { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dsh-partner-workspace .dsh-partner-memory-settings .is-memory-model > .dsh-partner-field:first-child { grid-column: 1 / -1; max-width: 220px; }
+
+.dsh-partner-workspace .dsh-partner-runtime-summary { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--partner-border); border-radius: 14px; background: var(--partner-interaction-well); }
+.dsh-partner-workspace .dsh-partner-runtime-summary > span { display: grid; min-width: 0; gap: 3px; }
+.dsh-partner-workspace .dsh-partner-runtime-summary :is(small, strong) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-workspace .dsh-partner-runtime-summary small { color: var(--partner-text-secondary); font-size: 12px; }
+.dsh-partner-workspace .dsh-partner-runtime-summary strong { font-size: 13px; font-weight: 600; }
+.dsh-partner-workspace :is(.dsh-partner-runtime-summary > button, .dsh-partner-runtime-editor footer > button) { min-height: var(--partner-control-height); padding: 6px 14px; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-control); color: var(--partner-text); background: var(--partner-control); font: 600 13px/1.4 var(--partner-font-family); cursor: pointer; }
+.dsh-partner-workspace .dsh-partner-runtime-editor { display: grid; min-width: 0; gap: 14px; }
+.dsh-partner-workspace .dsh-partner-runtime-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dsh-partner-workspace .dsh-partner-runtime-options .dsh-partner-field { margin: 0; }
+.dsh-partner-workspace .dsh-partner-runtime-search { display: grid; min-width: 0; gap: 7px; font-weight: 600; }
+.dsh-partner-workspace .dsh-partner-runtime-search input { width: 100%; }
+.dsh-partner-workspace .dsh-partner-runtime-models { display: grid; align-content: start; gap: 4px; max-height: 260px; overflow: auto; padding: 4px; border: 1px solid var(--partner-border); border-radius: 12px; scrollbar-gutter: stable; }
+.dsh-partner-workspace .dsh-partner-runtime-models > button { display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--partner-text); text-align: left; font: inherit; cursor: pointer; }
+.dsh-partner-workspace .dsh-partner-runtime-models > button > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.dsh-partner-workspace .dsh-partner-runtime-models small { color: var(--partner-text-secondary); font-size: 12px; }
+.dsh-partner-workspace .dsh-partner-runtime-models > button:is(:hover, [aria-pressed=true]) { background: var(--partner-selected); }
+.dsh-partner-workspace .dsh-partner-runtime-models > button:focus-visible { outline-offset: -2px; }
+.dsh-partner-workspace .dsh-partner-runtime-models i { display: grid; place-items: center; }
+.dsh-partner-workspace .dsh-partner-runtime-models > p { margin: 0; padding: 10px; color: var(--partner-text-secondary); }
+.dsh-partner-workspace .dsh-partner-runtime-editor footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dsh-partner-workspace .dsh-partner-runtime-editor footer > span { color: var(--partner-text-secondary); font-size: 12px; }
+@media (max-width: 760px) {
+  .dsh-partner-workspace { --partner-control-height: 44px; --partner-control-font-size: 16px; }
+  .dsh-partner-workspace .dsh-partner-skill-search input { min-height: 36px; height: 36px; }
+  .dsh-partner-workspace .dsh-partner-memory-toolbar > label:not(.dsh-partner-memory-search) { flex: 1 1 130px; }
+}
+@media (max-width: 480px) {
+  .dsh-partner-workspace .dsh-partner-runtime-summary { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .dsh-partner-workspace .dsh-partner-runtime-summary > span { grid-column: 1; }
+  .dsh-partner-workspace .dsh-partner-runtime-summary > button { grid-column: 2; grid-row: 1 / 3; }
+  .dsh-partner-workspace .dsh-partner-runtime-options { grid-template-columns: minmax(0, 1fr); }
+  .dsh-partner-workspace .dsh-partner-memory-settings .dsh-partner-automation-fields.is-memory-model { grid-template-columns: minmax(0, 1fr); }
+  .dsh-partner-workspace .dsh-partner-memory-settings .is-memory-model > .dsh-partner-field:first-child { max-width: none; }
+}

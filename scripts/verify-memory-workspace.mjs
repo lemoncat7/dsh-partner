@@ -7,7 +7,7 @@ import {build} from 'esbuild'
 const {chromium} = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
 const root = fileURLToPath(new URL('../', import.meta.url))
 const companion = {id:'fixture',name:'莫殇',automation:{memory:{enabled:true,retentionDays:90,dailyReviewEnabled:true,dailyReviewHour:3},heartbeat:{enabled:true,intervalMinutes:60,quietStartHour:23,quietEndHour:8,dailyLimit:3}}}
-const bundle = await build({stdin:{resolveDir:root,loader:'tsx',contents:`
+const bundle = await build({nodePaths:(process.env.DSH_UI_TEST_NODE_PATH??'').split(':').filter(Boolean),alias:{react:`${root}node_modules/react`},stdin:{resolveDir:root,loader:'tsx',contents:`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
 import {MemoryPanel} from './src/ui/memory/memory-panel';import {ConcernPanel} from './src/ui/memory/concern-panel';
 const companion=${JSON.stringify(companion)};
@@ -15,12 +15,14 @@ const snapshot={sessions:[{id:'route',companionId:'fixture',kind:'local',channel
 const noop=async()=>{};
 function App(){const [watch,setWatch]=useState(false);return <main className="dsh-partner-workspace"><div className="dsh-partner-stage-scroll"><nav><button onClick={()=>setWatch(false)}>记忆页</button><button onClick={()=>setWatch(true)}>关注页</button></nav>{watch?<ConcernPanel companion={companion} snapshot={snapshot} onChanged={noop}/>:<MemoryPanel companion={companion} snapshot={snapshot} openSession={noop} startSession={noop} renewSession={noop} onChanged={noop}/>}</div></main>}
 createRoot(document.getElementById('app')).render(<App/>);`},bundle:true,write:false,format:'iife',jsx:'automatic',platform:'browser',target:'es2022',loader:{'.css':'text','.module.css':'text'}})
-const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css','src/ui/memory/memory-ui.css'].map(p=>readFile(root+p,'utf8')))).join('\n')
+const styles=(await Promise.all(['src/client.css','src/ui/workspace-ui.css','src/ui/responsive-ui.css','src/ui/memory/memory-ui.css','src/ui/interaction-theme.css','src/ui/control-surfaces.css'].map(p=>readFile(root+p,'utf8')))).join('\n')
 const server=createServer((req,res)=>{res.setHeader('content-type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].contents:'<meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0}body{background:#eceff1}body[data-ds-dark-theme]{background:#202427}</style><div id="app"></div><script src="/app.js"></script>')})
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
+let currentPage
 try {
- const page=await browser.newPage({reducedMotion:'reduce'});const errors=[];page.on('pageerror',e=>errors.push(e.message));let graphs=0,writes=0
+ const page=await browser.newPage({reducedMotion:'reduce'});const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)});let graphs=0,writes=0
+ currentPage=page
  const item=(scopeId,status='active')=>({id:scopeId+status,scopeId,kind:'profile',subject:scopeId==='local:a'?'明确的项目背景':'另一位联系人的背景',content:'只保留有可靠对话依据的信息。',status,confidence:0.95,updatedAt:Date.now(),createdAt:Date.now(),evidence:[],locked:false})
  const profiles=['local:a','channel:b'].map(scopeId=>({scopeId,label:scopeId,entries:[item(scopeId)],preferences:[],evidenceCount:2,lockedCount:0,version:'version01',updatedAt:Date.now()}))
  await page.route('**/partner-local/v1/**',async route=>{
@@ -31,22 +33,26 @@ try {
   else if(path.endsWith('/history'))body=[{id:'turn',at:Date.now(),user:'记录一次对话',assistant:'这是历史回答'}]
   else if(path.endsWith('/graph')){graphs++;body={memories:[item(scope)],relations:[]}}
   else if(path.endsWith('/models'))body={defaultSelection:{provider:'local',model:'default'},providers:[]}
-  else if(path.endsWith('/concerns'))body={concerns:[{id:'watch',subject:'关注版本变化',reason:'等待正式修复',state:'active',nextCheckAt:Date.now()+3600000,resources:[],origin:'explicit',watchKind:'auto'}],observations:[]}
+  else if(path.endsWith('/concerns/archived'))body={items:[],hasMore:false}
+  else if(path.endsWith('/heartbeat/status'))body={running:false,result:null}
+  else if(path.endsWith('/concerns'))body={concerns:[{id:'watch',subject:'关注版本变化',reason:'等待正式修复',state:'active',priority:.8,score:.8,confidence:.9,updatedAt:Date.now(),nextCheckAt:Date.now()+3600000,resources:[],origin:'explicit',watchKind:'auto'}],observations:[],executions:[]}
   await route.fulfill({json:body})
  })
  const fits=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no horizontal overflow')
  for(const dark of [false,true])for(const width of [375,844,1440]){
+  console.log(`Checking ${width}px dark=${dark}`)
   await page.setViewportSize({width,height:width===844?500:900});await page.goto(`http://127.0.0.1:${server.address().port}`);await page.addStyleTag({content:styles});await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
   await page.locator('.dsh-partner-persona > summary').waitFor();assert.equal(await page.getByRole('button',{name:'画像',exact:true}).count(),0);await fits();const count=graphs
   await page.getByRole('button',{name:'记忆',exact:true}).click();await page.getByLabel('记忆状态').selectOption('expired');await page.getByText('已过期',{exact:true}).last().waitFor();assert.equal(graphs,count)
   await page.getByLabel('记忆范围').selectOption('channel:b');await page.getByRole('button',{name:/另一位联系人的背景/}).waitFor();assert.equal(await page.getByRole('button',{name:/明确的项目背景/}).count(),0)
   await page.getByRole('button',{name:'记忆设置',exact:true}).click();await page.getByRole('dialog').waitFor();await fits();const before=writes
   await page.getByRole('button',{name:'保存设置',exact:true}).evaluate(b=>{b.click();b.click()});await page.getByText('设置已保存',{exact:true}).waitFor();assert.equal(writes,before+1)
-  await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'})
+  await page.getByRole('button',{name:'保存设置',exact:true}).focus();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'})
   await page.getByRole('button',{name:'回顾',exact:true}).click();await page.getByRole('button',{name:'对话历史',exact:true}).click();await page.getByText('记录一次对话',{exact:true}).first().waitFor()
   await page.getByLabel('更多记忆内容').click();await page.getByRole('button',{name:'关系图谱',exact:true}).click();await page.getByText('还没有可靠关系',{exact:true}).waitFor();assert.equal(graphs,count+1)
   await page.getByRole('button',{name:'记忆',exact:true}).click();await page.screenshot({path:`/tmp/partner-memory-${width}-${dark?'dark':'light'}.png`});await fits()
   await page.getByRole('button',{name:'关注页',exact:true}).click();await page.getByRole('button',{name:'关注设置',exact:true}).waitFor();await fits();await page.getByRole('button',{name:/关注版本变化/}).waitFor();assert.equal(await page.locator('.dsh-partner-concern-row').evaluate(el=>getComputedStyle(el).display),'grid')
  }
  assert.deepEqual(errors,[]);console.log('Memory workspace: 6 viewport/theme cases; scope isolation, filters, lazy graph/history, settings and duplicate prevention passed.')
-}finally{await browser.close();await new Promise(resolve=>server.close(resolve))}
+}catch(error){await currentPage?.screenshot({path:'/tmp/partner-memory-style-failure.png'});throw error}
+finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

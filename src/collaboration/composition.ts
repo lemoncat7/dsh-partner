@@ -94,6 +94,7 @@ export class PartnerAgentComposition {
         '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态内部通知创建者，后续任务自动接续。执行、重试、待验收和返工不逐项通知渠道。仅当需求只剩已完成/受阻任务且没有排队执行时统一汇报成果和阻塞，不以归档为前提；只要还有收集箱、待开始、执行中或待验收就不发阶段通知。确认完整范围且全部任务完成后汇总归档。需求变更用 partner_requirements update，具体任务变更用 partner_task_board update；打回必须填写明确缺项和修正要求，并针对实际读取的 expectedRevision 决策。',
         directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
         `你自己的伙伴 id：${companion.id}。`,
+        '临时 SSH 授权不等于永久挂载，也不会自动共享给其他伙伴。需委派远程任务时，先以 autoRun=false 建立有明确负责人的看板任务，再调用 ssh_request_temporary_access(target, task, taskId)；该工具核验真实用户授意，无需重复审批弹窗。只有 granted=true 才提交同一任务执行。granted=false 时完整展示授权范围并等待用户在聊天中确认，禁止自己重复请求。执行者若已收到任务绑定授权，直接用 ssh_temporary_exec，不再申请或借用创建者的会话权限。任务结束、取消、改派或要求变更后授权失效。',
         '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
         ].filter(Boolean).join('\n\n'),
       }))

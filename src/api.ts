@@ -32,6 +32,8 @@ import { assertSameOrigin, httpError, mutation, readObject, sendError, sendJson 
 import type { StorageCoordinator } from './storage/coordinator.js'
 import type { McpService } from './mcp/service.js'
 import { dispatchMcpApi } from './api/features/mcp-api.js'
+import { dispatchPushApi } from './api/features/push-api.js'
+import type { PushService } from './notifications/push-service.js'
 
 export interface WebServerLike {
   register(route: { kind: 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
@@ -44,6 +46,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  push?: PushService
   concernExecution?: import('./concern-execution.js').ConcernExecutionDispatcher
   mcp?: McpService
   ctx: Context & { agentPresets: AgentPresets }
@@ -91,6 +94,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if (runtime.push && await dispatchPushApi(req, res, segments, runtime.push)) return
   if (runtime.mcp && await dispatchMcpApi(req, res, segments, runtime.mcp)) return
   if(method==='GET'&&segments.length===2&&segments[0]==='storage'&&segments[1]==='status') {
     if(!runtime.storage)throw httpError(503,'存储服务不可用')
@@ -184,6 +188,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       if (removeFiles !== null && removeFiles !== '0' && removeFiles !== '1') throw httpError(400, 'removeFiles 必须为 0 或 1')
       await runtime.companions.remove(id, {
         removeChannels: async target => {
+          await runtime.push?.removeOwner(target)
           const owned = runtime.store.snapshot().channels.filter(channel => channel.companionId === target)
           for (const channel of owned) {
             await runtime.channels.stop(channel.id)
@@ -461,6 +466,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
 }
 
 async function snapshot(runtime: ApiRuntime): Promise<{
+  pushChannels: import('./notifications/push-domain.js').PushChannelView[]
   companions: Companion[]; channels: ChannelView[]; pairings: ReturnType<PartnerStore['snapshot']>['pairings']; sessions: ReturnType<PartnerStore['snapshot']>['sessions']; heartbeatStates: ReturnType<PartnerStore['snapshot']>['heartbeatStates']; presets: { id: string; name: string; broken?: string }[]
 }> {
   const state = runtime.store.snapshot()
@@ -470,7 +476,7 @@ async function snapshot(runtime: ApiRuntime): Promise<{
     ...(item.broken ? { broken: item.broken } : {}),
   }))).catch(() => [])
   const sessions = state.sessions.map(item => ({ ...item, archived: runtime.agents.isArchived(item) }))
-  return { companions: state.companions, channels: await runtime.channels.views(), pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
+  return { companions: state.companions, channels: await runtime.channels.views(), pushChannels: runtime.push?.views() ?? [], pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
 }
 
 function localDay(now: number): string { const date = new Date(now); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }

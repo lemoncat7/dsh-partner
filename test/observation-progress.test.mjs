@@ -21,6 +21,14 @@ test('progress redacts credentials, query strings and URL userinfo',()=>{
  for(const secret of ['abcSECRET123','user:pass','token=xyz','sensitive','ghp_abcdef123456'])assert.equal(s.includes(secret),false)
  assert.ok(s.includes('https://example.com/path'))
 })
+test('structured progress preserves evidence after credentials and URL punctuation',()=>{
+ const raw={token:'private',content:'Access token: private\n规范内容\n- 回调：`https://example.com/path`\n- 来源：https://example.com/x；下一项',other:'保留'}
+ const safe=JSON.parse(redactProgress(JSON.stringify(raw),[]))
+ assert.equal(safe.token,'[凭据字段已隐藏]')
+ assert.equal(safe.content.includes('private'),false)
+ assert.match(safe.content,/规范内容\n- 回调：`https:\/\/example.com\/path`\n- 来源：https:\/\/example.com\/x；下一项/)
+ assert.equal(safe.other,'保留')
+})
 test('progress survives restart, expires, clears and rejects changed configuration',async t=>{
  const root=await mkdtemp(join(tmpdir(),'observation-progress-'));t.after(()=>rm(root,{recursive:true,force:true}))
  const store=new PartnerConcernStore(root)

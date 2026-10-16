@@ -40,6 +40,8 @@ import { listConcernFileSources, type ConcernSource } from './concern-sources.js
 import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { type NoteRecordingBridge } from './concern-recording.js'
 import {concernExecutionNotes} from './concern-execution-notes.js'
+import { bindTaskSshAccess, type SshTaskAccessBridge } from './collaboration/ssh-task-access.js'
+import type {ConcernKnowledgeBridge} from './concern-knowledge-source.js'
 import type {ConcernExecutionReceipt} from './concern-execution.js'
 import {hasConcernReply} from './concern-execution-receipt.js'
 import { executeObservationLoop } from './observation-loop.js'
@@ -97,7 +99,7 @@ export interface HeartbeatToolTrace {
 
 export interface HeartbeatExecution {
   recording?: Array<{concernId: string; state: 'synced' | 'pending'}>
-  rounds?: Array<{round: number; phase: 'check' | 'final'; modelMs: number; outputChars: number}>
+  rounds?: Array<{round: number; phase: 'check' | 'final'; modelMs: number; outputChars: number; retries?: import('./observation-model-retry.js').ObservationRetry[]}>
   blocked?: string[]
   blockedReasons?: Record<string, string>
   checkOutcomes?: Record<string, string>
@@ -369,7 +371,7 @@ export class PartnerAgentRuntime {
       }
       if (receipt.reconcileOnly) throw new Error('未找到原注入消息，仅核对结果，不重新执行')
       await this.store.update(s => {const r=s.concernExecutions?.find(r=>r.id===receipt.id);if(!r)throw new Error('关注执行已取消');r.status='running';r.updatedAt=Date.now()})
-      const access = await concernExecutionNotes({store:this.store, concerns:this.concerns, companionId:companion.id, sourceId:receipt.id, sessionId:key, bridge:()=>this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined})
+      const access = await concernExecutionNotes({store:this.store, concerns:this.concerns, companionId:companion.id, sourceId:receipt.id, sessionId:key, bridge:()=>this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined, knowledgeBridge:()=>this.ctx.get('dshKnowledgeTracking') as ConcernKnowledgeBridge | undefined})
       const disposers: Array<() => void> = []
       try {
         for (const tool of access.tools) disposers.push((agent.ctx as RuntimeContext).tools.register(tool))
@@ -401,12 +403,13 @@ export class PartnerAgentRuntime {
         if (delegation) delegation.executionSessionId = route.sessionId
       })
       input.signal?.throwIfAborted()
-      const noteAccess = this.concerns ? await concernExecutionNotes({store: this.store, concerns: this.concerns, companionId: input.companion.id, sourceId: input.sourceId, sessionId: route.sessionId, bridge: () => this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined}) : undefined
+      const noteAccess = this.concerns ? await concernExecutionNotes({store: this.store, concerns: this.concerns, companionId: input.companion.id, sourceId: input.sourceId, sessionId: route.sessionId, bridge: () => this.ctx.get('dshKnowledgeNoteRecording') as NoteRecordingBridge | undefined, knowledgeBridge:()=>this.ctx.get('dshKnowledgeTracking') as ConcernKnowledgeBridge | undefined}) : undefined
       const noteDisposers: Array<() => void> = []
+      const sshAccess = bindTaskSshAccess(this.store, this.ctx.get('dshSshTemporaryAccess') as SshTaskAccessBridge | undefined, { sourceId: input.sourceId, companionId: input.companion.id, sessionId: key, ...(input.signal ? { signal: input.signal } : {}) })
       try {
         for (const tool of noteAccess?.tools ?? []) noteDisposers.push((agent.ctx as RuntimeContext).tools.register(tool))
         agent.followup(createUserMessage({
-          content: [{ type: 'text', text: input.prompt + (noteAccess?.prompt ?? '') }],
+          content: [{ type: 'text', text: input.prompt + (noteAccess?.prompt ?? '') + (sshAccess?.prompt ?? '') }],
           source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: input.sourceId.startsWith('requirement:') ? '伙伴汇总需求' : input.sourceId.startsWith('review:') ? '伙伴核验看板任务' : '伙伴执行看板任务' },
         }))
         let timedOut = false
@@ -425,6 +428,7 @@ export class PartnerAgentRuntime {
         output = assistantTextAfter(agent, startSeq).trim()
         if (!output) throw new Error('伙伴会话没有产生任务结果')
       } finally {
+        sshAccess?.dispose()
         noteAccess?.dispose()
         for (const dispose of noteDisposers.reverse()) dispose()
       }
@@ -599,7 +603,12 @@ export class PartnerAgentRuntime {
 
   private async driveScopedHeartbeat(conversation: Agent, companion: Companion, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     const access = await resolveHeartbeatFileAccess(conversation.session.header.cwd!, concerns)
-    return executeObservationLoop({ ctx: this.ctx, conversation, companion, concerns, guard: (name, args) => heartbeatToolDenial(name, args, access), parse: parseConcernObservations, checkpoint: async(item,snapshot)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.checkpointRecording(item,snapshot)}, saveProgress: async(item,progress)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.saveObservationProgress(item,progress)} })
+    return executeObservationLoop({ ctx: this.ctx, conversation, companion, concerns, guard: (name, args) => heartbeatToolDenial(name, args, access), parse: parseConcernObservations,
+      assertCurrent: async item => {
+        const current = (await this.concerns?.list(companion.id))?.find(c => c.id === item.id)
+        if (this.store.isCompanionRemoving(companion.id) || !current || current.control === 'stopped' || !['active','watching'].includes(current.state) || current.updatedAt !== item.updatedAt || JSON.stringify(current.resources) !== JSON.stringify(item.resources)) throw new Error('[SOURCE_BINDING_REVOKED] 关注已停止、删除或依据配置改变，请重新检查')
+      },
+      checkpoint: async(item,snapshot)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.checkpointRecording(item,snapshot)}, saveProgress: async(item,progress)=>{if(!this.concerns)throw new Error('关注存储不可用');await this.concerns.saveObservationProgress(item,progress)} })
   }
 
   async recordHeartbeatActivity(
@@ -1198,7 +1207,7 @@ export function renderHeartbeatActivity(
     `用时：${formatDuration(execution.completedAt - execution.startedAt)}`,
     `工具：${execution.tools.length > 0 ? `${execution.tools.length} 次调用` : '未调用'}`,
     ...(execution.recording ?? []).map(item => `记录同步：${execution.concerns.find(concern => concern.id === item.concernId)?.subject ?? item.concernId} · ${item.state === 'synced' ? '已写入手动指定位置' : '待同步（本轮未完成写入，下轮继续处理）'}`),
-    ...(execution.rounds?.length ? [`模型轮次：${execution.rounds.map(item => `${item.round}${item.phase === 'final' ? '（收尾）' : ''} / ${(item.modelMs / 1000).toFixed(1)}秒 / ${item.outputChars}字`).join('；')}`] : []),
+    ...(execution.rounds?.length ? [`模型轮次：${execution.rounds.map(item => `${item.round}${item.phase === 'final' ? '（收尾）' : ''} / ${(item.modelMs / 1000).toFixed(1)}秒 / ${item.outputChars}字${item.retries?.length ? ` / 连接异常退避重试 ${item.retries.length} 次` : ''}`).join('；')}`] : []),
   ]
   execution.tools.forEach((trace, index) => {
     lines.push(

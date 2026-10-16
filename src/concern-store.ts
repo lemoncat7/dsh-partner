@@ -334,6 +334,7 @@ export class PartnerConcernStore {
             notificationRuleEffect,
           })
           const observation: ConcernObservation = {
+            ...(duplicateRow ? (typeof duplicateRow.workflow_json === 'string' ? {workflow: JSON.parse(duplicateRow.workflow_json)} : {}) : candidate.workflow ? {workflow: candidate.workflow} : {}),
             id: duplicateRow ? string(duplicateRow.id) : `observation-${randomUUID()}`,
             concernId: concern.id, companionId: concern.companionId, scopeId: concern.scopeId, fingerprint,
             event: duplicateRow ? string(duplicateRow.event) : compact(candidate.event, 800),
@@ -717,6 +718,7 @@ export class PartnerConcernStore {
     ensureColumn(database, 'concern_observations', 'rule_reason', "TEXT NOT NULL DEFAULT ''")
     ensureColumn(database, 'concern_observations', 'decision_reason', "TEXT NOT NULL DEFAULT ''")
     ensureColumn(database, 'concerns', 'observation_progress_json', 'TEXT')
+    ensureColumn(database, 'concern_observations', 'workflow_json', 'TEXT')
     migrateReferenceOnlyConcerns(database)
     return database
   }
@@ -755,6 +757,7 @@ function concernFromRow(row: SqlRow): PartnerConcern {
 
 function observationFromRow(row: SqlRow): ConcernObservation {
   return {
+    ...(typeof row.workflow_json === 'string' ? {workflow: JSON.parse(row.workflow_json)} : {}),
     id: string(row.id), concernId: string(row.concern_id), companionId: string(row.companion_id), scopeId: string(row.scope_id),
     fingerprint: string(row.fingerprint), event: string(row.event), evidence: string(row.evidence), source: string(row.source),
     novelty: number(row.novelty), relevance: number(row.relevance), confidence: number(row.confidence), actionability: number(row.actionability),
@@ -774,6 +777,7 @@ function insertObservation(database: DatabaseSync, item: ConcernObservation): vo
     item.novelty, item.relevance, item.confidence, item.actionability, item.interruptScore, item.decision,
     item.notificationRuleEffect, item.notificationRuleReason, item.decisionReason, item.createdAt, item.mentionedAt ?? null,
   )
+  if (item.workflow) database.prepare('UPDATE concern_observations SET workflow_json=? WHERE id=?').run(JSON.stringify(item.workflow), item.id)
 }
 
 function observationFingerprint(value: ConcernObservationCandidate): string {

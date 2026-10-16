@@ -3,6 +3,7 @@ import {api, type CompanionView, type PartnerSnapshot} from '../client-api.js'
 import {NotificationSettings} from './notification-settings.js'
 import {SectionHeading, ChannelStatus} from './partner-components.js'
 import {errorMessage, WorkspaceDialog} from './workspace-components.js'
+import {PushChannels} from './push-channels.js'
 
 export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:CompanionView;snapshot:PartnerSnapshot;onChanged():Promise<void>;weixin:ReactNode}):JSX.Element {
   const [platform,setPlatform]=useState<'matrix'|'mattermost'>('matrix')
@@ -16,6 +17,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   const [feedback,setFeedback]=useState('')
   const [deleting,setDeleting]=useState<string>()
   const [adding,setAdding]=useState(false)
+  const [addingPush,setAddingPush]=useState(false)
   const [fixedPlatform,setFixedPlatform]=useState(false)
   const [configuring,setConfiguring]=useState<string>()
   const closeAdd=()=>{setAdding(false);setToken('');setPassword('');setMfaToken('')}
@@ -39,7 +41,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
     {!adding&&feedback&&<p role="status">{feedback}</p>}
     {adding&&<WorkspaceDialog title={fixedPlatform?`${platform==='matrix'?'Matrix':'Mattermost'} 配置`:'添加渠道'} detail={platform==='matrix'?'仅未加密的双人会话可获取配对码。请新建未开启端到端加密的会话，邀请机器人后发送文字消息。':'先登录，再向机器人发私聊消息，核对配对码后授权。'} close={()=>{if(!busy)closeAdd()}}>
       <form className="dsh-partner-feature-form dsh-partner-channel-form" aria-busy={busy} onSubmit={(event:FormEvent)=>{event.preventDefault();void configure(true)}}>
-        {!fixedPlatform&&<FormField label="平台"><select autoFocus disabled={busy} value={platform} onChange={e=>{setPlatform(e.target.value as typeof platform);setPassword('');setToken('');setMfaToken('');setTargetId('');setFeedback('')}}><option value="matrix">Matrix</option><option value="mattermost">Mattermost</option></select></FormField>}
+        {!fixedPlatform&&<FormField label="平台"><select autoFocus disabled={busy} value={platform} onChange={e=>{if(e.target.value==='bark'){closeAdd();setAddingPush(true);return}setPlatform(e.target.value as typeof platform);setPassword('');setToken('');setMfaToken('');setTargetId('');setFeedback('')}}><option value="matrix">Matrix</option><option value="mattermost">Mattermost</option><option value="bark">Bark · 单向通知</option></select></FormField>}
         <FormField label="渠道名称"><input autoFocus={fixedPlatform} disabled={busy} maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder={`例如：我的 ${platform==='matrix'?'Matrix':'Mattermost'}`} /></FormField>
         <FormField label="服务器地址"><input disabled={busy} required type="url" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder="https://chat.example.com" /></FormField>
         <details><summary>高级配置（可选）</summary><FormField label={platform==='matrix'?'固定房间 ID':'固定 DM 会话 ID'} hint="留空则自动发现私聊，通过配对授权。填写后仅监听指定会话。"><input disabled={busy} value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder={platform==='matrix'?'!room:example.com':'DM channel ID'} /></FormField></details>
@@ -54,6 +56,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       </form>
     </WorkspaceDialog>}
     <div className="dsh-partner-channel-list">
+    <PushChannels companion={companion} snapshot={snapshot} onChanged={onChanged} adding={addingPush} closeAdd={()=>setAddingPush(false)}/>
     <div className="dsh-partner-channel-row">
       <span><strong>微信</strong><small>{channels.some(c=>!c.platform||c.platform==='weixin')?'管理连接与私聊授权':'尚未连接 · 扫码接入'}</small></span>{channels.find(c=>!c.platform||c.platform==='weixin')&&<ChannelStatus channel={channels.find(c=>!c.platform||c.platform==='weixin')!}/>}<button type="button" aria-label="配置微信" onClick={()=>setConfiguring('weixin')}>配置</button>
       {configuring==='weixin'&&<WorkspaceDialog title="微信配置" detail="管理扫码登录、连接与联系人授权。" close={()=>setConfiguring(undefined)}>{weixin}</WorkspaceDialog>}

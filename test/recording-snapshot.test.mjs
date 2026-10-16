@@ -49,6 +49,14 @@ test('checkpoint requires explicit target and complete bounded evidence',async()
  assert.equal(calls,1)
 })
 
+test('checkpoint failures explain the exact field without repeating private payloads',async()=>{
+ const tool=recordingCheckpointTool([{id:'c',recordTarget:{kind:'note',locator:'n'}},{id:'no-target'}],async()=>assert.fail('invalid checkpoints must not persist'))
+ const good={concernId:'c',complete:true,data:'verified',instructions:''}
+ for(const [patch,code] of [[{concernId:'other'},'CONCERN_INVALID'],[{concernId:'no-target'},'TARGET_MISSING'],[{complete:false},'INCOMPLETE'],[{data:{secret:'never echo'}},'DATA_INVALID'],[{data:'x'.repeat(100001)},'DATA_TOO_LARGE'],[{instructions:undefined},'INSTRUCTIONS_INVALID']]) {
+   await assert.rejects(tool.execute({...good,...patch},{}),error=>{assert.match(error.message,new RegExp(code));assert.doesNotMatch(error.message,/never echo/);return true})
+ }
+})
+
 test('sync-only scheduler never records observations or sends notifications',async t=>{
  const root=await mkdtemp(join(tmpdir(),'record-worker-'));t.after(()=>rm(root,{recursive:true,force:true}))
  const concerns=new PartnerConcernStore(root)

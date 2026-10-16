@@ -87,6 +87,8 @@ export async function migrateLayout(statePath:string,root:string,state:PartnerSt
   await copyVerified(layout.legacySkills,join(staging(layout.publicRoot),'skills'))
   const next=structuredClone(state)
   next.notificationDeliveries ??= []
+  next.pushChannels ??= []
+  next.pushDeliveries ??= []
   next.mcpBindings ??= []
   for(const skill of next.skills) {
     const rel=relative(layout.legacySkills,resolve(skill.rootPath))

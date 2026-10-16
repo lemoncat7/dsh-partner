@@ -111,6 +111,8 @@ export interface PartnerState {
   sessions: ChannelSession[]
   recentReceipts: string[]
   notificationDeliveries?: import('./channels/notification-delivery.js').NotificationDeliveryRecord[]
+  pushChannels?: import('./notifications/push-domain.js').PushChannel[]
+  pushDeliveries?: import('./notifications/push-domain.js').PushDelivery[]
   heartbeatStates: HeartbeatRuntimeState[]
   skills: PartnerSkill[]
   skillBindings: CompanionSkillBinding[]

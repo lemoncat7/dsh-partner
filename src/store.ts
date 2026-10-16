@@ -6,6 +6,7 @@ import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 import type { CompanionCapability } from './capabilities.js'
 import type { SplitStatePersistence } from './storage/split-state.js'
 import { validateMcpState } from './mcp/state.js'
+import { validatePushState } from './notifications/push-state.js'
 import { reconcileBoardContinuations } from './tasks/continuation.js'
 
 export class PartnerStore {
@@ -291,6 +292,7 @@ function validateState(value: unknown): asserts value is PartnerState {
   if (state.skillMarketNetwork.proxyUrl !== undefined && typeof state.skillMarketNetwork.proxyUrl !== 'string') throw new Error('partner state skillMarketNetwork.proxyUrl must be a string')
   const companionIds = new Set(state.companions!.map(companion => companion.id))
   validateMcpState(state)
+  validatePushState(state)
   for (const companion of state.companions!) {
     const config = companion.notificationDelivery
     if (config === undefined) continue

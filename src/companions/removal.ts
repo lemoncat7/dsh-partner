@@ -54,6 +54,8 @@ export class CompanionRemovalService {
       state.heartbeatStates = state.heartbeatStates.filter(item => item.companionId !== id)
       state.executionRuns = state.executionRuns.filter(item => item.ownerCompanionId !== id)
       if(state.notificationDeliveries)state.notificationDeliveries=state.notificationDeliveries.filter(item=>item.companionId!==id)
+      if(state.pushChannels)state.pushChannels=state.pushChannels.filter(item=>item.companionId!==id)
+      if(state.pushDeliveries)state.pushDeliveries=state.pushDeliveries.filter(item=>item.companionId!==id)
       for (const task of state.tasks) {
         let changed = false
         if (task.assigneeCompanionId === id) { delete task.assigneeCompanionId; task.autoRun = false; changed = true }

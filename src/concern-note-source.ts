@@ -1,10 +1,11 @@
 import type {ToolDefinition} from '@deepseek-ai/dsh-tools'
 import type {PartnerConcern} from './concern-domain.js'
 import type {NoteRecordingBridge} from './concern-recording.js'
+import type {SourceReadReceipt} from './concern-knowledge-source.js'
 
 export const CONCERN_NOTE_READ = 'heartbeat_read_note_source'
 /** Read only notes already bound as checking sources; no arbitrary note access. */
-export function concernNoteSourceTool(concerns: PartnerConcern[], bridge: () => NoteRecordingBridge | undefined): ToolDefinition {
+export function concernNoteSourceTool(concerns: PartnerConcern[], bridge: () => NoteRecordingBridge | undefined, onRead?: SourceReadReceipt): ToolDefinition {
   return {
     name: CONCERN_NOTE_READ,
     description: 'Read a note bound as a concern checking source. Read-only; paginate until nextOffset is null. Never use the recording tool to edit a checking source.',
@@ -19,7 +20,10 @@ export function concernNoteSourceTool(concerns: PartnerConcern[], bridge: () => 
       const service=bridge()
       if(service?.version!==1)throw new Error('笔记读取接口不可用，请检查知识库插件')
       const note=await service.read(String(args.noteId),exec.signal)
-      return JSON.stringify({...note,content:note.content.slice(offset,offset+6000),nextOffset:offset+6000<note.content.length?offset+6000:null,totalChars:note.content.length})
+      if(offset>note.content.length)throw new Error('笔记长度已变化，请从 offset=0 重读')
+      const page={...note,offset,content:note.content.slice(offset,offset+6000),nextOffset:offset+6000<note.content.length?offset+6000:null,totalChars:note.content.length}
+      onRead?.(concern.id,'note:'+String(args.noteId),page)
+      return JSON.stringify({...page, sourceKey: 'note:' + String(args.noteId)})
     },
   }
 }

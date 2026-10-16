@@ -110,6 +110,7 @@ export function hasSustainedConcernEvidence(value: string): boolean {
 }
 
 export interface ConcernObservationCandidate {
+  workflow?: import('./observation-workflow.js').ObservationWorkflow
   concernId: string
   changed: boolean
   executionNeeded?: boolean
@@ -126,6 +127,7 @@ export interface ConcernObservationCandidate {
 }
 
 export interface ConcernObservation {
+  workflow?: import('./observation-workflow.js').ObservationWorkflow
   id: string
   concernId: string
   companionId: string

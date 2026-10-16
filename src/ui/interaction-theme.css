@@ -1,0 +1,70 @@
+/* Knowledge 2.13.12 interaction contract. No global theme overrides or
+   background animations; pendant/WebGL and business state are untouched. */
+.dsh-partner-workspace {
+  --partner-radius-control: 12px;
+  --partner-radius-dialog: 24px;
+  --partner-radius-menu: 15px;
+  --partner-dialog-inset: 20px;
+  --partner-interaction-well: color-mix(in srgb, var(--partner-text) 3%, transparent);
+  --partner-dialog-surface: color-mix(in srgb, var(--partner-text) 3%, var(--partner-solid-panel));
+  --partner-interaction-rim: inset 0 1px 0 var(--partner-card-highlight);
+  --partner-interaction-veil: rgb(12 18 24 / 14%);
+}
+.dsh-partner-workspace :where(button:not(.dsh-partner-feature-switch)) {
+  border-radius: var(--partner-radius-control);
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms var(--partner-ease-out);
+}
+.dsh-partner-workspace :is(.dsh-partner-form-actions, .dsh-partner-feature-hero-actions, .dsh-partner-workspace-dialog footer) > button {
+  box-shadow: var(--partner-interaction-rim), 0 2px 4px color-mix(in srgb, var(--partner-text) 4%, transparent);
+}
+.dsh-partner-workspace :is(.dsh-partner-form-actions, .dsh-partner-workspace-dialog footer) > button:active:not(:disabled) { transform: scale(.97); }
+.dsh-partner-workspace :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--partner-text-secondary); outline-offset: 2px; }
+.dsh-partner-workspace :where(input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select) { border-radius: var(--partner-radius-control); transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.dsh-partner-workspace :is(.dsh-partner-feature-form, .dsh-partner-task-form, .dsh-partner-schedule-form, .dsh-partner-form-actions) :is(button, input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select) { border-radius: var(--partner-radius-control); }
+.dsh-partner-workspace .dsh-partner-tabs { gap: 4px; padding: 4px; border: 0; border-radius: 14px; background: var(--partner-interaction-well); }
+.dsh-partner-workspace .dsh-partner-tabs button { border-radius: 10px; white-space: nowrap; }
+.dsh-partner-workspace .dsh-partner-tabs button::after { display: none; }
+.dsh-partner-workspace .dsh-partner-tabs button.is-active { color: var(--partner-text); background: var(--partner-raised); box-shadow: var(--partner-interaction-rim), 0 2px 5px color-mix(in srgb, var(--partner-text) 8%, transparent); }
+.dsh-partner-workspace .dsh-partner-capability-card-copy { border-radius: 13px; transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease; }
+.dsh-partner-workspace .dsh-partner-capability-card:has([aria-pressed=true]) .dsh-partner-capability-card-copy { border-color: var(--partner-focus-ring); box-shadow: var(--partner-interaction-rim); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-layer { align-items: center; padding: 20px; background: var(--partner-interaction-veil); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog {
+  font: var(--partner-font-body)/1.5 var(--partner-font-family);
+  width: min(640px, 100%); height: auto; max-height: min(800px, 100%); box-sizing: border-box;
+  padding: 7px; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-dialog);
+  box-shadow: var(--partner-interaction-rim), 0 20px 64px rgb(0 0 0 / 20%);
+  animation-duration: 220ms;
+}
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-wide { width: min(880px, 100%); height: auto; max-height: min(840px, 100%); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-capability-resources { width: min(1000px, 100%); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog > header { padding: 18px 18px 16px; border: 0; background: transparent; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog > header strong { font-size: 18px; line-height: 1.4; letter-spacing: normal; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog > header p { max-width: 52ch; line-height: 1.65; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog > header button { width: 34px; min-width: 34px; min-height: 34px; border-radius: 50%; background: var(--partner-interaction-well); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-body { padding: var(--partner-dialog-inset); border: 1px solid var(--partner-separator); border-radius: 17px; background: var(--partner-dialog-surface); scroll-padding-block: 12px 90px; scrollbar-gutter: auto; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-body > :is(form, .dsh-partner-task-detail) > footer:last-child {
+  bottom: calc(-1 * var(--partner-dialog-inset)); margin: 4px calc(-1 * var(--partner-dialog-inset)) calc(-1 * var(--partner-dialog-inset));
+  padding: 14px var(--partner-dialog-inset); gap: 10px; border-top: 1px solid var(--partner-separator); box-shadow: none;
+  background: var(--partner-dialog-surface);
+}
+.dsh-partner-workspace .dsh-partner-workspace-dialog footer > button { min-height: 38px; border-radius: var(--partner-radius-control); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation { width: min(440px, 100%); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation .dsh-partner-form-actions { margin: 0; padding: 0; justify-content: flex-end; gap: 10px; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation .dsh-partner-form-actions button { min-height: 38px; padding: 8px 14px; border: 1px solid var(--partner-border); color: var(--partner-text); background: var(--partner-control); font: 600 var(--partner-font-body)/1.4 var(--partner-font-family); cursor: pointer; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation .dsh-partner-form-actions button.is-danger { color: var(--partner-danger); border-color: color-mix(in srgb, var(--partner-danger) 30%, var(--partner-border)); background: color-mix(in srgb, var(--partner-danger) 8%, var(--partner-control)); }
+.dsh-partner-workspace :is(.dsh-partner-workspace-notice, .dsh-partner-inline-error, .dsh-partner-capability-save-status) { border-radius: 12px; }
+@media (max-width: 760px) {
+  .dsh-partner-workspace { --partner-radius-dialog: 22px; --partner-dialog-inset: 16px; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog-layer { align-items: center; padding: 8px; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog,
+  .dsh-partner-workspace .dsh-partner-workspace-dialog.is-wide { width: 100%; height: auto; max-height: 100%; padding: 6px; border-width: 1px; border-radius: var(--partner-radius-dialog); }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog > header { padding: 12px; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog footer { flex-wrap: wrap; gap: 8px; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog :is(footer, .dsh-partner-form-actions) > button { min-height: 44px; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation { width: min(440px, 100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dsh-partner-workspace :is(button, input, textarea, select, .dsh-partner-capability-card-copy) { transition: none; }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog { animation: none; }
+  .dsh-partner-workspace :is(.dsh-partner-form-actions, .dsh-partner-workspace-dialog footer) > button:active:not(:disabled) { transform: none; }
+}

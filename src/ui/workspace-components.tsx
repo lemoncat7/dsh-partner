@@ -15,7 +15,7 @@ export function WorkspaceBlock({ title, detail, actions, children, className = '
   </section>
 }
 
-export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular', className = '' }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide'; className?: string }): JSX.Element {
+export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail, close, children, width = 'regular', className = '', confirmation = false }: { eyebrow?: string; title: string; detail: string; close(): void; children: ReactNode; width?: 'regular' | 'wide'; className?: string; confirmation?: boolean }): JSX.Element {
   const titleId = useId()
   const detailId = useId()
   const layerRef = useRef<HTMLDialogElement>(null)
@@ -26,7 +26,7 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
     layer?.showModal()
     const frame = requestAnimationFrame(() => {
       const panel = panelRef.current
-      const target = panel?.querySelector<HTMLElement>('[autofocus]') ?? panel?.querySelector<HTMLElement>('input, textarea, select, button')
+      const target = panel?.querySelector<HTMLElement>('[data-dialog-initial-focus], [autofocus]') ?? panel?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])')
       target?.focus({preventScroll: true})
     })
     return () => { cancelAnimationFrame(frame); layer?.close(); if (previous?.isConnected) previous.focus({preventScroll: true}) }
@@ -40,12 +40,19 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
-  return <dialog ref={layerRef} className="dsh-partner-workspace-dialog-layer" aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onCancel={event => {event.preventDefault(); event.stopPropagation(); close()}} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
-    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width} ${className}`} onKeyDown={keyDown}>
+  return <dialog ref={layerRef} className="dsh-partner-workspace-dialog-layer" role={confirmation ? 'alertdialog' : undefined} aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onCancel={event => {event.preventDefault(); event.stopPropagation(); close()}} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
+    <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}${confirmation ? ' is-confirmation' : ''} ${className}`} onKeyDown={keyDown}>
       <header><span>{eyebrow && <small>{eyebrow}</small>}<strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
       <div className="dsh-partner-workspace-dialog-body">{children}</div>
     </section>
   </dialog>
+}
+
+/** Shared, focus-safe confirmation; keep the underlying editor mounted. */
+export function DiscardChangesDialog({ keepEditing, discard }: { keepEditing(): void; discard(): void }): JSX.Element {
+  return <WorkspaceDialog confirmation eyebrow="" title="放弃未保存的修改？" detail="关闭后这些修改不会保存。你也可以继续编辑。" close={keepEditing}>
+    <div className="dsh-partner-form-actions"><button type="button" data-dialog-initial-focus onClick={keepEditing}>继续编辑</button><button type="button" className="is-danger" onClick={discard}>放弃修改</button></div>
+  </WorkspaceDialog>
 }
 
 export function WorkspaceNotice({ children, kind = 'error' }: { children: ReactNode; kind?: 'error' | 'warning' | 'success' }): JSX.Element {

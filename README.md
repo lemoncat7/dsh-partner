@@ -8,6 +8,7 @@
 
 - 伙伴身份、Agent Preset、模型与能力管理。
 - 微信 iLink Bot、Matrix、Mattermost 私聊，支持附件与交互提问。
+- Bark 单向结果通知，支持多个服务器及设备、持久投递队列和重试。
 - 长期记忆、人物画像、每日回顾和持续关注，可查看依据、状态与失败原因。
 - 任务看板、伙伴委派、定时任务与长任务续接。
 - Skill 市场、导入与按伙伴启用，以及 HTTP / stdio MCP 服务授权。
@@ -33,6 +34,8 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 
 - [使用与配置](docs/usage.md)
 - [渠道与附件](docs/direct-channels.md)
+- [Bark 单向通知](docs/bark-notifications.md)
+- [持续关注检查与执行流程](docs/concern-workflow.md)
 - [MCP 服务](docs/mcp.md)
 - [存储迁移](docs/storage-migration.md)
 - [任务生命周期与交付](docs/lifecycle-recovery.md)

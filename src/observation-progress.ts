@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto'
 import type {PartnerConcern} from './concern-domain.js'
 
-export interface ObservationProgress {signature:string; savedAt:number; steps:Array<{tool:string; error:boolean; text:string}>}
+export interface ObservationProgress {signature:string; savedAt:number; steps:Array<{tool:string; error:boolean; text:string}>; workflow?: import('./observation-workflow.js').ObservationWorkflow}
 export function observationSignature(item:PartnerConcern):string {
   return createHash('sha256').update(JSON.stringify([item.subject,item.reason,item.executionInstructions,item.resources,item.recordTarget])).digest('hex')
 }
@@ -26,12 +26,25 @@ export function observationAuthDenial(name:string,args:unknown,hosts:Set<string>
   }
 }
 export function redactProgress(text:string,secrets:Iterable<string>):string {
+  // Tool results are often JSON. Redact individual values, not a serialized
+  // line whose escaped newlines would make one credential erase the rest.
+  const credentials = [...secrets]
+  const walk = (value: unknown): unknown => {
+    if (typeof value === 'string') return redactProgressText(value, credentials)
+    if (Array.isArray(value)) return value.map(walk)
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) =>
+      [key, /^(?:authorization|cookie|set-cookie|password|passwd|密码|令牌|api[_-]?key|access[_-]?token|token)$/i.test(key) ? '[凭据字段已隐藏]' : walk(child)]))
+    return value
+  }
+  try {return JSON.stringify(walk(JSON.parse(text)))} catch {return redactProgressText(text, credentials)}
+}
+function redactProgressText(text:string,secrets:Iterable<string>):string {
   let safe=text
   for(const secret of secrets)if(secret.length>=4)safe=safe.split(secret).join('[已隐藏]')
   return safe.replace(/\b(?:gh[pousr]_|github_pat_|sk-|npm_)[\w-]+/g,'[已隐藏]')
     .replace(/(?:authorization|cookie|set-cookie|password|passwd|密码|令牌|api[_-]?key|access[_-]?token|token)\s*["']?\s*[:：=]\s*[^\r\n]+/gi,'[凭据字段已隐藏]')
     .replace(/Bearer\s+\S+/gi,'Bearer [已隐藏]')
-    .replace(/https?:\/\/[^\s"<>]+/gi,value=>{try{const u=new URL(value);u.username='';u.password='';u.search='';return u.toString()}catch{return '[URL已隐藏]'}})
+    .replace(/https?:\/\/[^\s"<>`\\，。；、！？（）【】]+/gi,value=>{const trailing=value.match(/[).,;!?]+$/)?.[0]??'';try{const u=new URL(value.slice(0,value.length-trailing.length));u.username='';u.password='';u.search='';return u.toString()+trailing}catch{return '[URL已隐藏]'+trailing}})
 }
 export function observationHttpHint(text:string):string {
   if(!/\b(?:401|403|429)\b/.test(text))return ''

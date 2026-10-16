@@ -5,9 +5,10 @@ export function hasConcernReply(events: readonly SessionEvent[], messageId: stri
   let found = false, answer = false
   for (const event of events) {
     if (event.type === 'user/message') {
-      // Newer Harness versions persist context snapshots as user/message.
+      // Harness context snapshots and automatic compaction checkpoints are
+      // persisted as user/message, but are not a new user request.
       const kind: string | undefined = event.data.source?.kind
-      if (kind && ['runtime-context','system-prompt','model-selection','tool-registry','ptc-mode'].includes(kind)) continue
+      if (kind && ['runtime-context','compact-checkpoint','system-prompt','model-selection','tool-registry','ptc-mode'].includes(kind)) continue
       if (found) return false
       found = event.data.id === messageId
       continue

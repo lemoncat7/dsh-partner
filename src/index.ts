@@ -37,11 +37,15 @@ import { EphemeralExecutionService } from './execution/service.js'
 import { PartnerCollaborationService } from './collaboration/service.js'
 import { PartnerSchedulerService } from './scheduler/service.js'
 import { PartnerAgentComposition } from './collaboration/composition.js'
+import { createSshTaskResolver } from './collaboration/ssh-task-access.js'
 import { CompanionService } from './companions/service.js'
 import { CompanionManagementService } from './companions/management.js'
 import { CompanionKnowledgeMounts } from './companions/knowledge-mounts.js'
 import { PartnerInboxStore } from './notifications/store.js'
 import { PartnerNoticeService } from './notifications/service.js'
+import { PushService } from './notifications/push-service.js'
+import { PushCredentials } from './notifications/push-credentials.js'
+import { PushObserver } from './notifications/push-observer.js'
 import { AttachmentDeliveryService } from './attachments/service.js'
 import { openSharedAttachmentStorage } from './attachments/shared-storage.js'
 import { attachmentTool } from './attachments/tool.js'
@@ -90,6 +94,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     ctx.effect(() => () => { notices.close(); inbox.close() }, 'dsh-partner.inbox')
     syncStorageNotice(inbox, storageConfig.storageVersion, TARGET_STORAGE_VERSION)
     const credentials = new PartnerCredentialVault(ctx.credentials)
+    const push = new PushService(store, new PushCredentials(ctx.credentials), message => ctx.logger.warn(`dsh-partner push: ${message}`))
+    const pushObserver = new PushObserver(store, push, () => ctx.logger.warn('dsh-partner: 推送通知入队失败，请检查通知队列'))
+    ctx.effect(() => async () => { await pushObserver.close(); await push.close() }, 'dsh-partner.push')
     const memory = new PartnerMemoryStore(resolved.defaultCwd, resolved.timeZone,privateRoot)
     const concerns = new PartnerConcernStore(resolved.defaultCwd,privateRoot)
     for (const companion of store.snapshot().companions) {
@@ -118,6 +125,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const skills = new SkillService(store, new SkillRepository(migrated?join(layout.publicRoot,'skills'):join(resolved.defaultCwd, 'partner-system', 'skills')))
     await skills.initialize()
     const tasks = new TaskBoardService(store)
+    ctx.provide('dshPartnerSshTaskAccess', createSshTaskResolver(store))
     const requirements = new RequirementService(store)
     const executor = new EphemeralExecutionService(ctx, store, resolved.defaultCwd)
     const interruptedRuns = await executor.reconcileInterruptedRuns()
@@ -203,6 +211,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     await collaboration.start()
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       notices.observeSession(session, event)
+      try { pushObserver.observeSession(session, event) } catch { ctx.logger.warn('dsh-partner: 推送事件处理失败') }
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
@@ -217,12 +226,13 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
     else ctx.logger.warn('dsh-partner: webServer is unavailable; companion management is disabled')
     if (resolved.autoStartChannels) await channels.startEnabled()
+    await push.start()
     heartbeat.start()
     dailyReview.start()
     memoryWorker.start()
@@ -237,6 +247,8 @@ export function apply(context: Context, config: PartnerConfig): void {
       requirementWorker.beginShutdown()
       blockedRecovery.beginShutdown()
       disposeSessionObserver()
+      await pushObserver.close()
+      await push.close()
       disposeConcernTool()
       reflection.close()
       persona.close()
