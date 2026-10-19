@@ -1,5 +1,9 @@
 # Bundled third-party licenses
 
+## AI camera language — source attribution
+
+`ai-camera-language` is a user-provided, independently summarized skill package, not an official distribution by the video's creators. Its three reference documents are preserved verbatim; `manifest.json` records their hashes and the supplied archive/entrypoint hashes. Source video: “AI运镜词典：32个镜头全演示+核心提示词”, Miorning喵咛, with credit to Rick, https://www.xinpianchang.com/a13724439. Original observations and supplementary advice are distinguished in `references/video-summary.md`. No original video, screenshots or character assets are distributed; the plugin's license does not grant rights to those original media.
+
 ## Drama Skills
 
 - **drama-skills** — https://github.com/zenstory-ai/drama-skills, commit `b71cb3ca9343eaf6c0375725ccc9261a4e79021e`, MIT, Copyright (c) 2026 drama-skills contributors.

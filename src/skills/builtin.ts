@@ -2,6 +2,7 @@ import { DIRECTOR_BUILTINS, type BuiltinSkill } from './director-builtins.js'
 import { VIORA_CANVAS_BUILTIN } from './viora-canvas-builtin.js'
 import { DRAMA_BUILTIN } from './drama-builtin.js'
 import { STORY_BUILTINS } from './story-builtins.js'
+import { AI_CAMERA_LANGUAGE_BUILTIN } from './ai-camera-language-builtin.js'
 import { TASK_PLANNING_DESCRIPTION, TASK_PLANNING_DOCUMENT, TASK_PLANNING_VERSION } from './task-planning.js'
 import { LONG_TASK_DESCRIPTION, LONG_TASK_DOCUMENT, LONG_TASK_VERSION } from './long-task-continuation.js'
 
@@ -11,6 +12,7 @@ export const BUILTIN_SKILLS = new Map<string, BuiltinSkill>([
   ...STORY_BUILTINS,
   ['drama-production', DRAMA_BUILTIN],
   ['viora-canvas-production', VIORA_CANVAS_BUILTIN],
+  ['ai-camera-language', AI_CAMERA_LANGUAGE_BUILTIN],
   ...DIRECTOR_BUILTINS,
   ['long-task-continuation', {
     entry: { id: 'long-task-continuation', name: '长任务等待与续接', description: LONG_TASK_DESCRIPTION, version: LONG_TASK_VERSION, tags: ['定时任务', '续接'], skillUrl: 'builtin:long-task-continuation', sourceId: BUILTIN_SKILL_SOURCE },

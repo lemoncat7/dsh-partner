@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "source": "builtin",
+  "version": "1.0.0",
+  "provenance": {
+    "package": "ai-camera-language.zip",
+    "archiveSha256": "31874daf0f04dd71f1e76b3e6042b213231724bbce8bed17e0677328182654e0",
+    "entrySha256": "7b3983b68371b17a925245c79c565bac13edf6dd8d643c0b1c5bf017739b9cbd",
+    "origin": "User-provided skill package; reference documents preserved verbatim",
+    "videoSource": "https://www.xinpianchang.com/a13724439"
+  },
+  "files": [
+    {
+      "path": "references/camera-dictionary.md",
+      "sha256": "66becb7148de2517010d49256da468ba4b67786e754cbe9ae26e0194d9dfba90"
+    },
+    {
+      "path": "references/prompt-workflow.md",
+      "sha256": "b5b40bbc09e8c7d1430af11295bfcc868a958a180ff75add2e12be2d7ad7c6b0"
+    },
+    {
+      "path": "references/video-summary.md",
+      "sha256": "e408da1a1d122b07ba2ea1064b432520e963aac3ebe852ef55cdc3b4ac106690"
+    }
+  ]
+}
