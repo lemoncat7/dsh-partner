@@ -99,9 +99,9 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
   --partner-surface: transparent;
   --partner-pane: rgb(16 23 25 / 18%);
   --partner-raised: rgb(32 41 43 / 58%);
-  --partner-control: rgb(39 50 53 / 72%);
-  --partner-control-hover: rgb(39 50 53 / 84%);
-  --partner-card-surface: rgb(32 41 43 / 58%);
+  --partner-control: rgb(39 50 53 / 56%);
+  --partner-control-hover: rgb(39 50 53 / 68%);
+  --partner-card-surface: rgb(32 41 43 / 38%);
   --partner-card-highlight: rgba(255, 255, 255, .11);
   --partner-solid-panel: #182022;
   --partner-solid-raised: #20292b;
@@ -141,7 +141,7 @@ body[data-ds-dark-theme] :is(.dsh-partner-sidebar, .dsh-partner-workspace, .dsh-
 /* Lift workspace cards to neutral graphite without changing the pendant,
    host canvas, or the opaque dialog/control fallback palette. */
 body[data-ds-dark-theme] .dsh-partner-workspace {
-  --partner-raised: rgb(76 78 82 / 58%);
+  --partner-raised: rgb(76 78 82 / 38%);
   --partner-card-surface: var(--partner-raised);
   --partner-card-highlight: rgb(255 255 255 / 13%);
   --partner-card-shadow:
