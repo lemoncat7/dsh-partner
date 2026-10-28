@@ -36,7 +36,8 @@ export function parseChatInput(raw: unknown): Array<{text:string} | {stickerId:s
  * Preserve only that exact call's public text, never reasoning, earlier steps or other tools.
  */
 export function withChatCompanionText(input: Array<{text:string} | {stickerId:string}>, events: readonly SessionEvent[], callId: string | undefined): Array<{text:string} | {stickerId:string}> {
-  if (!callId) return input
+  // Authored text inside messages is authoritative; surrounding prose can be a paraphrase or preamble.
+  if (!callId || input.some(part=>'text' in part)) return input
   for (let i=events.length-1;i>=0;i--) {
     const event=events[i]!
     if (event.type==='turn/start'||event.type==='user/message') break
@@ -47,9 +48,6 @@ export function withChatCompanionText(input: Array<{text:string} | {stickerId:st
     if (event.data.interrupted||calls.length!==1||calls[0]!.name!=='partner_chat_reply') return input
     const speech=blocks.filter(b=>b.type==='text').map(b=>b.text.trim()).filter(Boolean).join('\n')
     if (!speech) return input
-    const normalize=(value:string)=>value.replace(/\s+/g,'')
-    const spoken=input.filter((p):p is {text:string}=>'text' in p).map(p=>p.text)
-    if (spoken.some(text=>normalize(text)===normalize(speech))||normalize(spoken.join(''))===normalize(speech)) return input
     // The protocol's size limits remain authoritative; a rejected oversized call can be corrected.
     return parseChatInput({messages:[{text:speech},...input]})
   }

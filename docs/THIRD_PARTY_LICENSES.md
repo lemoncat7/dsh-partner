@@ -329,7 +329,7 @@ SOFTWARE.
 
 ## qq-bridge 聊天预设设计
 
-角色 / 聊天行为分层和部分表达约束参考 Derpyu520/qq-bridge，提交 `a49877f4e58d04e47532d44b803360d0f001160d`。未引入其 QQ / SnowLuma 代码或依赖。
+角色 / 聊天行为分层和部分表达约束参考 Derpyu520/qq-bridge，提交 `a49877f4e58d04e47532d44b803360d0f001160d`。`src/ui/role-reference-data.ts` 收录该版本 `roles/小鲸鱼.md` 原文，供只读参考，不注入伙伴提示词。未引入其 QQ / SnowLuma 代码或依赖，也未复制第三方 QQ 收藏图片。
 
 MIT License
 

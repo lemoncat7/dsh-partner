@@ -80,12 +80,14 @@ test('chat behavior never asks for a transport tool or synthetic wait', () => {
 })
 
 
-test('short segmented chat and sticker choices remain explicit at each user turn', () => {
+test('segmentation permits multiple messages without encouraging a second reply at each turn', () => {
   const card=normalizeCharacterCard({enabled:true,roleText:'坦率的同行者',length:'short',segmentedReplies:true,stickersEnabled:true})
   const behavior=renderConversationBehavior(card),turn=renderConversationTurn(card,1)
-  assert.doesNotMatch(behavior,/普通闲聊通常只发一句短话/)
+  assert.match(behavior,/普通闲聊通常只发一句短话/)
   for(const prompt of [behavior,turn]) {
     assert.match(prompt,/分段回复已开启/)
+    assert.match(prompt,/允许分段，不是要求多发/)
+    assert.doesNotMatch(prompt,/优先分成两条|有前后两个接话点时分别发两条/)
     assert.match(prompt,/表情包已开启/)
     assert.match(prompt,/partner_chat_reply/)
     assert.match(prompt,/不每轮固定发/)

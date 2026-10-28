@@ -6,9 +6,9 @@ import { chatReplyFromEvent, type ChatReply } from './protocol.js'
 /** Project durable delivery metadata into the host's normal assistant renderer.
  * This is a view only: no synthetic assistant messages or history rewrites.
  */
-export function nativeChatBlocks(reply: ChatReply): Array<{kind:'text';text:string}> {
+export function nativeChatBlocks(reply: ChatReply, base = typeof document === 'undefined' ? undefined : document.baseURI): Array<{kind:'text';text:string}> {
   return reply.parts.map(part => ({kind:'text', text:part.type==='text' ? part.text
-    : `![${part.label.replace(/[\\\[\]]/g,'\\$&')}](${encodeURI(part.url).replace(/[()]/g,c=>`%${c.charCodeAt(0).toString(16)}`)})`}))
+    : `![${part.label.replace(/[\\\[\]]/g,'\\$&')}](${encodeURI(base ? new URL(part.url, base).href : part.url).replace(/[()]/g,c=>`%${c.charCodeAt(0).toString(16)}`)})`}))
 }
 export const chatReplyDefinition:ConversationNodeDefinition<ChatReply>={
   kind:'partner-chat-reply',target:'chat',

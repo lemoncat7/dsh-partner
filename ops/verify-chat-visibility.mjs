@@ -37,12 +37,11 @@ async function verify() {
       if (response?.status() === 200) {
         const snapshot = await response.json()
         assert.ok(Array.isArray(snapshot.companions))
-        await page.locator('.dsh-partner-sidebar-row, .dsh-partner-rail').first().click({timeout:30000})
-        await page.locator('.dsh-partner-roster-list button').filter({hasText:process.env.PARTNER_VERIFY_NAME||'莫殇'}).click({timeout:60000})
-        await page.getByRole('button',{name:'打开会话',exact:true}).click()
-        await page.waitForTimeout(7000)
+        const name=process.env.PARTNER_VERIFY_NAME||'莫殇'
+        await page.getByText(`伙伴 · ${name}`,{exact:true}).click({timeout:60000})
+        await page.getByText(process.env.PARTNER_VERIFY_SESSION_TITLE||'greeting',{exact:true}).click({timeout:60000})
         const replies=page.locator('[data-chat-node-key^="18:partner-chat-reply"]')
-        assert.ok(await replies.count()>0,'Open a companion with existing structured chat replies')
+        await replies.first().waitFor({state:'attached',timeout:60000})
         const rows=await replies.evaluateAll(nodes=>nodes.map(n=>({hidden:n.getAttribute('data-turn-process-hidden'),height:n.getBoundingClientRect().height})))
         assert.ok(rows.every(r=>r.hidden!=='true'&&r.height>0),'Replies must remain visible when native tool process is collapsed')
         assert.equal(await page.locator('.dsh-partner-chat-bubbles').count(),0)
@@ -59,7 +58,10 @@ async function verify() {
           await page.screenshot({path:`/tmp/partner-native-chat-${width}.png`})
         }
         const images=replies.locator('img')
-        if(await images.count())await page.waitForFunction(()=>[...document.querySelectorAll('[data-chat-node-key^="18:partner-chat-reply"] img')].every(i=>i.complete&&i.naturalWidth>0))
+        assert.ok(await images.count()>0,'Fixture history must include a rendered sticker, not an image fallback')
+        assert.equal(await replies.getByText(/图片无法预览/).count(),0)
+        for(const img of await images.all()) await img.scrollIntoViewIfNeeded()
+        await page.waitForFunction(()=>[...document.querySelectorAll('[data-chat-node-key^="18:partner-chat-reply"] img')].every(i=>i.complete&&i.naturalWidth>0))
         console.log(`Production conversation: ${rows.length} existing replies visible outside process folding; no messages sent.`)
         return
       }

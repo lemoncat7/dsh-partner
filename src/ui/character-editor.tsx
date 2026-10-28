@@ -1,4 +1,5 @@
 import { StickerLibraryDialog } from './sticker-library.js'
+import { RoleReference } from './role-reference.js'
 import { SettingsSections } from './settings-sections.js'
 import { useState, type ReactNode } from 'react'
 import { api, type CompanionView } from '../client-api.js'
@@ -75,6 +76,7 @@ function CharacterWizard({ companion, initial, close, complete }: { companion: C
 
 function RoleFields({ card, onChange }: { card: CharacterCard; onChange(card: CharacterCard): void }): JSX.Element {
   return <div className="dsh-partner-character-section">
+    <RoleReference />
     {card.roleText === undefined && roleTextForCard(card) && <p className="dsh-partner-character-hint">旧设定和对话示例已合并展示，内容完整保留。直接修改这份设定即可。</p>}
     <Field label="角色设定" hint="写清身份、相处关系和具体反应，普通文字或 Markdown 都可以。对话示例可直接写在末尾，不是必填。"><textarea rows={14} maxLength={48000} value={roleTextForCard(card)} onChange={e => onChange({ ...card, roleText: e.target.value })} /></Field>
   </div>
@@ -86,7 +88,7 @@ function ChatFields({ card, onChange, companionId }: { card: CharacterCard; comp
     <div className="dsh-partner-conversation-summary"><strong>像聊天一样接话</strong><p>先给直接反应，说到点上就停。可以不同意、不知道或开玩笑；不固定追问、不把闲聊改成建议清单。认真求助时照常查证和执行。</p></div>
     <div className="dsh-partner-fields two"><Field label="闲聊节奏" hint="只影响闲聊，解释和任务交付按实际需要展开。"><select value={card.length} onChange={e => onChange({ ...card, length: e.target.value as CharacterCard['length'] })}><option value="short">短句接话</option><option value="balanced">随话题自然调整</option><option value="rich">愿意展开聊</option></select></Field><label className="dsh-partner-character-check"><input type="checkbox" checked={card.narration} onChange={e => onChange({ ...card, narration: e.target.checked })} />允许少量动作描写</label></div>
     <div className="dsh-partner-chat-options">
-      <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>分段回复</strong><small>需要时分成几条短消息，长文和代码保持完整。不会刻意等待。</small></span></label>
+      <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>允许分段回复</strong><small>默认一句说完就停。确有新内容才另发一条，不凑条数、不刻意等待；长文和代码保持完整。</small></span></label>
       <label><input type="checkbox" checked={card.stickersEnabled===true} onChange={e=>onChange({...card,stickersEnabled:e.target.checked})}/><span><strong>表情包</strong><small>根据语境从表情库选图，作为单独消息发送。不支持表情的渠道会显示图片。</small></span></label>
       <button type="button" onClick={()=>setLibrary(true)}>管理表情库</button>
     </div>
@@ -102,7 +104,7 @@ function LoreFields({ card, onChange }: { card: CharacterCard; onChange(card: Ch
       <Field label="条目标题"><input maxLength={100} value={entry.title} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, title: e.target.value } : x) })} /></Field>
       <Field label="触发词" hint="最多 8 个，用逗号分隔。"><input value={entry.keywords.join('，')} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, keywords: e.target.value.split(/[,，]/).map(t => t.trim()) } : x) })} /></Field>
       <Field label="设定内容"><textarea rows={3} maxLength={2000} value={entry.content} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, content: e.target.value } : x) })} /></Field>
-      <div className="dsh-partner-character-row"><label><input type="checkbox" checked={entry.enabled} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, enabled: e.target.checked } : x) })} />启用条目</label><button type="button" onClick={() => onChange({ ...card, lore: card.lore.filter((_, i) => i !== index) })}>移除条目</button></div>
+      <div className="dsh-partner-character-row"><label className="dsh-partner-character-check"><input type="checkbox" checked={entry.enabled} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, enabled: e.target.checked } : x) })} /><span>启用条目</span></label><button type="button" onClick={() => onChange({ ...card, lore: card.lore.filter((_, i) => i !== index) })}>移除条目</button></div>
     </ContentDisclosure>)}<button type="button" disabled={card.lore.length >= 40} onClick={() => onChange({ ...card, lore: [...card.lore, { id: crypto.randomUUID(), title: '', keywords: [], content: '', enabled: true }] })}>添加世界条目</button>
   </div>
 }

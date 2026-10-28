@@ -99,6 +99,7 @@ test('chat metadata projects into the native assistant renderer without register
   assert.equal(blocks[0].text,'你可算来了')
   assert.equal(blocks[1].text,'![开心](/partner-local/v1/attachments/test)')
   assert.equal(blocks[2].text,'还以为今天不来了')
+  assert.equal(nativeChatBlocks(meta,'https://chat.example.test/')[1].text,'![开心](https://chat.example.test/partner-local/v1/attachments/test)')
   assert.doesNotMatch(JSON.stringify(blocks),/snapshot\/image/)
   assert.equal(definition.match({...result,data:{...result.data,message:{isError:true}}}),null)
 })
@@ -180,6 +181,8 @@ test('mixed provider speech belongs only to its exact terminal call, never reaso
   assert.deepEqual(withChatCompanionText(input,[start,user,mixed],'chat-1'),input)
   const explicit=[{text:'来了，给你留着呢。'},...input]
   assert.deepEqual(withChatCompanionText(explicit,events,'chat-1'),explicit)
+  const final=[{text:'另一句最终回复'},...input]
+  assert.deepEqual(withChatCompanionText(final,events,'chat-1'),final)
   const split=[{text:'来了，'},{text:'给你留着呢。'},...input]
   assert.deepEqual(withChatCompanionText(split,events,'chat-1'),split)
 })

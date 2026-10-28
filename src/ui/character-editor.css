@@ -24,8 +24,8 @@
 .dsh-partner-trial-exchange { border-bottom: 1px solid var(--partner-border); padding: 10px 0; }
 .dsh-partner-trial-exchange p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .dsh-partner-trial-exchange b { display: block; font-size: 12px; margin-bottom: 5px; }
-.dsh-partner-character-check { display: flex; align-items: center; gap: 10px; }
-.dsh-partner-character input[type=checkbox], .dsh-partner-character-dialog input[type=checkbox] { width: 18px; min-height: 18px; appearance: auto; }
+.dsh-partner-character .dsh-partner-character-check, .dsh-partner-character-dialog .dsh-partner-character-check { display: inline-flex; flex-direction: row; align-items: center; gap: 12px; min-height: 44px; margin: 0; padding: 4px 0; cursor: pointer; }
+.dsh-partner-character input[type=checkbox], .dsh-partner-character-dialog input[type=checkbox] { flex: 0 0 18px; width: 18px; height: 18px; min-height: 18px; margin: 0; padding: 0; appearance: auto; }
 .dsh-partner-character-dialog :is(textarea, input:not([type=checkbox]), select), .dsh-partner-character select { box-sizing: border-box; width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid var(--partner-border); border-radius: 10px; font: inherit; line-height: 1.5; color: var(--partner-text); background: var(--partner-control); }
 .dsh-partner-character-dialog textarea { resize: vertical; }
 .dsh-partner-stepper-track { position: relative; display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--partner-control); }
@@ -110,3 +110,15 @@
 .dsh-partner-sticker-grid small { color: var(--partner-text-secondary); margin: 6px 0 10px; line-height: 1.5; }
 .dsh-partner-sticker-upload { border-top: 1px solid var(--partner-border); padding-top: 20px; }
 .dsh-partner-sticker-upload summary { cursor: pointer; min-height: 44px; font-weight: 600; }
+.dsh-partner-role-reference-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding-block: 8px 16px; }
+.dsh-partner-role-reference-entry > span { flex: 1 1 240px; line-height: 1.6; color: var(--partner-text-secondary); }
+.dsh-partner-role-reference-guide h4 { margin: 24px 0 8px; font-size: 15px; }
+.dsh-partner-role-reference-guide h4:first-child { margin-top: 0; }
+.dsh-partner-role-reference-original { border-block: 1px solid var(--partner-border); padding: 12px 0; margin: 20px 0; }
+.dsh-partner-role-reference-original summary, .dsh-partner-sticker-source summary { min-height: 44px; padding: 10px 0; box-sizing: border-box; cursor: pointer; font-weight: 600; }
+.dsh-partner-role-reference-original pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; padding: 16px; background: var(--partner-control); border-radius: 10px; font: 13px/1.8 var(--partner-font-family); }
+.dsh-partner-sticker-source { padding: 0 0 16px; margin-bottom: 20px; border-bottom: 1px solid var(--partner-border); }
+.dsh-partner-sticker-upload + .dsh-partner-sticker-upload { margin-top: 24px; }
+.dsh-partner-sticker-import-preview { max-height: 240px; overflow: auto; padding: 0; margin: 16px 0; list-style: none; }
+.dsh-partner-sticker-import-preview li { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 0; border-bottom: 1px solid var(--partner-border); overflow-wrap: anywhere; }
+.dsh-partner-sticker-import-preview span { color: var(--partner-text-secondary); }
