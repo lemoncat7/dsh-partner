@@ -29,8 +29,9 @@ trap rollback ERR
 docker stop -t 90 "$container" >/dev/null
 helper install
 docker start "$container" >/dev/null
-for attempt in $(seq 1 120); do
-  if test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy && curl --noproxy '*' -fsS --max-time 3 http://127.0.0.1:3080/partner-local/v1 >/dev/null; then
+ready_deadline=$((SECONDS + 600))
+while (( SECONDS < ready_deadline )); do
+  if test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy && curl --noproxy '*' -fsS --max-time 10 http://127.0.0.1:3080/partner-local/v1 >/dev/null; then
     docker exec -u node "$container" node --input-type=module -e '
       import assert from "node:assert/strict";
       import {readFile} from "node:fs/promises";
