@@ -48,8 +48,8 @@
   background-repeat: no-repeat !important;
   background-position: right 12px center !important;
 }
-.dsh-partner-workspace #dsh-partner-identity-editor button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close),
-.dsh-partner-workspace #dsh-partner-channels button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close) {
+.dsh-partner-workspace #dsh-partner-identity-editor button:where(:not(.dsh-partner-switch):not(.dsh-partner-dialog-close)),
+.dsh-partner-workspace #dsh-partner-channels button:where(:not(.dsh-partner-switch):not(.dsh-partner-dialog-close)) {
   appearance: none !important;
   display: inline-flex;
   align-items: center;
@@ -121,8 +121,8 @@
   font: var(--partner-font-body)/1.5 var(--partner-font-family) !important;
 }
 @media (max-width: 640px) {
-  .dsh-partner-workspace #dsh-partner-channels button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close),
-  .dsh-partner-workspace #dsh-partner-identity-editor button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close) { min-height: 44px; }
+  .dsh-partner-workspace #dsh-partner-channels button:where(:not(.dsh-partner-switch):not(.dsh-partner-dialog-close)),
+  .dsh-partner-workspace #dsh-partner-identity-editor button:where(:not(.dsh-partner-switch):not(.dsh-partner-dialog-close)) { min-height: 44px; }
   .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog { border-radius: var(--partner-radius-dialog, 22px) !important; border-width: 1px !important; }
   .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-toolbar { align-items: flex-start; flex-wrap: wrap; }
 }
