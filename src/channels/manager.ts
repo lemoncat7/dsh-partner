@@ -1,3 +1,4 @@
+import { isIdleContactNotice, idleContactRouteAllowed, idleContactQuiet, lastIdleContactUser } from '../character/idle-contact.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
@@ -260,6 +261,25 @@ export class ChannelManager {
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
+    // Idle greetings have an explicit route; don't broadcast through notification preferences.
+    if (event.type === 'turn/end' && event.data.reason.kind === 'completed') {
+      const events=completedTurnEvents(session.snapshotEvents(),event)
+      const notice=events.find(isIdleContactNotice)
+      if(notice?.type==='user/message') {
+        const route=this.store.snapshot().sessions.find(r=>r.sessionId===session.id && r.idleContactState?.messageId===notice.data.id)
+        if(!route)return
+        const valid=()=>{
+          const state=this.store.snapshot(), companion=state.companions.find(c=>c.id===route.companionId)
+          const current=state.sessions.find(r=>r.id===route.id), claim=current?.idleContactState
+          return Boolean(companion?.idleContact?.enabled && companion.idleContact.routeId===route.id && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !idleContactQuiet(companion.idleContact,Date.now(),claim.timeZone) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
+        }
+        if(route.kind==='channel' && valid()) {
+          const parts=channelReplyPartsAfter(events,0,true)
+          if(parts.text||parts.chatParts?.length) await this.queueProactive(route,`idle:${notice.data.id}`,await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId)),valid,true)
+        }
+        return
+      }
+    }
     const route = this.routeForSession(session.id)
     if (route === undefined || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const concernNotice = concernCreatedNoticeFromEvent(event)

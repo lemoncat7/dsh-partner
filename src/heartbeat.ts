@@ -97,10 +97,18 @@ export class HeartbeatScheduler {
     this.timer.unref?.()
   }
 
+  private startIdleContact(companion: Companion): void {
+    if (this.closed || !companion.idleContact?.enabled || this.running.has(companion.id)) return
+    this.running.add(companion.id)
+    void this.agents.idleContact(companion.id, this.timeZone)
+      .catch(error => this.ctx.logger.warn(`闲时联系未完成：${message(error)}`))
+      .finally(() => this.running.delete(companion.id))
+  }
+
   private async tick(): Promise<void> {
     const now = Date.now()
     for (const companion of this.store.snapshot().companions) {
-      if (!companion.automation.heartbeat.enabled) continue
+      if (!companion.automation.heartbeat.enabled) { this.startIdleContact(companion); continue }
       if(!this.running.has(companion.id)) await this.executionDispatcher?.(companion.id).catch(error=>this.ctx.logger.warn(`关注后续任务调度失败：${message(error)}`))
       if(!this.running.has(companion.id) && await this.concerns.pendingRecording(companion.id,now)) {
         void this.trigger(companion.id,{recordingOnly:true}).catch(error=>this.ctx.logger.warn(`记录同步未完成：${message(error)}`))
@@ -112,7 +120,7 @@ export class HeartbeatScheduler {
         continue
       }
       const state = stored
-      if (state.nextCheckAt > now) continue
+      if (state.nextCheckAt > now) { this.startIdleContact(companion); continue }
       void this.trigger(companion.id).catch(error => this.ctx.logger.warn(`dsh-partner heartbeat for ${companion.id} failed: ${message(error)}`))
     }
   }

@@ -1,3 +1,4 @@
+import { isIdleContactNotice } from '../character/idle-contact.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
@@ -36,7 +37,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       return {content:[{type:'text',text:JSON.stringify(item)},{type:'image',attachment}]}
     },
   },{
-    name:'partner_chat_reply',description:`提交本轮最终聊天回复并结束回合。messages 是按顺序展示/发送的 1–8 条消息，每条只含 text 或 stickerId；默认一条文字就够，只有独立的新内容才追加；开启分段不要求发两条，最多两张库内表情。先完成所有必要工作，再调用本工具；不要同时安排其他工具，所有要说的文字都放在 messages 的 text 条目中，表情放在独立的 stickerId 条目；不要把文字放在工具外、只在 messages 里提交表情。不在调用前后重复相同文字。无需分段的长文/代码可用普通最终回复。仅适用于直接对话，不用于内部任务或心跳。内置表情：${BUILTIN_STICKERS.map(s=>`${s.id}（${s.name}：${s.tags.join('、')}）`).join('；')}。开启表情后可直接按 ID 使用；其他表情先用 partner_stickers 查找。`,
+    name:'partner_chat_reply',description:`提交本轮最终聊天回复并结束回合。messages 是按顺序展示/发送的 1–8 条消息，每条只含 text 或 stickerId；默认一条文字就够，只有独立的新内容才追加；开启分段不要求发两条，最多两张库内表情。先完成所有必要工作，再调用本工具；不要同时安排其他工具，所有要说的文字都放在 messages 的 text 条目中，表情放在独立的 stickerId 条目；不要把文字放在工具外、只在 messages 里提交表情。不在调用前后重复相同文字。无需分段的长文/代码可用普通最终回复。适用于直接对话或系统明确发起的闲时联系，不用于内部任务或心跳。内置表情：${BUILTIN_STICKERS.slice(0,6).map(s=>`${s.id}（${s.name}：${s.tags.join('、')}）`).join('；')}。开启表情后可直接按 ID 使用；其他表情先用 partner_stickers 查找。`,
     parameters:{type:'object',properties:{messages:{type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{text:{type:'string',maxLength:6000},stickerId:{type:'string'}},additionalProperties:false}}},required:['messages'],additionalProperties:false},
     output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:(value as unknown as {parts:ChatPart[]}).parts.map(p=>p.type==='text'?p.text:`[表情：${p.label}]`).join('\n\n')}],presentationMeta:(_args,value)=>value},
     presentCall:()=>({card:'generic',title:'回复'}),
@@ -51,7 +52,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       if(!route)throw new Error('不能跨伙伴提交回复')
       const events=agent.session.snapshotEvents()
       const currentStart=[...events].reverse().find(e=>e.type==='turn/start')?.seq??0
-      const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)))
+      const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))
       if(!origin||isInternalTaskNotice(origin))throw new Error('内部任务或自动执行不能用聊天回复结束；请按原任务协议交付')
       const parts:ChatPart[]=[]
       for(const p of input){

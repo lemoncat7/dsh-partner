@@ -1,0 +1,109 @@
+{
+  "author": "Volpeon",
+  "license": "Apache-2.0",
+  "page": "https://volpeon.ink/emojis/blobfox/",
+  "download": "https://strapi.volpeon.ink/uploads/blobfox_1703c01b78.zip",
+  "sha256": "6fe992c847558d795d5bf51025a5b2d9c9f4685fcd01dfd1051a16fcad2fd9b6",
+  "files": [
+    {
+      "id": "builtin-happy",
+      "file": "blobfoxhappy.png",
+      "sha256": "f5782a92f22f1849a52c4e2ef6617629e523b1ca1ce228f9028c9a1d0c6ab668"
+    },
+    {
+      "id": "builtin-grumpy",
+      "file": "blobfoxangry.png",
+      "sha256": "65e318330cc715887548d48e9c0ccd641ec8031db89f0fb5e8422cd7c2889af7"
+    },
+    {
+      "id": "builtin-surprise",
+      "file": "blobfox0_0.png",
+      "sha256": "e3a626fd97f3b9e14d0ca9f9dcdb19027bf0e3a528e6f9893640aa2e811b19d2"
+    },
+    {
+      "id": "builtin-tired",
+      "file": "blobfoxsleep.png",
+      "sha256": "bd0ccd7358150e086e9729765df90b12d0020db1ae127a8349bc60e1a607dc48"
+    },
+    {
+      "id": "builtin-care",
+      "file": "blobfoxcatsnuggle.png",
+      "sha256": "1bd273275c628fc8746202a93d37c9d9afe333118b53acabc50c29eaafd00bdb"
+    },
+    {
+      "id": "builtin-skeptic",
+      "file": "blobfoxglare.png",
+      "sha256": "b39df46c2e7852f7f41d9528e92ab7e82220adc601b511f91be14421e469dd9f"
+    },
+    {
+      "id": "builtin-fox-blush",
+      "file": "blobfoxblush.png",
+      "sha256": "35c8a772b5c8a7c394c82ea3f018643217a675d2538cd437f04724b8939f35b6"
+    },
+    {
+      "id": "builtin-fox-smug",
+      "file": "blobfoxcomfysmug.png",
+      "sha256": "e38d63ffb9c873028ff4665ab74304499e81af2ceb6fafaac3180c94c6c96f22"
+    },
+    {
+      "id": "builtin-fox-laugh",
+      "file": "blobfoxcrylaugh.png",
+      "sha256": "6f6c8d1830547995d16717024b5bcc692034dd4c01deae973704fc238f49d876"
+    },
+    {
+      "id": "builtin-fox-cry",
+      "file": "blobfoxcry.png",
+      "sha256": "ae33dc88f4f2f5070199e9f1b53d35cc49cdad8c856b66945747350e603a65ad"
+    },
+    {
+      "id": "builtin-fox-think",
+      "file": "blobfoxthinking.png",
+      "sha256": "e9d46cc4a906441332bcde661027ffa372ae42f035505f20c76d29813fda12db"
+    },
+    {
+      "id": "builtin-fox-facepalm",
+      "file": "blobfoxfacepalm.png",
+      "sha256": "da1890fb51381813e3154ab46fe702b09c2673b8f1e907134a3c1e2e52f90390"
+    },
+    {
+      "id": "builtin-fox-peek",
+      "file": "blobfoxlurk.png",
+      "sha256": "d156fe509170c86efb14c86d7eda8e9a4fc0f9ec38c4c1fa4a98aa15f299a8c8"
+    },
+    {
+      "id": "builtin-fox-heart",
+      "file": "blobfoxheartcute.png",
+      "sha256": "89f4da224afc99120a6204220d95f0905cd571841459b8f4effdb70d19e23b7c"
+    },
+    {
+      "id": "builtin-fox-cheer",
+      "file": "blobfoxcheer.png",
+      "sha256": "8ac7dafdf4826e62f540ae1ba364dde68b88ae2b6d55e391b6a45dbe7fcff6fa"
+    },
+    {
+      "id": "builtin-fox-boop",
+      "file": "blobfoxboop.png",
+      "sha256": "925c0f122b706aead38a2b5080f2e2c2b9384da17e1b402f0a1fae8d3ebdb27f"
+    },
+    {
+      "id": "builtin-fox-coffee",
+      "file": "blobfoxcofe.png",
+      "sha256": "09cc197b3d6f969fd5b33b9691a935f9a41aad4c6b35eadcff89204d6e6491d3"
+    },
+    {
+      "id": "builtin-fox-cookie",
+      "file": "blobfoxnomcookie.png",
+      "sha256": "fe481da46c79dc67bde3c06aae4e659ed68af4967c7c5c20ab679ab1da4d6715"
+    },
+    {
+      "id": "builtin-fox-comfy",
+      "file": "blobfoxcomfy.png",
+      "sha256": "486307ad309a711a42b14f99cd7326678fb59568ef2e2e93fc77f8b06dbd3d1b"
+    },
+    {
+      "id": "builtin-fox-flower",
+      "file": "blobfoxflower.png",
+      "sha256": "b9de5b54b41c9381c20fbfbaac8ae0e6c4f08aacdcb3987ac96811ecb6186e5c"
+    }
+  ]
+}

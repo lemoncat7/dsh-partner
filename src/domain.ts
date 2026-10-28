@@ -1,3 +1,4 @@
+import { normalizeIdleContact } from './character/idle-contact.js'
 import { normalizeCharacterCard, type CharacterCard } from './character/domain.js'
 import type { CompanionSkillBinding, PartnerSkill, SkillMarketSource } from './skills/domain.js'
 import type { BoardTask, TaskActivity } from './tasks/domain.js'
@@ -11,6 +12,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
   notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }
   id: string
@@ -90,6 +92,7 @@ export interface PairingRequest {
 }
 
 export interface ChannelSession {
+  idleContactState?: import('./character/idle-contact.js').IdleContactState
   id: string
   /** Local DSH conversation or a channel-backed contact conversation. */
   kind: 'local' | 'channel'
@@ -144,6 +147,7 @@ export interface CompanionAccessGrant {
 }
 
 export interface CompanionDraft {
+  idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
   name: string
   role: string
@@ -223,6 +227,7 @@ export function normalizeCompanionDraft(value: unknown): CompanionDraft {
     ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCompanionCapability)
     : []
   const draft: CompanionDraft = {
+    ...(input.idleContact === undefined ? {} : { idleContact: normalizeIdleContact(input.idleContact) }),
     ...(input.characterCard === undefined ? {} : { characterCard: normalizeCharacterCard(input.characterCard) }),
     name: text(input.name, 'name', 60),
     role: optionalText(input.role, 'role', 120) ?? '长期 AI 工作伙伴',

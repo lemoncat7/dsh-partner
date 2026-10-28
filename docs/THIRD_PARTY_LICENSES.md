@@ -352,3 +352,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Blobfox chat stickers — Volpeon
+
+20 unmodified PNGs from the author's official [Blobfox collection](https://volpeon.ink/emojis/blobfox/), licensed **Apache-2.0** on that page. Author: **Volpeon**. Download: https://strapi.volpeon.ink/uploads/blobfox_1703c01b78.zip. Retrieved 2026-10-28.
+
+Chinese display names and search tags were added by this plugin; image bytes are unchanged. See [the bundled license](licenses/Apache-2.0.txt) and [archive/file SHA-256 provenance](blobfox-manifest.json). `ops/import-blobfox-stickers.py` reproduces the selected assets from the pinned archive. The pack includes `meta.json` and PNGs; no separate NOTICE file is present. Images are bundled locally, with no hotlinking or runtime third-party fetches. Existing six builtin IDs remain valid.
