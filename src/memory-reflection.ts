@@ -1,3 +1,4 @@
+import { normalizeCharacterState } from './character/domain.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -97,7 +98,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
-        system: DAILY_REVIEW_SYSTEM, temperature: 0.05, maxTokens: 3000, signal: controller.signal,
+        system: DAILY_REVIEW_SYSTEM + '\ncharacterEnabled=true 的轮次可能含角色扮演。虚构身份、剧情与称呼不是现实用户事实，不能据此生成用户画像、现实关系、挂念；剧情只在日记中明确标为虚构。', temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`每日记忆终审失败：${memoryFinishError(chunk.reason)}`)
@@ -115,6 +116,7 @@ export class MemoryReflectionService {
 
   private async extract(companion: Companion, turn: ConversationTurn, repair = false): Promise<ReflectionResult> {
     const existing = await this.store.candidateMemories(companion.id, turn.scopeId, turn.user)
+    const story = turn.characterEnabled && !repair ? await this.store.characterState(companion.id, turn.scopeId) : undefined
     const diaries = await this.store.recentReflectionsForScope(companion.id, turn.scopeId, 1)
     const concerns = await this.concerns.list(companion.id, turn.concernScopeId ?? turn.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
@@ -128,7 +130,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
-        system: REFLECTION_SYSTEM + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
+        system: REFLECTION_SYSTEM + (story ? '\n此轮启用了角色扮演。虚构设定、角色称呼、剧情与角色关系只能进入 characterState，不得写入真实用户 memories 或 concerns。额外输出 characterState:{scene,relationship,facts:[],events:[],pins:[]}，承接已有状态，仅更新本轮明确发生的剧情，不推测好感或亲密程度；保留仍有效事实，pins 不输出。已有状态：' + JSON.stringify(story) : '') + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
         temperature: 0.1,
         maxTokens: 1800,
         signal: controller.signal,
@@ -141,6 +143,7 @@ export class MemoryReflectionService {
       throw new Error(`记忆提炼失败：${cause}；耗时${Math.round((Date.now()-startedAt)/1000)}秒，正文${output.length}字`)
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseReflection(output, true)
+    if (!story) delete result.characterState
     result.memories = requireGroundedMemories(result.memories, [turn])
     return result
   }
@@ -238,6 +241,7 @@ export function parseReflection(raw: string, strict = false): ReflectionResult {
     },
     memories,
     concerns,
+    ...(value.characterState === undefined ? {} : { characterState: normalizeCharacterState(value.characterState) }),
   }
 }
 

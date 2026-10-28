@@ -1,3 +1,6 @@
+import { initializeHistorySearch, indexHistoryTurn, searchHistory } from './history-search.js'
+import { initializeCharacterState, readCharacterState, saveCharacterState, applyCharacterState } from './character/store.js'
+import type { CharacterState } from './character/domain.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -16,7 +19,7 @@ import { rankMemories, memoryRelevance, memoryTerms } from './memory-retrieval.j
 import { initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
-type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[] }
+type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[]; characterState?: CharacterState }
 export interface LegacyHeartbeatFocus { scopeId: string; subject: string; reason: string; confidence: number }
 type SqlRow = Record<string, unknown>
 
@@ -28,6 +31,47 @@ export class PartnerMemoryStore {
   async freeze(): Promise<void> { this.frozen = true; await Promise.allSettled(this.writes.values()) }
 
   day(at: number): string { return localDay(at, this.timeZone) }
+
+  async characterState(companionId: string, scopeId: string): Promise<CharacterState> {
+    return this.journal(companionId, db => readCharacterState(db, scopeId))
+  }
+  async saveCharacterState(companionId: string, scopeId: string, value: unknown, expectedAt: number): Promise<CharacterState> {
+    return this.journal(companionId, db => saveCharacterState(db, scopeId, value, expectedAt))
+  }
+  async searchHistory(companionId: string, scopeId: string, query: string, limit = 6) {
+    return this.journal(companionId, db => searchHistory(db, scopeId, query, limit))
+  }
+  async unarchivedContext(companionId: string, scopeId: string, messages: Array<{id: string; text: string}>): Promise<string[]> {
+    return this.journal(companionId, db => {
+      const turns = db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=?').all(scopeId).map(r => JSON.parse(String(r.turn_json)) as ConversationTurn)
+      const ids = new Set(turns.flatMap(t => t.userMessageIds ?? []))
+      const legacy = new Set(turns.filter(t => !t.userMessageIds).map(t => t.user.trim()))
+      return messages.filter(m => !ids.has(m.id) && !legacy.has(m.text.trim())).map(m => m.id)
+    })
+  }
+  async coversContext(companionId: string, scopeId: string, messages: Array<{id: string; text: string}>): Promise<boolean> {
+    return this.journal(companionId, db => {
+      const turns = db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND done=1').all(scopeId).map(r => JSON.parse(String(r.turn_json)) as ConversationTurn)
+      const ids = new Set(turns.flatMap(t => t.userMessageIds ?? []))
+      const legacy = new Set(turns.filter(t => !t.userMessageIds).map(t => t.user.trim()))
+      return messages.every(m => ids.has(m.id) || legacy.has(m.text.trim()))
+    })
+  }
+  async renewalStatus(companionId: string) {
+    return this.journal(companionId, db => db.prepare('SELECT session_id AS sessionId, day, at, removed FROM context_renewals ORDER BY at DESC').all())
+  }
+  async renewalReady(companionId: string, scopeId: string, sessionId: string, day: string, learning = true): Promise<boolean> {
+    return this.journal(companionId, db => {
+      if (db.prepare('SELECT 1 FROM context_renewals WHERE session_id=? AND day>=?').get(sessionId, day)) return false
+      if (!learning) return true
+      if (db.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND done=0').get(scopeId)) return false
+      if (db.prepare('SELECT 1 FROM daily_reflections WHERE scope_id=? AND reviewed_at IS NULL').get(scopeId)) return false
+      return !db.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=?').get(scopeId) || Boolean(db.prepare('SELECT 1 FROM daily_reflections WHERE scope_id=? AND reviewed_at IS NOT NULL AND date<=?').get(scopeId, day))
+    })
+  }
+  async markRenewed(companionId: string, sessionId: string, day: string, removed: number): Promise<void> {
+    await this.journal(companionId, db => { db.prepare('INSERT INTO context_renewals VALUES (?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET day=excluded.day, at=excluded.at, removed=excluded.removed').run(sessionId, day, Date.now(), removed) })
+  }
 
   async claimPersona(companionId: string, scopeId: string): Promise<PersonaJob | undefined> {
     return this.journal(companionId, db => claimPersona(db, companionId, scopeId))
@@ -73,7 +117,7 @@ export class PartnerMemoryStore {
   }
 
   async enqueue(turn: ConversationTurn): Promise<void> {
-    await this.journal(turn.companionId, db => enqueueMemoryJob(db, turn))
+    await this.journal(turn.companionId, db => { enqueueMemoryJob(db, turn); indexHistoryTurn(db, turn) })
   }
 
   async hasPendingTurns(companionId: string, scopeId: string): Promise<boolean> {
@@ -180,11 +224,12 @@ export class PartnerMemoryStore {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(scope_id, date) DO UPDATE SET summary=excluded.summary, events_json=excluded.events_json,
           open_tasks_json=excluded.open_tasks_json, completed_tasks_json=excluded.completed_tasks_json,
-          learnings_json=excluded.learnings_json, updated_at=excluded.updated_at, turn_count=excluded.turn_count`).run(
+          learnings_json=excluded.learnings_json, updated_at=excluded.updated_at, turn_count=excluded.turn_count, reviewed_at=NULL, next_review_at=0`).run(
           date, turn.companionId, turn.scopeId, compact(result.daily.summary, 1200), json(strings(result.daily.events, 20, 240)),
           json(strings(result.daily.openTasks, 20, 240)), json(strings(result.daily.completedTasks, 20, 240)),
           json(strings(result.daily.learnings, 20, 240)), Date.now(), number(previous?.turn_count) + 1,
         )
+        if (result.characterState) applyCharacterState(database, turn.scopeId, result.characterState, turn.at, turn.id)
         if (job) database.prepare('UPDATE memory_jobs SET committed=1 WHERE id=?').run(turn.id)
         database.exec('COMMIT')
       } catch (error) { rollback(database); throw error } finally { database.close() }
@@ -216,13 +261,7 @@ export class PartnerMemoryStore {
       const terms = memoryTerms(query)
       const scenes = readScenes(database, scopeId, memories).filter(scene =>
         memoryRelevance({ subject: scene.title, content: scene.summary }, terms) > 0).slice(0, 2)
-      const history = (database.prepare(`SELECT id, at, substr(json_extract(turn_json, '$.user'), 1, 4000) AS user,
-        substr(json_extract(turn_json, '$.assistant'), 1, 700) AS assistant
-        FROM memory_jobs WHERE scope_id=? ORDER BY at DESC LIMIT 100`).all(scopeId))
-        .map(row => ({ id: String(row.id), at: Number(row.at), user: String(row.user), assistant: String(row.assistant) }))
-        .map(turn => ({ turn, score: memoryRelevance({ subject: '', content: turn.user }, terms) }))
-        .filter(item => item.score >= .2).sort((a, b) => b.score - a.score || b.turn.at - a.turn.at).slice(0, 2)
-        .map(({ turn }) => ({ id: turn.id, at: turn.at, user: compact(turn.user, 500), assistant: compact(turn.assistant, 700) }))
+      const history = searchHistory(database, scopeId, query, 3)
       return { profile, ...recall, scenes, history }
     } finally { database.close() }
   }
@@ -495,6 +534,8 @@ export class PartnerMemoryStore {
     ensureColumn(database, 'daily_reflections', 'review_error', 'TEXT')
     ensureColumn(database, 'daily_reflections', 'next_review_at', 'INTEGER NOT NULL DEFAULT 0')
     initializeMemoryJournal(database)
+    initializeCharacterState(database)
+    initializeHistorySearch(database)
     initializeMemoryArtifacts(database)
     initializePersona(database)
     return database
@@ -557,7 +598,7 @@ export class PartnerMemoryStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(scope_id, date) DO UPDATE SET summary=excluded.summary, events_json=excluded.events_json,
       open_tasks_json=excluded.open_tasks_json, completed_tasks_json=excluded.completed_tasks_json,
-      learnings_json=excluded.learnings_json, updated_at=excluded.updated_at, turn_count=excluded.turn_count`).run(
+      learnings_json=excluded.learnings_json, updated_at=excluded.updated_at, turn_count=excluded.turn_count, reviewed_at=NULL, next_review_at=0`).run(
       reflection.date, reflection.companionId, reflection.scopeId, reflection.summary, json(reflection.events),
       json(reflection.openTasks), json(reflection.completedTasks), json(reflection.learnings), reflection.updatedAt, reflection.turnCount,
     )

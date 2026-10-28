@@ -1,3 +1,4 @@
+import { normalizeCharacterCard, type CharacterCard } from './character/domain.js'
 import type { CompanionSkillBinding, PartnerSkill, SkillMarketSource } from './skills/domain.js'
 import type { BoardTask, TaskActivity } from './tasks/domain.js'
 import type { BoardRequirement } from './requirements/domain.js'
@@ -10,6 +11,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  characterCard?: CharacterCard
   notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }
   id: string
   name: string
@@ -31,6 +33,8 @@ export interface CompanionAutomation {
     retentionDays: number
     provider?: string
     model?: string
+    contextRenewalEnabled?: boolean
+    contextRenewalHour?: number
     dailyReviewEnabled: boolean
     dailyReviewHour: number
   }
@@ -140,6 +144,7 @@ export interface CompanionAccessGrant {
 }
 
 export interface CompanionDraft {
+  characterCard?: CharacterCard
   name: string
   role: string
   description: string
@@ -151,7 +156,7 @@ export interface CompanionDraft {
 }
 
 export const DEFAULT_AUTOMATION: CompanionAutomation = {
-  memory: { enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
+  memory: { contextRenewalHour: 4, contextRenewalEnabled: true, enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
   heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 },
 }
 
@@ -163,6 +168,8 @@ export function normalizeAutomation(value: unknown): CompanionAutomation {
     memory: {
       enabled: boolean(memory.enabled, 'memory.enabled'),
       retentionDays: retentionDays(memory.retentionDays),
+      contextRenewalHour: integer(memory.contextRenewalHour ?? 4, 'memory.contextRenewalHour', 0, 23),
+      contextRenewalEnabled: boolean(memory.contextRenewalEnabled ?? true, 'memory.contextRenewalEnabled'),
       dailyReviewEnabled: boolean(memory.dailyReviewEnabled ?? true, 'memory.dailyReviewEnabled'),
       dailyReviewHour: integer(memory.dailyReviewHour ?? 2, 'memory.dailyReviewHour', 0, 23),
       ...optionalRoute(memory),
@@ -216,6 +223,7 @@ export function normalizeCompanionDraft(value: unknown): CompanionDraft {
     ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCompanionCapability)
     : []
   const draft: CompanionDraft = {
+    ...(input.characterCard === undefined ? {} : { characterCard: normalizeCharacterCard(input.characterCard) }),
     name: text(input.name, 'name', 60),
     role: optionalText(input.role, 'role', 120) ?? '长期 AI 工作伙伴',
     description: optionalText(input.description, 'description', 500) ?? '',

@@ -1,3 +1,4 @@
+import { previewCharacter } from './character/preview.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { conversationMemoryScope } from './memory-scope.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -170,13 +171,36 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const route = await runtime.agents.createLocalSession(id)
       return sendJson(res, 201, { routeId: route.id, sessionId: route.sessionId })
     }
+    if (id && segments[2] === 'character' && segments.length === 4) {
+      const companion = requiredCompanion(runtime.store, id)
+      if (segments[3] === 'preview' && method === 'POST') {
+        mutation(req)
+        return sendJson(res, 200, await previewCharacter(runtime.ctx, companion, await readObject(req)))
+      }
+      if (segments[3] === 'state') {
+        const routes = runtime.store.snapshot().sessions.filter(r => r.companionId === id)
+        const scopeId = url.searchParams.get('scopeId') ?? (routes[0] ? conversationMemoryScope(routes.find(r => r.kind === 'local') ?? routes[0], routes) : '')
+        const scopes = [...new Set(routes.map(r => conversationMemoryScope(r, routes)))]
+        if (!scopeId || !scopes.includes(scopeId)) throw httpError(400, '请选择本伙伴的会话')
+        if (method === 'GET') return sendJson(res, 200, { state: await runtime.memory.characterState(id, scopeId), scopeId, scopes })
+        if (method === 'PUT') {
+          mutation(req); const body = await readObject(req)
+          if (typeof body.expectedAt !== 'number') throw httpError(400, '缺少角色记忆版本，请刷新')
+          return sendJson(res, 200, { state: await runtime.memory.saveCharacterState(id, scopeId, body.state, body.expectedAt), scopeId, scopes })
+        }
+      }
+    }
+    if (id && segments[2] === 'memory' && segments[3] === 'renewal' && segments.length === 4 && method === 'GET') {
+      requiredCompanion(runtime.store, id)
+      return sendJson(res, 200, { items: await runtime.memory.renewalStatus(id), status: runtime.dailyReview.renewalStatus(id) })
+    }
     if (id !== undefined && method === 'PUT' && segments.length === 2) {
       mutation(req)
       const draft = normalizeCompanionDraft((await readObject(req)).companion)
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })
       const next = saved.companions.find(item => item.id === id)!

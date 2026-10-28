@@ -5,6 +5,8 @@ export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relation
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
 
 export interface ConversationTurn {
+  characterEnabled?: boolean
+  userMessageIds?: string[]
   /** Transport identity for concern delivery, independent of shared memory. */
   concernScopeId?: string
   id: string
@@ -88,6 +90,7 @@ export interface MemoryCandidate {
 }
 
 export interface ReflectionResult {
+  characterState?: import('./character/domain.js').CharacterState
   daily: Pick<DailyReflection, 'summary' | 'events' | 'openTasks' | 'completedTasks' | 'learnings'>
   memories: MemoryCandidate[]
   concerns: ConcernCandidate[]

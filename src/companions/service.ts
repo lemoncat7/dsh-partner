@@ -48,6 +48,7 @@ function identityRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('companion must be an object')
   const input = value as Record<string, unknown>
   return {
+    characterCard: input.characterCard,
     name: input.name,
     role: input.role,
     description: input.description,
