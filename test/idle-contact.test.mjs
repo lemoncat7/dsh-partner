@@ -19,7 +19,7 @@ function fixture(){
 }
 test('defaults opt out, strict input and cross-midnight quiet hours',()=>{
   assert.equal(DEFAULT_IDLE_CONTACT.enabled,false)
-  for(const bad of [{...DEFAULT_IDLE_CONTACT,enabled:true},{...DEFAULT_IDLE_CONTACT,idleMinutes:0},{...DEFAULT_IDLE_CONTACT,dailyLimit:20}])assert.throws(()=>normalizeIdleContact(bad))
+  for(const bad of [{...DEFAULT_IDLE_CONTACT,enabled:true},{...DEFAULT_IDLE_CONTACT,idleMinutes:0},{...DEFAULT_IDLE_CONTACT,quietEnabled:20}])assert.throws(()=>normalizeIdleContact(bad))
   assert.equal(idleContactQuiet(DEFAULT_IDLE_CONTACT,Date.parse('2026-10-28T16:00:00Z'),tz),true)
   assert.equal(idleContactQuiet(DEFAULT_IDLE_CONTACT,Date.parse('2026-10-28T01:00:00Z'),tz),false)
   assert.equal(idleContactQuiet({...DEFAULT_IDLE_CONTACT,quietStartHour:9,quietEndHour:17},now,tz),true)
@@ -34,13 +34,14 @@ test('only real user inactivity qualifies; deny recent activity, unauthorized ta
   state.channels[0].companionId='other';assert.equal(idleContactDue(state,companion,user,now,tz),false)
   assert.deepEqual(lastIdleContactUser([{type:'user/message',time:123,data:{id:'real',source:{kind:'user'}}},{type:'user/message',time:456,data:{id:'internal',source:{kind:'plugin:task'}}}]),{id:'real',at:123})
 })
-test('no reply means no repeat even next day; per-owner daily cap and cooldown span routes',()=>{
+test('no reply means no repeat even next day; no daily cap and cooldown span routes',()=>{
   const {state,companion,route}=fixture()
   route.idleContactState={userMessageId:user.id,attemptedAt:now-3*3600_000,day:idleContactDay(now,tz),count:1}
   assert.equal(idleContactDue(state,companion,user,now+86400_000,tz),false)
   assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),true)
-  state.sessions.push({...route,id:'r2',idleContactState:{...route.idleContactState,count:1}})
-  assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),false)
+  state.sessions.push({...route,id:'r2',idleContactState:{...route.idleContactState,count:999}})
+  companion.idleContact.dailyLimit=1 // Legacy stored limits no longer restrict sending.
+  assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),true)
   state.sessions.pop();route.idleContactState.attemptedAt=now-60_000
   assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),false)
 })
@@ -109,4 +110,25 @@ test('idle contact never starves concern continuations when both features are en
   const scheduler=new HeartbeatScheduler({logger:{warn:()=>{}}},{snapshot:()=>f.state},{idleContact:async()=>calls.push('idle')},{},{pendingRecording:async()=>undefined})
   scheduler.setExecutionDispatcher(async()=>calls.push('work'))
   await scheduler.tick();await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['work','idle']);await scheduler.close()
+})
+
+test('explicit quiet switch defaults on for legacy settings and disabling preserves hours',()=>{
+  const legacy={...DEFAULT_IDLE_CONTACT}; delete legacy.quietEnabled
+  assert.equal(normalizeIdleContact(legacy).quietEnabled,true)
+  const off=normalizeIdleContact({...legacy,quietEnabled:false})
+  assert.equal(off.quietStartHour,23);assert.equal(off.quietEndHour,9)
+  const midnight=Date.parse('2026-10-28T16:00:00Z')
+  assert.equal(idleContactQuiet(legacy,midnight,tz),true)
+  assert.equal(idleContactQuiet(off,midnight,tz),false)
+  assert.equal(normalizeIdleContact({...legacy,dailyLimit:1}).dailyLimit,undefined)
+})
+
+test('quiet switch controls actual channel delivery, independently of old daily counts',async()=>{
+  const f=deliveryFixture()
+  const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour:'2-digit',hourCycle:'h23'}).format(Date.now()))
+  Object.assign(f.companion.idleContact,{quietEnabled:true,quietStartHour:hour,quietEndHour:(hour+1)%24,dailyLimit:1})
+  f.route.idleContactState.count=999
+  await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,0)
+  f.companion.idleContact.quietEnabled=false
+  await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,1)
 })

@@ -12,6 +12,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  identityDraft?: import('./companions/identity.js').CompanionIdentity
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
   notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }

@@ -5,7 +5,7 @@ export interface IdleContactPolicy {
   enabled: boolean
   routeId: string
   idleMinutes: number
-  dailyLimit: number
+  quietEnabled?: boolean
   quietStartHour: number
   quietEndHour: number
 }
@@ -18,7 +18,7 @@ export interface IdleContactState {
   day: string
   count: number
 }
-export const DEFAULT_IDLE_CONTACT: IdleContactPolicy = { enabled: false, routeId: '', idleMinutes: 120, dailyLimit: 2, quietStartHour: 23, quietEndHour: 9 }
+export const DEFAULT_IDLE_CONTACT: IdleContactPolicy = { enabled: false, routeId: '', idleMinutes: 120, quietEnabled: true, quietStartHour: 23, quietEndHour: 9 }
 export const IDLE_CONTACT_NOTICE = '伙伴闲时主动联系'
 export function normalizeIdleContact(value: unknown): IdleContactPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('闲时联系配置无效')
@@ -27,7 +27,9 @@ export function normalizeIdleContact(value: unknown): IdleContactPolicy {
   const result = {...DEFAULT_IDLE_CONTACT, enabled:v.enabled}
   if (typeof v.routeId !== 'string' || v.routeId.length > 200) throw new Error('请选择联系会话')
   result.routeId = v.routeId
-  for (const [key,min,max] of [['idleMinutes',30,1440],['dailyLimit',1,5],['quietStartHour',0,23],['quietEndHour',0,23]] as const) {
+  if (v.quietEnabled !== undefined && typeof v.quietEnabled !== 'boolean') throw new Error('请选择是否开启免打扰')
+  result.quietEnabled = v.quietEnabled !== false
+  for (const [key,min,max] of [['idleMinutes',30,1440],['quietStartHour',0,23],['quietEndHour',0,23]] as const) {
     const number = v[key] ?? result[key]
     if (typeof number !== 'number' || !Number.isInteger(number) || number < min || number > max) throw new Error(`${key} 须为 ${min}–${max} 的整数`)
     result[key] = number
@@ -39,6 +41,7 @@ export function idleContactDay(now:number,timeZone:string):string {
   return new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).format(now)
 }
 export function idleContactQuiet(policy:IdleContactPolicy,now:number,timeZone:string):boolean {
+  if (policy.quietEnabled === false) return false
   const hour = Number(new Intl.DateTimeFormat('en-GB',{timeZone,hour:'2-digit',hourCycle:'h23'}).format(now))
   const {quietStartHour:start,quietEndHour:end}=policy
   return start === end ? false : start < end ? hour >= start && hour < end : hour >= start || hour < end
@@ -62,9 +65,7 @@ export function idleContactDue(state:PartnerState,companion:Companion,user:{id:s
   if(previous?.userMessageId===user.id)return false // Never nag again until a real new user message.
   const latestActivity=Math.max(user.at,...state.sessions.filter(r=>r.companionId===companion.id).map(r=>r.lastMessageAt),previous?.attemptedAt??0)
   if(now-latestActivity<policy.idleMinutes*60_000)return false
-  const day=idleContactDay(now,timeZone)
-  const attempts=state.sessions.filter(r=>r.companionId===companion.id).reduce((n,r)=>n+(r.idleContactState?.day===day?r.idleContactState.count:0),0)
-  return attempts<policy.dailyLimit
+  return true
 }
 export function isIdleContactNotice(event:SessionEvent):boolean {
   return event.type==='user/message' && event.data.source.kind==='plugin:@lemoncat7/dsh-partner' && event.data.source.form==='notice' && event.data.source.summary===IDLE_CONTACT_NOTICE

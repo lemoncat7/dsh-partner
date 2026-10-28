@@ -110,8 +110,8 @@ test('tool guidance connects requests, specialists and the planning Skill withou
     },
     systemPrompt: { section(value) { sections.push(value); return () => {} } },
   }, store.snapshot().companions[0])
-  assert.deepEqual([...tools.keys()].sort(), ['partner_collaborate', 'partner_requirements', 'partner_skill', 'partner_task_board'])
-  for (const name of tools.keys()) assert.match(tools.get(name).description, /enabled task-planning Skill/)
+  assert.deepEqual([...tools.keys()].sort(), ['partner_collaborate', 'partner_identity', 'partner_requirements', 'partner_skill', 'partner_task_board'])
+  for (const name of [...tools.keys()].filter(name => name !== 'partner_identity')) assert.match(tools.get(name).description, /enabled task-planning Skill/)
   assert.match(tools.get('partner_task_board').description, /no explicit @ or board request/)
   assert.match(tools.get('partner_collaborate').description, /do not duplicate already-assigned work/)
   assert.equal(sections.some(section => section.name.includes('preflight')), false)

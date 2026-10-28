@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.11.6",
+  "version": "2.11.7",
   "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -103,7 +103,8 @@
     "docs/blobfox-manifest.json",
     "docs/releases/2.11.5.md",
     "docs/releases/2.11.6.md",
-    "docs/storage-read-performance.md"
+    "docs/storage-read-performance.md",
+    "docs/releases/2.11.7.md"
   ],
   "dsh": {
     "bundle": {

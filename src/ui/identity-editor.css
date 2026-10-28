@@ -72,3 +72,12 @@
 @media (forced-colors: active) {
   #dsh-partner-identity-editor .dsh-partner-field :is(input, textarea):focus { outline: 2px solid Highlight; }
 }
+
+.dsh-partner-effective-identity { padding: 16px; }
+.dsh-partner-effective-content { display: grid; gap: 12px; margin: 16px 0; min-width: 0; }
+.dsh-partner-effective-content h4 { margin: 0; }
+.dsh-partner-effective-content p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+
+#dsh-partner-identity-editor .dsh-partner-form-actions > button[type="button"] { color: var(--partner-text); background: var(--partner-control); }
+
+.dsh-partner-quiet-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 20px 0 16px; padding-top: 16px; border-top: 1px solid var(--partner-border); }
