@@ -10,7 +10,10 @@ const saved='/backup/install-state.json'
 function releaseStoppedWriterLock(){
   const path='/data/.credentials.yaml.lock'
   if(!existsSync(path))return
-  assert.match(readFileSync(path,'utf8').trim(), /^\d+$/)
+  // A stop can occur after creating the lock but before writing the PID.
+  // The deployment guard has stopped the sole writer; retain even empty locks
+  // in the backup before releasing them. Reject any other unexpected contents.
+  assert.match(readFileSync(path,'utf8').trim(), /^(?:\d+)?$/)
   copyFileSync(path,'/backup/credentials-stale-'+Date.now()+'.lock')
   unlinkSync(path)
 }
