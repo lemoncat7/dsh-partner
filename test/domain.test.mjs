@@ -368,6 +368,8 @@ test('migrates a legacy raw knowledge token into a focused concern', async () =>
     const created = await store.createExplicit('companion-1', '*', '@知识库[项目长期记忆/nomifun/nomifun-desktop 版本更新关注]')
     const path = join(directory, 'partners', 'companion-1', 'concerns', 'concerns.sqlite')
     const database = new DatabaseSync(path)
+    // Simulate a legacy database, not damaged data stamped with the current schema.
+    database.exec('PRAGMA user_version = 4')
     database.prepare("DELETE FROM concern_meta WHERE key = 'reference-subject-normalized-v1'").run()
     const raw = '@知识库[项目长期记忆/nomifun/nomifun-desktop 版本更新关注]'
     database.prepare("UPDATE concerns SET normalized_subject = ?, subject = ?, watch_kind = 'auto', watch_query = ? WHERE id = ?").run(normalizeConcernSubject(raw), raw, raw, created.id)

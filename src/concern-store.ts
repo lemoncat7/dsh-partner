@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { initializeSqliteSchema } from './storage/sqlite-schema.js'
 import { reviseConcern, type ConcernRevision } from './concern-attention.js'
 import {
   boundedConcernCheckMinutes, clamp, concernInterval, extractConcernResources, focusedConcernQuery, implicitConcernRejection,
@@ -13,6 +14,8 @@ import {
 } from './concern-domain.js'
 
 type SqlRow = Record<string, unknown>
+// Version 4 included unversioned column additions; upgrade all legacy variants once.
+const CONCERN_SCHEMA_VERSION = 5
 export interface LegacyConcernSeed { scopeId: string; subject: string; reason: string; confidence: number; origin: ConcernOrigin }
 export interface ConcernDueOptions { now?: number; limit?: number; includeFuture?: boolean; concernId?: string }
 export type ConcernCandidateSource = 'reflection' | 'daily_review' | 'tool' | 'ui'
@@ -670,8 +673,16 @@ export class PartnerConcernStore {
     if (this.frozen) throw new Error('伙伴数据迁移中')
     const directory = this.directory(companionId)
     await mkdir(directory, { recursive: true, mode: 0o700 })
+    if (this.frozen) throw new Error('伙伴数据迁移中')
     const database = new DatabaseSync(this.path(companionId))
-    database.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
+    try {
+      initializeSqliteSchema(database, CONCERN_SCHEMA_VERSION, () => this.initializeSchema(database))
+      return database
+    } catch (error) { database.close(); throw error }
+  }
+
+  private initializeSchema(database: DatabaseSync): void {
+    database.exec(`
       CREATE TABLE IF NOT EXISTS concern_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS concern_batches (scope_id TEXT NOT NULL, id TEXT NOT NULL, result_json TEXT NOT NULL, PRIMARY KEY(scope_id, id));
       CREATE TABLE IF NOT EXISTS concerns (
@@ -700,8 +711,7 @@ export class PartnerConcernStore {
         source TEXT NOT NULL, origin TEXT NOT NULL, operation TEXT NOT NULL, subject TEXT NOT NULL, reason TEXT NOT NULL,
         evidence TEXT NOT NULL, decision TEXT NOT NULL, decision_reason TEXT NOT NULL, created_at INTEGER NOT NULL, notified_at INTEGER
       );
-      CREATE INDEX IF NOT EXISTS concern_audit_session ON concern_audit(companion_id, scope_id, session_id, source, decision, notified_at, created_at);
-      PRAGMA user_version = 4;`)
+      CREATE INDEX IF NOT EXISTS concern_audit_session ON concern_audit(companion_id, scope_id, session_id, source, decision, notified_at, created_at);`)
     ensureColumn(database, 'concerns', 'resources_json', "TEXT NOT NULL DEFAULT '[]'")
     ensureColumn(database, 'concerns', 'control', "TEXT NOT NULL DEFAULT 'auto'")
     ensureColumn(database, 'concerns', 'adjustments_json', "TEXT NOT NULL DEFAULT '[]'")
@@ -720,7 +730,6 @@ export class PartnerConcernStore {
     ensureColumn(database, 'concerns', 'observation_progress_json', 'TEXT')
     ensureColumn(database, 'concern_observations', 'workflow_json', 'TEXT')
     migrateReferenceOnlyConcerns(database)
-    return database
   }
 
   private directory(companionId: string): string { return join(this.privateRoot?.(companionId) ?? join(this.root, 'partners', companionId), 'concerns') }
@@ -815,7 +824,7 @@ function explicitConcernDescriptor(value: string): Pick<ConcernCandidate, 'subje
 
 function migrateReferenceOnlyConcerns(database: DatabaseSync): void {
   if (database.prepare("SELECT value FROM concern_meta WHERE key = 'reference-subject-normalized-v1'").get()) return
-  database.exec('BEGIN IMMEDIATE')
+  database.exec('SAVEPOINT reference_subject_migration')
   try {
     const rows = database.prepare("SELECT id, companion_id, scope_id, subject, resources_json FROM concerns WHERE origin = 'explicit' AND resources_json != '[]'").all() as SqlRow[]
     const update = database.prepare('UPDATE concerns SET normalized_subject = ?, subject = ?, watch_kind = ?, watch_query = ? WHERE id = ?')
@@ -830,8 +839,8 @@ function migrateReferenceOnlyConcerns(database: DatabaseSync): void {
       if (!duplicate) update.run(normalized, descriptor.subject, descriptor.watchKind, descriptor.watchQuery, string(row.id))
     }
     database.prepare("INSERT INTO concern_meta (key, value) VALUES ('reference-subject-normalized-v1', ?)").run(String(Date.now()))
-    database.exec('COMMIT')
-  } catch (error) { rollback(database); throw error }
+    database.exec('RELEASE reference_subject_migration')
+  } catch (error) { database.exec('ROLLBACK TO reference_subject_migration; RELEASE reference_subject_migration'); throw error }
 }
 function resourcesJson(value: ConcernCandidate['resources']): string {
   return JSON.stringify((value ?? []).slice(0, 8).map(item => ({ kind: item.kind, locator: compact(item.locator, 500), label: compact(item.label, 240) }))

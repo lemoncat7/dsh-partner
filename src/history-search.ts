@@ -17,12 +17,12 @@ export function initializeHistorySearch(db: DatabaseSync): void {
     CREATE TRIGGER IF NOT EXISTS partner_history_delete AFTER DELETE ON memory_jobs BEGIN DELETE FROM partner_history_fts WHERE id=old.id; END;
     CREATE TRIGGER IF NOT EXISTS partner_history_scope AFTER UPDATE OF scope_id ON memory_jobs BEGIN UPDATE partner_history_fts SET scope_id=new.scope_id WHERE id=new.id; END;`)
   if (db.prepare("SELECT 1 FROM memory_maintenance WHERE key='history-fts-v1'").get()) return
-  db.exec('BEGIN IMMEDIATE')
+  db.exec('SAVEPOINT history_search_migration')
   try {
     for (const row of db.prepare('SELECT turn_json FROM memory_jobs').iterate()) indexHistoryTurn(db, JSON.parse(String(row.turn_json)))
     db.prepare("INSERT INTO memory_maintenance VALUES ('history-fts-v1')").run()
-    db.exec('COMMIT')
-  } catch (e) { db.exec('ROLLBACK'); throw e }
+    db.exec('RELEASE history_search_migration')
+  } catch (e) { db.exec('ROLLBACK TO history_search_migration; RELEASE history_search_migration'); throw e }
 }
 export function searchHistory(db: DatabaseSync, scope: string, query: string, limit = 4): Array<Pick<ConversationTurn, 'id' | 'at' | 'user' | 'assistant'>> {
   const terms = words(query).slice(0, 24)

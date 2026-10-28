@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { initializeSqliteSchema } from './storage/sqlite-schema.js'
 import type { ConversationTurn, DailyReflection, DailyReviewResult, DailyReviewTarget, MemoryCandidate, MemoryContextConnection, MemoryEvidence, MemoryKind, MemoryRecallContext, MemoryRelation, MemoryRelationKind, MemoryRelationReviewContext, MemoryStatus, PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
 import { buildProfileSnapshot, canonicalProfileSubject, isProfileBaselineEntry } from './profile-domain.js'
 import {initializePersona, readPersona, claimPersona, finishPersona, failPersona, requestPersona} from './persona/store.js'
@@ -22,6 +23,8 @@ interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[]; characterState?: CharacterState }
 export interface LegacyHeartbeatFocus { scopeId: string; subject: string; reason: string; confidence: number }
 type SqlRow = Record<string, unknown>
+// Version 1 included unversioned column additions; upgrade all legacy variants once.
+const MEMORY_SCHEMA_VERSION = 2
 
 export class PartnerMemoryStore {
   private readonly writes = new Map<string, Promise<void>>()
@@ -503,9 +506,16 @@ export class PartnerMemoryStore {
   private async open(companionId: string): Promise<DatabaseSync> {
     if (this.frozen) throw new Error('伙伴数据迁移中')
     await mkdir(this.memoryRoot(companionId), { recursive: true, mode: 0o700 })
+    if (this.frozen) throw new Error('伙伴数据迁移中')
     const database = new DatabaseSync(this.databasePath(companionId))
     try {
-    database.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
+      initializeSqliteSchema(database, MEMORY_SCHEMA_VERSION, () => this.initializeSchema(database))
+      return database
+    } catch (error) { database.close(); throw error }
+  }
+
+  private initializeSchema(database: DatabaseSync): void {
+    database.exec(`
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY, companion_id TEXT NOT NULL, scope_id TEXT NOT NULL, kind TEXT NOT NULL,
         subject TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, confidence REAL NOT NULL,
@@ -527,8 +537,7 @@ export class PartnerMemoryStore {
         FOREIGN KEY(source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
         FOREIGN KEY(target_memory_id) REFERENCES memories(id) ON DELETE CASCADE
       );
-      CREATE INDEX IF NOT EXISTS relations_companion_scope ON memory_relations(companion_id, scope_id, updated_at DESC);
-      PRAGMA user_version = 1;`)
+      CREATE INDEX IF NOT EXISTS relations_companion_scope ON memory_relations(companion_id, scope_id, updated_at DESC);`)
     ensureColumn(database, 'daily_reflections', 'reviewed_at', 'INTEGER')
     ensureColumn(database, 'daily_reflections', 'review_attempts', 'INTEGER NOT NULL DEFAULT 0')
     ensureColumn(database, 'daily_reflections', 'review_error', 'TEXT')
@@ -538,8 +547,6 @@ export class PartnerMemoryStore {
     initializeHistorySearch(database)
     initializeMemoryArtifacts(database)
     initializePersona(database)
-    return database
-    } catch (error) { database.close(); throw error }
   }
 
   private memoriesForScope(database: DatabaseSync, companionId: string, scopeId: string): PartnerMemory[] {
