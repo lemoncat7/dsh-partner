@@ -93,3 +93,7 @@
   .dsh-partner-settings-tabs { flex-wrap: wrap; }
   .dsh-partner-workspace .dsh-partner-settings-tabs > button { flex: 1 0 auto; }
 }
+.dsh-partner-conversation-summary { padding: 18px 20px; border-left: 3px solid var(--partner-accent-strong); background: var(--partner-control); border-radius: 0 10px 10px 0; }
+.dsh-partner-conversation-summary p { margin: 8px 0 0; }
+.dsh-partner-character textarea { resize: vertical; }
+.dsh-partner-character .dsh-partner-character-check { min-height: 44px; }
