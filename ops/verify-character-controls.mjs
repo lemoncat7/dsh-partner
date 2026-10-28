@@ -75,6 +75,7 @@ async function verify() {
           await toggle.click()
           const reference=page.getByRole('button',{name:'查看大肥鱼参考',exact:true})
           await reference.click()
+          await page.waitForTimeout(400) // Dialog scale-in animation must settle before measuring.
           const refClose=await inspectClose()
           assert.equal(refClose.width,44);assert.equal(refClose.height,44);assert.equal(refClose.iconWidth,18);assert.equal(refClose.iconHeight,18);assert.equal(refClose.padding,'0px');assert.equal(refClose.radius,'50%')
           assert.ok(Math.abs(refClose.offsetX-13)<=1);assert.ok(Math.abs(refClose.offsetY-13)<=1)
@@ -86,6 +87,7 @@ async function verify() {
           assert.equal(await reference.evaluate(n=>document.activeElement===n),true)
           await page.getByRole('tab',{name:'聊天方式',exact:true}).click()
           await page.getByRole('button',{name:'管理表情库'}).click()
+          await page.waitForTimeout(400)
           assert.deepEqual(await inspectClose(),refClose)
           await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click()
         }
