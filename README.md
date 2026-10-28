@@ -6,10 +6,11 @@
 
 ## 功能
 
-- 伙伴身份、Agent Preset、模型与能力管理。
+- 伙伴身份、Agent Preset、模型与能力管理；可选人格卡、创建引导、角色记忆与独立试聊。
 - 微信 iLink Bot、Matrix、Mattermost 私聊，支持附件与交互提问。
 - Bark 单向结果通知，支持多个服务器及设备、持久投递队列和重试。
 - 长期记忆、人物画像、每日回顾和持续关注，可查看依据、状态与失败原因。
+- 每日上下文焕新默认开启、独立定时；开启记忆时整理成功后清空，关闭记忆时直接清空，保留聊天历史。
 - 任务看板、伙伴委派、定时任务与长任务续接。
 - Skill 市场、导入与按伙伴启用，以及 HTTP / stdio MCP 服务授权。
 - 伙伴挂饰、消息收件箱、通知与交付重试。
@@ -33,6 +34,7 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 ## 文档
 
 - [使用与配置](docs/usage.md)
+- [人格强化与每日上下文焕新](docs/character-cards-and-renewal.md)
 - [渠道与附件](docs/direct-channels.md)
 - [Bark 单向通知](docs/bark-notifications.md)
 - [持续关注检查与执行流程](docs/concern-workflow.md)

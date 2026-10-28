@@ -1,0 +1,47 @@
+// Runs offline in a helper container against the stopped production volume.
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import assert from 'node:assert/strict'
+const profile='/data/profiles/web', scope=profile+'/node_modules/@lemoncat7', target=scope+'/dsh-partner'
+const saved='/backup/install-state.json'
+function restore(){
+  const state=JSON.parse(readFileSync(saved))
+  assert.ok(state.old.startsWith('/data/plugin-package-backups/partner-290-'))
+  if(existsSync(state.old)){
+    if(existsSync(target))renameSync(target,state.old+'-failed')
+    renameSync(state.old,target)
+  }
+  for(const file of ['package.json','package-lock.json'])copyFileSync('/backup/'+file,profile+'/'+file)
+  execFileSync('chown',['1000:1000',profile+'/package.json',profile+'/package-lock.json'])
+}
+if(process.argv[2]==='restore'){restore();console.log('Previous partner package and install metadata restored');process.exit(0)}
+const next=JSON.parse(execFileSync('tar',['-xOzf','/package.tgz','package/package.json']))
+const prev=JSON.parse(readFileSync(target+'/package.json'))
+assert.equal(next.name,'@lemoncat7/dsh-partner');assert.equal(next.version,'2.9.0')
+assert.equal(next.engines.dsh,'^0.2.1-rc.2');assert.deepEqual(next.dependencies,prev.dependencies)
+assert.equal(existsSync(target+'/node_modules'),false,'Review nested dependencies before replacing package')
+for(const file of ['package.json','package-lock.json'])copyFileSync(profile+'/'+file,'/backup/'+file)
+execFileSync('tar',['-cf','/backup/partner-package.tar','-C',scope,'dsh-partner'])
+execFileSync('tar',['-cf','/backup/partner-data.tar','-C','/data','partner'])
+const stage=mkdtempSync(scope+'/.partner-290-stage-')
+execFileSync('tar',['-xzf','/package.tgz','--strip-components=1','-C',stage])
+execFileSync('chown',['-R','1000:1000',stage])
+mkdirSync('/data/plugin-package-backups',{recursive:true})
+const old=mkdtempSync('/data/plugin-package-backups/partner-290-')+'/package'
+writeFileSync(saved,JSON.stringify({old,previousVersion:prev.version}),{mode:0o600})
+try{
+  renameSync(target,old);renameSync(stage,target)
+  const archiveDir='/data/local-plugins/partner-2.9.0'
+  mkdirSync(archiveDir,{recursive:true});copyFileSync('/package.tgz',archiveDir+'/lemoncat7-dsh-partner-2.9.0.tgz')
+  execFileSync('chown',['-R','1000:1000',archiveDir])
+  const spec='file:../../local-plugins/partner-2.9.0/lemoncat7-dsh-partner-2.9.0.tgz'
+  const pkg=JSON.parse(readFileSync(profile+'/package.json')),lock=JSON.parse(readFileSync(profile+'/package-lock.json'))
+  assert.ok(pkg.dependencies[next.name]);assert.ok(lock.packages[''].dependencies[next.name])
+  const record=lock.packages['node_modules/'+next.name];assert.ok(record)
+  pkg.dependencies[next.name]=spec;lock.packages[''].dependencies[next.name]=spec
+  record.version=next.version;record.resolved=spec.slice(5)
+  record.integrity='sha512-'+createHash('sha512').update(readFileSync('/package.tgz')).digest('base64')
+  for(const [file,data] of [['package.json',pkg],['package-lock.json',lock]])writeFileSync(profile+'/'+file,JSON.stringify(data,null,2)+'\n')
+  console.log('Installed partner 2.9.0; previous package and metadata retained for rollback')
+}catch(error){restore();throw error}
