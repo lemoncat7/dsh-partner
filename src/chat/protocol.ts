@@ -31,3 +31,27 @@ export function parseChatInput(raw: unknown): Array<{text:string} | {stickerId:s
   if (total > 12000 || images > 2) throw new Error('一轮最多 12000 字、2 张表情；不需要每轮发表情')
   return parts
 }
+
+/** Some providers put speech beside a terminal tool call instead of inside its arguments.
+ * Preserve only that exact call's public text, never reasoning, earlier steps or other tools.
+ */
+export function withChatCompanionText(input: Array<{text:string} | {stickerId:string}>, events: readonly SessionEvent[], callId: string | undefined): Array<{text:string} | {stickerId:string}> {
+  if (!callId) return input
+  for (let i=events.length-1;i>=0;i--) {
+    const event=events[i]!
+    if (event.type==='turn/start'||event.type==='user/message') break
+    if (event.type!=='assistant/message') continue
+    const blocks=event.data.message.content
+    const calls=blocks.filter(b=>b.type==='tool-call')
+    if (!calls.some(c=>c.id===callId)) continue
+    if (event.data.interrupted||calls.length!==1||calls[0]!.name!=='partner_chat_reply') return input
+    const speech=blocks.filter(b=>b.type==='text').map(b=>b.text.trim()).filter(Boolean).join('\n')
+    if (!speech) return input
+    const normalize=(value:string)=>value.replace(/\s+/g,'')
+    const spoken=input.filter((p):p is {text:string}=>'text' in p).map(p=>p.text)
+    if (spoken.some(text=>normalize(text)===normalize(speech))||normalize(spoken.join(''))===normalize(speech)) return input
+    // The protocol's size limits remain authoritative; a rejected oversized call can be corrected.
+    return parseChatInput({messages:[{text:speech},...input]})
+  }
+  return input
+}

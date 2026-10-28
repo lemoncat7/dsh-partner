@@ -3,18 +3,16 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,readFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {createElement} from 'react'
-import {renderToStaticMarkup} from 'react-dom/server'
 import {PartnerStore} from '../lib/store.js'
 import {NotificationDelivery} from '../lib/channels/notification-delivery.js'
 import {ChannelManager} from '../lib/channels/manager.js'
 import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 import {prepareChannelReply} from '../lib/channels/outbound-media.js'
-import {parseChatInput,replyDeliveryParts} from '../lib/chat/protocol.js'
+import {parseChatInput,replyDeliveryParts,withChatCompanionText} from '../lib/chat/protocol.js'
 import {StickerLibrary,stickerMediaType} from '../lib/chat/stickers.js'
 import {AttachmentDeliveryService} from '../lib/attachments/service.js'
 import {chatTools} from '../lib/chat/tools.js'
-import {chatReplyDefinition,ChatBubbles,registerChatReplies} from '../lib/chat/conversation.js'
+import {chatReplyDefinition,nativeChatBlocks,registerChatReplies} from '../lib/chat/conversation.js'
 
 const image={type:'image',attachment:{path:'/snapshot/image',name:'开心.png',kind:'image',mediaType:'image/png'},url:'/partner-local/v1/attachments/test',label:'开心'}
 const meta={kind:'partner-chat-v1',parts:[{type:'text',text:'你可算来了'},image,{type:'text',text:'还以为今天不来了'}]}
@@ -75,22 +73,33 @@ test('terminal tool snapshots stickers, respects revocation, and never sends to 
   assert.equal(conclusions,1);assert.equal(outcome.parts.length,2)
   assert.ok((await readFile(outcome.parts[1].attachment.path)).length>100)
   assert.deepEqual(tool.output.presentationMeta({},outcome),outcome)
+  events=[start,user,{type:'assistant/message',seq:3,data:{message:{content:[{type:'text',text:'留给你的。'},{type:'tool-call',id:'mixed',name:'partner_chat_reply',arguments:'{}'}]}}}]
+  const mixed=await tool.execute({messages:[{stickerId:'builtin-happy'}]},{...exec,callId:'mixed'})
+  assert.deepEqual(mixed.parts.map(p=>p.type),['text','image'])
+  assert.equal(mixed.parts[0].text,'留给你的。')
+  const transmitted=channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta:mixed}},end],0)
+  assert.deepEqual(transmitted.chatParts,mixed.parts)
+  assert.match(transmitted.text,/留给你的/)
+  assert.match(tool.output.render({},mixed)[0].text,/留给你的/)
   card.stickersEnabled=false
   await assert.rejects(tool.execute({messages:[{stickerId:'builtin-happy'}]},exec),/未开启/)
-  assert.equal(conclusions,1)
+  assert.equal(conclusions,2)
   card.enabled=false;await assert.rejects(tool.execute({messages:[{text:'x'}]},exec),/停用/)
   card.enabled=true;events=[start];await assert.rejects(tool.execute({messages:[{text:'x'}]},exec),/内部任务/)
-  assert.equal(conclusions,1)
+  assert.equal(conclusions,2)
 })
-test('native chat renders bubbles and images through published host registration',()=>{
-  let definition,renderer
+test('chat metadata projects into the native assistant renderer without registering a custom bubble',()=>{
+  let definition
   const registry={register(d){definition=d;return()=>{}}}
-  const ctx={get:()=>({events:registry}),effect:fn=>fn(),inject:(keys,fn)=>{if(keys[0]==='uiConversation')fn(ctx)},slots:{inject:(_name,fn)=>fn(),register:(_opts,fn)=>{renderer=fn;return()=>{}}}}
+  const ctx={get:()=>({events:registry}),effect:fn=>fn(),inject:(keys,fn)=>{if(keys[0]==='uiConversation')fn(ctx)}}
   registerChatReplies(ctx);assert.equal(definition,chatReplyDefinition)
-  const match=definition.match(result);assert.notEqual(match.exclusive,true)
-  const data=definition.start({}, {event:result})
-  const html=renderToStaticMarkup(renderer({node:{data}}))
-  assert.match(html,/你可算来了/);assert.match(html,/alt="开心"/);assert.doesNotMatch(html,/snapshot\/image/)
+  assert.notEqual(definition.match(result).exclusive,true)
+  const blocks=nativeChatBlocks(meta)
+  assert.deepEqual(blocks.map(b=>b.kind),['text','text','text'])
+  assert.equal(blocks[0].text,'你可算来了')
+  assert.equal(blocks[1].text,'![开心](/partner-local/v1/attachments/test)')
+  assert.equal(blocks[2].text,'还以为今天不来了')
+  assert.doesNotMatch(JSON.stringify(blocks),/snapshot\/image/)
   assert.equal(definition.match({...result,data:{...result.data,message:{isError:true}}}),null)
 })
 test('terminal replies stay outside native process folding and leave tool results observable',()=>{
@@ -102,7 +111,9 @@ test('terminal replies stay outside native process folding and leave tool result
     assert.equal(node.groupTree,'turn','DSH groups nodes without a position into collapsed process steps')
     assert.equal(node.visibility,'visible')
     assert.equal(node.location,location)
-    assert.deepEqual(node.data.parts,meta.parts)
+    assert.equal(node.kind,'assistant-step')
+    assert.equal(node.data.status,'settled')
+    assert.deepEqual(node.data.blocks,nativeChatBlocks(meta))
   }
 })
 test('direct queued reply checks the original route and rechecks authorization between parts',async()=>{
@@ -153,4 +164,22 @@ test('structured replies from browser or another channel cannot be forwarded by 
     const response=await prepareChannelReply(channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta:{...meta,originRouteId}}},end],0),'/unused')
     await assert.rejects(manager.sendChatReply({id:'mx',companionId:'a'},'u','event',response),/其他输入来源/)
   }
+})
+
+
+test('mixed provider speech belongs only to its exact terminal call, never reasoning or prior steps',()=>{
+  const input=[{stickerId:'builtin-happy'}]
+  const message={type:'assistant/message',seq:3,data:{message:{content:[{type:'reasoning',text:'private analysis'},{type:'text',text:'来了，给你留着呢。'},{type:'tool-call',id:'chat-1',name:'partner_chat_reply',arguments:'{}'}]}}}
+  const events=[start,user,message]
+  assert.deepEqual(withChatCompanionText(input,events,'chat-1'),[{text:'来了，给你留着呢。'},...input])
+  for(const id of [undefined,'other-call'])assert.deepEqual(withChatCompanionText(input,events,id),input)
+  assert.deepEqual(withChatCompanionText(input,[...events,{...start,seq:5}],'chat-1'),input)
+  assert.deepEqual(withChatCompanionText(input,[...events,{...user,seq:5}],'chat-1'),input)
+  assert.deepEqual(withChatCompanionText(input,[start,user,{...message,data:{...message.data,interrupted:true}}],'chat-1'),input)
+  const mixed=structuredClone(message);mixed.data.message.content.push({type:'tool-call',id:'work',name:'exec',arguments:'{}'})
+  assert.deepEqual(withChatCompanionText(input,[start,user,mixed],'chat-1'),input)
+  const explicit=[{text:'来了，给你留着呢。'},...input]
+  assert.deepEqual(withChatCompanionText(explicit,events,'chat-1'),explicit)
+  const split=[{text:'来了，'},{text:'给你留着呢。'},...input]
+  assert.deepEqual(withChatCompanionText(split,events,'chat-1'),split)
 })

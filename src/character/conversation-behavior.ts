@@ -1,4 +1,4 @@
-import type { CharacterCard } from './domain.js'
+import { roleTextForCard, type CharacterCard } from './domain.js'
 
 /** Shared chat preset, independent of role prose and transport. No tool filtering. */
 export function renderConversationBehavior(card?: CharacterCard): string {
@@ -27,6 +27,7 @@ export function renderConversationTurn(card: CharacterCard | undefined, consecut
     '【本轮聊天提醒】',
     consecutiveUserMessages > 1 ? `对方连续发了 ${consecutiveUserMessages} 条消息，请结合起来理解，不逐条机械答复。` : '结合眼前发言和仍在继续的话题回应。',
     renderChatDeliveryGuidance(card),
+    renderTurnRoleAnchor(card),
     '使用当前角色的反应方式，历史里的客服腔不必延续；说完有内容的话即可，不自动补建议、选项或追问。若有实际任务，继续使用全部已授权工具完成；纯闲聊不套用工作汇报。直接私聊需要可见回复。',
   ].join('\n')
 }
@@ -35,7 +36,7 @@ export function renderConversationTurn(card: CharacterCard | undefined, consecut
 export function renderChatDeliveryGuidance(card?: CharacterCard): string {
   if (!card?.enabled || (!card.segmentedReplies && !card.stickersEnabled)) return ''
   return [
-    '【本轮聊天投递】日常对话用 partner_chat_reply 提交最终回复，messages 中每个元素是一条独立消息；先完成必要工作，再调用一次结束本轮，不在前后重复普通回复。长文、代码和正式交付仍可用普通最终回复。',
+    '【本轮聊天投递】日常对话用 partner_chat_reply 提交最终回复，messages 中每个元素是一条独立消息，所有文字必须放进 text 条目，图片用独立 stickerId 条目，不要在工具外先说话、工具里只发表情；先完成必要工作，再调用一次结束本轮，不在前后重复普通回复。长文、代码和正式交付仍可用普通最终回复。',
     card.segmentedReplies
       ? '分段回复已开启：有两个自然接话点时，优先分成两条短消息，不把前后反应挤成一条逗号长句。可以先回应、再补一句不同的想法，通常 1–3 条；短回复偏好不是单条限制。不要机械按标点拆句，也不要为凑条数重复意思。'
       : '分段回复未开启：文字只用一条，表情可独立一条。',
@@ -44,4 +45,15 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
       : '表情包未开启：不查找或提交表情，只发文字。',
     '内部任务和心跳遵循原任务协议，不使用聊天终结工具。',
   ].join('\n')
+}
+
+/** A small, current role anchor prevents transport reminders from becoming the conversation's voice. */
+export function renderTurnRoleAnchor(card: CharacterCard): string {
+  const opening=roleTextForCard(card).split(/\n\s*\n/)[0]?.trim()??''
+  return [
+    '【此刻怎样接话】',
+    opening.length<=2000?opening:'沿用系统中的当前角色设定。',
+    card.chatStyle?.trim()??'',
+    '用这个角色自己的口气直接接话，先有自己的反应，再决定文字与表情怎样一起表达。不要把回复写成发送说明、情绪说明或服务选项；表情是反应的一部分，不需要播报“给你发个表情”。简短不等于抹掉角色的偏好、亲疏和小情绪。对方没有明确报故障时，不自动把问号或接话理解成技术报障。实际技术问题仍据实处理。',
+  ].filter(Boolean).join('\n')
 }
