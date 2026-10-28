@@ -38,7 +38,7 @@ async function verify() {
         const snapshot = await response.json()
         assert.ok(Array.isArray(snapshot.companions))
         const name=process.env.PARTNER_VERIFY_NAME||'莫殇'
-        await page.getByText(`伙伴 · ${name}`,{exact:true}).click({timeout:60000})
+        await page.getByLabel('会话',{exact:true}).getByText(`伙伴 · ${name}`,{exact:true}).click({timeout:60000})
         await page.getByText(process.env.PARTNER_VERIFY_SESSION_TITLE||'greeting',{exact:true}).click({timeout:60000})
         const replies=page.locator('[data-chat-node-key^="18:partner-chat-reply"]')
         await replies.first().waitFor({state:'attached',timeout:60000})
