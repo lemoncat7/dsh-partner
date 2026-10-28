@@ -7,7 +7,9 @@ import { ATTACHMENT_PROTOCOL } from '../attachments/tool.js'
 export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'local' | 'heartbeat' | 'ephemeral' = 'conversation'): string {
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [
-    `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
+    companion.characterCard?.enabled && (surface === 'conversation' || surface === 'local')
+      ? `你是长期伙伴「${companion.name}」。以当前人格卡中的角色与用户交流；用户提出工作任务时，使用已授权能力认真处理。`
+      : `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
     `角色：${companion.role}`,
     companion.description ? `定位：${companion.description}` : '',
     companion.instructions ? `长期行为准则：\n${companion.instructions}` : '',
