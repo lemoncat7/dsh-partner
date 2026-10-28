@@ -170,6 +170,8 @@
     "@deepseek-ai/dsh-user-questions": "0.2.1-rc.2",
     "@deepseek-ai/dsh-workspace": "0.2.1-rc.2",
     "@dimforge/rapier3d-compat": "0.20.0",
+    "@hugeicons/core-free-icons": "^4.3.5",
+    "@hugeicons/react": "^1.1.10",
     "@types/node": "^24.0.0",
     "@types/react": "18.3.28",
     "@types/three": "0.185.0",

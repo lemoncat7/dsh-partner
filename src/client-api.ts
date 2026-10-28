@@ -4,10 +4,11 @@ export const PARTNER_API = '/partner-local/v1'
 export type { CompanionCapability as Capability } from './capabilities.js'
 import type { CompanionCapability as Capability } from './capabilities.js'
 export interface AutomationView {
-  memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; dailyReviewEnabled: boolean; dailyReviewHour: number }
+  memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; contextRenewalEnabled?: boolean; contextRenewalHour?: number; dailyReviewEnabled: boolean; dailyReviewHour: number }
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
 }
 export interface CompanionView {
+  characterCard?: import('./character/domain.js').CharacterCard
   notificationDelivery?: { mode: 'recent' | 'selected'; targets: {channelId: string; userId: string}[] }
   id: string; name: string; role: string; description: string; instructions: string
   presetId?: string; provider?: string; model?: string; capabilities: Capability[]

@@ -1,0 +1,64 @@
+.dsh-partner-character { margin-top: 28px; border-top: 1px solid var(--partner-border); padding-top: 24px; }
+.dsh-partner-character > header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.dsh-partner-character h3 { margin: 6px 0; font-size: 19px; }
+.dsh-partner-character h3 small { font-size: 12px; font-weight: 400; margin-left: 8px; color: var(--partner-text-secondary); }
+.dsh-partner-character p, .dsh-partner-character-dialog p { line-height: 1.65; margin: 8px 0 16px; }
+.dsh-partner-character-kicker { font-size: 11px; letter-spacing: .15em; color: var(--partner-text-secondary); }
+.dsh-partner-character-empty { padding: 22px; background: var(--partner-control); border-radius: 12px; }
+.dsh-partner-character-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+.dsh-partner-character-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--partner-border); }
+.dsh-partner-character-section h4 { margin: 0 0 16px; font-size: 15px; }
+.dsh-partner-character-section h4 small { display: inline-block; font-weight: 400; font-size: 12px; margin-left: 8px; }
+.dsh-partner-character .dsh-partner-field, .dsh-partner-character-dialog .dsh-partner-field { margin: 16px 0; }
+.dsh-partner-character :is(button, select), .dsh-partner-character-dialog :is(button, select) { font: inherit; }
+.dsh-partner-character button:not(.dsh-partner-switch), .dsh-partner-character-dialog button { min-height: 40px; border: 1px solid var(--partner-border); border-radius: 9px; padding: 8px 14px; color: var(--partner-text); background: var(--partner-control); cursor: pointer; }
+.dsh-partner-character :is(button, input, select, textarea):focus-visible, .dsh-partner-character-dialog :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 3px; }
+.dsh-partner-character :is(button, fieldset):disabled, .dsh-partner-character-dialog button:disabled { opacity: .55; cursor: default; }
+.dsh-partner-character-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.dsh-partner-character-example { border-left: 2px solid var(--partner-border); padding-left: 18px; margin: 20px 0; }
+.dsh-partner-character-example > span { font-size: 12px; color: var(--partner-text-secondary); }
+.dsh-partner-character-preview, .dsh-partner-character-lore { border-top: 1px solid var(--partner-border); margin-top: 20px; padding-top: 16px; }
+.dsh-partner-character-preview summary, .dsh-partner-character-lore summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
+.dsh-partner-character-lore summary small { margin-left: 16px; font-weight: 400; }
+.dsh-partner-character-trial pre { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 var(--partner-font-family); padding: 16px; background: var(--partner-control); border-radius: 10px; }
+.dsh-partner-trial-exchange { border-bottom: 1px solid var(--partner-border); padding: 10px 0; }
+.dsh-partner-trial-exchange p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dsh-partner-trial-exchange b { display: block; font-size: 12px; margin-bottom: 5px; }
+.dsh-partner-character-check { display: flex; align-items: center; gap: 10px; }
+.dsh-partner-character input[type=checkbox], .dsh-partner-character-dialog input[type=checkbox] { width: 18px; min-height: 18px; appearance: auto; }
+.dsh-partner-character-dialog :is(textarea, input:not([type=checkbox]), select), .dsh-partner-character select { box-sizing: border-box; width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid var(--partner-border); border-radius: 10px; font: inherit; line-height: 1.5; color: var(--partner-text); background: var(--partner-control); }
+.dsh-partner-character-dialog textarea { resize: vertical; }
+.dsh-partner-stepper-track { position: relative; display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--partner-control); }
+.dsh-partner-stepper-glider { position: absolute; top: 4px; bottom: 4px; left: 0; border: 1px solid var(--partner-border); border-radius: 9px; background: var(--partner-card-surface); transition: transform .25s ease, width .25s ease; pointer-events: none; }
+.dsh-partner-character-dialog .dsh-partner-stepper-segment { position: relative; flex: 1; display: flex; gap: 8px; justify-content: center; align-items: center; min-width: 0; padding: 8px; border: 0; background: transparent; font-size: 13px; }
+.dsh-partner-character-dialog .dsh-partner-stepper-segment:disabled { opacity: 1; }
+.dsh-partner-stepper-badge { display: grid; place-items: center; width: 23px; height: 23px; flex: none; border: 1px solid var(--partner-border); border-radius: 50%; font-size: 12px; }
+.dsh-partner-stepper-badge[data-complete] { color: var(--partner-on-accent); background: var(--partner-accent-strong); }
+.dsh-partner-stepper-pane { padding-top: 16px; min-width: 0; }
+.dsh-partner-stepper-pane:focus { outline: none; }
+.dsh-partner-stepper-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 24px; }
+.dsh-partner-stepper-footer button { display: inline-flex; align-items: center; gap: 8px; }
+.dsh-partner-character-dialog .dsh-partner-primary-button { background: var(--partner-accent-strong); color: var(--partner-on-accent); }
+.dsh-partner-review-policy.is-context-renewal { padding: 18px; margin-top: 12px; align-items: flex-start; gap: 16px; }
+.dsh-partner-review-policy.is-context-renewal > span { min-width: 0; flex: 1; }
+.dsh-partner-review-policy.is-context-renewal small { display: block; line-height: 1.6; margin-top: 6px; }
+@media (max-width: 640px) {
+  .dsh-partner-character-empty { padding: 16px; }
+  .dsh-partner-character-dialog .dsh-partner-stepper-segment { flex-direction: column; gap: 5px; font-size: 11px; }
+  .dsh-partner-character-dialog .dsh-partner-fields.two { grid-template-columns: 1fr; }
+  .dsh-partner-character-example { padding-left: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .dsh-partner-stepper-glider { transition: none; } }
+/* Keep controls readable inside the host's narrow settings dialog. */
+.dsh-partner-memory-settings .dsh-partner-review-policy { grid-template-columns: 44px minmax(0, 1fr); padding: 20px 0; gap: 12px 16px; }
+.dsh-partner-memory-settings .dsh-partner-review-policy > span { grid-column: 2; }
+.dsh-partner-memory-settings .dsh-partner-review-policy > label,
+.dsh-partner-memory-settings .dsh-partner-review-policy > .dsh-partner-field { grid-column: 2; width: 132px; }
+.dsh-partner-memory-settings .dsh-partner-review-policy > button:last-child:not(.dsh-partner-switch) { grid-column: 2; justify-self: start; }
+.dsh-partner-memory-settings .dsh-partner-review-policy select { min-height: 40px; font-size: 14px; }
+.dsh-partner-memory-settings .dsh-partner-switch,
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch { flex: 0 0 44px; width: 44px; min-width: 44px; height: 26px; min-height: 26px; padding: 0; border-radius: 999px; align-self: start; margin-block: 4px; }
+.dsh-partner-memory-settings .dsh-partner-switch::before,
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch::before { content: ''; position: absolute; inset: -9px 0; }
+.dsh-partner-memory-settings .dsh-partner-switch i,
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch i { width: 18px; height: 18px; }
