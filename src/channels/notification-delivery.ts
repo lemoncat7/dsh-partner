@@ -1,3 +1,4 @@
+import { replyDeliveryParts } from '../chat/protocol.js'
 import type {PartnerReply} from '../channel-message.js'
 import type {PartnerStore} from '../store.js'
 import {notificationFailureReason} from './notification-timeout.js'
@@ -45,12 +46,13 @@ export class NotificationDelivery {
       await this.store.update(state => {
         const saved = state.notificationDeliveries!.find(r => r.id === id)!
         saved.reply.attachments = []; saved.reply.attachmentPolicy = 'text-only'
-        for (const target of saved.targets) target.sentParts = target.sentParts.filter(part => part === 0)
+        if (!saved.reply.chatParts) for (const target of saved.targets) target.sentParts = target.sentParts.filter(part => part === 0)
       })
       record = this.store.snapshot().notificationDeliveries!.find(r => r.id === id)!
     }
     const frozen=record
-    const parts=frozen.reply.attachments.length+1
+    const deliveryParts=replyDeliveryParts(frozen.reply)
+    const parts=deliveryParts.length
     const failures:unknown[]=[]
     await Promise.all(frozen.targets.map(async target=>{
       if(target.sentParts.length===parts)return
@@ -63,7 +65,8 @@ export class NotificationDelivery {
         await send(target,frozen.reply,async(index,perform)=>{
           if(target.sentParts.includes(index))return
           currentPart=index
-          const hash = index > 0 ? frozen.reply.attachments[index - 1]?.contentHash : undefined
+          const part=deliveryParts[index]
+          const hash = part?.type === 'image' ? part.attachment.contentHash : undefined
           const scope = frozen.reply.attachmentScope
           const recipient = JSON.stringify([target.channelId, target.userId])
           const alreadySent = scope && hash && this.store.snapshot().requirements?.find(r => r.id === scope)?.attachmentReceipts?.[recipient]?.includes(hash)
@@ -87,7 +90,7 @@ export class NotificationDelivery {
           delete saved.lastError
         })
       }catch(error){
-        const stage=currentPart===undefined?'接收人检查':currentPart===0?'文字':`附件 ${currentPart}`
+        const stage=currentPart===undefined?'接收人检查':frozen.reply.chatParts?`消息 ${currentPart+1}`:currentPart===0?'文字':`附件 ${currentPart}`
         const message=`${stage}：${notificationFailureReason(error)}`
         failures.push(new Error(message))
         await this.store.update(state=>{

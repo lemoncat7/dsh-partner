@@ -1,3 +1,4 @@
+import { StickerLibraryDialog } from './sticker-library.js'
 import { SettingsSections } from './settings-sections.js'
 import { useState, type ReactNode } from 'react'
 import { api, type CompanionView } from '../client-api.js'
@@ -42,7 +43,7 @@ export function CharacterEditor({ companion, card, disabled, onChange }: { compa
       <p className="dsh-partner-character-status">{card!.enabled ? '已启用 · 保存后下一轮应用新设定，旧对话不会决定新的语气。' : '已关闭 · 内容保留，伙伴继续使用基本身份。'}</p>
       <SettingsSections<typeof section> label="角色聊天分段" value={section} onChange={setSection} sections={[
         {id: 'role', title: '角色设定', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><RoleFields card={card!} onChange={onChange} /><details className="dsh-partner-settings-advanced"><summary>背景资料 <small>可选 · {card!.lore.length} 条</small></summary><LoreFields card={card!} onChange={onChange} /></details></fieldset>},
-        {id: 'chat', title: '聊天方式', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><ChatFields card={card!} onChange={onChange} /></fieldset>},
+        {id: 'chat', title: '聊天方式', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><ChatFields companionId={companion.id} card={card!} onChange={onChange} /></fieldset>},
         {id: 'trial', title: '试聊', content: <CharacterTrial companion={companion} card={card!} />},
         {id: 'memory', title: '相处记忆', content: <CharacterMemoryEditor companionId={companion.id} />},
       ]} />
@@ -66,7 +67,7 @@ function CharacterWizard({ companion, initial, close, complete }: { companion: C
     {error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
     <Stepper step={step} onStepChange={n => { setStep(n); setError(undefined) }} onNext={next} busy={false} backButtonText="上一步" nextButtonText="继续" completeButtonText="应用到身份草稿">
       <Step title="角色设定"><p className="dsh-partner-character-hint">几条具体习惯就够。可以先填入通用示例，再改成自己的角色。</p><button type="button" onClick={() => setDraft(structuredClone(SAMPLE))}>填入通用示例</button><RoleFields card={draft} onChange={setDraft} /></Step>
-      <Step title="聊天方式"><ChatFields card={draft} onChange={setDraft} /></Step>
+      <Step title="聊天方式"><ChatFields companionId={companion.id} card={draft} onChange={setDraft} /></Step>
       <Step title="试聊"><p>试聊可跳过。完成后点击身份页面的“保存身份”生效。</p><CharacterTrial companion={companion} card={draft} /></Step>
     </Stepper>
   </WorkspaceDialog>{discard && <DiscardChangesDialog keepEditing={() => setDiscard(false)} discard={close} />}</>
@@ -79,10 +80,17 @@ function RoleFields({ card, onChange }: { card: CharacterCard; onChange(card: Ch
   </div>
 }
 
-function ChatFields({ card, onChange }: { card: CharacterCard; onChange(card: CharacterCard): void }): JSX.Element {
+function ChatFields({ card, onChange, companionId }: { card: CharacterCard; companionId: string; onChange(card: CharacterCard): void }): JSX.Element {
+  const [library,setLibrary]=useState(false)
   return <div className="dsh-partner-character-section">
     <div className="dsh-partner-conversation-summary"><strong>像聊天一样接话</strong><p>先给直接反应，说到点上就停。可以不同意、不知道或开玩笑；不固定追问、不把闲聊改成建议清单。认真求助时照常查证和执行。</p></div>
     <div className="dsh-partner-fields two"><Field label="闲聊节奏" hint="只影响闲聊，解释和任务交付按实际需要展开。"><select value={card.length} onChange={e => onChange({ ...card, length: e.target.value as CharacterCard['length'] })}><option value="short">短句接话</option><option value="balanced">随话题自然调整</option><option value="rich">愿意展开聊</option></select></Field><label className="dsh-partner-character-check"><input type="checkbox" checked={card.narration} onChange={e => onChange({ ...card, narration: e.target.checked })} />允许少量动作描写</label></div>
+    <div className="dsh-partner-chat-options">
+      <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>分段回复</strong><small>需要时分成几条短消息，长文和代码保持完整。不会刻意等待。</small></span></label>
+      <label><input type="checkbox" checked={card.stickersEnabled===true} onChange={e=>onChange({...card,stickersEnabled:e.target.checked})}/><span><strong>表情包</strong><small>根据语境从表情库选图，作为单独消息发送。不支持表情的渠道会显示图片。</small></span></label>
+      <button type="button" onClick={()=>setLibrary(true)}>管理表情库</button>
+    </div>
+    {library&&<StickerLibraryDialog companionId={companionId} close={()=>setLibrary(false)}/>}
     <Field label="额外聊天偏好（可选）" hint="例如：玩笑时直接接梗；认真说烦恼时先听，不急着给建议。留空使用默认聊天规则。"><textarea rows={4} maxLength={2000} value={card.chatStyle ?? ''} onChange={e => onChange({ ...card, chatStyle: e.target.value })} /></Field>
     <p className="dsh-partner-character-hint">角色聊天不会减少工具或权限，也不会主动延迟、潜水或省略应有的私聊回复。</p>
   </div>
@@ -110,7 +118,7 @@ function CharacterTrial({ companion, card }: { companion: CompanionView; card: C
     try { normalizeCharacterCard(card); const result = await api<{reply:string}>(`/companions/${encodeURIComponent(companion.id)}/character/preview`, {method:'POST', body:JSON.stringify({card,message,history})}); setHistory(old => [...old, {user:message,assistant:result.reply}].slice(-8)); setMessage('') }
     catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
   }
-  return <div className="dsh-partner-character-trial"><details><summary>查看角色与聊天规则</summary><pre>{card.enabled ? [renderCharacterCore(card), renderConversationBehavior(card)].join('\n\n') : '角色聊天未启用。'}</pre></details><p className="dsh-partner-character-hint">使用此伙伴当前模型，最多保留 8 组试聊，不写正式记忆。这里仅预览语气，不执行操作；正式会话仍可使用全部已授权工具。</p>
+  return <div className="dsh-partner-character-trial"><details><summary>查看角色与聊天规则</summary><pre>{card.enabled ? [renderCharacterCore(card), renderConversationBehavior(card)].join('\n\n') : '角色聊天未启用。'}</pre></details><p className="dsh-partner-character-hint">使用此伙伴当前模型，最多保留 8 组试聊，不写正式记忆。这里仅预览语气，不预览分段或表情发送，不执行操作；正式会话仍可使用全部已授权工具。</p>
     <div aria-live="polite">{history.map((x, i) => <div className="dsh-partner-trial-exchange" key={i}><p><b>你</b>{x.user}</p><p><b>{companion.name}</b>{x.assistant}</p></div>)}</div>
     <Field label="试聊消息"><textarea rows={2} maxLength={2000} disabled={busy} value={message} onChange={e => setMessage(e.target.value)} /></Field>{error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
     <div className="dsh-partner-character-row"><button type="button" disabled={busy} onClick={() => setHistory([])}>重新试聊</button><button type="button" disabled={busy || !message.trim() || !card.enabled} onClick={() => void send()}>{busy ? '角色正在回复…' : '发送试聊'}</button></div>

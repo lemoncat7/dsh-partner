@@ -1,3 +1,4 @@
+import { replyDeliveryParts } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
 import type { ChannelSession, ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
@@ -96,7 +97,11 @@ export class ChannelManager {
     }))
   }
 
+  private chatRecoveryTimer: ReturnType<typeof setInterval> | undefined
+  private chatRecovery: Promise<void> | undefined
+
   async startEnabled(): Promise<void> {
+    this.startChatRecovery()
     for (const channel of this.store.snapshot().channels) if (channel.enabled) {
       try { await this.start(channel.id) }
       catch { this.runtime.set(channel.id,{status:'error',lastError:'渠道启动失败，请检查凭据和配置'}) }
@@ -104,6 +109,7 @@ export class ChannelManager {
   }
 
   async start(channelId: string): Promise<void> {
+    this.startChatRecovery()
     if (this.tasks.has(channelId)) return
     const channel = requiredChannel(this.store, channelId)
     if ((!channel.platform || channel.platform === 'weixin') && this.store.snapshot().channels.some(c => c.id !== channelId && c.companionId === channel.companionId && (!c.platform || c.platform === 'weixin') && c.enabled)) {
@@ -142,12 +148,15 @@ export class ChannelManager {
 
   async close(): Promise<void> {
     this.notificationShutdown.abort()
+    clearInterval(this.chatRecoveryTimer)
+    await this.chatRecovery
     for (const pending of this.pendingQuestions.values()) {
       pending.detachAbort()
       pending.reject(new Error('伙伴渠道已停止'))
     }
     this.pendingQuestions.clear()
     await Promise.all([...this.tasks.keys()].map(id => this.stop(id)))
+    await Promise.allSettled([...this.messageSendQueues.values()])
   }
 
   async delete(channelId: string): Promise<void> {
@@ -311,7 +320,15 @@ export class ChannelManager {
         await this.sendNotificationTarget(target.channelId, target.userId, payload, sendPart)
       })
   }
-  private async sendNotificationTarget(channelId: string, userId: string, reply: PartnerReply, sendPart: (part:number, send:()=>Promise<unknown>)=>Promise<void>): Promise<void> {
+  private readonly messageSendQueues = new Map<string,Promise<void>>()
+  private async sendNotificationTarget(channelId:string,userId:string,reply:PartnerReply,sendPart:(part:number,send:()=>Promise<unknown>)=>Promise<void>):Promise<void> {
+    const key=JSON.stringify([channelId,userId])
+    const job=(this.messageSendQueues.get(key)??Promise.resolve()).catch(()=>{}).then(()=>this.performNotificationTarget(channelId,userId,reply,sendPart))
+    this.messageSendQueues.set(key,job)
+    try{await job}finally{if(this.messageSendQueues.get(key)===job)this.messageSendQueues.delete(key)}
+  }
+  private async performNotificationTarget(channelId: string, userId: string, reply: PartnerReply, sendPart: (part:number, send:()=>Promise<unknown>)=>Promise<void>): Promise<void> {
+    this.notificationShutdown.signal.throwIfAborted()
     const channel = requiredChannel(this.store, channelId)
     if (!channel.enabled) throw new Error('通知渠道已停用')
     const pairing = this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)
@@ -320,13 +337,58 @@ export class ChannelManager {
     const token = this.contextTokens.get(`${channelId}:${userId}`)
     const api = this.sender(channel, credential, userId)
     const send = (attachment:boolean, perform:(signal:AbortSignal)=>Promise<unknown>) => {
+      this.checkChatSource(channelId,userId,reply)
       const current = requiredChannel(this.store, channelId)
       if (!current.enabled || current.companionId !== channel.companionId) throw new Error('通知渠道已停用或授权已变更')
       if (this.store.snapshot().pairings.find(item => item.channelId === channelId && item.userId === userId)?.status !== 'approved') throw new Error('通知接收人尚未批准')
       return sendNotificationPart(attachment, perform, this.notificationShutdown.signal)
     }
-    await sendPart(0, () => send(false, signal => api.sendText(userId, reply.text, token, signal)))
-    for (const [index, attachment] of reply.attachments.entries()) await sendPart(index + 1, () => send(true, signal => api.sendAttachment(userId, attachment, token, signal)))
+    for (const [index, part] of replyDeliveryParts(reply).entries()) await sendPart(index, () => part.type === 'text'
+      ? part.text ? send(false, signal => api.sendText(userId,part.text,token,signal)) : Promise.resolve()
+      : send(true, signal => api.sendAttachment(userId,part.attachment,token,signal)))
+  }
+
+  private checkChatSource(channelId:string,userId:string,reply:PartnerReply):void {
+    if(!reply.directSource)return
+    const state=this.store.snapshot(),source=reply.directSource
+    const route=state.sessions.find(s=>s.id===source.routeId&&s.sessionId===source.sessionId&&s.channelId===channelId&&s.userId===userId)
+    const channel=state.channels.find(c=>c.id===channelId),pair=state.pairings.find(p=>p.channelId===channelId&&p.userId===userId)
+    if(!route||!channel||route.companionId!==channel.companionId||this.store.isCompanionRemoving(route.companionId)||channel.accountId!==source.accountId||(channel.direct?.baseUrl??'')!==source.baseUrl||(pair?.directTargetId||channel.direct?.targetId||'')!==source.targetId)throw new Error('原始会话、账号或房间已变更，保留回复等待处理，不转发其他渠道')
+  }
+  private async sendChatReply(channel:WeixinChannel,userId:string,receipt:string,reply:PartnerReply,first?:(text:string)=>Promise<void>,targetId?:string):Promise<void> {
+    const state=this.store.snapshot(),route=state.sessions.find(s=>s.channelId===channel.id&&s.userId===userId&&s.companionId===channel.companionId)
+    if(!route)throw new Error('聊天来源会话已移除')
+    if(reply.chatOriginRouteId!==undefined&&reply.chatOriginRouteId!==route.id)throw new Error('回复属于其他输入来源，仅保留在网页历史，不向当前渠道转发')
+    const payload:PartnerReply={...reply,directSource:{routeId:route.id,sessionId:route.sessionId,accountId:channel.accountId,baseUrl:channel.direct?.baseUrl??'',targetId:targetId??(state.pairings.find(p=>p.channelId===channel.id&&p.userId===userId)?.directTargetId||channel.direct?.targetId||'')}}
+    await this.notificationDelivery.deliver(`chat:${receipt}`,channel.companionId,()=>[{channelId:channel.id,userId}],payload,async(target,frozen,part)=>{
+      this.checkChatSource(target.channelId,target.userId,frozen)
+      await this.sendNotificationTarget(target.channelId,target.userId,frozen,(index,perform)=>part(index,()=>{
+        this.notificationShutdown.signal.throwIfAborted()
+        this.checkChatSource(target.channelId,target.userId,frozen)
+        const firstPart=replyDeliveryParts(frozen)[0]
+        return index===0&&first&&firstPart?.type==='text'?first(firstPart.text):perform()
+      }))
+    })
+  }
+  private startChatRecovery():void {
+    if(this.chatRecoveryTimer||this.notificationShutdown.signal.aborted)return
+    this.chatRecoveryTimer=setInterval(()=>{
+      if(this.chatRecovery)return
+      this.chatRecovery=this.recoverChatReplies().catch(error=>this.ctx.logger.warn(`dsh-partner chat recovery: ${String(error)}`)).finally(()=>{this.chatRecovery=undefined})
+    },30000)
+    this.chatRecoveryTimer.unref?.()
+  }
+  private async recoverChatReplies():Promise<void> {
+    for(const record of this.store.snapshot().notificationDeliveries??[]){
+      if(this.notificationShutdown.signal.aborted)return
+      if(record.completedAt||!record.reply.chatParts||!record.reply.directSource||record.targets.some(t=>Date.now()-(t.lastAttemptAt??0)<30000))continue
+      const key=JSON.parse(record.id) as [string,string]
+      if(key[0]!==record.companionId||!key[1].startsWith('chat:'))continue
+      try{await this.notificationDelivery.deliver(key[1],record.companionId,()=>record.targets,record.reply,async(target,reply,part)=>{
+        this.checkChatSource(target.channelId,target.userId,reply)
+        await this.sendNotificationTarget(target.channelId,target.userId,reply,part)
+      })}catch{ /* Persisted per-target error remains visible; next cycle retries only missing parts. */ }
+    }
   }
 
   private async pollLoop(channel: WeixinChannel, api: WeixinApi, signal: AbortSignal): Promise<void> {
@@ -403,6 +465,12 @@ export class ChannelManager {
       return
     }
     const reply = await this.agents.reply(companion, channel.id, userId, { text: inboundText, attachments })
+    if(reply.chatParts){
+      // Claim the input before delivery so recovery never executes its tools again.
+      await this.rememberReceipt(receipt)
+      await this.sendChatReply(channel,userId,receipt,reply)
+      return
+    }
     await api.sendText(userId, reply.text, this.contextTokens.get(tokenKey), signal)
     for (const attachment of reply.attachments) {
       try { await api.sendAttachment(userId, attachment, this.contextTokens.get(tokenKey), signal) }
@@ -683,12 +751,18 @@ export class ChannelManager {
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!current.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId)||!current.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'))throw new Error('渠道或联系人授权已撤销，取消回复')
+        if(reply.chatParts){
+          const first=reply.chatParts[0]
+          if(progress&&first?.type!=='text')await progress.completeWithoutReply()
+          await this.sendChatReply(channel,event.sender,receipts.join('|'),reply,progress&&first?.type==='text'?text=>progress.finish(text):undefined,event.targetId||channel.direct?.targetId)
+        } else {
         const replyText=reply.text || (reply.attachments.length?'已生成附件，正在发送。':'')
         if(progress)await progress.finish(replyText)
         else await api.sendText(event.sender,replyText,undefined,signal)
         for(const attachment of reply.attachments){
           if(!allowed())throw new Error('渠道或联系人授权已撤销')
           await api.sendAttachment(event.sender,attachment,undefined,signal,allowed)
+        }
         }
         } catch(error) {
           await progress?.fail()

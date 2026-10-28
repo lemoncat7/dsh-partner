@@ -3,6 +3,7 @@ import {createServer} from 'node:http'
 import {readFile} from 'node:fs/promises'
 import {fileURLToPath, pathToFileURL} from 'node:url'
 import {build} from 'esbuild'
+import { BUILTIN_STICKERS } from '../lib/chat/sticker-builtins.js'
 const {chromium}=await import(pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href)
 const bundle=await build({nodePaths:(process.env.DSH_UI_TEST_NODE_PATH??'').split(':').filter(Boolean),alias:{react:fileURLToPath(new URL('../node_modules/react',import.meta.url))},stdin:{resolveDir:fileURLToPath(new URL('../',import.meta.url)),loader:'tsx',contents:`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {IdentityEditor} from './src/ui/identity-editor';import {AutomationSettings} from './src/ui/memory/automation-settings';import {createDefaultCompanion} from './src/domain';
@@ -21,6 +22,8 @@ try {
    else if(url.endsWith('/preview'))result={reply:'先缓一缓，愿意说说发生了什么吗？'}
    else if(url.endsWith('/models'))result={providers:[],defaultSelection:{provider:'test',model:'test'}}
    else if(url.endsWith('/renewal'))result={items:[]}
+   else if(url.endsWith('/stickers'))result={items:BUILTIN_STICKERS.map(({data,...s})=>({...s,builtin:true}))}
+   else if(url.includes('/stickers/builtin-')){await route.fulfill({contentType:'image/png',body:Buffer.from(BUILTIN_STICKERS.find(s=>url.endsWith(s.id)).data,'base64')});return}
    await route.fulfill({json:result})
   })
   await page.goto(`http://127.0.0.1:${server.address().port}`);await page.addStyleTag({content:css});await page.evaluate(dark=>{document.body.toggleAttribute('data-ds-dark-theme',dark);document.body.style.background=dark?'#181a1c':'#f6f6f8';document.body.style.fontFamily='sans-serif'},dark)
@@ -40,6 +43,18 @@ try {
   await page.getByRole('button',{name:'添加世界条目'}).click();await page.getByLabel('条目标题').fill('图书馆');await page.getByLabel('触发词',{exact:false}).fill('图书馆，书架');await page.getByLabel('设定内容').fill('虚构场景里有一面蓝色书架。')
   await page.getByRole('tab',{name:'聊天方式',exact:true}).click()
   await page.getByLabel('额外聊天偏好（可选）',{exact:false}).fill('不习惯性追问，不把闲聊变成建议清单。')
+  await page.getByRole('checkbox',{name:/分段回复/}).check()
+  await page.getByRole('checkbox',{name:/表情包/}).check()
+  await page.getByRole('button',{name:'管理表情库'}).click()
+  await page.getByRole('dialog').getByText('6 张内置',{exact:false}).waitFor()
+  assert.equal(await page.getByRole('dialog').getByRole('img').count(),6)
+  assert.equal(await page.getByRole('dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true)
+  await page.screenshot({path:`/tmp/partner-stickers-${width}-${dark?'dark':'light'}.png`})
+  await page.getByLabel('查找表情').fill('困')
+  assert.equal(await page.getByRole('dialog').getByRole('img').count(),1)
+  await page.keyboard.press('Escape')
+  assert.equal(await page.getByRole('dialog').count(),0)
+  assert.equal(await page.getByRole('button',{name:'管理表情库'}).evaluate(e=>document.activeElement===e),true)
   await page.getByRole('tab',{name:'角色设定',exact:true}).click()
   assert.equal(await page.getByLabel('闲聊节奏',{exact:false}).isVisible(),false)
   await page.getByRole('tab',{name:'基本身份',exact:false}).click()
@@ -56,6 +71,8 @@ try {
   assert.equal(await page.evaluate(()=>window.savedCompanion.name),'未保存的名字')
   assert.equal(await page.evaluate(()=>window.savedCompanion.characterCard.roleText),'坦率的同行者，闲聊简短，有自己的偏好。')
   assert.equal(await page.evaluate(()=>window.savedCompanion.characterCard.lore[0].title),'图书馆')
+  assert.equal(await page.evaluate(()=>window.savedCompanion.characterCard.segmentedReplies),true)
+  assert.equal(await page.evaluate(()=>window.savedCompanion.characterCard.stickersEnabled),true)
   assert.equal(await page.getByRole('button',{name:'设置角色',exact:true}).count(),0)
   assert.equal(await page.getByRole('switch',{name:'启用角色聊天'}).getAttribute('aria-checked'),'true')
   await page.getByRole('switch',{name:'启用角色聊天'}).click();assert.ok((await page.getByRole('textbox',{name:/角色设定/}).inputValue()).length>0)

@@ -110,6 +110,12 @@ export class ReplyProgressController {
       }else await this.transport.send(text,signal)
     }finally{await this.clearTyping()}
   }
+  async completeWithoutReply():Promise<void>{
+    await this.stop()
+    if(this.blocks)await this.blocks.boundary('回复已整理，正在发送。')
+    if(this.id&&this.allowed()&&!this.signal.aborted)await this.transport.edit(this.id,'回复已整理，正在发送。',AbortSignal.timeout(3000)).catch(()=>{})
+    await this.clearTyping()
+  }
   async fail():Promise<void>{
     if(this.closed)return
     await this.stop()

@@ -97,3 +97,20 @@
 .dsh-partner-conversation-summary p { margin: 8px 0 0; }
 .dsh-partner-character textarea { resize: vertical; }
 .dsh-partner-character .dsh-partner-character-check { min-height: 44px; }
+.dsh-partner-chat-options { display: grid; gap: 18px; padding: 20px 0; border-block: 1px solid var(--partner-border); }
+.dsh-partner-chat-options > label { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; min-height: 44px; }
+.dsh-partner-chat-options input { flex: none; margin-top: 4px; }
+.dsh-partner-chat-options span { min-width: 0; }
+.dsh-partner-chat-options small { display: block; margin-top: 6px; line-height: 1.6; color: var(--partner-text-secondary); }
+.dsh-partner-chat-options > button { justify-self: start; }
+.dsh-partner-sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 18px; margin: 20px 0 28px; }
+.dsh-partner-sticker-grid figure { margin: 0; padding: 12px; min-width: 0; border-bottom: 1px solid var(--partner-border); }
+.dsh-partner-sticker-grid img { display: block; width: 100%; height: 112px; object-fit: contain; margin-bottom: 12px; }
+.dsh-partner-sticker-grid strong, .dsh-partner-sticker-grid small { display: block; overflow-wrap: anywhere; }
+.dsh-partner-sticker-grid small { color: var(--partner-text-secondary); margin: 6px 0 10px; line-height: 1.5; }
+.dsh-partner-sticker-upload { border-top: 1px solid var(--partner-border); padding-top: 20px; }
+.dsh-partner-sticker-upload summary { cursor: pointer; min-height: 44px; font-weight: 600; }
+.dsh-partner-chat-bubbles { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 12px 0; max-width: 100%; color: inherit; }
+.dsh-partner-chat-bubble { white-space: pre-wrap; overflow-wrap: anywhere; max-width: min(100%, 680px); box-sizing: border-box; padding: 12px 16px; background: color-mix(in srgb, currentColor 6%, transparent); border-radius: 16px; line-height: 1.7; }
+.dsh-partner-chat-sticker img { width: 144px; max-width: 100%; height: 144px; object-fit: contain; }
+.dsh-partner-chat-image-missing { font-size: 13px; opacity: .7; }

@@ -51,6 +51,7 @@ import { errorMessage as message } from './ui/workspace-components.js'
 import { CompanionCreateDialog, type NewCompanionDraft } from './ui/companion-create.js'
 import { createPartnerController, type PartnerController as Controller } from './client-controller.js'
 import { CAPABILITY_LABELS } from './capabilities.js'
+import { registerChatReplies } from './chat/conversation.js'
 import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
@@ -68,6 +69,7 @@ export const inject = ['slots', 'layout', 'sessions', 'uiWorkspace']
 
 export function apply(ctx: ClientContext): void {
   registerDecisionCards(ctx)
+  registerChatReplies(ctx)
   ctx.effect(installStyles, 'dsh-partner: styles')
   const controller = createPartnerController(ctx, PLUGIN_ID, (props, current) => <PartnerWorkspace {...props} controller={current} />)
   if(pendingStorageRecovery()!==undefined)controller.open(undefined,{page:'general'})

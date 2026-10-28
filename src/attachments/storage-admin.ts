@@ -5,7 +5,7 @@ import type { AttachmentStorageView, AttachmentCleanupResult } from './storage-t
 export async function attachmentStorageView(service: AttachmentDeliveryService, store: PartnerStore): Promise<AttachmentStorageView> {
   const state=store.snapshot(), entries=await service.storedEntries()
   // Includes explicit IDs and historical text-based attachment references.
-  const references=JSON.stringify([...state.tasks.filter(t=>t.status!=='done'),...(state.requirements??[]).filter(r=>!r.archivedAt||!r.notifiedAt)])
+  const references=JSON.stringify([...(state.notificationDeliveries??[]).filter(r=>!r.completedAt),...state.tasks.filter(t=>t.status!=='done'),...(state.requirements??[]).filter(r=>!r.archivedAt||!r.notifiedAt)])
   const owners:AttachmentStorageView['owners']=[]
   const items=entries.map(item=>{
     const name=state.companions.find(c=>c.id===item.companionId)?.name??item.companionId

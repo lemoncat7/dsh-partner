@@ -21,6 +21,11 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  chatParts?: import('./chat/protocol.js').ChatPart[]
+  chatOriginRouteId?: string | null
+  /** Freeze the direct source; never reroute a queued reply after account or room changes. */
+  directSource?: { routeId: string; sessionId: string; accountId: string; baseUrl: string; targetId: string }
+
   /** Status-only delivery must suppress even previously queued attachment parts. */
   attachmentPolicy?: 'text-only'
   attachmentScope?: string

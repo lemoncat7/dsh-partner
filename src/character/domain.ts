@@ -5,6 +5,8 @@ export interface CharacterCard {
   /** Authoritative free-form role. Absent means adapt the legacy fields losslessly. */
   roleText?: string
   chatStyle?: string
+  segmentedReplies?: boolean
+  stickersEnabled?: boolean
   identity: string
   motivation: string
   voice: string
@@ -48,6 +50,8 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   if (typeof v.enabled !== 'boolean') throw new Error('请选择是否启用人格强化')
   const card: CharacterCard = {
     schemaVersion: 1, enabled: v.enabled,
+    ...(v.segmentedReplies !== undefined ? { segmentedReplies: v.segmentedReplies === true } : {}),
+    ...(v.stickersEnabled !== undefined ? { stickersEnabled: v.stickersEnabled === true } : {}),
     ...(v.roleText !== undefined ? { roleText: str(v.roleText, '角色设定', 48000) } : {}),
     ...(v.chatStyle !== undefined ? { chatStyle: str(v.chatStyle, '聊天偏好', 2000) } : {}),
     identity: str(v.identity, '角色核心', 2000), motivation: str(v.motivation, '行为动机', 3000), voice: str(v.voice, '语言风格', 1500),

@@ -93,5 +93,5 @@ export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string
   text = text.replace(SANDBOX, raw => label(raw, raw))
   if (missingSandbox) text += '\n\n这里只提供了沙箱引用，未发送该附件。请让伙伴使用 partner_send_attachment 交付真实文件；sandbox 地址不能直接在渠道打开。'
   if (!text.trim()) text = '本轮未生成可发送的最终答复，请重试或在会话中查看执行状态。'
-  return { text: text.trim(), attachments: [] }
+  return { text: text.trim(), attachments: [], ...(parts.chatParts ? {chatParts:parts.chatParts,...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})} : {}) }
 }

@@ -30,6 +30,8 @@ const MAX_INLINE_SKILL_CHARS = 32_000
 export class PartnerAgentComposition {
   private mcp?: McpService
   setMcpService(service: McpService): void { this.mcp = service }
+  private chatToolFactory?: (companionId: string) => ToolDefinition[]
+  setChatToolFactory(factory: (companionId: string) => ToolDefinition[]): void { this.chatToolFactory = factory }
   private avatarToolFactory?: (companionId: string) => ToolDefinition
   setAvatarToolFactory(factory: (companionId: string) => ToolDefinition): void { this.avatarToolFactory = factory }
   private attachmentToolFactory?: (companionId: string) => ToolDefinition
@@ -63,6 +65,7 @@ export class PartnerAgentComposition {
     try {
       for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
       if (this.attachmentToolFactory) disposers.push(ctx.tools.register(this.attachmentToolFactory(companion.id)))
+      for (const tool of this.chatToolFactory?.(companion.id) ?? []) disposers.push(ctx.tools.register(tool))
       if (this.avatarToolFactory) disposers.push(ctx.tools.register(this.avatarToolFactory(companion.id)))
       if (skillsEnabled) register(skillTool(companion, this.skills, this.executor), 'skills')
       if (companion.capabilities.includes('companions')) register(companionTool(this.companions), 'companions')

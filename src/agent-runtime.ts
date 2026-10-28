@@ -1,3 +1,4 @@
+import { questionOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
 import { renderConversationTurn } from './character/conversation-behavior.js'
 import { renewContext } from './context-renewal.js'
@@ -211,6 +212,8 @@ export class PartnerAgentRuntime {
     if (route === undefined) return false
     const agent = this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId)
     if (agent === undefined || agent.status !== 'running') return false
+    // Shared history is not shared delivery ownership: queue cross-channel input.
+    if (questionOrigin(agent.session.id, agent.session.snapshotEvents(), this.store.snapshot().sessions)?.id !== route.id) return false
     const inbound = await this.persistInbound(route, message)
     const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
     if (deferred && deferred.length > 0) {
@@ -542,7 +545,8 @@ export class PartnerAgentRuntime {
     const prompt = events.find(item => item.type === 'user/message' && item.data.source.kind === 'user')
     const replies = events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
     const userText = events.filter(e => e.type === 'user/message' && e.data.source.kind === 'user').map(e => e.type === 'user/message' ? textContent(e.data.content) : '').filter(Boolean).join('\n\n')
-    const assistantText = replies.flatMap(item => item.type === 'assistant/message' ? [textContent(item.data.message.content)] : []).filter(Boolean).join('\n\n')
+    const structuredReply = channelReplyPartsAfter(events, -1)
+    const assistantText = structuredReply.chatParts ? structuredReply.text : replies.flatMap(item => item.type === 'assistant/message' ? [textContent(item.data.message.content)] : []).filter(Boolean).join('\n\n')
     if (!userText || !assistantText) return
     const scopeId = memoryScope(route.channelId, route.userId)
     const concernDirective = await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)

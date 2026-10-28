@@ -48,6 +48,8 @@ import { PushCredentials } from './notifications/push-credentials.js'
 import { PushObserver } from './notifications/push-observer.js'
 import { AttachmentDeliveryService } from './attachments/service.js'
 import { openSharedAttachmentStorage } from './attachments/shared-storage.js'
+import { StickerLibrary } from './chat/stickers.js'
+import { chatTools } from './chat/tools.js'
 import { attachmentTool } from './attachments/tool.js'
 import { StorageCoordinator } from './storage/coordinator.js'
 import { storageLayout, TARGET_STORAGE_VERSION } from './storage/layout.js'
@@ -174,6 +176,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     })
     const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
+    const stickers = new StickerLibrary(layout.privateRoot)
+    composer.setChatToolFactory(id => chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix))
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -226,7 +230,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

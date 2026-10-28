@@ -1,3 +1,5 @@
+import { StickerLibrary } from './chat/stickers.js'
+import { dispatchStickersApi } from './api/features/stickers-api.js'
 import { previewCharacter } from './character/preview.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { conversationMemoryScope } from './memory-scope.js'
@@ -47,6 +49,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  stickers?: StickerLibrary
   push?: PushService
   concernExecution?: import('./concern-execution.js').ConcernExecutionDispatcher
   mcp?: McpService
@@ -125,6 +128,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     return sendJson(res, 200, await runtime.storage.inspect())
   }
   if (segments[0] === 'companions' && segments[1] && runtime.store.isCompanionRemoving(segments[1]) && !(method === 'DELETE' && segments.length === 2)) throw httpError(409, '伙伴正在删除，请稍后刷新')
+  if (runtime.stickers && await dispatchStickersApi(req,res,segments,runtime.stickers,runtime.store)) return
   if (await dispatchPendantApi(req, res, segments, runtime.inbox)) return
   if (runtime.deliveries && await dispatchAttachmentsApi(req,res,segments,runtime.deliveries,runtime.store)) return
   if (method === 'GET' && segments[0] === 'health') return sendJson(res, 200, { ok: true, service: 'dsh-partner', schemaVersion: 14 })
