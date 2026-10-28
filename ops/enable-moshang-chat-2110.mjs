@@ -13,7 +13,7 @@ try {
   assert.equal(r.status,200)
 }catch(error){
   const check=await fetch(base,{signal:AbortSignal.timeout(20000)}).then(r=>r.json())
-  if(JSON.stringify(check.companions.find(c=>c.id===old.id)?.characterCard)!==JSON.stringify(card))throw error
+  try { assert.deepEqual(check.companions.find(c=>c.id===old.id)?.characterCard,card) } catch { throw error }
 }
 const after=await fetch(base,{signal:AbortSignal.timeout(20000)}).then(r=>r.json())
 for(const c of before.companions){const next=after.companions.find(n=>n.id===c.id);assert.ok(next);for(const key of ['name','role','description','instructions','capabilities','presetId','provider','model','automation','notificationDelivery'])assert.deepEqual(next[key],c[key],c.id+':'+key);assert.deepEqual(next.characterCard,c.id===old.id?card:c.characterCard)}
