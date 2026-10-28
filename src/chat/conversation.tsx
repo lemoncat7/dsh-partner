@@ -4,12 +4,14 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { chatReplyFromEvent, type ChatReply } from './protocol.js'
 
+// A terminal reply is turn content, outside the collapsible tool process.
+// Keep native tool-result consumers subscribed so their call state also settles.
 export const chatReplyDefinition:ConversationNodeDefinition<ChatReply>={
   kind:'partner-chat-reply',target:'chat',
-  match:event=>chatReplyFromEvent(event as SessionEvent)?{id:`reply-${event.seq}`,role:'start',exclusive:true}:null,
+  match:event=>chatReplyFromEvent(event as SessionEvent)?{id:`reply-${event.seq}`,role:'start'}:null,
   start:(_ctx,match)=>chatReplyFromEvent(match.event as SessionEvent)!,
   update:(_ctx,match)=>chatReplyFromEvent(match.event as SessionEvent)!,
-  buildViewNode:context=>context.state&&context.start?{key:context.key,id:context.id,kind:'partner-chat-reply',target:'chat',anchorSeq:context.start.event.seq,location:context.start.location,visibility:'visible',data:context.state}:null,
+  buildViewNode:context=>context.state&&context.start?{key:context.key,id:context.id,kind:'partner-chat-reply',target:'chat',anchorSeq:context.start.event.seq,location:context.start.location,visibility:'visible',groupTree:'turn',data:context.state}:null,
 }
 function StickerImage({url,label}:{url:string;label:string}) {
   const [failed,setFailed]=useState(false)

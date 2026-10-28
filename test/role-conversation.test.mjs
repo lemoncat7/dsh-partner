@@ -78,3 +78,20 @@ test('chat behavior never asks for a transport tool or synthetic wait', () => {
   assert.match(text,/私聊明确找你时必须有可见回复/)
   assert.equal(renderConversationTurn(undefined,2),'')
 })
+
+
+test('short segmented chat and sticker choices remain explicit at each user turn', () => {
+  const card=normalizeCharacterCard({enabled:true,roleText:'坦率的同行者',length:'short',segmentedReplies:true,stickersEnabled:true})
+  const behavior=renderConversationBehavior(card),turn=renderConversationTurn(card,1)
+  assert.doesNotMatch(behavior,/普通闲聊通常只发一句短话/)
+  for(const prompt of [behavior,turn]) {
+    assert.match(prompt,/分段回复已开启/)
+    assert.match(prompt,/表情包已开启/)
+    assert.match(prompt,/partner_chat_reply/)
+    assert.match(prompt,/不每轮固定发/)
+  }
+  assert.doesNotMatch(renderConversationTurn({...card,enabled:false},1),/partner_chat_reply/)
+  assert.match(renderConversationTurn({...card,segmentedReplies:false},1),/文字只用一条/)
+  assert.match(renderConversationTurn({...card,stickersEnabled:false},1),/不查找或提交表情/)
+  assert.doesNotMatch(renderConversationTurn({...card,stickersEnabled:false,segmentedReplies:false},1),/partner_chat_reply/)
+})

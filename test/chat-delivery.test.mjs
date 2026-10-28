@@ -87,11 +87,23 @@ test('native chat renders bubbles and images through published host registration
   const registry={register(d){definition=d;return()=>{}}}
   const ctx={get:()=>({events:registry}),effect:fn=>fn(),inject:(keys,fn)=>{if(keys[0]==='uiConversation')fn(ctx)},slots:{inject:(_name,fn)=>fn(),register:(_opts,fn)=>{renderer=fn;return()=>{}}}}
   registerChatReplies(ctx);assert.equal(definition,chatReplyDefinition)
-  const match=definition.match(result);assert.equal(match.exclusive,true)
+  const match=definition.match(result);assert.notEqual(match.exclusive,true)
   const data=definition.start({}, {event:result})
   const html=renderToStaticMarkup(renderer({node:{data}}))
   assert.match(html,/你可算来了/);assert.match(html,/alt="开心"/);assert.doesNotMatch(html,/snapshot\/image/)
   assert.equal(definition.match({...result,data:{...result.data,message:{isError:true}}}),null)
+})
+test('terminal replies stay outside native process folding and leave tool results observable',()=>{
+  for (const event of [result,{...result,type:'tool/ptc-dispatch'}]) {
+    const match=chatReplyDefinition.match(event)
+    assert.notEqual(match.exclusive,true,'native tool lifecycle must still receive the result')
+    const location={kind:'step',turn:{turn:1},step:1}
+    const node=chatReplyDefinition.buildViewNode({key:'reply',id:match.id,state:chatReplyDefinition.start({}, {event}),start:{event,location}})
+    assert.equal(node.groupTree,'turn','DSH groups nodes without a position into collapsed process steps')
+    assert.equal(node.visibility,'visible')
+    assert.equal(node.location,location)
+    assert.deepEqual(node.data.parts,meta.parts)
+  }
 })
 test('direct queued reply checks the original route and rechecks authorization between parts',async()=>{
   const channel={id:'c',companionId:'a',enabled:true,accountId:'account',direct:{baseUrl:'https://example.test',targetId:'room'}}
