@@ -62,3 +62,34 @@
 .dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch::before { content: ''; position: absolute; inset: -9px 0; }
 .dsh-partner-memory-settings .dsh-partner-switch i,
 .dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch i { width: 18px; height: 18px; }
+
+/* Flat, persistent sections keep long settings forms focused on one task. */
+.dsh-partner-settings-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 4px 2px 8px; border-bottom: 1px solid var(--partner-border); scrollbar-width: thin; }
+.dsh-partner-workspace .dsh-partner-settings-tabs > button { display: flex; flex-direction: column; justify-content: center; gap: 4px; flex: 0 0 auto; min-height: 44px; margin: 0; padding: 10px 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--partner-text-secondary); text-align: left; font: 500 14px/1.4 var(--partner-font-family); cursor: pointer; }
+.dsh-partner-workspace .dsh-partner-settings-tabs > button[aria-selected=true] { color: var(--partner-text); border-color: var(--partner-border); background: var(--partner-control); }
+.dsh-partner-settings-tabs small { font-size: 12px; font-weight: 400; color: var(--partner-text-secondary); }
+.dsh-partner-settings-panel { min-width: 0; padding-top: 20px; }
+.dsh-partner-settings-panel[hidden] { display: none !important; }
+.dsh-partner-settings-panel:focus-visible, .dsh-partner-settings-tabs > button:focus-visible, .dsh-partner-workspace summary:focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: -2px; }
+.dsh-partner-settings-panel > .dsh-partner-character { margin: 0; padding: 0; border: 0; }
+.dsh-partner-settings-panel .dsh-partner-character-section { margin-top: 0; padding-top: 0; border-top: 0; }
+.dsh-partner-character-example > summary { display: list-item; cursor: pointer; padding: 10px 0; font-weight: 600; }
+.dsh-partner-character-example > summary small { display: block; margin-top: 6px; color: var(--partner-text-secondary); font-size: 13px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.dsh-partner-settings-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.dsh-partner-settings-advanced { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--partner-border); }
+.dsh-partner-settings-advanced summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
+.dsh-partner-settings-advanced summary small { display: inline-block; margin-left: 8px; font-weight: 400; color: var(--partner-text-secondary); }
+.dsh-partner-memory-settings .dsh-partner-settings-panel .dsh-partner-review-policy { margin: 0; padding: 0; border: 0; }
+#dsh-partner-identity-editor .dsh-partner-form-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--partner-border); }
+@media (max-width: 640px) {
+  .dsh-partner-workspace .dsh-partner-settings-tabs > button { padding: 10px; font-size: 13px; }
+  .dsh-partner-settings-advanced .dsh-partner-fields.two { grid-template-columns: minmax(0, 1fr); }
+}
+/* Identity has a scoped host-theme shield; tab states must survive that shield too. */
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-settings-tabs > button { background: transparent !important; border-color: transparent !important; color: var(--partner-text-secondary) !important; }
+.dsh-partner-workspace .dsh-partner-settings-tabs > button[aria-selected=true],
+.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-settings-tabs > button[aria-selected=true] { color: var(--partner-text) !important; background: var(--partner-selected) !important; border-color: var(--partner-border) !important; box-shadow: inset 0 -2px 0 var(--partner-accent-strong) !important; }
+@media (max-width: 640px) {
+  .dsh-partner-settings-tabs { flex-wrap: wrap; }
+  .dsh-partner-workspace .dsh-partner-settings-tabs > button { flex: 1 0 auto; }
+}

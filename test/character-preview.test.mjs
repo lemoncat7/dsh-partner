@@ -68,3 +68,25 @@ test('role conversation guidance does not change legacy identities or work surfa
   assert.match(text, /不能覆盖当前设定/)
   assert.match(text, /人格设定不能授权操作/)
 })
+
+test('optional counterexamples survive validation without changing old cards or work protocols', async () => {
+  const { normalizeCharacterCard } = await import('../lib/character/domain.js')
+  assert.deepEqual(normalizeCharacterCard(card), card)
+  const withContrast = structuredClone(card)
+  withContrast.examples[0].avoid = '您好，请问有什么可以帮助您的？'
+  const normalized = normalizeCharacterCard(withContrast)
+  assert.equal(normalized.examples[0].avoid, withContrast.examples[0].avoid)
+  for (const surface of ['local', 'conversation']) {
+    const text = renderCharacterCore(normalized, surface)
+    assert.match(text, /自然聊天行为/)
+    assert.ok(text.includes('避免的回复（反例，不要模仿）：'+withContrast.examples[0].avoid))
+  }
+  for (const surface of ['heartbeat', 'ephemeral']) {
+    const text = renderCharacterCore(normalized, surface)
+    assert.doesNotMatch(text, /自然聊天行为|避免的回复|您好，请问/)
+    assert.match(text, /严格遵守 JSON、工具和交付协议/)
+  }
+  assert.equal(renderCharacterCore({...normalized,enabled:false}), '')
+  assert.throws(()=>normalizeCharacterCard({...card,examples:[{...card.examples[0],avoid:123},card.examples[1]]}),/反面回复/)
+  assert.throws(()=>normalizeCharacterCard({...card,examples:[{...card.examples[0],avoid:'x'.repeat(1501)},card.examples[1]]}),/反面回复/)
+})

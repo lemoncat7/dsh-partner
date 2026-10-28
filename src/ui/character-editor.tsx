@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { SettingsSections } from './settings-sections.js'
+import { useState, type ReactNode } from 'react'
 import { api, type CompanionView } from '../client-api.js'
 import { emptyCharacterCard, normalizeCharacterCard, renderCharacterCore, type CharacterCard } from '../character/domain.js'
 import { FormField as Field } from './partner-components.js'
@@ -20,16 +21,21 @@ const SAMPLE: CharacterCard = {
 
 export function CharacterEditor({ companion, card, disabled, onChange }: { companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
   const [wizard, setWizard] = useState(false)
-  const hasContent = Boolean(card && (card.identity || card.motivation || card.voice || card.examples.length))
+  const [section, setSection] = useState<'core' | 'voice' | 'world' | 'trial' | 'memory'>('core')
+  const hasContent = Boolean(card && (card.identity || card.motivation || card.voice || card.relationship || card.greeting || card.examples.length || card.lore.length))
   return <section className="dsh-partner-character" aria-label="人格强化">
     <header><div><span className="dsh-partner-character-kicker">CHARACTER</span><h3>人格强化 <small>可选</small></h3><p>让身份有自己的行为逻辑、说话方式和持续的关系记忆。</p></div>
       <button type="button" role="switch" aria-label="启用人格强化" aria-checked={card?.enabled === true} className="dsh-partner-switch" data-on={card?.enabled === true} disabled={disabled} onClick={() => { if (!hasContent) setWizard(true); else onChange({ ...card!, enabled: !card!.enabled }) }}><i /></button>
     </header>
-    {!hasContent ? <div className="dsh-partner-character-empty"><strong>给这个身份多一点个性</strong><p>四步建立人格卡。未启用时，伙伴继续使用上面的身份与行为准则。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>创建人格卡</button></div> : <>
+    {!hasContent ? <div className="dsh-partner-character-empty"><strong>给这个身份多一点个性</strong><p>四步建立人格卡。未启用时，伙伴继续使用基本身份与行为准则。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>创建人格卡</button></div> : <>
       <p className="dsh-partner-character-status">{card!.enabled ? '启用后，每轮对话都会应用人格卡；世界设定按话题加载。保存身份后生效。' : '强化已关闭，卡片内容保留。伙伴继续使用原身份。'}</p>
-      <fieldset disabled={disabled} className="dsh-partner-character-fields"><CharacterFields card={card!} onChange={onChange} section="core" /><CharacterFields card={card!} onChange={onChange} section="voice" /><CharacterFields card={card!} onChange={onChange} section="world" /></fieldset>
-      <details className="dsh-partner-character-preview"><summary>查看生效规则与试聊</summary><CharacterTrial companion={companion} card={card!} /></details>
-      <CharacterMemoryEditor companionId={companion.id} />
+      <SettingsSections<typeof section> label="人格内容分段" value={section} onChange={setSection} sections={[
+        {id: 'core', title: '角色核心', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><CharacterFields card={card!} onChange={onChange} section="core" /></fieldset>},
+        {id: 'voice', title: '说话方式', detail: `${card!.examples.length} 组示例`, content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><CharacterFields card={card!} onChange={onChange} section="voice" /></fieldset>},
+        {id: 'world', title: '世界与关系', detail: `${card!.lore.length} 条设定`, content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><CharacterFields card={card!} onChange={onChange} section="world" /></fieldset>},
+        {id: 'trial', title: '预览试聊', content: <CharacterTrial companion={companion} card={card!} />},
+        {id: 'memory', title: '角色记忆', content: <CharacterMemoryEditor companionId={companion.id} />},
+      ]} />
     </>}
     {wizard && <CharacterWizard companion={companion} initial={card ?? emptyCharacterCard()} close={() => setWizard(false)} complete={value => { onChange(value); setWizard(false) }} />}
   </section>
@@ -65,17 +71,17 @@ function CharacterFields({ card, onChange, section }: { card: CharacterCard; onC
   if (section === 'voice') return <div className="dsh-partner-character-section"><h4>说话方式</h4>{field('voice', '语言风格', '措辞、幽默、称呼与不喜欢的表达方式。', 1500)}
     <div className="dsh-partner-fields two"><Field label="回复节奏"><select value={card.length} onChange={e => onChange({ ...card, length: e.target.value as CharacterCard['length'] })}><option value="short">简短闲聊</option><option value="balanced">自然适中</option><option value="rich">丰富叙述</option></select></Field><label className="dsh-partner-character-check"><input type="checkbox" checked={card.narration} onChange={e => onChange({ ...card, narration: e.target.checked })} />允许少量动作描写</label></div>
     <h4>对话示例 <small>至少两组，展示不同情境</small></h4>
-    {card.examples.map((item, index) => <div className="dsh-partner-character-example" key={index}><span>示例 {index + 1}</span><Field label="对方说"><textarea rows={2} maxLength={1000} value={item.user} onChange={e => onChange({ ...card, examples: card.examples.map((x, i) => i === index ? { ...x, user: e.target.value } : x) })} /></Field><Field label="角色回应"><textarea rows={3} maxLength={1500} value={item.assistant} onChange={e => onChange({ ...card, examples: card.examples.map((x, i) => i === index ? { ...x, assistant: e.target.value } : x) })} /></Field><button type="button" onClick={() => onChange({ ...card, examples: card.examples.filter((_, i) => i !== index) })} aria-label={`移除示例 ${index + 1}`}>移除</button></div>)}
+    {card.examples.map((item, index) => <ContentDisclosure className="dsh-partner-character-example" key={index} initialOpen={!item.user && !item.assistant}><summary>示例 {index + 1}<small>{item.user || '待填写'}</small></summary><Field label="对方说"><textarea rows={2} maxLength={1000} value={item.user} onChange={e => onChange({ ...card, examples: card.examples.map((x, i) => i === index ? { ...x, user: e.target.value } : x) })} /></Field><Field label="角色回应"><textarea rows={3} maxLength={1500} value={item.assistant} onChange={e => onChange({ ...card, examples: card.examples.map((x, i) => i === index ? { ...x, assistant: e.target.value } : x) })} /></Field><Field label="避免的回复（可选）" hint="写一条不符合这个角色的回复，帮助区分语气。"><textarea rows={2} maxLength={1500} value={item.avoid ?? ''} onChange={e => onChange({ ...card, examples: card.examples.map((x, i) => i === index ? { ...x, avoid: e.target.value } : x) })} /></Field><button type="button" onClick={() => onChange({ ...card, examples: card.examples.filter((_, i) => i !== index) })} aria-label={`移除示例 ${index + 1}`}>移除</button></ContentDisclosure>)}
     <button type="button" disabled={card.examples.length >= 8} onClick={() => onChange({ ...card, examples: [...card.examples, { user: '', assistant: '' }] })}>添加对话示例</button>
   </div>
   return <div className="dsh-partner-character-section"><h4>世界与关系</h4>{field('relationship', '关系起点', '初次交流时如何相处，不会覆盖已经保存的真实交流。', 1000)}{field('greeting', '开场白参考', '可选，只用于首次见面的语气，不会每轮重复。', 1000)}
     <h4>世界设定 <small>可选 · 提到关键词时加载</small></h4><p className="dsh-partner-character-hint">核心身份始终保留。地点、人物、物品等细节放在这里，每轮最多加载 5 条。</p>
-    {card.lore.map((entry, index) => <details className="dsh-partner-character-lore" key={entry.id} open><summary>{entry.title || `新条目 ${index + 1}`}<small>{entry.enabled ? '已启用' : '已停用'}</small></summary>
+    {card.lore.map((entry, index) => <ContentDisclosure className="dsh-partner-character-lore" key={entry.id} initialOpen={!entry.title && !entry.content}><summary>{entry.title || `新条目 ${index + 1}`}<small>{entry.enabled ? '已启用' : '已停用'}</small></summary>
       <Field label="条目标题"><input maxLength={100} value={entry.title} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, title: e.target.value } : x) })} /></Field>
       <Field label="触发词" hint="最多 8 个，用逗号分隔。"><input value={entry.keywords.join('，')} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, keywords: e.target.value.split(/[,，]/).map(t => t.trim()) } : x) })} /></Field>
       <Field label="设定内容"><textarea rows={3} maxLength={2000} value={entry.content} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, content: e.target.value } : x) })} /></Field>
       <div className="dsh-partner-character-row"><label><input type="checkbox" checked={entry.enabled} onChange={e => onChange({ ...card, lore: card.lore.map((x, i) => i === index ? { ...x, enabled: e.target.checked } : x) })} />启用条目</label><button type="button" onClick={() => onChange({ ...card, lore: card.lore.filter((_, i) => i !== index) })}>移除条目</button></div>
-    </details>)}<button type="button" disabled={card.lore.length >= 40} onClick={() => onChange({ ...card, lore: [...card.lore, { id: crypto.randomUUID(), title: '', keywords: [], content: '', enabled: true }] })}>添加世界条目</button>
+    </ContentDisclosure>)}<button type="button" disabled={card.lore.length >= 40} onClick={() => onChange({ ...card, lore: [...card.lore, { id: crypto.randomUUID(), title: '', keywords: [], content: '', enabled: true }] })}>添加世界条目</button>
   </div>
 }
 
@@ -95,4 +101,9 @@ function CharacterTrial({ companion, card }: { companion: CompanionView; card: C
     <Field label="试聊消息"><textarea rows={2} maxLength={2000} disabled={busy} value={message} onChange={e => setMessage(e.target.value)} /></Field>{error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
     <div className="dsh-partner-character-row"><button type="button" disabled={busy} onClick={() => setHistory([])}>重新试聊</button><button type="button" disabled={busy || !message.trim() || !card.enabled} onClick={() => void send()}>{busy ? '角色正在回复…' : '发送试聊'}</button></div>
   </div>
+}
+
+function ContentDisclosure({children, className, initialOpen}: {children: ReactNode; className: string; initialOpen: boolean}): JSX.Element {
+  const [open, setOpen] = useState(initialOpen)
+  return <details className={className} open={open} onToggle={event => setOpen(event.currentTarget.open)}>{children}</details>
 }

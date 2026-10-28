@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "Long-lived AI companions with WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -88,7 +88,9 @@
     "docs/releases/2.8.5.md",
     "docs/character-cards-and-renewal.md",
     "docs/releases/2.9.0.md",
-    "docs/releases/2.9.1.md"
+    "docs/releases/2.9.1.md",
+    "docs/releases/2.9.2.md",
+    "docs/natural-conversation-port.md"
   ],
   "dsh": {
     "bundle": {
