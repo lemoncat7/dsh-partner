@@ -247,7 +247,7 @@ export class PartnerMemoryStore {
     } finally { database.close() }
   }
 
-  async recallContext(companionId: string, scopeId: string, query: string, limit = 12): Promise<MemoryRecallContext> {
+  async recallContext(companionId: string, scopeId: string, query: string, limit = 12, options: { includeHistory?: boolean } = {}): Promise<MemoryRecallContext> {
     const database = await this.open(companionId)
     try {
       const now = Date.now()
@@ -261,7 +261,7 @@ export class PartnerMemoryStore {
       const terms = memoryTerms(query)
       const scenes = readScenes(database, scopeId, memories).filter(scene =>
         memoryRelevance({ subject: scene.title, content: scene.summary }, terms) > 0).slice(0, 2)
-      const history = searchHistory(database, scopeId, query, 3)
+      const history = options.includeHistory === false ? [] : searchHistory(database, scopeId, query, 3)
       return { profile, ...recall, scenes, history }
     } finally { database.close() }
   }

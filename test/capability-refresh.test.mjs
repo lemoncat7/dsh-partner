@@ -21,13 +21,14 @@ async function fixture(t, makeComposer) {
   await store.update(state => state.sessions.push(route))
   const registered = new Map()
   const sections = new Map()
+  const contexts = new Map()
   let compositions = 0
   let disposals = 0
   const agent = {
     status: 'running', session: { id: route.sessionId, header: { cwd: directory }, events: [], seq: 0 },
     ctx: scope.ctx.extend({ agent: carrier,
       tools: { register(tool) { assert.equal(registered.has(tool.name), false); registered.set(tool.name, tool); return () => registered.delete(tool.name) } },
-      systemPrompt: { section(value) { assert.ok(!sections.has(value.name), 'no duplicate prompt sections'); sections.set(value.name, value.text); return () => sections.delete(value.name) } },
+      systemPrompt: { context(value) { contexts.set(value.name,value.text); return () => contexts.delete(value.name) }, section(value) { assert.ok(!sections.has(value.name), 'no duplicate prompt sections'); sections.set(value.name, value.text); return () => sections.delete(value.name) } },
     }),
     async whenIdle() { throw new Error('pre-step must not wait for itself') },
     async runMaintenance() { throw new Error('pre-step must not schedule maintenance') },
@@ -43,7 +44,7 @@ async function fixture(t, makeComposer) {
   })
   t.after(async () => { await runtime.close(); await scope.dispose(); await rm(directory, { recursive: true, force: true }) })
   const step = (turn, signal = new AbortController().signal) => ctx.waterfall(scopeTarget(carrier), 'agent/pre-step', { agent, turn, signal }, async () => 'ready')
-  return { runtime, store, agent, route, companion, composition, registered, sections, step, counts: () => ({ compositions, disposals }) }
+  return { runtime, store, agent, route, companion, composition, registered, sections, contexts, step, counts: () => ({ compositions, disposals }) }
 }
 
 test('MCP grant and refreshed tool generation register on the next real pre-step, revoke denies stale tools', async t => {
@@ -237,7 +238,7 @@ test('cancellation cleans new effects and does not mark the failed turn prepared
 })
 
 test('role chat preserves the registered tool set across enable, edit and disable', async t => {
-  const { step, store, registered, agent, sections } = await fixture(t)
+  const { step, store, registered, agent, sections, contexts } = await fixture(t)
   agent.session.deriveMessages = () => []
   await step(1)
   const tools = [...registered.keys()].sort()
@@ -245,7 +246,7 @@ test('role chat preserves the registered tool set across enable, edit and disabl
   await step(2)
   assert.deepEqual([...registered.keys()].sort(), tools)
   assert.match(sections.get('partner-identity'), /自然聊天行为/)
-  assert.match(sections.get('partner-conversation-memory'), /本轮聊天提醒/)
+  assert.match(contexts.get('partner-conversation-memory'), /本轮聊天提醒/)
   await store.update(state => { state.companions[0].characterCard.roleText = '喜欢冷笑话的同行者' })
   await step(3)
   assert.match(sections.get('partner-identity'), /喜欢冷笑话/)
@@ -254,5 +255,5 @@ test('role chat preserves the registered tool set across enable, edit and disabl
   await step(4)
   assert.deepEqual([...registered.keys()].sort(), tools)
   assert.doesNotMatch(sections.get('partner-identity'), /自然聊天行为/)
-  assert.equal(sections.has('partner-conversation-memory'), false)
+  assert.equal(contexts.has('partner-conversation-memory'), false)
 })

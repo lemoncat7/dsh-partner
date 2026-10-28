@@ -54,7 +54,7 @@ test('turn guidance works without a memory service, combines consecutive message
   const session = Session.create('role-no-memory')
   for (const text of ['今天很烦', '只是想吐槽']) session.append('user/message', createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }), {surfaceOp:'append'})
   const sections = new Map()
-  const agent = { session, ctx: { systemPrompt: { section: value => { sections.set(value.name,value); return () => sections.delete(value.name) } } } }
+  const agent = { session, ctx: { systemPrompt: { context: value => { sections.set(value.name,value); return () => sections.delete(value.name) } } } }
   const runtime = Object.create(PartnerAgentRuntime.prototype)
   const config = { companion, route: { kind:'local', sessionId: session.id, companionId:companion.id, userId:'local', channelId:'local:'+companion.id }, revision:'1' }
   Object.assign(runtime, { configurations: { forSession: () => config }, store: { snapshot: () => ({sessions:[config.route]}) }, contextRevisions:new WeakMap(), characterContexts:new Map() })
