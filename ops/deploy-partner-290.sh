@@ -10,6 +10,7 @@ package=${1:?Provide the verified absolute package archive path}
 test "$(docker inspect "$container" --format '{{.Config.Image}}')" = "$image"
 test "$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$volume"
 test -s "$package"
+test "$(docker ps --filter volume="$volume" --format '{{.Names}}')" = "$container"
 backup=$(mktemp -d "$root/dsh-docker/backups/partner-290-XXXXXXXX")
 chmod 700 "$backup"
 echo "Backup: $backup"
@@ -26,8 +27,8 @@ trap rollback ERR
 docker stop -t 90 "$container" >/dev/null
 helper install
 docker start "$container" >/dev/null
-for attempt in $(seq 1 60); do
-  if test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy; then
+for attempt in $(seq 1 120); do
+  if test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy && curl --noproxy '*' -fsS --max-time 3 http://127.0.0.1:3080/partner-local/v1 >/dev/null; then
     docker exec -u node "$container" node --input-type=module -e '
       import assert from "node:assert/strict";
       import {readFile} from "node:fs/promises";

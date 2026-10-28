@@ -1,11 +1,21 @@
 // Runs offline in a helper container against the stopped production volume.
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 const profile='/data/profiles/web', scope=profile+'/node_modules/@lemoncat7', target=scope+'/dsh-partner'
 const saved='/backup/install-state.json'
+// The deployment script has stopped the sole container using this data volume.
+// Container PID reuse otherwise makes an abandoned credentials lock look live.
+function releaseStoppedWriterLock(){
+  const path='/data/.credentials.yaml.lock'
+  if(!existsSync(path))return
+  assert.match(readFileSync(path,'utf8').trim(), /^\d+$/)
+  copyFileSync(path,'/backup/credentials-stale-'+Date.now()+'.lock')
+  unlinkSync(path)
+}
 function restore(){
+  releaseStoppedWriterLock()
   const state=JSON.parse(readFileSync(saved))
   assert.ok(state.old.startsWith('/data/plugin-package-backups/partner-290-'))
   if(existsSync(state.old)){
@@ -24,6 +34,7 @@ assert.equal(existsSync(target+'/node_modules'),false,'Review nested dependencie
 for(const file of ['package.json','package-lock.json'])copyFileSync(profile+'/'+file,'/backup/'+file)
 execFileSync('tar',['-cf','/backup/partner-package.tar','-C',scope,'dsh-partner'])
 execFileSync('tar',['-cf','/backup/partner-data.tar','-C','/data','partner'])
+releaseStoppedWriterLock()
 const stage=mkdtempSync(scope+'/.partner-290-stage-')
 execFileSync('tar',['-xzf','/package.tgz','--strip-components=1','-C',stage])
 execFileSync('chown',['-R','1000:1000',stage])

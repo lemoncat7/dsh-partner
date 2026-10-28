@@ -137,3 +137,23 @@ test('renewal also handles a single visible user message and retries a failed fl
  assert.equal(session.snapshotEvents().length,3)
  assert.equal(Session.create('replay',session.snapshotEvents()).deriveMessages()[0].content[0].text,'head')
 })
+
+test('independent 04:00 schedule runs once and does not reset immediately after a late startup',async()=>{
+ const realNow=Date.now;let now=Date.parse('2026-10-28T03:59:00+08:00'),cleared=0;const items=[]
+ Date.now=()=>now
+ const c={...createDefaultCompanion(),id:'c'};c.automation.memory.enabled=false;c.automation.memory.dailyReviewEnabled=false
+ const state={companions:[c],sessions:[{companionId:'c',sessionId:'s'}]}
+ const args=[{logger:{warn(){},error(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false},{renewalStatus:async()=>items},{},{isCompanionBusy:()=>false,renewReviewedContexts:async(id,day)=>{items.push({sessionId:'s',day});cleared++;return 1}}]
+ try{
+  const scheduler=new DailyReviewScheduler(...args)
+  await scheduler.tick();assert.equal(cleared,0)
+  now=Date.parse('2026-10-28T04:00:00+08:00');await scheduler.tick();assert.equal(cleared,1)
+  await scheduler.tick();assert.equal(cleared,1)
+  now=Date.parse('2026-10-29T04:00:00+08:00');await scheduler.tick();assert.equal(cleared,2)
+  await scheduler.close();items.length=0
+  const restarted=new DailyReviewScheduler(...args)
+  await restarted.tick();assert.equal(cleared,2,'late startup waits for the next planned day')
+  now=Date.parse('2026-10-30T04:00:00+08:00');await restarted.tick();assert.equal(cleared,3)
+  await restarted.close()
+ }finally{Date.now=realNow}
+})
