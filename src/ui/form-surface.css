@@ -48,8 +48,8 @@
   background-repeat: no-repeat !important;
   background-position: right 12px center !important;
 }
-.dsh-partner-workspace #dsh-partner-identity-editor button,
-.dsh-partner-workspace #dsh-partner-channels button {
+.dsh-partner-workspace #dsh-partner-identity-editor button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close),
+.dsh-partner-workspace #dsh-partner-channels button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close) {
   appearance: none !important;
   display: inline-flex;
   align-items: center;
@@ -114,19 +114,15 @@
   border-color: color-mix(in srgb, var(--partner-danger) 30%, var(--partner-border)) !important;
   background: color-mix(in srgb, var(--partner-danger) 8%, var(--partner-control)) !important;
 }
-.dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog > header button {
-  width: 34px; min-width: 34px; min-height: 34px; padding: 0 !important;
-  border-radius: 50% !important;
-  background: var(--partner-interaction-well, var(--partner-hover)) !important; border-color: transparent !important;
-}
+
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-form {
   background: transparent !important; box-shadow: none !important; border: 0 !important;
   color: var(--partner-text) !important;
   font: var(--partner-font-body)/1.5 var(--partner-font-family) !important;
 }
 @media (max-width: 640px) {
-  .dsh-partner-workspace #dsh-partner-channels button,
-  .dsh-partner-workspace #dsh-partner-identity-editor button { min-height: 44px; }
+  .dsh-partner-workspace #dsh-partner-channels button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close),
+  .dsh-partner-workspace #dsh-partner-identity-editor button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close) { min-height: 44px; }
   .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog { border-radius: var(--partner-radius-dialog, 22px) !important; border-width: 1px !important; }
   .dsh-partner-workspace #dsh-partner-channels .dsh-partner-channel-toolbar { align-items: flex-start; flex-wrap: wrap; }
 }

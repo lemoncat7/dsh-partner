@@ -38,7 +38,7 @@ export function CharacterEditor({ companion, card, disabled, onChange }: { compa
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">
     <header><div><span className="dsh-partner-character-kicker">ROLE & CONVERSATION</span><h3>角色聊天 <small>可选</small></h3><p>角色决定怎么反应，聊天方式决定怎么接话。工具能力照常可用。</p></div>
-      <button type="button" role="switch" aria-label="启用角色聊天" aria-checked={card?.enabled === true} className="dsh-partner-switch" data-on={card?.enabled === true} disabled={disabled} onClick={() => { if (!hasContent) setWizard(true); else onChange({ ...card!, enabled: !card!.enabled }) }}><i /></button>
+      <div className="dsh-partner-character-toggle"><button type="button" role="switch" aria-label="启用角色聊天" aria-checked={card?.enabled === true} className="dsh-partner-switch" data-on={card?.enabled === true} disabled={disabled} onClick={() => { if (!hasContent) setWizard(true); else onChange({ ...card!, enabled: !card!.enabled }) }}><i aria-hidden="true" /></button><span aria-hidden="true">{card?.enabled === true ? '已开启' : '已关闭'}</span></div>
     </header>
     {!hasContent ? <div className="dsh-partner-character-empty"><strong>几条设定，就可以开始聊</strong><p>写下他是谁、怎样相处和说话。示例和背景都是可选的，关闭后继续使用基本身份。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>设置角色</button></div> : <>
       <p className="dsh-partner-character-status">{card!.enabled ? '已启用 · 保存后下一轮应用新设定，旧对话不会决定新的语气。' : '已关闭 · 内容保留，伙伴继续使用基本身份。'}</p>

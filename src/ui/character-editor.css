@@ -11,7 +11,9 @@
 .dsh-partner-character-section h4 small { display: inline-block; font-weight: 400; font-size: 12px; margin-left: 8px; }
 .dsh-partner-character .dsh-partner-field, .dsh-partner-character-dialog .dsh-partner-field { margin: 16px 0; }
 .dsh-partner-character :is(button, select), .dsh-partner-character-dialog :is(button, select) { font: inherit; }
-.dsh-partner-character button:not(.dsh-partner-switch), .dsh-partner-character-dialog button { min-height: 40px; border: 1px solid var(--partner-border); border-radius: 9px; padding: 8px 14px; color: var(--partner-text); background: var(--partner-control); cursor: pointer; }
+.dsh-partner-character button:not(.dsh-partner-switch):not(.dsh-partner-dialog-close), .dsh-partner-character-dialog button:not(.dsh-partner-dialog-close) { min-height: 40px; border: 1px solid var(--partner-border); border-radius: 9px; padding: 8px 14px; color: var(--partner-text); background: var(--partner-control); cursor: pointer; }
+.dsh-partner-character-toggle { flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 9px 0; }
+.dsh-partner-character-toggle > span { white-space: nowrap; color: var(--partner-text-secondary); font-size: 12px; line-height: 1.4; }
 .dsh-partner-character :is(button, input, select, textarea):focus-visible, .dsh-partner-character-dialog :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--partner-focus-ring); outline-offset: 3px; }
 .dsh-partner-character :is(button, fieldset):disabled, .dsh-partner-character-dialog button:disabled { opacity: .55; cursor: default; }
 .dsh-partner-character-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
@@ -56,12 +58,9 @@
 .dsh-partner-memory-settings .dsh-partner-review-policy > .dsh-partner-field { grid-column: 2; width: 132px; }
 .dsh-partner-memory-settings .dsh-partner-review-policy > button:last-child:not(.dsh-partner-switch) { grid-column: 2; justify-self: start; }
 .dsh-partner-memory-settings .dsh-partner-review-policy select { min-height: 40px; font-size: 14px; }
-.dsh-partner-memory-settings .dsh-partner-switch,
-.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch { flex: 0 0 44px; width: 44px; min-width: 44px; height: 26px; min-height: 26px; padding: 0; border-radius: 999px; align-self: start; margin-block: 4px; }
-.dsh-partner-memory-settings .dsh-partner-switch::before,
-.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch::before { content: ''; position: absolute; inset: -9px 0; }
-.dsh-partner-memory-settings .dsh-partner-switch i,
-.dsh-partner-workspace #dsh-partner-identity-editor .dsh-partner-switch i { width: 18px; height: 18px; }
+.dsh-partner-memory-settings .dsh-partner-switch { flex: 0 0 44px; width: 44px; min-width: 44px; height: 26px; min-height: 26px; padding: 0; border-radius: 999px; align-self: start; margin-block: 4px; }
+.dsh-partner-memory-settings .dsh-partner-switch::before { content: ''; position: absolute; inset: -9px 0; }
+.dsh-partner-memory-settings .dsh-partner-switch i { width: 18px; height: 18px; }
 
 /* Flat, persistent sections keep long settings forms focused on one task. */
 .dsh-partner-settings-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 4px 2px 8px; border-bottom: 1px solid var(--partner-border); scrollbar-width: thin; }

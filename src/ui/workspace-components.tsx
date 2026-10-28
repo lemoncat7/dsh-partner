@@ -34,7 +34,7 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
   const keyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return }
     if (event.key !== 'Tab') return
-    const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])') ?? [])].filter(node => node.getClientRects().length > 0)
+    const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])') ?? [])].filter(node => node.getClientRects().length > 0)
     if (focusable.length === 0) return
     const first = focusable[0]; const last = focusable.at(-1)
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
@@ -42,7 +42,7 @@ export function WorkspaceDialog({ eyebrow = 'CREATE & CONFIGURE', title, detail,
   }
   return <dialog ref={layerRef} className="dsh-partner-workspace-dialog-layer" role={confirmation ? 'alertdialog' : undefined} aria-modal="true" aria-labelledby={titleId} aria-describedby={detailId} onCancel={event => {event.preventDefault(); event.stopPropagation(); close()}} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
     <section ref={panelRef} className={`dsh-partner-workspace-dialog is-${width}${confirmation ? ' is-confirmation' : ''} ${className}`} onKeyDown={keyDown}>
-      <header><span>{eyebrow && <small>{eyebrow}</small>}<strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" onClick={close} aria-label="关闭"><IconCloseOutline16 size={16} /></button></header>
+      <header><span>{eyebrow && <small>{eyebrow}</small>}<strong id={titleId}>{title}</strong><p id={detailId}>{detail}</p></span><button type="button" className="dsh-partner-dialog-close" onClick={close} aria-label="关闭"><IconCloseOutline16 size={18} /></button></header>
       <div className="dsh-partner-workspace-dialog-body">{children}</div>
     </section>
   </dialog>
