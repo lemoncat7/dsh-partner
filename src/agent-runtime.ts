@@ -1,4 +1,5 @@
 import { renderCharacterContext } from './character/domain.js'
+import { renderConversationTurn } from './character/conversation-behavior.js'
 import { renewContext } from './context-renewal.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { isPluginSource } from './message-source.js'
@@ -714,20 +715,32 @@ export class PartnerAgentRuntime {
   private readonly contextRevisions = new WeakMap<Agent, string>()
   private async prepareConversationContext(agent: Agent, signal: AbortSignal): Promise<boolean> {
     const config = this.configurations.forSession(agent.session.id)
-    if (!config || !this.memory) return false
+    if (!config) return false
     const { companion, route } = config
+    if (!this.memory && !companion.characterCard?.enabled) {
+      this.characterContexts.get(agent.session.id)?.()
+      this.characterContexts.delete(agent.session.id)
+      this.contextRevisions.delete(agent)
+      return false
+    }
     const messages = agent.session.deriveMessages()
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? textContent(last.content) : ''
     const revision = `${config.revision}:${last?.id ?? ''}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
-    const story = companion.characterCard?.enabled ? await this.memory.characterState(companion.id, scope) : undefined
-    const recalled = companion.automation.memory.enabled ? await this.memory.recallContext(companion.id, scope, query, 8) : undefined
+    const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
+    const recalled = companion.automation.memory.enabled ? await this.memory?.recallContext(companion.id, scope, query, 8) : undefined
+    let consecutiveUserMessages = 0
+    for (const message of [...messages].reverse()) {
+      if (message.role === 'assistant') break
+      if (message.role === 'user' && message.source.kind === 'user') consecutiveUserMessages++
+    }
     signal.throwIfAborted()
     const text = [renderCharacterContext(companion.characterCard, messages.slice(-6).filter(m => m.role === 'user' || m.role === 'assistant').map(m => textContent(m.content)).join('\n').slice(-12000), story),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled ? renderProfile(recalled.profile) : '',
+      renderConversationTurn(companion.characterCard, consecutiveUserMessages),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()
     if (text) this.characterContexts.set(agent.session.id, agent.ctx.systemPrompt.section({ name: 'partner-conversation-memory', order: -5, text }))

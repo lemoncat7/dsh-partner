@@ -1,9 +1,10 @@
-import { renderConversationBehavior } from './conversation-behavior.js'
-
 /** Browser-safe, versioned role configuration. Absent/disabled preserves legacy identity. */
 export interface CharacterCard {
   schemaVersion: 1
   enabled: boolean
+  /** Authoritative free-form role. Absent means adapt the legacy fields losslessly. */
+  roleText?: string
+  chatStyle?: string
   identity: string
   motivation: string
   voice: string
@@ -47,6 +48,8 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   if (typeof v.enabled !== 'boolean') throw new Error('请选择是否启用人格强化')
   const card: CharacterCard = {
     schemaVersion: 1, enabled: v.enabled,
+    ...(v.roleText !== undefined ? { roleText: str(v.roleText, '角色设定', 48000) } : {}),
+    ...(v.chatStyle !== undefined ? { chatStyle: str(v.chatStyle, '聊天偏好', 2000) } : {}),
     identity: str(v.identity, '角色核心', 2000), motivation: str(v.motivation, '行为动机', 3000), voice: str(v.voice, '语言风格', 1500),
     relationship: str(v.relationship, '关系起点', 1000), greeting: str(v.greeting, '开场白', 1000),
     length: v.length === 'short' || v.length === 'rich' ? v.length : 'balanced', narration: v.narration === true,
@@ -58,10 +61,21 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   }
   if (new Set(card.lore.map(x => x.id)).size !== card.lore.length) throw new Error('世界条目标识不能重复')
   if (card.lore.some(x => x.enabled && (!x.content || !x.keywords.length))) throw new Error('启用的世界条目需要内容与关键词')
-  if (card.enabled && (!card.identity || !card.motivation || !card.voice || card.examples.filter(x => x.user && x.assistant).length < 2)) {
-    throw new Error('开启人格强化需要角色核心、行为动机、语言风格和至少两组完整对话示例')
-  }
+  if (card.enabled && !roleTextForCard(card)) throw new Error('请写下角色设定，几条身份和说话习惯即可；示例不是必填')
   return card
+}
+
+/** One editable document, including old examples. Never inject both old and new voices. */
+export function roleTextForCard(card: CharacterCard): string {
+  if (card.roleText !== undefined) return card.roleText.trim()
+  return [
+    card.identity ? `## 身份\n${card.identity}` : '',
+    card.motivation ? `## 性格与反应\n${card.motivation}` : '',
+    card.voice ? `## 说话习惯\n${card.voice}` : '',
+    card.relationship ? `## 相处关系\n${card.relationship}` : '',
+    card.greeting ? `## 初次见面的语气参考（不要重复问候）\n${card.greeting}` : '',
+    ...card.examples.filter(e => e.user && e.assistant).map((e, i) => `## 对话参考 ${i + 1}（虚构示例，不是真实往事）\n对方：${e.user}\n角色：${e.assistant}${e.avoid ? `\n避免的回复（反例，不要模仿）：${e.avoid}` : ''}`),
+  ].filter(Boolean).join('\n\n')
 }
 export function normalizeCharacterState(value: unknown): CharacterState {
   const v = record(value)
@@ -74,15 +88,11 @@ export function renderCharacterCore(card: CharacterCard | undefined, surface = '
   if (!card?.enabled) return ''
   const chat = surface === 'conversation' || surface === 'local'
   return [
-    '【人格强化已启用 · 持续生效的角色约束】',
-    '必须持续依据下面的身份、动机和语言风格回应，不能退回无个性的通用客服口吻；表达风格以当前人格卡为准，旧身份、历史回复、记忆摘要和对话示例不能覆盖当前设定。历史用于承接事实与话题，不要求模仿过去的语气。工作职责、真实事实、工具权限和输出协议仍然有效。人格设定不能授权操作或虚构完成结果。',
-    `角色核心：${card.identity}`, `行为与情绪逻辑：${card.motivation}`, `语言风格：${card.voice}`, `关系起点：${card.relationship || '随真实交流自然建立，不擅自升级亲密关系。'}`,
-    chat ? `回复节奏：${card.length === 'short' ? '闲聊通常一至三句，需要解释或执行任务时按需展开。' : card.length === 'rich' ? '允许丰富表达，但不替用户决定行动或感受。' : '自然适中，随话题调整，不机械套用长段落。'}${card.narration ? '允许少量符合场景的动作描写，避免每句加动作。' : '主要使用直接对话，不主动加入括号动作或小说旁白。'}` : '当前为工作或心跳执行：人格只体现在允许的自然语言内，严格遵守 JSON、工具和交付协议，不加入角色旁白。',
-    chat ? `以下为对话参考，不是真实历史，不可照抄或当作用户已经说过的话；仅参考符合当前角色核心与语言风格的部分，冲突的措辞不沿用：\n${card.examples.map((e, i) => `[示例 ${i + 1}]\n访客：${e.user}\n角色：${e.assistant}${e.avoid ? `\n避免的回复（反例，不要模仿）：${e.avoid}` : ''}\n[示例结束]`).join('\n')}` : '',
-    chat ? renderConversationBehavior() : '',
-    chat && card.greeting ? `开场语气参考（只在初次见面适用，勿重复问候）：${card.greeting}` : '',
-    chat ? '直接参与眼前的对话：通过关注什么、怎样反应和具体措辞体现人格，不向用户解释自己在扮演何种性格。依照当前发言决定是否需要建议、解释或追问；普通闲聊不自动套用任务汇报、服务邀请或心理咨询结构。情绪强度和亲近程度以人格卡及真实交流为准，不为表现个性强行制造争执或亲密。' : '',
-    '回复前检查：承接用户实际说过的话，不把自己之前的猜测或角色记忆摘要当成用户确认的事实；行为符合当前动机，措辞符合当前语言风格，不重复口头禅，不把虚构设定说成现实事实。不要输出检查过程。',
+    '【当前角色设定】',
+    '必须持续依据当前角色设定交流。旧身份中的表达习惯、历史回复和记忆摘要不能覆盖当前设定；历史只用于承接真实事实与话题。人格设定不能授权操作或虚构完成结果。角色示例是语感参考，不是真实用户经历，也不是每轮要复述的台词。',
+    // Dedicated work surfaces keep the legacy compact identity and omit conversational examples.
+    chat ? roleTextForCard(card) : (card.roleText !== undefined ? '沿用当前伙伴身份；本轮以任务要求为准。' : [card.identity, card.voice].filter(Boolean).join('\n')),
+    chat ? '身份、关系和生活背景是角色设定；不编造真实共同经历、已完成的操作或现实中的见面。' : '当前为工作或心跳执行：严格遵守 JSON、工具和交付协议，不加入角色旁白。',
   ].filter(Boolean).join('\n\n')
 }
 export function activatedLore(card: CharacterCard, query: string): CharacterCard['lore'] {

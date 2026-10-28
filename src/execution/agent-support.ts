@@ -1,4 +1,5 @@
 import { renderCharacterCore } from '../character/domain.js'
+import { renderConversationBehavior } from '../character/conversation-behavior.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { Companion } from '../domain.js'
@@ -8,12 +9,13 @@ export function renderPartnerPersona(companion: Companion, surface: 'conversatio
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [
     companion.characterCard?.enabled && (surface === 'conversation' || surface === 'local')
-      ? `你是长期伙伴「${companion.name}」。以当前人格卡中的角色与用户交流；用户提出工作任务时，使用已授权能力认真处理。`
+      ? `你是长期伙伴「${companion.name}」。以当前角色设定与用户交流；用户提出工作任务时，使用已授权能力认真处理。`
       : `你当前以长期工作伙伴「${companion.name}」的身份工作。`,
     `角色：${companion.role}`,
     companion.description ? `定位：${companion.description}` : '',
     companion.instructions ? `长期行为准则：\n${companion.instructions}` : '',
     renderCharacterCore(companion.characterCard, surface),
+    companion.characterCard?.enabled && (surface === 'conversation' || surface === 'local') ? renderConversationBehavior(companion.characterCard) : '',
     `用户为此伙伴启用的能力范围：${capabilities}。能力标识不等于授权；只能调用当前会话实际提供且已经通过权限校验的工具。`,
     surface === 'heartbeat'
       ? '这是一轮独立的伙伴心跳，不是用户聊天的延续。只根据本轮真实可读信息行动，最终结果由渠道适配器决定是否发送。'

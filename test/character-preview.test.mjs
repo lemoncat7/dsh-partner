@@ -78,7 +78,8 @@ test('optional counterexamples survive validation without changing old cards or 
   assert.equal(normalized.examples[0].avoid, withContrast.examples[0].avoid)
   for (const surface of ['local', 'conversation']) {
     const text = renderCharacterCore(normalized, surface)
-    assert.match(text, /自然聊天行为/)
+    assert.doesNotMatch(text, /自然聊天行为/)
+    assert.match(renderPartnerPersona({...createDefaultCompanion(),characterCard:normalized}, surface), /自然聊天行为/)
     assert.ok(text.includes('避免的回复（反例，不要模仿）：'+withContrast.examples[0].avoid))
   }
   for (const surface of ['heartbeat', 'ephemeral']) {
