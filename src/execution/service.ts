@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { knowledgeToolAccess } from './knowledge-tool-access.js'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -175,8 +176,9 @@ export class ExecutionFailedError extends Error {
 
 function restrictTools(ctx: ExecutionContext, agent: Agent, requested: string[]): void {
   const visible = ctx.tools.schemas(agent).map(tool => tool.name).filter(name => name !== 'run_code')
-  const requestedSet = new Set(requested)
-  const allowed = visible.filter(name => requestedSet.has(name))
+  const policy = knowledgeToolAccess(requested, visible)
+  const allowed = policy.allowed
+  ctx.tools.guard(exec => policy.denial(exec.name, exec.arguments))
   if (allowed.length > 0) ctx.tools.restrict({ allow: allowed })
   else if (visible.length > 0) ctx.tools.restrict({ deny: visible })
 }

@@ -59,6 +59,7 @@ import type {ConcernKnowledgeBridge} from './concern-knowledge-source.js'
 import type {ConcernExecutionReceipt} from './concern-execution.js'
 import {hasConcernReply} from './concern-execution-receipt.js'
 import { executeObservationLoop } from './observation-loop.js'
+import { observationKnowledgeEntryDenial } from './observation-knowledge-entry.js'
 import { waitForBoardTurn } from './tasks/continuation-yield.js'
 import { assistantTextAfter, renderPartnerPersona, renderToolProtocol, resolvePartnerAgentOptions as resolveAgentOptions } from './execution/agent-support.js'
 import { channelReplyPartsAfter, isInternalTaskNotice, isRequirementDeliveryReceipt } from './channels/delivery-policy.js'
@@ -90,6 +91,7 @@ export type PartnerQuestionAnswerer = (ctx: Context, route: ChannelSession) => (
 
 const PARTNER_TASK_TIMEOUT_MS = 30 * 60_000
 const HEARTBEAT_READ_ONLY_TOOLS = new Set([
+  'knowledge',
   'knowledge_base_search',
   'knowledge_search',
   'knowledge_read',
@@ -1428,6 +1430,7 @@ async function resolveHeartbeatFileAccess(cwd: string, concerns: PartnerConcern[
 }
 
 export function heartbeatToolDenial(name: string, argumentsValue: unknown, access?: HeartbeatFileAccess): string | undefined {
+  if (name === 'knowledge') return observationKnowledgeEntryDenial(argumentsValue)
   if (['knowledge_note_references', 'knowledge_note_read', 'knowledge_note_update'].includes(name)) return '关注不处理依据中的笔记引用；记录仅使用手动配置的 recordTarget 和专用记录工具。'
   if (!isRecord(argumentsValue)) return undefined
   const isRead = ['glob', 'grep', 'read'].includes(name)
