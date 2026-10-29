@@ -2,6 +2,8 @@ import {PARTNER_TOOL_ENTRIES} from './collaboration/tool-discovery.js'
 import {setReplyTiming} from './channels/qq/latency.js'
 import { resolveToolAccess, installToolAccessGuard } from './execution/tool-access-adapter.js'
 import { renderIdentityRelationship, relationshipTextForIdentity } from './character/relationship-adapter.js'
+import { affectionEnabled, awardAffection, renderAffection } from './character/affection.js'
+import { affectionTurnEligible, currentAffectionAudience } from './character/affection-context.js'
 import { currentQqIdentityRelation, renderQqIdentityRelation } from './channels/qq/identity-binding.js'
 import { qqSettings, qqSessionTarget } from './channels/qq/settings.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
@@ -650,6 +652,8 @@ export class PartnerAgentRuntime {
     await this.store.update(state => {
       const target = state.sessions.find(item => item.id === route.id)
       if (target) target.lastMessageAt = Date.now()
+      const current=state.companions.find(c=>c.id===companion.id)
+      if(current&&affectionEnabled(current)&&affectionTurnEligible(state,current.id,session.id,events))awardAffection(current,`${session.id}:${event.seq}`,event.time)
     })
   }
 
@@ -814,7 +818,8 @@ export class PartnerAgentRuntime {
     const events=relationEvents ?? agent.session.snapshotEvents()
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
-    const revision = `${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
+    const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
+    const revision = `${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -829,6 +834,7 @@ export class PartnerAgentRuntime {
     const access = resolveToolAccess({agent, state})
     const text = [access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音能力为 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
+      renderAffection(companion,affectionAudience),
       renderCharacterContext(companion.characterCard, messages.slice(-6).filter(m => m.role === 'user' || m.role === 'assistant').map(m => textContent(m.content)).join('\n').slice(-12000), relationshipAllowed ? story : undefined),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled && relationshipAllowed ? renderProfile(recalled.profile) : '',

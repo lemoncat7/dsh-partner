@@ -2,6 +2,8 @@
 export interface CharacterCard {
   schemaVersion: 1
   enabled: boolean
+  /** Default on for role chat; progression belongs to the companion, not the card. */
+  affectionEnabled?: boolean
   /** Authoritative free-form role. Absent means adapt the legacy fields losslessly. */
   roleText?: string
   chatStyle?: string
@@ -48,8 +50,10 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   const v = record(value)
   if (v.schemaVersion !== undefined && v.schemaVersion !== 1) throw new Error('不支持的人格卡版本')
   if (typeof v.enabled !== 'boolean') throw new Error('请选择是否启用人格强化')
+  if (v.affectionEnabled !== undefined && typeof v.affectionEnabled !== 'boolean') throw new Error('请选择是否启用好感度')
   const card: CharacterCard = {
     schemaVersion: 1, enabled: v.enabled,
+    ...(v.affectionEnabled !== undefined ? {affectionEnabled:v.affectionEnabled as boolean} : {}),
     ...(v.segmentedReplies !== undefined ? { segmentedReplies: v.segmentedReplies === true } : {}),
     ...(v.stickersEnabled !== undefined ? { stickersEnabled: v.stickersEnabled === true } : {}),
     ...(v.roleText !== undefined ? { roleText: str(v.roleText, '角色设定', 48000) } : {}),

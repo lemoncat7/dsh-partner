@@ -1,3 +1,4 @@
+import { AffectionPanel } from './affection-panel.js'
 import { renderIdentityRelationship } from '../character/relationship-adapter.js'
 import { PERSONA_REQUEST_EXAMPLE } from '../character/identity-guide.js'
 import { StickerLibraryDialog } from './sticker-library.js'
@@ -32,9 +33,9 @@ const SAMPLE: CharacterCard = {
 避免：下雨天记得带伞哦！你可以在家看书、听音乐或者看电影。`,
 }
 
-export function CharacterEditor({ companion, card, disabled, onChange, relationshipText }: { relationshipText: string; companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
+export function CharacterEditor({ companion, card, disabled, onChange, relationshipText, active = true }: { active?: boolean; relationshipText: string; companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
   const [wizard, setWizard] = useState(false)
-  const [section, setSection] = useState<'role' | 'chat' | 'trial'>('role')
+  const [section, setSection] = useState<'role' | 'chat' | 'affection' | 'trial'>('role')
   // An explicitly empty document remains editable rather than reopening the wizard.
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">
@@ -47,6 +48,7 @@ export function CharacterEditor({ companion, card, disabled, onChange, relations
       <SettingsSections<typeof section> label="角色聊天分段" value={section} onChange={setSection} sections={[
         {id: 'role', title: '角色设定', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><RoleFields card={card!} onChange={onChange} /><details className="dsh-partner-settings-advanced"><summary>背景资料 <small>可选 · {card!.lore.length} 条</small></summary><LoreFields card={card!} onChange={onChange} /></details></fieldset>},
         {id: 'chat', title: '聊天方式', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><ChatFields companionId={companion.id} card={card!} onChange={onChange} /></fieldset>},
+        {id: 'affection', title: '好感度', content: <AffectionPanel companion={companion} card={card!} active={active && section === 'affection'} disabled={disabled} onChange={onChange} />},
         {id: 'trial', title: '试聊', content: <CharacterTrial companion={companion} relationshipText={relationshipText} card={card!} />},
       ]} />
     </>}

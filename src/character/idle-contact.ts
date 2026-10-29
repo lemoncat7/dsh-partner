@@ -1,5 +1,7 @@
 import {channelReplyAllowed} from '../channels/reply-access.js'
 import { isSleeping } from './sleep.js'
+import { affectionMultiplier } from './affection.js'
+import { affectionAudienceAllowed } from './affection-adapter.js'
 import { qqSettings } from '../channels/qq/settings.js'
 import { QQ_ACTION_CATEGORIES, QQ_ACTIONS } from '../channels/qq/action-catalog.js'
 import type { Companion, PartnerState } from '../domain.js'
@@ -59,7 +61,10 @@ export function idleActivityProbability(state:PartnerState,companion:Companion,u
   const routes=state.sessions.filter(r=>r.companionId===companion.id)
   const latestActivity=Math.max(user.at,...routes.map(r=>r.lastMessageAt),...routes.map(r=>r.idleContactState?.attemptedAt??0))
   const minutes=Math.floor(Math.max(0,now-latestActivity)/60_000)
-  return Math.min(1,minutes/policy.idleMinutes)
+  const route=routes.find(r=>r.id===policy.routeId)
+  const channel=state.channels.find(c=>c.id===route?.channelId&&c.companionId===companion.id)
+  const eligible=!!route&&(route.kind==='local'||!!channel)&&affectionAudienceAllowed({route,...(channel?{channel}:{}),autonomous:true})
+  return Math.min(1,minutes/policy.idleMinutes*affectionMultiplier(companion,eligible))
 }
 export function idleContactDue(state:PartnerState,companion:Companion,user:{id:string;at:number}|undefined,now:number,_timeZone:string):boolean {
   const route=state.sessions.find(r=>r.id===companion.idleContact?.routeId)

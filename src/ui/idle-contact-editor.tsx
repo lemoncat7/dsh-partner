@@ -18,8 +18,8 @@ export function IdleContactEditor({companionId,value,disabled,onChange}:{compani
     {policy.enabled&&<fieldset disabled={disabled} className="dsh-partner-character-fields">
       <Field label="活动所在会话" hint="从这个会话读取上下文，普通聊天回复发到这里。其他工具操作按各自的渠道授权执行；不会自动群发。"><select required value={policy.routeId} onChange={e=>patch({routeId:e.target.value})}><option value="">选择一个会话</option>{routes.map(r=><option key={r.id} value={r.id}>{r.kind==='local'?'网页聊天':`${snapshot?.channels.find(c=>c.id===r.channelId)?.name??'渠道'} · ${snapshot?.pairings.find(p=>p.channelId===r.channelId&&p.userId===r.userId)?.displayName??r.userId}`}</option>)}</select></Field>
       {snapshot&&!routes.length&&<p>还没有可用会话，先在网页或已授权渠道和伙伴聊一次。</p>}
-      <div className="dsh-partner-fields two"><Field label="概率升至 100% 的间隔" hint="每分钟概率 = 已空闲分钟 ÷ 此间隔。最短 30 分钟；这是概率上限时间，不是平均活动间隔。"><select value={policy.idleMinutes} onChange={e=>patch({idleMinutes:Number(e.target.value)})}>{[...new Set([30,60,120,240,480,1440,policy.idleMinutes])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></Field></div>
-      <p className="dsh-partner-character-hint">当前间隔 {policy.idleMinutes} 分钟：第 1 分钟约 {(100/policy.idleMinutes).toFixed(1)}%，第 {policy.idleMinutes/2} 分钟约 50%，到 {policy.idleMinutes} 分钟为 100%。提前抽中就开始新周期，因此通常会更早触发。100% 代表做一次决定，不保证发送消息。</p>
+      <div className="dsh-partner-fields two"><Field label="基础概率升至 100% 的间隔" hint="基础概率 = 已空闲分钟 ÷ 此间隔。适用好感度加成时再乘以主动系数，上限 100%；最短 30 分钟，不是平均活动间隔。"><select value={policy.idleMinutes} onChange={e=>patch({idleMinutes:Number(e.target.value)})}>{[...new Set([30,60,120,240,480,1440,policy.idleMinutes])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></Field></div>
+      <p className="dsh-partner-character-hint">未计好感度加成时，间隔 {policy.idleMinutes} 分钟：第 1 分钟约 {(100/policy.idleMinutes).toFixed(1)}%，第 {policy.idleMinutes/2} 分钟约 50%，到 {policy.idleMinutes} 分钟为 100%。提前抽中就开始新周期，因此通常会更早触发。100% 代表做一次决定，不保证发送消息。</p>
       <p className="dsh-partner-character-hint">不限制每天活动次数，也不要求每次发消息。抽中后重置计时；新聊天会重新累计空闲时间。你没回复时，伙伴仍可做其他事情，避免反复追问。睡眠期间暂停，醒来后恢复检查。</p>
     </fieldset>}
   </section>
