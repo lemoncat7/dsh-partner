@@ -19,7 +19,7 @@ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { IDLE_CONTACT_NOTICE, idleContactDue, idleContactDay, lastIdleContactUser } from './character/idle-contact.js'
+import { IDLE_CONTACT_NOTICE, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -196,8 +196,10 @@ export class PartnerAgentRuntime {
     const key = `companion:${companionId}`
     if (this.closed || this.isCompanionBusy(companionId) || this.queues.has(key) || this.taskQueues.has(key) || this.heartbeatQueues.has(key) || this.steeringQueues.has(key) || this.store.isCompanionRemoving(companionId)) return
     const state = this.store.snapshot(), companion = state.companions.find(c => c.id === companionId)
-    const route = state.sessions.find(r => r.id === companion?.idleContact?.routeId && r.companionId === companionId)
+    let route = state.sessions.find(r => r.id === companion?.idleContact?.routeId && r.companionId === companionId)
     if (!companion?.idleContact?.enabled || !route || this.isArchived(route)) return
+    const channel=state.channels.find(c=>c.id===route!.channelId)
+    if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(route.userId))?'main':'separate'))route=await this.ensureSession(companion,route.channelId,route.userId)
     const agent = await this.ensureAgent(companion, route)
     if (agent.status !== 'idle' || this.isCompanionBusy(companionId) || this.queues.has(key) || this.taskQueues.has(key)) return
     const user = lastIdleContactUser(agent.session.snapshotEvents())
@@ -220,6 +222,16 @@ export class PartnerAgentRuntime {
     const current=this.store.snapshot().companions.find(c=>c.id===companionId)
     if(!current?.idleContact?.enabled || isSleeping(current) || current.updatedAt!==companion.updatedAt || this.isArchived(route))return
     agent.followup(message)
+  }
+
+  async idleContactDeliveryCurrent(origin:NonNullable<PartnerReply['idleContactOrigin']>):Promise<boolean> {
+    const state=this.store.snapshot(),route=state.sessions.find(r=>r.id===origin.routeId)
+    const companion=state.companions.find(c=>c.id===route?.companionId)
+    if(!route||!companion||route.sessionId!==origin.sessionId||!companion.idleContact?.enabled||companion.idleContact.routeId!==route.id||companion.updatedAt!==origin.policyRevision||route.idleContactState?.messageId!==origin.messageId||!idleContactRouteAllowed(state,companion,route.id)||isSleeping(companion)||this.isArchived(route)||this.store.isCompanionRemoving(companion.id))return false
+    const channel=state.channels.find(c=>c.id===route.channelId)
+    if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(route.userId))?'main':'separate'))return false
+    const agent=await this.ensureAgent(companion,route)
+    return lastIdleContactUser(agent.session.snapshotEvents())?.id===origin.userMessageId
   }
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {

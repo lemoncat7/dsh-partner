@@ -3,6 +3,10 @@ import type {PartnerReply} from '../channel-message.js'
 import type {PartnerStore} from '../store.js'
 import {notificationFailureReason} from './notification-timeout.js'
 
+export class NotificationDeferredError extends Error {
+  constructor(){super('QQ 尚未上线，消息未发送，等待恢复连接')}
+}
+
 type Target = {channelId:string;userId:string}
 export interface NotificationDeliveryRecord {
   id:string
@@ -10,7 +14,7 @@ export interface NotificationDeliveryRecord {
   createdAt:number
   completedAt?:number
   reply:PartnerReply
-  targets:(Target & {sentParts:number[];lastAttemptAt?:number;lastError?:string})[]
+  targets:(Target & {sentParts:number[];lastAttemptAt?:number;lastError?:string;retrySafe?:boolean})[]
 }
 type Send = (target:Target, reply:PartnerReply, part:(index:number, send:()=>Promise<unknown>)=>Promise<void>)=>Promise<void>
 
@@ -61,6 +65,7 @@ export class NotificationDelivery {
         await this.store.update(state=>{
           const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
           saved.lastAttemptAt=Date.now()
+          delete saved.retrySafe
         })
         await send(target,frozen.reply,async(index,perform)=>{
           if(target.sentParts.includes(index))return
@@ -88,6 +93,7 @@ export class NotificationDelivery {
         await this.store.update(state=>{
           const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
           delete saved.lastError
+          delete saved.retrySafe
         })
       }catch(error){
         const stage=currentPart===undefined?'接收人检查':frozen.reply.chatParts?`消息 ${currentPart+1}`:currentPart===0?'文字':`附件 ${currentPart}`
@@ -96,6 +102,7 @@ export class NotificationDelivery {
         await this.store.update(state=>{
           const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
           saved.lastError=message
+          saved.retrySafe=currentPart===undefined&&error instanceof NotificationDeferredError
         })
       }
     }))

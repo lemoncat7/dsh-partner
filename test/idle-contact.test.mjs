@@ -123,3 +123,56 @@ test('legacy quiet hours are discarded; sleep controls actual channel delivery w
   f.companion.sleepState.episode.wokeAt=Date.now()
   await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,1)
 })
+
+test('idle generation reconciles QQ main-session selection before reading conversation history',async()=>{
+ const f=runtimeFixture();f.state.channels[0].platform='qq';f.state.channels[0].qq={mainSessionPeers:['private:12345678']}
+ f.route.userId='12345678';f.state.pairings[0].userId='12345678';f.route.qqSessionMode='separate'
+ const calls=[]
+ f.runtime.ensureSession=async(c,ch,peer)=>{calls.push('reconcile');assert.equal(peer,'12345678');f.route.sessionId='main';f.route.qqSessionMode='main';return f.route}
+ f.runtime.ensureAgent=async(c,r)=>{calls.push(r.sessionId);return f.agent}
+ await f.runtime.idleContact('c');assert.deepEqual(calls,['reconcile','main']);assert.equal(f.followed.length,1)
+})
+
+function recoveryFixture(){
+ const f=deliveryFixture(),origin={routeId:'r',sessionId:'s',messageId:'idle-1',userMessageId:user.id,policyRevision:1}
+ const record={id:JSON.stringify(['c','idle:idle-1']),companionId:'c',createdAt:Date.now()-60000,reply:{text:'刚想起你说的那个事。',attachments:[],idleContactOrigin:origin},targets:[{channelId:'ch',userId:'peer',sentParts:[],lastAttemptAt:Date.now()-60000,retrySafe:true}]}
+ f.state.notificationDeliveries=[record];f.manager.runtime.set('ch',{status:'running'})
+ f.manager.agents.idleContactDeliveryCurrent=async()=>true
+ f.manager.queueProactive=async(route,receipt,reply,valid,exact)=>{assert.equal(exact,true);assert.equal(reply.text,record.reply.text);f.sent.push(receipt)}
+ return {...f,record}
+}
+test('idle recovery resends a known-unsent frozen reply to the original recipient only',async()=>{
+ const f=recoveryFixture();await f.manager.recoverIdleReplies();assert.deepEqual(f.sent,['idle:idle-1'])
+})
+for(const mode of ['legacy','uncertain','expired','offline','new input','rerouted','completed'])test(`idle recovery never replays ${mode} notifications`,async()=>{
+ const f=recoveryFixture()
+ if(mode==='legacy')delete f.record.reply.idleContactOrigin
+ if(mode==='uncertain')delete f.record.targets[0].retrySafe
+ if(mode==='expired')f.record.createdAt=Date.now()-3600001
+ if(mode==='offline')f.manager.runtime.set('ch',{status:'starting'})
+ if(mode==='new input')f.manager.agents.idleContactDeliveryCurrent=async()=>false
+ if(mode==='rerouted')f.route.userId='someone-else'
+ if(mode==='completed')f.record.completedAt=Date.now()
+ await f.manager.recoverIdleReplies();assert.equal(f.sent.length,0)
+})
+test('idle recovery validity requires unchanged settings and the same last real user message',async()=>{
+ const f=runtimeFixture(),origin={routeId:'r',sessionId:'s',messageId:'idle-1',userMessageId:user.id,policyRevision:1}
+ f.route.idleContactState={messageId:'idle-1'}
+ assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),true)
+ f.events.push({type:'user/message',seq:2,time:Date.now(),data:{id:'new-input',source:{kind:'user'}}})
+ assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),false)
+ f.events.pop();f.companion.updatedAt++
+ assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),false)
+})
+
+test('offline QQ proactive delivery is persisted as unsent before attempting to obtain a sender',async()=>{
+ const f=recoveryFixture();delete f.state.notificationDeliveries
+ f.state.channels[0].platform='qq';f.manager.runtime.set('ch',{status:'starting'})
+ f.manager.store.update=async fn=>{fn(f.state);return f.state}
+ f.manager.credentials.read=async()=>({baseUrl:'ws://localhost:3001',botToken:'test'})
+ f.manager.sender=()=>assert.fail('Offline QQ must not start a send')
+ await assert.rejects(f.manager.sendProactiveReply('ch','peer',f.record.reply,'idle:idle-1','c',true))
+ const saved=f.state.notificationDeliveries[0]
+ assert.equal(saved.targets[0].retrySafe,true);assert.deepEqual(saved.targets[0].sentParts,[])
+ assert.equal(saved.reply.text,f.record.reply.text)
+})

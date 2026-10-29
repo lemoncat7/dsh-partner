@@ -115,3 +115,19 @@ test('QQ group notifications stay in their source group and private recent routi
  state.companions[0].notificationDelivery={mode:'selected',targets:[privateTarget]}
  assert.deepEqual(notificationRoutes(state,groupTarget.channelId,groupTarget.userId),[groupTarget])
 })
+
+test('only explicitly deferred preflight failures are safe to retry, and the marker survives restart',async t=>{
+ const {NotificationDeferredError}=await import('../lib/channels/notification-delivery.js')
+ const dir=await mkdtemp(join(tmpdir(),'idle-deferred-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ const path=join(dir,'state.json'),store=await PartnerStore.open(path)
+ const reply={text:'稍后联系',attachments:[]}
+ await assert.rejects(new NotificationDelivery(store).deliver('idle:m','c',()=>[targets[0]],reply,async()=>{throw new NotificationDeferredError()}))
+ const reopened=await PartnerStore.open(path)
+ assert.equal(reopened.snapshot().notificationDeliveries[0].targets[0].retrySafe,true)
+ // An actual send may have reached QQ even if its acknowledgement was lost.
+ await assert.rejects(new NotificationDelivery(reopened).deliver('idle:m','c',()=>[targets[1]],reply,async(target,payload,part)=>{
+  assert.equal(target.userId,'alice');await part(0,async()=>{throw Error('lost acknowledgement')})
+ }))
+ assert.equal(reopened.snapshot().notificationDeliveries[0].targets[0].retrySafe,false)
+ assert.deepEqual(reopened.snapshot().notificationDeliveries[0].targets[0].sentParts,[])
+})

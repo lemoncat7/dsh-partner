@@ -25,6 +25,8 @@ export interface ChannelView {
   direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
+  groupDecision?: {at:number;groupId:string;reason:string}
+  idleDelivery?: string
   lastError?: string; credentialConfigured: boolean
 }
 export interface PairingView {

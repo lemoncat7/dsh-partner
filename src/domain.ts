@@ -231,6 +231,8 @@ function optionalRoute(value: Record<string, unknown>): { provider?: string; mod
 
 export interface ChannelView extends WeixinChannel {
   runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
+  groupDecision?: {at:number;groupId:string;reason:string}
+  idleDelivery?: string
   lastError?: string
   credentialConfigured: boolean
 }

@@ -22,6 +22,7 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  idleContactOrigin?: {routeId:string;sessionId:string;messageId:string;userMessageId:string;policyRevision:number}
   chatParts?: import('./chat/protocol.js').ChatPart[]
   chatOriginRouteId?: string | null
   /** Freeze the direct source; never reroute a queued reply after account or room changes. */

@@ -19,3 +19,23 @@ test('malformed or incomplete decisions fail silent and observations stay bounde
  assert.equal(JSON.parse(gate.context('c',event)).length,15)
  assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),false)
 })
+
+test('decision uses the supported non-thinking effort and reports failures separately from silence',async()=>{
+ let now=100000,mode='silence',request
+ const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({provider:'p',model:'m',reasoningEffort:'high'})}),llm:{
+  resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'},{id:'low'},{id:'high'}]}}),
+  async *stream(req){request=req;if(mode==='error')throw Error('credential=secret');yield {type:'text-delta',text:'{"reply":false}'};if(mode!=='truncated')yield {type:'finish',reason:{kind:'stop'}}}
+ }},()=>now)
+ gate.observe('c',event)
+ assert.equal(await gate.shouldReply('c',event,companion,new AbortController().signal),false)
+ assert.equal(request.reasoningEffort,'off');assert.equal(request.maxTokens,1024)
+ assert.match(gate.status('c').reason,/决定旁听/)
+ now+=16000;mode='truncated';await gate.shouldReply('c',event,companion,new AbortController().signal)
+ assert.match(gate.status('c').reason,/未完成/)
+ now+=16000;mode='error';await gate.shouldReply('c',event,companion,new AbortController().signal)
+ assert.match(gate.status('c').reason,/判断失败/);assert.doesNotMatch(gate.status('c').reason,/secret/)
+})
+test('non-reasoning models do not inherit unsupported conversation effort',async()=>{
+ const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({provider:'p',model:'m',reasoningEffort:'high'})}),llm:{resolveModelInfo:async()=>({}),async *stream(req){assert.equal(req.reasoningEffort,undefined);yield {type:'text-delta',text:'{"reply":true}'};yield {type:'finish',reason:{kind:'stop'}}}}},()=>100000)
+ gate.observe('c',event);assert.equal(await gate.shouldReply('c',event,companion,new AbortController().signal),true)
+})

@@ -16,6 +16,7 @@ export async function sendNotificationPart(
 /** Deliberately whitelist diagnostics: upstream messages may contain credentials or signed URLs. */
 export function notificationFailureReason(error: unknown): string {
   const value = error instanceof Error ? `${error.name} ${error.message}` : ''
+  if (/尚未上线.*消息未发送/.test(value)) return 'QQ 离线，消息尚未发送，等待连接恢复'
   if (/timeout|timed out|超时/i.test(value)) return '发送超时'
   if (/abort|停止/i.test(value)) return '发送已中断'
   const status = value.match(/(?:HTTP|status)\s*[:=]?\s*([45]\d{2})\b/i)?.[1]
