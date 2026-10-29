@@ -192,7 +192,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
         if (method === 'GET') return sendJson(res, 200, { state: await runtime.memory.characterState(id, scopeId), scopeId, scopes })
         if (method === 'PUT') {
           mutation(req); const body = await readObject(req)
-          if (typeof body.expectedAt !== 'number') throw httpError(400, '缺少角色记忆版本，请刷新')
+          if (typeof body.expectedAt !== 'number') throw httpError(400, '缺少相处状态版本，请刷新')
           return sendJson(res, 200, { state: await runtime.memory.saveCharacterState(id, scopeId, body.state, body.expectedAt), scopeId, scopes })
         }
       }

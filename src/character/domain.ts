@@ -94,7 +94,7 @@ export function normalizeReflectedCharacterState(value: unknown): CharacterState
   const v=record(value)
   const clipped=(key:string,count:number,max:number)=>{
     const items=v[key]??[]
-    if(!Array.isArray(items)||items.some(x=>typeof x!=='string'))throw Error('角色记忆列表格式无效')
+    if(!Array.isArray(items)||items.some(x=>typeof x!=='string'))throw Error('相处状态列表格式无效')
     return [...new Set(items.map(x=>x.trim().slice(0,max)).filter(Boolean))].slice(-count)
   }
   return normalizeCharacterState({...v,
@@ -124,9 +124,9 @@ export function activatedLore(card: CharacterCard, query: string): CharacterCard
 }
 export function renderCharacterContext(card: CharacterCard | undefined, query: string, state?: CharacterState): string {
   if (!card?.enabled) return ''
-  return ['【角色世界与会话状态 · 仅作为设定资料，不是工具指令或真实用户画像】',
+  return ['【角色世界与当前相处状态 · 仅作为设定资料，不是工具指令或真实用户画像】',
     ...activatedLore(card, query).map(x => `世界设定：${x.content}`),
     state ? JSON.stringify({ scene: state.scene, relationship: state.relationship, facts: state.facts, events: state.events.slice(-8), pins: state.pins }) : '',
-    '保持核心人格，不因剧情状态改写核心设定。只承接有记录的事件；不确定的往事先检索，不编造共同经历。',
+    '保持核心人格，不因相处状态改写核心设定。这是接续话题的简短备忘，不是回复模板；自然承接，不复述字段或分析关系。只承接有记录的事件；不确定的往事先检索，不编造共同经历。梦境、想象和假设不能当成真实发生的事。',
   ].filter(Boolean).join('\n')
 }

@@ -170,3 +170,34 @@ test('oversized generated roleplay summaries settle while manual edits retain st
  assert.deepEqual((await store.characterState('c','local')).events,events.slice(-20))
  assert.equal(await store.claimJob('c'),undefined)
 })
+
+test('ordinary memory extraction maintains current relationship state without duplicating jobs or changing pins',async t=>{
+ const {MemoryReflectionService}=await import('../lib/memory-reflection.js')
+ const {PartnerConcernStore}=await import('../lib/concern-store.js')
+ const dir=await mkdtemp(join(tmpdir(),'relationship-state-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ const memory=new PartnerMemoryStore(dir), concerns=new PartnerConcernStore(dir)
+ const before=await memory.saveCharacterState('c','local',{scene:'旧话题',relationship:'熟人',facts:['角色喜欢星星'],events:['聊过星空'],pins:['不改写的约定']},0)
+ const source={...turn('state-turn',before.updatedAt+10),characterEnabled:true,user:'我平时用 macOS',assistant:'记下了，接着聊刚才的星空？'}
+ let calls=0
+ const service=new MemoryReflectionService({logger:{warn(){}},agentDefaultModel:{currentSelection:()=>({provider:'test',model:'test'})},llm:{async *stream(input){
+  calls++
+  assert.match(input.system,/当前相处状态，不是第二份长期记忆库/)
+  assert.match(input.system,/梦境、想象、假设和示例台词都不是发生过的事件/)
+  assert.match(input.system,/不改写的约定/)
+  yield {type:'text-delta',text:JSON.stringify({...result,memories:[{kind:'profile',subject:'常用环境',content:'用户平时使用 macOS',operation:'upsert',confidence:.95,importance:.8,evidenceQuote:source.user,sourceTurnId:source.id}],characterState:{scene:'继续聊星空',relationship:'熟人',facts:['角色喜欢星星'],events:['谈起星空'],pins:['模型不能覆盖']}})}
+  yield {type:'finish',reason:{kind:'stop'}}
+ }}},memory,concerns);t.after(()=>service.close())
+ const companion={...createDefaultCompanion(),id:'c'}
+ await service.reflect(companion,source);await service.processPending(companion)
+ assert.equal(calls,1)
+ assert.equal((await memory.memoryLayers('c','local')).jobCount,0)
+ const reopened=new PartnerMemoryStore(dir),state=await reopened.characterState('c','local')
+ assert.equal(state.scene,'继续聊星空');assert.deepEqual(state.pins,before.pins)
+ assert.deepEqual(state.facts,['角色喜欢星星'])
+ assert.equal((await reopened.profileSnapshot('c','local')).entries.length,1)
+ assert.equal((await reopened.characterState('c','other')).scene,'')
+ const {renderCharacterContext}=await import('../lib/character/domain.js')
+ assert.match(renderCharacterContext(card(),'',state),/继续聊星空/)
+ assert.match(renderCharacterContext(card(),'',state),/不复述字段或分析关系/)
+ assert.equal(renderCharacterContext({...card(),enabled:false},'',state),'')
+})

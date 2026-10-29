@@ -9,7 +9,6 @@ import { renderConversationBehavior } from '../character/conversation-behavior.j
 import { FormField as Field } from './partner-components.js'
 import { WorkspaceDialog, DiscardChangesDialog, errorMessage } from './workspace-components.js'
 import Stepper, { Step } from './character-stepper.js'
-import { CharacterMemoryEditor } from './character-memory-editor.js'
 
 const SAMPLE: CharacterCard = {
   ...emptyCharacterCard(), enabled: true,
@@ -34,7 +33,7 @@ const SAMPLE: CharacterCard = {
 
 export function CharacterEditor({ companion, card, disabled, onChange }: { companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
   const [wizard, setWizard] = useState(false)
-  const [section, setSection] = useState<'role' | 'chat' | 'trial' | 'memory'>('role')
+  const [section, setSection] = useState<'role' | 'chat' | 'trial'>('role')
   // An explicitly empty document remains editable rather than reopening the wizard.
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">
@@ -48,7 +47,6 @@ export function CharacterEditor({ companion, card, disabled, onChange }: { compa
         {id: 'role', title: '角色设定', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><RoleFields card={card!} onChange={onChange} /><details className="dsh-partner-settings-advanced"><summary>背景资料 <small>可选 · {card!.lore.length} 条</small></summary><LoreFields card={card!} onChange={onChange} /></details></fieldset>},
         {id: 'chat', title: '聊天方式', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><ChatFields companionId={companion.id} card={card!} onChange={onChange} /></fieldset>},
         {id: 'trial', title: '试聊', content: <CharacterTrial companion={companion} card={card!} />},
-        {id: 'memory', title: '相处记忆', content: <CharacterMemoryEditor companionId={companion.id} />},
       ]} />
     </>}
     {wizard && <CharacterWizard companion={companion} initial={card ?? emptyCharacterCard()} close={() => setWizard(false)} complete={value => { onChange(value); setWizard(false) }} />}

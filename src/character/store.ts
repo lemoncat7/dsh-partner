@@ -10,7 +10,7 @@ export function readCharacterState(db: DatabaseSync, scope: string): CharacterSt
 }
 export function saveCharacterState(db: DatabaseSync, scope: string, value: unknown, expectedAt: number): CharacterState {
   const previous = readCharacterState(db, scope)
-  if (previous.updatedAt !== expectedAt) throw new Error('角色记忆已更新，请刷新后再保存')
+  if (previous.updatedAt !== expectedAt) throw new Error('当前相处状态已更新，请重新读取后再保存')
   const state = { ...normalizeCharacterState(value), updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
   db.prepare('INSERT INTO character_states VALUES (?,?) ON CONFLICT(scope_id) DO UPDATE SET state_json=excluded.state_json').run(scope, JSON.stringify(state))
   return state
