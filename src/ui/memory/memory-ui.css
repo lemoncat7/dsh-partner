@@ -99,3 +99,18 @@
   .dsh-partner-memory-record > summary > time { display: block; }
   .dsh-partner-memory-settings .dsh-partner-automation-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* State notes stay readable in narrow companion panels and themed workspaces. */
+.dsh-partner-current-state .dsh-partner-field > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.dsh-partner-current-state .dsh-partner-field > span > strong { flex: none; }
+.dsh-partner-current-state .dsh-partner-field > span > small {
+  color: var(--partner-text-secondary);
+  line-height: 1.6;
+  text-align: left;
+}
+.dsh-partner-current-state > .dsh-partner-character > button { justify-self: start; }
