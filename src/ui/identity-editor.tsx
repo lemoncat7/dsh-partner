@@ -1,3 +1,4 @@
+import { relationshipTextForIdentity } from '../character/relationship-adapter.js'
 import { SleepEditor } from './sleep-editor.js'
 import { sleepPolicy } from '../character/sleep.js'
 import { IdleContactEditor } from './idle-contact-editor.js'
@@ -6,9 +7,7 @@ import { CharacterEditor } from './character-editor.js'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { IconCheckOutlineRegular as IconCheckOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type CompanionView } from '../client-api.js'
-import { pageIdentity, effectiveIdentity } from '../companions/identity.js'
-import { roleTextForCard } from '../character/domain.js'
-import { DEFAULT_IDLE_CONTACT } from '../character/idle-contact.js'
+import { pageIdentity } from '../companions/identity.js'
 import { FormField as Field, SectionHeading as Section } from './partner-components.js'
 import { errorMessage } from './workspace-components.js'
 
@@ -24,7 +23,7 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
   const [form, setForm] = useState(() => pageIdentity(companion))
   const revision = useRef(companion.updatedAt)
   const [operation, setOperation] = useState<'save'>()
-  const [section, setSection] = useState<'identity' | 'character' | 'idle' | 'sleep'>('identity')
+  const [section, setSection] = useState<'identity' | 'character' | 'relationship' | 'idle' | 'sleep'>('identity')
   const dirty = useRef(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string>()
@@ -50,36 +49,20 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
     } finally { locked.current = false; if (alive.current) setOperation(undefined) }
   }
   return <form onInvalidCapture={event => { event.preventDefault(); const target = event.target as HTMLElement; const idle = Boolean(target.closest('[aria-label="闲时自主活动"]')); setSection(idle ? 'idle' : 'identity'); setError(idle ? '请选择自主活动的目标会话。' : '请填写基本身份中的名字和角色。'); requestAnimationFrame(() => target.focus()) }} id="dsh-partner-identity-editor" className="dsh-partner-form is-identity" aria-busy={operation !== undefined} onSubmit={event => { void submit(event) }}>
-    <Section eyebrow="IDENTITY" title="身份与角色" detail="这里编辑的是你保留的原稿。保存会同时更新草稿和生效身份；聊天中让 AI 生成人格或调整设定，只会改变生效内容。" />
-    <details className="dsh-partner-settings-advanced dsh-partner-effective-identity">
-      <summary>查看当前生效身份 <small>{JSON.stringify(pageIdentity(companion)) === JSON.stringify(effectiveIdentity(companion)) ? '与已保存草稿一致' : '已与草稿不同'}</small></summary>
-      <p className="dsh-partner-character-hint">可以直接对伙伴说：“根据我的要求生成并应用人格卡……”；AI 保存后的内容在这里查看，下一轮生效。下方表单仍保留你的草稿。</p>
-      <EffectiveIdentity companion={companion} />
-      <button type="button" disabled={busy} onClick={() => { revision.current = companion.updatedAt; edit(effectiveIdentity(companion)) }}>将生效内容复制到编辑区</button>
-      <p className="dsh-partner-character-hint">复制后仍需保存，才会替换原稿。</p>
-    </details>
+    <Section eyebrow="IDENTITY" title="身份与角色" detail="页面与 AI 使用同一份设定。推荐在聊天中提出要求，让 AI 生成角色与关系；这里查看最新内容，也可直接修改保存。" />
+    {dirty.current && companion.updatedAt !== revision.current && <p role="status" className="dsh-partner-character-hint">设定已被 AI 或其他页面更新。你的未保存编辑仍在，保存会进行版本校验；请先载入最新设定再修改，避免覆盖新内容。</p>}
     <section className="dsh-partner-identity-card" aria-label="身份配置">
     <SettingsSections<typeof section> label="身份设置分段" value={section} onChange={setSection} sections={[{id: 'identity', title: '基本身份', detail: '名字、定位与行为准则', content: <>
     <div className="dsh-partner-fields two"><Field label="名字"><input disabled={busy} required maxLength={60} value={form.name} onChange={event => edit({ ...form, name: event.target.value })} /></Field><Field label="角色"><input disabled={busy} required maxLength={120} value={form.role} onChange={event => edit({ ...form, role: event.target.value })} /></Field></div>
     <Field label="一句话定位" hint="用于名册识别，不会替代完整行为准则。"><textarea disabled={busy} rows={2} maxLength={500} value={form.description} onChange={event => edit({ ...form, description: event.target.value })} /></Field>
-    <Field label="长期行为准则" hint="建议写职责、表达方式与边界；渠道、工具和授权由系统单独控制。"><textarea disabled={busy} rows={9} maxLength={12000} value={form.instructions} onChange={event => edit({ ...form, instructions: event.target.value })} /></Field>
-    </>}, {id: 'character', title: '角色聊天', detail: form.characterCard?.enabled ? '已启用 · 设定与试聊' : '可选 · 设定与试聊', content: <CharacterEditor companion={companion} {...(form.characterCard ? {card:form.characterCard} : {})} disabled={busy} onChange={characterCard => edit({...form,characterCard})} />}, {id: 'idle', title: '闲时自主活动', detail: form.idleContact?.enabled ? '已开启 · 按概率自主行动' : '可选 · 聊天或使用能力', content: <IdleContactEditor companionId={companion.id} value={form.idleContact} disabled={busy} onChange={idleContact => edit({...form,idleContact})} />}, {id: 'sleep', title: '睡眠与做梦', detail: '自主休息 · 梦境与感受', content: <SleepEditor companion={companion} value={sleepPolicy(form)} disabled={busy} active={section === 'sleep'} onChange={sleepPolicy => edit({...form,sleepPolicy})} />}]} />
+    <Field label="长期行为准则" hint="写角色通用的职责、表达与边界。与用户的身份关系、专属称呼请放到“关系设定”。"><textarea disabled={busy} rows={9} maxLength={12000} value={form.instructions} onChange={event => edit({ ...form, instructions: event.target.value })} /></Field>
+    </>}, {id: 'character', title: '角色聊天', detail: form.characterCard?.enabled ? '已启用 · 设定与试聊' : '可选 · 设定与试聊', content: <CharacterEditor relationshipText={relationshipTextForIdentity(form)} companion={companion} {...(form.characterCard ? {card:form.characterCard} : {})} disabled={busy} onChange={characterCard => edit({...form,characterCard})} />}, {id: 'relationship', title: '关系设定', detail: '称呼与相处 · 按渠道应用', content: <>
+      <p className="dsh-partner-character-hint">角色设定写“我是谁”，这里写“我们是什么关系”。普通会话会合并使用；QQ 仅在发送者匹配任一归属账号时附加这份关系，群聊与私聊通用。其他人根据角色性格与实际交往相处。</p>
+      <Field label="关系设定" hint="写关系身份、专属称呼和相处习惯，也可附关系示例。留空表示不预设关系。"><textarea disabled={busy} rows={12} maxLength={12000} value={relationshipTextForIdentity(form)} onChange={event => edit({...form, relationshipText:event.target.value})} /></Field>
+      <details className="dsh-partner-settings-advanced"><summary>通用示例与编辑说明</summary><p>我们是互相尊重的老朋友，称呼对方的名字。熟悉时可以开玩笑，认真讨论时直说意见，不编造共同往事。</p><p>可以让 AI 分别生成角色与关系。AI 与页面编辑同一份生效内容；保存后下一轮使用新设定。旧版角色或基本身份中混写的专属关系，需要移到这里；系统不会猜测删改旧文本。QQ 账号只需在渠道的访问权限中填写。</p></details>
+    </>}, {id: 'idle', title: '闲时自主活动', detail: form.idleContact?.enabled ? '已开启 · 按概率自主行动' : '可选 · 聊天或使用能力', content: <IdleContactEditor companionId={companion.id} value={form.idleContact} disabled={busy} onChange={idleContact => edit({...form,idleContact})} />}, {id: 'sleep', title: '睡眠与做梦', detail: '自主休息 · 梦境与感受', content: <SleepEditor companion={companion} value={sleepPolicy(form)} disabled={busy} active={section === 'sleep'} onChange={sleepPolicy => edit({...form,sleepPolicy})} />}]} />
     {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
-    <div className="dsh-partner-form-actions"><button type="button" disabled={busy} onClick={() => { setForm(pageIdentity(companion)); revision.current = companion.updatedAt; dirty.current = false; setError(undefined); setSaved(false) }}>重新载入已保存草稿</button><span role="status">{saved && <><IconCheckOutline14 size={14} />草稿已保存并应用，下一轮将使用新身份</>}</span><button disabled={busy}>{operation === 'save' ? '正在保存…' : '保存身份'}</button></div>
+    <div className="dsh-partner-form-actions"><button type="button" disabled={busy} onClick={() => { setForm(pageIdentity(companion)); revision.current = companion.updatedAt; dirty.current = false; setError(undefined); setSaved(false) }}>载入最新设定</button><span role="status">{saved && <><IconCheckOutline14 size={14} />身份已保存，下一轮将使用新身份</>}</span><button disabled={busy}>{operation === 'save' ? '正在保存…' : '保存身份'}</button></div>
     </section>
   </form>
-}
-
-function EffectiveIdentity({ companion }: { companion: CompanionView }): JSX.Element {
-  const card = companion.characterCard, idle = companion.idleContact ?? DEFAULT_IDLE_CONTACT
-  return <div className="dsh-partner-effective-content">
-    <h4>{companion.name} · {companion.role}</h4>
-    {companion.description && <p>{companion.description}</p>}
-    <h4>长期行为准则</h4><p>{companion.instructions || '未填写'}</p>
-    <h4>角色聊天 · {card?.enabled ? '已开启' : '已关闭'}</h4>
-    {card && <><p>{roleTextForCard(card) || '尚未编写人格卡'}</p><h4>聊天方式</h4><p>{card.chatStyle || '未额外指定'}<br />回复长度：{{short:'简短',balanced:'适中',rich:'丰富'}[card.length]} · 旁白：{card.narration ? '开启' : '关闭'} · 分段：{card.segmentedReplies ? '开启' : '关闭'} · 表情：{card.stickersEnabled ? '开启' : '关闭'}</p>
-    {card.lore.map(item => <div key={item.id}><h4>{item.title || '背景资料'} · {item.enabled ? '启用' : '停用'}</h4><p>关键词：{item.keywords.join('、')}<br />{item.content}</p></div>)}</>}
-    <h4>闲时自主活动 · {idle.enabled ? '已开启' : '已关闭'}</h4><p>空闲概率在 {idle.idleMinutes} 分钟内升至 100%，每分钟抽取一次；不限制每天活动次数。</p>
-    <h4>自主睡眠 · {sleepPolicy(companion).enabled ? '已开启' : '已关闭'}</h4><p>做梦：{sleepPolicy(companion).dreamsEnabled ? '允许' : '关闭'}，不设固定时段。</p>
-  </div>
 }

@@ -76,7 +76,6 @@ export function roleTextForCard(card: CharacterCard): string {
     card.identity ? `## 身份\n${card.identity}` : '',
     card.motivation ? `## 性格与反应\n${card.motivation}` : '',
     card.voice ? `## 说话习惯\n${card.voice}` : '',
-    card.relationship ? `## 相处关系\n${card.relationship}` : '',
     card.greeting ? `## 初次见面的语气参考（不要重复问候）\n${card.greeting}` : '',
     ...card.examples.filter(e => e.user && e.assistant).map((e, i) => `## 对话参考 ${i + 1}（虚构示例，不是真实往事）\n对方：${e.user}\n角色：${e.assistant}${e.avoid ? `\n避免的回复（反例，不要模仿）：${e.avoid}` : ''}`),
   ].filter(Boolean).join('\n\n')
@@ -110,7 +109,7 @@ export function renderCharacterCore(card: CharacterCard | undefined, surface = '
     '必须持续依据当前角色设定交流。旧身份中的表达习惯、历史回复和记忆摘要不能覆盖当前设定；历史只用于承接真实事实与话题。人格设定不能授权操作或虚构完成结果。角色示例是语感参考，不是真实用户经历，也不是每轮要复述的台词。',
     // Dedicated work surfaces keep the legacy compact identity and omit conversational examples.
     chat ? roleTextForCard(card) : (card.roleText !== undefined ? '沿用当前伙伴身份；本轮以任务要求为准。' : [card.identity, card.voice].filter(Boolean).join('\n')),
-    chat ? '身份、关系和生活背景是角色设定；不编造真实共同经历、已完成的操作或现实中的见面。' : '当前为工作或心跳执行：严格遵守 JSON、工具和交付协议，不加入角色旁白。',
+    chat ? '身份和生活背景是角色设定；与当前对象的关系仅依据本轮附加的关系设定；不编造真实共同经历、已完成的操作或现实中的见面。' : '当前为工作或心跳执行：严格遵守 JSON、工具和交付协议，不加入角色旁白。',
   ].filter(Boolean).join('\n\n')
 }
 export function activatedLore(card: CharacterCard, query: string): CharacterCard['lore'] {

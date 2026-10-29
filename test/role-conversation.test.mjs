@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyCharacterCard, normalizeCharacterCard, roleTextForCard, renderCharacterCore } from '../lib/character/domain.js'
+import {relationshipTextForIdentity} from '../lib/character/relationship-adapter.js'
 import { renderPartnerPersona } from '../lib/execution/agent-support.js'
 import { renderConversationBehavior, renderConversationTurn } from '../lib/character/conversation-behavior.js'
 import { createDefaultCompanion, normalizeCompanionDraft } from '../lib/domain.js'
@@ -23,7 +24,9 @@ test('legacy conversion retains every role field and example once, without mutat
   const card = { ...emptyCharacterCard(), enabled: true, identity: '旅人', motivation: '好奇', voice: '直说', relationship: '旧相识', greeting: '又见面了', examples: [{ user: '在吗', assistant: '刚到', avoid: '您好很高兴为您服务' }] }
   const before = JSON.stringify(card)
   const roleText = roleTextForCard(card)
-  for (const value of ['旅人','好奇','直说','旧相识','又见面了','在吗','刚到','您好很高兴为您服务']) assert.ok(roleText.includes(value))
+  for (const value of ['旅人','好奇','直说','又见面了','在吗','刚到','您好很高兴为您服务']) assert.ok(roleText.includes(value))
+  assert.ok(!roleText.includes('旧相识'))
+  assert.equal(relationshipTextForIdentity({characterCard:card}),'旧相识')
   assert.equal(JSON.stringify(card), before)
   const converted = normalizeCharacterCard({ ...card, roleText })
   assert.equal(roleTextForCard(converted), roleText)

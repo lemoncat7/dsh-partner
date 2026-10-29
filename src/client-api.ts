@@ -11,6 +11,8 @@ export interface CompanionView {
   toolDiscovery?: boolean
   sleepPolicy?: import('./character/sleep.js').SleepPolicy
   sleepState?: import('./character/sleep.js').SleepState
+  relationshipText?: string
+  /** Legacy archive, never used as the editor source. */
   identityDraft?: import('./companions/identity.js').CompanionIdentity
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: import('./character/domain.js').CharacterCard

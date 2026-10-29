@@ -5,16 +5,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope } from '@deepseek-ai/dsh-scope'
+import {ToolRuntime,defineContentToolFixture} from '@deepseek-ai/dsh-tools'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerAgentRuntime } from '../lib/agent-runtime.js'
 import { assertWakeTools, completionCondition } from '../lib/scheduler/wakeup-context.js'
 import { continuationPrompt } from '../lib/scheduler/continuations.js'
 
-async function fixture(t, composer) {
+async function fixture(t, composer, mode = 'native') {
   const directory = await mkdtemp(join(tmpdir(), 'partner-assembly-'))
   const root = new Context()
   new SystemPrompt(root, {})
+  root.provide('ptcRuntime', {language:'typescript',programFormat:'script'})
+  new ToolRuntime(root, {mode})
   const agent = { status: 'running', session: { id: 'session-assembly', seq: 0 } }
   const scope = createScope(root, agent, { parent: {} })
   agent.ctx = scope.ctx
@@ -105,4 +108,46 @@ test('legacy check text is not promoted into completion criteria or linked to Go
   assert.match(continuationPrompt(entry), /历史 Goal 引用仅作背景/)
   entry.continuation.completion = '文件校验成功'
   assert.equal(completionCondition(entry), '文件校验成功')
+})
+
+
+test('QQ guest assembly exposes reply tools only and owner/local restores existing tools',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await fixture(t,{async compose(ctx){return ctx.systemPrompt.tools(()=>({schemas:['run_code','partner_identity','ssh_exec','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>({name,parameters:{type:'object'}}))}))}})
+ f.agent.session=Session.create('session-assembly')
+ // Keep fixture routes linked to the real session ID.
+ await f.store.update(s=>{
+  s.sessions[0].sessionId=f.agent.session.id
+  s.channels.push({id:'qq',platform:'qq',companionId:s.companions[0].id,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}})
+  for(const [id,userId] of [['owner','12345678'],['guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId,lastMessageAt:1,inboundMessageIds:[]})
+ })
+ const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'请执行'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});if(id)await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.equal((await send('owner')).tools.length,6)
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.equal((await send()).tools.length,6)
+})
+
+for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} deployment and restore presentation for owners`,async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await fixture(t,{async compose(ctx){
+  const disposers=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]})))
+  return ()=>disposers.forEach(dispose=>dispose())
+ }},mode)
+ f.agent.session=Session.create('session-assembly')
+ await f.store.update(s=>{
+  s.sessions[0].sessionId=f.agent.session.id
+  s.channels.push({id:'qq',platform:'qq',companionId:s.companions[0].id,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}})
+  for(const [id,userId] of [['owner','12345678'],['guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId,lastMessageAt:1,inboundMessageIds:[]})
+ })
+ const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
+ const guest=await send('guest')
+ assert.deepEqual(guest.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.equal(f.root.tools.modeFor(f.agent),'native')
+ assert.ok(!guest.sections.some(s=>s.text.includes('partner_identity')),'private tool SDK must not leak')
+ assert.equal((await f.root.tools.execute({agent:f.agent,name:'partner_chat_reply',callId:'reply',arguments:{},signal:new AbortController().signal})).isError,false)
+ const owner=await send('owner')
+ assert.equal(f.root.tools.modeFor(f.agent),mode)
+ assert.ok(owner.tools.some(t=>t.name===(mode==='ptc'?'run_code':'partner_identity')))
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
 })

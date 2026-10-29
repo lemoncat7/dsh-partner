@@ -28,7 +28,7 @@ async function fixture(t) {
   return { store, path, id, tool, exec, call, inspect, update }
 }
 
-test('AI generates and revises a complete effective persona, preserving legacy human draft across restart', async t => {
+test('AI generates and revises a complete effective persona, sharing its latest content with the page across restart', async t => {
   const f = await fixture(t), original = effectiveIdentity(f.store.snapshot().companions[0])
   const index = new SessionConfigurationIndex(f.store); t.after(() => index.close())
   const revision = index.forSession('session').revision
@@ -38,9 +38,9 @@ test('AI generates and revises a complete effective persona, preserving legacy h
     lore: [{ id: 'home', title: '住处', keywords: ['家'], content: '虚构的温暖小屋', enabled: true }],
   }, idleContact: { enabled: true, routeId: 'local' }, sleepPolicy: {enabled:true,dreamsEnabled:true} })
   assert.equal(result.applied, true)
-  assert.equal(result.humanDraftPreserved, true)
+  assert.equal(result.sharedIdentity, true)
   let current = f.store.snapshot().companions[0]
-  assert.deepEqual(pageIdentity(current), original)
+  assert.deepEqual(pageIdentity(current), effectiveIdentity(current))
   assert.equal(current.characterCard.enabled, true)
   assert.equal(current.sleepPolicy.enabled, true)
   assert.equal(current.idleContact.dailyLimit, undefined)
@@ -51,21 +51,21 @@ test('AI generates and revises a complete effective persona, preserving legacy h
   assert.equal(current.characterCard.stickersEnabled, true)
   assert.deepEqual(current.characterCard.lore, [])
   assert.equal(current.idleContact.routeId, 'local')
-  assert.deepEqual(pageIdentity(current), original)
+  assert.deepEqual(pageIdentity(current), effectiveIdentity(current))
   const reopened = (await PartnerStore.open(f.path)).snapshot().companions[0]
   assert.deepEqual(reopened, current)
   assert.deepEqual((await f.inspect()).routes.map(r => r.id), ['local'])
   assert.equal('identityDraft' in await f.inspect(), false)
 })
 
-test('human save fully replaces effective identity and draft without restoring omitted AI card fields', async t => {
+test('human save replaces the shared effective identity without restoring omitted AI card fields', async t => {
   const f = await fixture(t)
   await f.update({ characterCard: { enabled: true, roleText: 'AI 的版本', stickersEnabled: true } })
   const current = f.store.snapshot().companions[0]
   const human = { ...pageIdentity(current), characterCard: { enabled: true, identity: '人工旧格式角色', voice: '轻快' } }
   await f.store.update(state => applyIdentity(state, state.companions[0], human, current.updatedAt, 'page'))
   const saved = f.store.snapshot().companions[0]
-  assert.deepEqual(saved.identityDraft, effectiveIdentity(saved))
+  assert.equal(saved.identityDraft, undefined)
   assert.equal(saved.characterCard.roleText, undefined)
   assert.equal(saved.characterCard.stickersEnabled, undefined)
   assert.equal(saved.characterCard.identity, '人工旧格式角色')
@@ -89,7 +89,7 @@ test('stale or simultaneous updates cannot silently overwrite newer changes; can
   assert.deepEqual(f.store.snapshot(), before)
 })
 
-test('page identity API saves both copies and unrelated settings endpoint preserves draft', async t => {
+test('page identity API shares AI edits and unrelated settings preserve relationship', async t => {
   const f = await fixture(t)
   let handler
   registerPartnerApi({ register(route) { handler = route.handler; return () => {} } }, '/api', { store: f.store })
@@ -105,23 +105,23 @@ test('page identity API saves both copies and unrelated settings endpoint preser
   assert.equal((await put(body, '/identity', {})).statusCode, 403)
   assert.equal((await put(body)).statusCode, 200)
   current = f.store.snapshot().companions[0]
-  assert.equal(current.characterCard, undefined)
-  assert.deepEqual(current.identityDraft, effectiveIdentity(current))
+  assert.equal(current.characterCard.roleText, 'AI 生成人格')
+  assert.equal(current.identityDraft, undefined)
   assert.notEqual((await put(body)).statusCode, 200)
   await f.update({ name: 'AI 新名字' })
   current = f.store.snapshot().companions[0]
   assert.equal((await put({ companion: { ...current, capabilities: ['skills'] } }, '')).statusCode, 200)
-  assert.equal(f.store.snapshot().companions[0].identityDraft.name, '页面原稿')
+  assert.equal(f.store.snapshot().companions[0].identityDraft, undefined)
   assert.equal(f.store.snapshot().companions[0].name, 'AI 新名字')
   assert.deepEqual(f.store.snapshot().companions[0].capabilities, ['skills'])
 })
 
-test('privileged management can generate another persona while preserving its human draft', async t => {
+test('privileged management updates the same identity displayed by the page', async t => {
   const f = await fixture(t), original = pageIdentity(f.store.snapshot().companions[0])
   const management = new CompanionManagementService(f.store, { isBusy: () => false, catalog: async () => ({}), reload: async () => {} })
   let before = management.inspect('manager', f.id)
   await management.update('manager', f.id, before.revision, { characterCard: { enabled: true, roleText: '管理伙伴生成的人格' } })
-  assert.deepEqual(f.store.snapshot().companions[0].identityDraft, original)
+  assert.equal(f.store.snapshot().companions[0].identityDraft, undefined)
   before = management.inspect('manager', f.id)
   assert.equal(before.characterCard.roleText, '管理伙伴生成的人格')
   await management.update('manager', f.id, before.revision, { characterCard: { chatStyle: '自然简短' } })
@@ -129,12 +129,38 @@ test('privileged management can generate another persona while preserving its hu
   before = management.inspect('manager', f.id)
   await management.update('manager', f.id, before.revision, { characterCard: null })
   assert.equal(f.store.snapshot().companions[0].characterCard, undefined)
-  assert.deepEqual(f.store.snapshot().companions[0].identityDraft, original)
+  assert.equal(f.store.snapshot().companions[0].identityDraft, undefined)
 })
 
-test('identity discovery exposes an authoring format and applies generated role without touching the page draft',async t=>{
+test('identity discovery guides separate role and relationship authoring, visible on the page',async t=>{
  const f=await fixture(t),before=pageIdentity(f.store.snapshot().companions[0]),inspection=await f.inspect()
- for(const section of ['你是谁','怎么相处','怎么说话','对话参考'])assert.ok(inspection.generationGuide.includes(section))
+ for(const section of ['你是谁','称呼与相处','怎么说话','正反例'])assert.ok(inspection.generationGuide.includes(section))
  await f.update({characterCard:{enabled:true,roleText:'## 你是谁\n爱观察的同行者。\n\n## 怎么相处\n坦率、不附和。\n\n## 对话参考\n对方：下雨了。\n回应：那今天就赖着。'}})
- assert.deepEqual(pageIdentity(f.store.snapshot().companions[0]),before)
+ assert.match(pageIdentity(f.store.snapshot().companions[0]).characterCard.roleText,/爱观察的同行者/)
+})
+
+test('separate relationship edits survive restart and refresh both runtime and page',async t=>{
+ const f=await fixture(t),draft=pageIdentity(f.store.snapshot().companions[0])
+ const index=new SessionConfigurationIndex(f.store);t.after(()=>index.close())
+ const before=index.forSession('session').revision
+ await f.update({relationshipText:'我们是老朋友，称呼名字。'})
+ assert.notEqual(index.forSession('session').revision,before)
+ let c=f.store.snapshot().companions[0]
+ assert.equal(c.relationshipText,'我们是老朋友，称呼名字。');assert.equal(pageIdentity(c).relationshipText,'我们是老朋友，称呼名字。')
+ assert.equal((await PartnerStore.open(f.path)).snapshot().companions[0].relationshipText,c.relationshipText)
+ await f.store.update(state=>applyIdentity(state,state.companions[0],{...pageIdentity(c),relationshipText:'页面关系'},c.updatedAt,'page'))
+ c=f.store.snapshot().companions[0];assert.equal(c.identityDraft,undefined);assert.equal(c.relationshipText,'页面关系')
+ await f.update({relationshipText:''});assert.equal(f.store.snapshot().companions[0].relationshipText,'')
+ assert.equal(pageIdentity(f.store.snapshot().companions[0]).relationshipText,'')
+ await assert.rejects(f.update({relationshipText:'a'.repeat(12001)}))
+})
+
+
+test('old human drafts cannot shadow or resurrect the current AI-generated identity',async t=>{
+ const f=await fixture(t)
+ await f.store.update(state=>{const c=state.companions[0];c.identityDraft={...effectiveIdentity(c),name:'旧草稿'};c.name='最新AI版本'})
+ assert.equal(pageIdentity(f.store.snapshot().companions[0]).name,'最新AI版本')
+ await f.update({relationshipText:'新关系'})
+ assert.equal(f.store.snapshot().companions[0].identityDraft,undefined)
+ assert.equal(pageIdentity(f.store.snapshot().companions[0]).name,'最新AI版本')
 })

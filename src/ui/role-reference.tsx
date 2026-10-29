@@ -14,7 +14,7 @@ export function RoleReference(): JSX.Element {
         <h4>一句够了就结束</h4>
         <p>原版也写着“能一句答完就别加戏”。分段只用于确实想补充的内容；表情也是可选的反应，不是每轮的装饰。</p>
         <h4>放到伙伴里怎么用</h4>
-        <p>保留自己的身份、关系和兴趣，参考段落结构写具体习惯。伙伴继续使用全部已授权工具；原版的群聊潜水、故意等待和拒绝办事规则不自动应用。</p>
+        <p>角色设定保留自身身份、兴趣与具体习惯；与用户的关系和专属称呼单独写在“关系设定”。伙伴继续使用全部已授权工具；原版的群聊潜水、故意等待和拒绝办事规则不自动应用。</p>
       </div>
       <details className="dsh-partner-role-reference-original"><summary>展开原版角色卡 · 只读</summary><pre>{ROLE_REFERENCE_TEXT}</pre></details>
       <a href={ROLE_REFERENCE_SOURCE} target="_blank" rel="noreferrer">在 GitHub 查看对应版本</a>

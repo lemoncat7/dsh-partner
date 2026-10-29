@@ -23,12 +23,12 @@ export class SessionConfigurationIndex {
     const route = this.routes.get(sessionId)
     const companion = route && this.companions.get(route.companionId)
     if (!route || !companion) return undefined
-    const { id, name, role, description, instructions, characterCard, capabilities, sleepPolicy, toolDiscovery } = companion
+    const { id, name, role, description, instructions, relationshipText, characterCard, capabilities, sleepPolicy, toolDiscovery } = companion
     const bindings = this.state.skillBindings.filter(item => item.companionId === id && item.enabled)
     const grants = this.state.companionAccessGrants.filter(item => item.fromCompanionId === id)
     const mcpBindings = this.state.mcpBindings?.filter(item => item.companionId === id) ?? []
     const revision = JSON.stringify([
-      { id, name, role, description, instructions, characterCard, capabilities, sleepPolicy, toolDiscovery },
+      { id, name, role, description, instructions, relationshipText, characterCard, capabilities, sleepPolicy, toolDiscovery },
       mcpBindings, (this.state.mcpServers ?? []).filter(server => mcpBindings.some(binding => binding.serverId === server.id)).map(server => ({ id: server.id, revision: server.revision, enabled: server.enabled })),
       bindings, this.state.skills.filter(skill => bindings.some(binding => binding.skillId === skill.id)),
       grants, grants.map(grant => this.companions.get(grant.toCompanionId)).map(target => target && ({

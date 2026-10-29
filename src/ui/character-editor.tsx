@@ -1,3 +1,4 @@
+import { renderIdentityRelationship } from '../character/relationship-adapter.js'
 import { PERSONA_REQUEST_EXAMPLE } from '../character/identity-guide.js'
 import { StickerLibraryDialog } from './sticker-library.js'
 import { RoleReference } from './role-reference.js'
@@ -15,15 +16,15 @@ const SAMPLE: CharacterCard = {
   roleText: `## 你是谁
 一位喜欢观察日常、说话坦率的同行者。对新事物好奇，也愿意承认不知道。
 
-## 怎么相处
-从互相尊重的熟人开始，不编造共同往事。有自己的偏好，不为了讨好而附和；轻松时开点玩笑，正事认真处理。
+## 性格与反应
+有自己的偏好，不为了讨好而附和；轻松时开点玩笑，正事认真处理。
 
 ## 怎么说话
 自然简洁，不机械称呼，不重复口头禅。闲聊先给直接反应，不急着提建议；需要解释时认真展开。
 
 ## 对话参考（不是固定台词）
 对方：你是不是觉得我的想法都对？
-回应：倒也没有，昨天那个我就不赞成。
+回应：倒也没有，刚才那个我就不赞成。
 避免：你的每个想法都很棒！需要我帮你完善吗？
 
 对方：外面又下雨了。
@@ -31,29 +32,29 @@ const SAMPLE: CharacterCard = {
 避免：下雨天记得带伞哦！你可以在家看书、听音乐或者看电影。`,
 }
 
-export function CharacterEditor({ companion, card, disabled, onChange }: { companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
+export function CharacterEditor({ companion, card, disabled, onChange, relationshipText }: { relationshipText: string; companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
   const [wizard, setWizard] = useState(false)
   const [section, setSection] = useState<'role' | 'chat' | 'trial'>('role')
   // An explicitly empty document remains editable rather than reopening the wizard.
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">
-    <header><div><span className="dsh-partner-character-kicker">ROLE & CONVERSATION</span><h3>角色聊天 <small>可选</small></h3><p>告诉伙伴你想要的身份、关系、性格和语气，让 AI 按角色格式生成并应用设定。工具能力照常可用。</p></div>
+    <header><div><span className="dsh-partner-character-kicker">ROLE & CONVERSATION</span><h3>角色聊天 <small>可选</small></h3><p>告诉伙伴你想要的身份、关系、性格和语气，让 AI 按角色格式生成并应用设定。工具能力遵守渠道与账号权限。</p></div>
       <div className="dsh-partner-character-toggle"><button type="button" role="switch" aria-label="启用角色聊天" aria-checked={card?.enabled === true} className="dsh-partner-switch" data-on={card?.enabled === true} disabled={disabled} onClick={() => { if (!hasContent) setWizard(true); else onChange({ ...card!, enabled: !card!.enabled }) }}><i aria-hidden="true" /></button><span aria-hidden="true">{card?.enabled === true ? '已开启' : '已关闭'}</span></div>
     </header>
-    <details className="dsh-partner-settings-advanced"><summary>怎么让 AI 帮我生成人格？</summary><p className="dsh-partner-character-hint">在与这个伙伴的正式聊天中提出要求即可。AI 会读取当前设定，按“身份 → 相处方式 → 说话习惯 → 避免的表达 → 对话正反例”生成并保存。AI 修改实际生效内容，下面的页面草稿仍保留；当前版本可在“查看当前生效身份”中查看。</p><Field label="通用需求示例" hint="复制到与伙伴的聊天中，将括号里的内容换成你的要求。"><textarea readOnly rows={5} value={PERSONA_REQUEST_EXAMPLE} onFocus={event=>event.currentTarget.select()} /></Field></details>
-    {!hasContent ? <div className="dsh-partner-character-empty"><strong>把你想要的角色告诉 AI</strong><p>推荐先在正式聊天中提出要求，由 AI 生成并应用；也可以在这里手动填写草稿。关闭角色聊天后继续使用基本身份。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>手动编写草稿</button></div> : <>
+    <details className="dsh-partner-settings-advanced"><summary>怎么让 AI 帮我生成人格？</summary><p className="dsh-partner-character-hint">在与这个伙伴的正式聊天中提出要求即可。AI 会读取当前设定，将角色自身的身份、性格、语气与通用示例写入角色设定，将与用户的关系、专属称呼与相处方式单独写入关系设定。AI 保存后会更新下方同一份设定；页面正在编辑时会保留未保存内容，并提示先载入最新版本。</p><Field label="通用需求示例" hint="复制到与伙伴的聊天中，将括号里的内容换成你的要求。"><textarea readOnly rows={5} value={PERSONA_REQUEST_EXAMPLE} onFocus={event=>event.currentTarget.select()} /></Field></details>
+    {!hasContent ? <div className="dsh-partner-character-empty"><strong>把你想要的角色告诉 AI</strong><p>推荐先在正式聊天中提出要求，由 AI 生成并应用；也可以在这里手动填写内容。关闭角色聊天后继续使用基本身份。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>手动编写设定</button></div> : <>
       <p className="dsh-partner-character-status">{card!.enabled ? '已启用 · 保存后下一轮应用新设定，旧对话不会决定新的语气。' : '已关闭 · 内容保留，伙伴继续使用基本身份。'}</p>
       <SettingsSections<typeof section> label="角色聊天分段" value={section} onChange={setSection} sections={[
         {id: 'role', title: '角色设定', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><RoleFields card={card!} onChange={onChange} /><details className="dsh-partner-settings-advanced"><summary>背景资料 <small>可选 · {card!.lore.length} 条</small></summary><LoreFields card={card!} onChange={onChange} /></details></fieldset>},
         {id: 'chat', title: '聊天方式', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><ChatFields companionId={companion.id} card={card!} onChange={onChange} /></fieldset>},
-        {id: 'trial', title: '试聊', content: <CharacterTrial companion={companion} card={card!} />},
+        {id: 'trial', title: '试聊', content: <CharacterTrial companion={companion} relationshipText={relationshipText} card={card!} />},
       ]} />
     </>}
-    {wizard && <CharacterWizard companion={companion} initial={card ?? emptyCharacterCard()} close={() => setWizard(false)} complete={value => { onChange(value); setWizard(false) }} />}
+    {wizard && <CharacterWizard relationshipText={relationshipText} companion={companion} initial={card ?? emptyCharacterCard()} close={() => setWizard(false)} complete={value => { onChange(value); setWizard(false) }} />}
   </section>
 }
 
-function CharacterWizard({ companion, initial, close, complete }: { companion: CompanionView; initial: CharacterCard; close(): void; complete(card: CharacterCard): void }): JSX.Element {
+function CharacterWizard({ companion, initial, close, complete, relationshipText }: { relationshipText: string; companion: CompanionView; initial: CharacterCard; close(): void; complete(card: CharacterCard): void }): JSX.Element {
   const [draft, setDraft] = useState(() => ({ ...structuredClone(initial), enabled: true }))
   const [step, setStep] = useState(1)
   const [error, setError] = useState<string>()
@@ -66,10 +67,10 @@ function CharacterWizard({ companion, initial, close, complete }: { companion: C
   const dismiss = () => JSON.stringify(draft) !== JSON.stringify({ ...initial, enabled: true }) ? setDiscard(true) : close()
   return <><WorkspaceDialog title="设置角色" eyebrow="ROLE SETUP" detail="先写角色，再选聊天方式。无需填写完整传记，也不强制添加示例。" close={dismiss} width="wide" className="dsh-partner-character-dialog">
     {error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
-    <Stepper step={step} onStepChange={n => { setStep(n); setError(undefined) }} onNext={next} busy={false} backButtonText="上一步" nextButtonText="继续" completeButtonText="应用到身份草稿">
+    <Stepper step={step} onStepChange={n => { setStep(n); setError(undefined) }} onNext={next} busy={false} backButtonText="上一步" nextButtonText="继续" completeButtonText="应用到编辑区">
       <Step title="角色设定"><p className="dsh-partner-character-hint">几条具体习惯就够。可以先填入通用示例，再改成自己的角色。</p><button type="button" onClick={() => setDraft(structuredClone(SAMPLE))}>填入通用示例</button><RoleFields card={draft} onChange={setDraft} /></Step>
       <Step title="聊天方式"><ChatFields companionId={companion.id} card={draft} onChange={setDraft} /></Step>
-      <Step title="试聊"><p>试聊可跳过。完成后点击身份页面的“保存身份”生效。</p><CharacterTrial companion={companion} card={draft} /></Step>
+      <Step title="试聊"><p>试聊可跳过。完成后点击身份页面的“保存身份”生效。</p><CharacterTrial companion={companion} relationshipText={relationshipText} card={draft} /></Step>
     </Stepper>
   </WorkspaceDialog>{discard && <DiscardChangesDialog keepEditing={() => setDiscard(false)} discard={close} />}</>
 }
@@ -77,8 +78,8 @@ function CharacterWizard({ companion, initial, close, complete }: { companion: C
 function RoleFields({ card, onChange }: { card: CharacterCard; onChange(card: CharacterCard): void }): JSX.Element {
   return <div className="dsh-partner-character-section">
     <RoleReference />
-    {card.roleText === undefined && roleTextForCard(card) && <p className="dsh-partner-character-hint">旧设定和对话示例已合并展示，内容完整保留。直接修改这份设定即可。</p>}
-    <Field label="角色设定" hint="写清身份、相处关系和具体反应，普通文字或 Markdown 都可以。对话示例可直接写在末尾，不是必填。"><textarea rows={14} maxLength={48000} value={roleTextForCard(card)} onChange={e => onChange({ ...card, roleText: e.target.value })} /></Field>
+    {card.roleText === undefined && roleTextForCard(card) && <p className="dsh-partner-character-hint">旧角色与示例完整保留；独立的旧关系字段会显示在“关系设定”。混写在正文里的专属关系请手动移过去，或让 AI 帮你拆分。</p>}
+    <Field label="角色设定" hint="只写角色自身的身份、性格、语气与通用示例。与用户的关系、专属称呼请写在身份的“关系设定”，不要混入这里、聊天偏好或背景资料。"><textarea rows={14} maxLength={48000} value={roleTextForCard(card)} onChange={e => onChange({ ...card, roleText: e.target.value })} /></Field>
   </div>
 }
 
@@ -94,7 +95,7 @@ function ChatFields({ card, onChange, companionId }: { card: CharacterCard; comp
     </div>
     {library&&<StickerLibraryDialog companionId={companionId} close={()=>setLibrary(false)}/>}
     <Field label="额外聊天偏好（可选）" hint="例如：玩笑时直接接梗；认真说烦恼时先听，不急着给建议。留空使用默认聊天规则。"><textarea rows={4} maxLength={2000} value={card.chatStyle ?? ''} onChange={e => onChange({ ...card, chatStyle: e.target.value })} /></Field>
-    <p className="dsh-partner-character-hint">角色聊天不会减少工具或权限，也不会主动延迟、潜水或省略应有的私聊回复。</p>
+    <p className="dsh-partner-character-hint">角色聊天保留已配置能力；QQ 未归属账号仅聊天，也不会主动延迟、潜水或省略应有的私聊回复。</p>
   </div>
 }
 
@@ -109,7 +110,8 @@ function LoreFields({ card, onChange }: { card: CharacterCard; onChange(card: Ch
   </div>
 }
 
-function CharacterTrial({ companion, card }: { companion: CompanionView; card: CharacterCard }): JSX.Element {
+function CharacterTrial({ companion, card, relationshipText }: { companion: CompanionView; card: CharacterCard; relationshipText: string }): JSX.Element {
+  const [audience, setAudience] = useState<'default' | 'qq-owner' | 'qq-guest'>('default')
   const [message, setMessage] = useState('今天不太顺利，想和你聊聊。')
   const [history, setHistory] = useState<Array<{user: string; assistant: string}>>([])
   const [busy, setBusy] = useState(false)
@@ -117,10 +119,10 @@ function CharacterTrial({ companion, card }: { companion: CompanionView; card: C
   const send = async () => {
     if (busy) return
     setBusy(true); setError(undefined)
-    try { normalizeCharacterCard(card); const result = await api<{reply:string}>(`/companions/${encodeURIComponent(companion.id)}/character/preview`, {method:'POST', body:JSON.stringify({card,message,history})}); setHistory(old => [...old, {user:message,assistant:result.reply}].slice(-8)); setMessage('') }
+    try { normalizeCharacterCard(card); const result = await api<{reply:string}>(`/companions/${encodeURIComponent(companion.id)}/character/preview`, {method:'POST', body:JSON.stringify({card,message,history,relationshipText,audience})}); setHistory(old => [...old, {user:message,assistant:result.reply}].slice(-8)); setMessage('') }
     catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
   }
-  return <div className="dsh-partner-character-trial"><details><summary>查看角色与聊天规则</summary><pre>{card.enabled ? [renderCharacterCore(card), renderConversationBehavior(card)].join('\n\n') : '角色聊天未启用。'}</pre></details><p className="dsh-partner-character-hint">使用此伙伴当前模型，最多保留 8 组试聊，不写正式记忆。这里仅预览语气，不预览分段或表情发送，不执行操作；正式会话仍可使用全部已授权工具。</p>
+  return <div className="dsh-partner-character-trial"><Field label="试聊对象" hint="只模拟关系加载，不会向 QQ 发消息。切换对象会清空试聊历史。"><select disabled={busy} value={audience} onChange={e => { setAudience(e.target.value as typeof audience); setHistory([]) }}><option value="default">普通会话 · 角色与关系</option><option value="qq-owner">QQ 归属账号 · 角色与关系</option><option value="qq-guest">QQ 其他账号 / 未绑定 · 仅角色</option></select></Field><details><summary>查看角色与聊天规则</summary><pre>{card.enabled ? [renderCharacterCore(card), renderIdentityRelationship({relationshipText}, audience === 'default' ? {channel:'default'} : {channel:'qq', matched:audience === 'qq-owner'}), renderConversationBehavior(card)].join('\n\n') : '角色聊天未启用。'}</pre></details><p className="dsh-partner-character-hint">使用此伙伴当前模型，最多保留 8 组试聊，不写正式记忆。这里仅预览语气，不预览分段或表情发送，不执行操作；正式会话按渠道与账号权限提供工具。</p>
     <div aria-live="polite">{history.map((x, i) => <div className="dsh-partner-trial-exchange" key={i}><p><b>你</b>{x.user}</p><p><b>{companion.name}</b>{x.assistant}</p></div>)}</div>
     <Field label="试聊消息"><textarea rows={2} maxLength={2000} disabled={busy} value={message} onChange={e => setMessage(e.target.value)} /></Field>{error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
     <div className="dsh-partner-character-row"><button type="button" disabled={busy} onClick={() => setHistory([])}>重新试聊</button><button type="button" disabled={busy || !message.trim() || !card.enabled} onClick={() => void send()}>{busy ? '角色正在回复…' : '发送试聊'}</button></div>

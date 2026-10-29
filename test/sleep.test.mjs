@@ -90,11 +90,11 @@ test('tools cannot cross owners or expose another conversation dream, and do not
  assert.equal(isSleeping(f.c()),true);assert.deepEqual(f.c().capabilities,[])
  await tool.execute({action:'wake'},exec);assert.equal(isSleeping(f.c()),false)
 })
-test('configuration changes preserve sleep history and draft separation; disabling sleep permits immediate contact',async t=>{
+test('configuration changes preserve sleep history and update the shared identity; disabling sleep permits immediate contact',async t=>{
  const f=await fixture(t);await f.service.sleep(f.id,'r',30,'休息')
  const previous=f.c(),draft=pageIdentity(previous)
  await f.store.update(s=>applyIdentity(s,s.companions[0],{sleepPolicy:{enabled:false}},previous.updatedAt,'ai'))
- assert.equal(isSleeping(f.c()),false);assert.deepEqual(f.c().identityDraft,draft);assert.equal(f.c().sleepState.episode.id,previous.sleepState.episode.id)
+ assert.equal(isSleeping(f.c()),false);assert.equal(f.c().identityDraft,undefined);assert.equal(pageIdentity(f.c()).sleepPolicy.enabled,false);assert.equal(pageIdentity(f.c()).name,draft.name);assert.equal(f.c().sleepState.episode.id,previous.sleepState.episode.id)
  await f.service.tick();assert.equal(f.c().sleepState.episode.wakeReason,'睡眠功能已关闭')
 })
 test('new activity or task arriving during autonomous decision invalidates sleep; output truncation cannot apply',async t=>{

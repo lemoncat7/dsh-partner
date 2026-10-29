@@ -53,5 +53,6 @@ function identityRecord(value: unknown): Record<string, unknown> {
     role: input.role,
     description: input.description,
     instructions: input.instructions,
+    relationshipText: input.relationshipText,
   }
 }

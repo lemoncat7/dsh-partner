@@ -4,26 +4,24 @@ import { emptyCharacterCard, type CharacterCard } from '../character/domain.js'
 import { DEFAULT_IDLE_CONTACT, idleContactRouteAllowed, type IdleContactPolicy } from '../character/idle-contact.js'
 import { record } from '../core/validation.js'
 
-/** Page-owned source; runtime continues to read the companion's top-level identity. */
+/** One authoritative identity, shared by page editing and AI updates. */
 export interface CompanionIdentity {
   name: string
   role: string
   description: string
   instructions: string
+  relationshipText?: string
   characterCard?: CharacterCard
   idleContact?: IdleContactPolicy
   sleepPolicy?: SleepPolicy
 }
-export const IDENTITY_FIELDS = ['name', 'role', 'description', 'instructions', 'characterCard', 'idleContact', 'sleepPolicy'] as const
+export const IDENTITY_FIELDS = ['name', 'role', 'description', 'instructions', 'relationshipText', 'characterCard', 'idleContact', 'sleepPolicy'] as const
 export function effectiveIdentity(value: CompanionIdentity): CompanionIdentity {
-  const { name, role, description, instructions, characterCard, idleContact, sleepPolicy } = value
-  return structuredClone({ name, role, description, instructions, ...(characterCard ? { characterCard } : {}), ...(idleContact ? { idleContact } : {}), ...(sleepPolicy ? { sleepPolicy } : {}) })
+  const { name, role, description, instructions, relationshipText, characterCard, idleContact, sleepPolicy } = value
+  return structuredClone({ name, role, description, instructions, ...(relationshipText !== undefined ? { relationshipText } : {}), ...(characterCard ? { characterCard } : {}), ...(idleContact ? { idleContact } : {}), ...(sleepPolicy ? { sleepPolicy } : {}) })
 }
 export function pageIdentity(value: CompanionIdentity & { identityDraft?: CompanionIdentity }): CompanionIdentity {
-  return effectiveIdentity(value.identityDraft ?? value)
-}
-export function preserveIdentityDraft(companion: Companion): void {
-  companion.identityDraft ??= effectiveIdentity(companion)
+  return effectiveIdentity(value)
 }
 /** Selected scalars replace; nested objects merge one level; arrays replace. null clears optional sections. */
 export function patchIdentity(previous: CompanionIdentity, raw: unknown): CompanionIdentity {
@@ -41,13 +39,12 @@ export function applyIdentity(state: PartnerState, companion: Companion, raw: un
   if (typeof expectedAt !== 'number' || companion.updatedAt !== expectedAt) throw new Error('身份已变化，请刷新并读取最新版本后重试；本次未保存')
   if (source === 'page') {
     const input = record(raw, 'identity')
-    for (const key of ['name', 'role', 'description', 'instructions']) if (typeof input[key] !== 'string') throw new Error('请提交完整身份草稿')
+    for (const key of ['name', 'role', 'description', 'instructions']) if (typeof input[key] !== 'string') throw new Error('请提交完整身份内容')
   }
   const next = patchIdentity(source === 'page' ? { name: '', role: '', description: '', instructions: '' } : companion, raw)
   if (next.idleContact?.enabled && !idleContactRouteAllowed(state, companion, next.idleContact.routeId)) throw new Error('请选择本伙伴可用的会话；渠道联系人须已授权')
-  preserveIdentityDraft(companion)
+  delete companion.identityDraft
   for (const key of IDENTITY_FIELDS) delete (companion as unknown as Record<string, unknown>)[key]
   Object.assign(companion, next)
-  if (source === 'page') companion.identityDraft = effectiveIdentity(next)
   companion.updatedAt = Math.max(Date.now(), companion.updatedAt + 1)
 }

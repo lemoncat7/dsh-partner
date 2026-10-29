@@ -1,3 +1,4 @@
+import { renderIdentityRelationship } from '../character/relationship-adapter.js'
 import { renderCharacterCore } from '../character/domain.js'
 import { renderConversationBehavior } from '../character/conversation-behavior.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -5,7 +6,7 @@ import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-mod
 import type { Companion } from '../domain.js'
 import { ATTACHMENT_PROTOCOL } from '../attachments/tool.js'
 
-export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'local' | 'heartbeat' | 'ephemeral' = 'conversation'): string {
+export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'local' | 'heartbeat' | 'ephemeral' = 'conversation', includeRelationship = true): string {
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [
     companion.characterCard?.enabled && (surface === 'conversation' || surface === 'local')
@@ -15,6 +16,7 @@ export function renderPartnerPersona(companion: Companion, surface: 'conversatio
     companion.description ? `定位：${companion.description}` : '',
     companion.instructions ? `长期行为准则：\n${companion.instructions}` : '',
     renderCharacterCore(companion.characterCard, surface),
+    includeRelationship ? renderIdentityRelationship(companion) : '',
     companion.characterCard?.enabled && (surface === 'conversation' || surface === 'local') ? renderConversationBehavior(companion.characterCard) : '',
     `用户为此伙伴启用的能力范围：${capabilities}。能力标识不等于授权；只能调用当前会话实际提供且已经通过权限校验的工具。`,
     surface === 'heartbeat'

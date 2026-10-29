@@ -176,3 +176,21 @@ test('QQ binding refreshes independently of persona/tool discovery, shared routi
  assert.equal(f.calls.length,0,'relation attribution does not add model calls or enable memory')
  assert.equal(f.sections.size,0,'does not replace personality/tool sections')
 })
+
+test('relationship adapter switches actual prompt on each QQ sender, missing binding and local input', async()=>{
+ const f=fixture(false),signal=new AbortController().signal
+ f.config.companion.relationshipText='RELATION_ONLY_特定称呼'
+ const base={kind:'channel',sessionId:f.agent.session.id,channelId:'qq',companionId:f.config.companion.id,inboundMessageIds:[]}
+ const owner={...base,id:'owner',userId:'12345678'},guest={...base,id:'guest',userId:'group:99887766:22345678',inboundMessageIds:[]}
+ const state={sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
+ f.runtime.store.snapshot=()=>state
+ f.runtime.memory.characterState=async()=>({scene:'旧场景',relationship:'SECRET_RELATION_STATE',facts:[],events:[],pins:[]})
+ const run=async(route)=>{f.input('你好');const e=f.agent.session.snapshotEvents().at(-1);route?.inboundMessageIds.push(e.data.id);await f.runtime.prepareConversationContext(f.agent,signal);return f.contexts.values().next().value.text}
+ assert.match(await run(owner),/RELATION_ONLY/)
+ const guestPrompt=await run(guest);assert.doesNotMatch(guestPrompt,/RELATION_ONLY|SECRET_RELATION_STATE/)
+ state.channels[0].qq.identityBinding.enabled=false
+ assert.doesNotMatch(await run(owner),/RELATION_ONLY/)
+ assert.match(await run(),/RELATION_ONLY/)
+ assert.equal(f.sections.size,0,'changing sender must not append a system section')
+ assert.equal(f.calls.length,0,'adapter uses no model or recall calls')
+})

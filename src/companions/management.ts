@@ -1,4 +1,4 @@
-import { preserveIdentityDraft, patchIdentity, effectiveIdentity } from './identity.js'
+import { patchIdentity, effectiveIdentity } from './identity.js'
 import { idleContactRouteAllowed } from '../character/idle-contact.js'
 import { createHash } from 'node:crypto'
 import { COMPANION_CAPABILITIES, CAPABILITY_LABELS, isCompanionCapability } from '../capabilities.js'
@@ -16,7 +16,7 @@ export interface ManagementRuntime {
   reload(companionId: string): Promise<void>
 }
 
-const PATCH_FIELDS = new Set(['name', 'role', 'description', 'instructions', 'presetId', 'provider', 'model', 'capabilities', 'skillIds', 'accessTargetIds', 'characterCard', 'idleContact', 'sleepPolicy'])
+const PATCH_FIELDS = new Set(['name', 'role', 'description', 'instructions', 'relationshipText', 'presetId', 'provider', 'model', 'capabilities', 'skillIds', 'accessTargetIds', 'characterCard', 'idleContact', 'sleepPolicy'])
 
 /** Privileged configuration boundary. No conversations, credentials or memory are exposed. */
 export class CompanionManagementService {
@@ -72,7 +72,7 @@ export class CompanionManagementService {
     const skills = patch.skillIds === undefined ? undefined : stringList(patch.skillIds, 'skillIds', 500)
     const targets = patch.accessTargetIds === undefined ? undefined : stringList(patch.accessTargetIds, 'accessTargetIds', 200, 160)
     const { skillIds: _skills, accessTargetIds: _targets, ...identity } = patch
-    const identityPatch = Object.fromEntries(Object.entries(identity).filter(([key]) => ['name', 'role', 'description', 'instructions', 'characterCard', 'idleContact', 'sleepPolicy'].includes(key)))
+    const identityPatch = Object.fromEntries(Object.entries(identity).filter(([key]) => ['name', 'role', 'description', 'instructions', 'relationshipText', 'characterCard', 'idleContact', 'sleepPolicy'].includes(key)))
     const changedIdentity = Object.keys(identityPatch).length ? patchIdentity(before, identityPatch) : effectiveIdentity(before)
     const draft = normalizeCompanionDraft({ ...before, ...identity, ...changedIdentity, characterCard: changedIdentity.characterCard, idleContact: changedIdentity.idleContact, sleepPolicy: changedIdentity.sleepPolicy })
     if (['presetId', 'provider', 'model'].some(key => key in patch)) {
@@ -95,7 +95,7 @@ export class CompanionManagementService {
       if (skills?.length && !draft.capabilities.includes('skills')) throw new Error('绑定 Skill 前请同时启用 skills 能力')
       if (targets?.some(id => id === target.id || !state.companions.some(item => item.id === id))) throw new Error('协作对象不存在，或包含目标伙伴自己')
       if (draft.idleContact?.enabled && !idleContactRouteAllowed(state, target, draft.idleContact.routeId)) throw new Error('请选择目标伙伴已授权的联系会话')
-      preserveIdentityDraft(target)
+      delete target.identityDraft
       if (identity.characterCard === null) delete target.characterCard
       if (identity.idleContact === null) delete target.idleContact
       if (identity.sleepPolicy === null) delete target.sleepPolicy

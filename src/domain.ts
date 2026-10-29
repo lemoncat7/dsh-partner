@@ -25,6 +25,7 @@ export interface Companion {
   role: string
   description: string
   instructions: string
+  relationshipText?: string
   presetId?: string
   provider?: string
   model?: string
@@ -171,6 +172,7 @@ export interface CompanionDraft {
   role: string
   description: string
   instructions: string
+  relationshipText?: string
   presetId?: string
   provider?: string
   model?: string
@@ -257,6 +259,7 @@ export function normalizeCompanionDraft(value: unknown): CompanionDraft {
     role: optionalText(input.role, 'role', 120) ?? '长期 AI 工作伙伴',
     description: optionalText(input.description, 'description', 500) ?? '',
     instructions: optionalText(input.instructions, 'instructions', 12_000) ?? '',
+    ...(input.relationshipText !== undefined ? { relationshipText: optionalText(input.relationshipText, '关系设定', 12000) ?? '' } : {}),
     capabilities: [...new Set(capabilities)],
   }
   const presetId = optionalText(input.presetId, 'presetId', 100)

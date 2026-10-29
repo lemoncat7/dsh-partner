@@ -1,3 +1,4 @@
+import { renderIdentityRelationship } from './relationship-adapter.js'
 import { renderConversationTurn } from './conversation-behavior.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -10,6 +11,10 @@ const running = new Set<string>()
 export async function previewCharacter(ctx: Context, companion: Companion, body: Record<string, unknown>) {
   if (running.has(companion.id)) throw new Error('该伙伴的试聊正在生成，请稍候')
   const card = normalizeCharacterCard(body.card)
+  if (body.relationshipText !== undefined && (typeof body.relationshipText !== 'string' || body.relationshipText.length > 12000)) throw new Error('关系设定最多 12000 字')
+  if (body.audience !== undefined && !['default', 'qq-owner', 'qq-guest'].includes(String(body.audience))) throw new Error('试聊对象无效')
+  const identity = { ...companion, characterCard: card, ...(typeof body.relationshipText === 'string' ? {relationshipText:body.relationshipText} : {}) }
+  const audience = body.audience === 'qq-owner' || body.audience === 'qq-guest' ? {channel:'qq' as const, matched:body.audience === 'qq-owner'} : {channel:'default' as const}
   if (!card.enabled) throw new Error('请先开启人格强化再试聊')
   if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 2000) throw new Error('试聊消息须为 1–2000 字')
   const history = Array.isArray(body.history) ? body.history.slice(-8).map(entry => {
@@ -35,7 +40,7 @@ export async function previewCharacter(ctx: Context, companion: Companion, body:
   const started = Date.now()
   try {
     for await (const chunk of ctx.llm.stream({ ...selection,
-      system: `${renderPartnerPersona({ ...companion, characterCard: card }, 'local')}\n${renderCharacterContext(card, history.map(e => e.user + e.assistant).join('\n') + body.message)}\n${renderConversationTurn(card, 1)}\n这是独立试聊：只依据提供的对话回应，没有工具，不执行真实操作，不读取或写入正式记忆，不向任何渠道发送消息；身份里列出的工作能力在本次试聊不可用。`,
+      system: `${renderPartnerPersona(identity, 'local', false)}\n${renderIdentityRelationship(identity, audience)}\n${renderCharacterContext(card, history.map(e => e.user + e.assistant).join('\n') + body.message)}\n${renderConversationTurn(card, 1)}\n这是独立试聊：只依据提供的对话回应，没有工具，不执行真实操作，不读取或写入正式记忆，不向任何渠道发送消息；身份里列出的工作能力在本次试聊不可用。`,
       messages,
       maxTokens: 1200, signal: controller.signal,
     })) {

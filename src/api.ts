@@ -1,4 +1,4 @@
-import { applyIdentity, pageIdentity } from './companions/identity.js'
+import { applyIdentity } from './companions/identity.js'
 import { StickerLibrary } from './chat/stickers.js'
 import { dispatchStickersApi } from './api/features/stickers-api.js'
 import { idleContactRouteAllowed } from './character/idle-contact.js'
@@ -228,7 +228,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), identityDraft: pageIdentity(previous), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), ...(draft.relationshipText === undefined && previous.relationshipText !== undefined ? {relationshipText:previous.relationshipText} : {}), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         if (next.idleContact?.enabled && !idleContactRouteAllowed(state, next, next.idleContact.routeId)) throw httpError(400, '请选择本伙伴可用的会话；渠道联系人须已授权')
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })

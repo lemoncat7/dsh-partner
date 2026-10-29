@@ -107,6 +107,9 @@ export class MemoryReflectionService {
       }
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseDailyReview(output)
+    // Daily concern candidates have no per-turn authority evidence. Mixed guest
+    // diaries cannot create/modify executable watches; owner turn extraction still can.
+    if (context.turns.some(turn => turn.identityRelation && !turn.identityRelation.matched)) result.concerns = []
     result.memories = groundMemoryCandidates(result.memories, context.turns)
     result.experiences = groundExperiences(result.experiences ?? [], context.turns)
     await this.store.completeDailyReview(target, result)
@@ -153,6 +156,7 @@ export class MemoryReflectionService {
   }
 
   private async applyConcerns(companion: Companion, turn: ConversationTurn, result: ReflectionResult): Promise<PartnerConcern[]> {
+    if (turn.identityRelation && !turn.identityRelation.matched) return []
     const resources = extractConcernResources(turn.user)
     const reflected = protectConcernDirective(result.concerns, turn.concernDirective)
     const candidates = resources.length === 0 ? reflected : reflected.map(item => item.operation === 'upsert' ? { ...item, resources } : item)

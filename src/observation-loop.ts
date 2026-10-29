@@ -1,3 +1,4 @@
+import { markAutonomousAgent } from './channels/qq/authority.js'
 import { concernNoteSourceTool, CONCERN_NOTE_READ } from './concern-note-source.js'
 import { concernKnowledgeSourceTool, CONCERN_KNOWLEDGE_READ, type ConcernKnowledgeBridge } from './concern-knowledge-source.js'
 import { ObservationWorkflowTracker, WORKFLOW_TOOL } from './observation-workflow.js'
@@ -56,6 +57,7 @@ export async function executeObservationLoop(options: {
   Object.assign(agent, { id: `observation-${randomUUID()}`, options: conversation.options, session: conversation.session,
     inbox: conversation.inbox, status: 'idle', ctx: agentCtx, cancel: () => {},
     whenIdle: async () => {}, send: rejectMessage, followup: rejectMessage, steer: rejectMessage, inject: rejectMessage })
+  const releaseAuthority = markAutonomousAgent(agent)
   const secrets = new Set<string>()
   for(const item of concerns)for(const m of `${item.reason}\n${item.executionInstructions??''}`.matchAll(/\b(?:gh[pousr]_|github_pat_|sk-|npm_)[\w-]+|(?:token|令牌|password|api[_-]?key)\s*[:：=]?\s*([A-Za-z0-9_./+-]{12,})/gi))secrets.add(m[1]??m[0])
   let phase = '初始化工具'
@@ -294,7 +296,7 @@ export async function executeObservationLoop(options: {
   }
   finally {
     result.recording = concerns.filter(item => item.recordTarget && (syncing || checkpointed.has(item.id) || written.has(item.id) || item.recordingPending || result.error || result.candidates.some(candidate => candidate.concernId === item.id && candidate.changed))).map(item => ({concernId: item.id, state: written.has(item.id) ? 'synced' : 'pending'}))
-    result.completedAt = Date.now(); await scope.dispose()
+    result.completedAt = Date.now(); releaseAuthority(); await scope.dispose()
   }
   return result
 }
