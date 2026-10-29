@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
+const { chromium } = await import(process.env.PARTNER_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PARTNER_PLAYWRIGHT_MODULE).href : 'playwright-core')
+const bundle = await build({ nodePaths: (process.env.DSH_UI_TEST_NODE_PATH ?? '').split(':').filter(Boolean), alias: {react: fileURLToPath(new URL('../node_modules/react',import.meta.url))}, stdin: { resolveDir: fileURLToPath(new URL('../', import.meta.url)), loader: 'tsx', contents: `
+import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
+import {IdentityEditor} from './src/ui/identity-editor';import {ChannelsPanel} from './src/ui/channels-panel';
+const companion={id:'fixture',name:'测试伙伴',role:'资料整理',description:'',instructions:'测试身份',capabilities:[],updatedAt:1};
+const snapshot={channels:[{id:'c',companionId:'fixture',platform:'matrix',name:'Matrix',enabled:false,runtimeStatus:'stopped'}],pairings:Array.from({length:3},(_,i)=>({id:'p'+i,channelId:'c',userId:'u'+i,displayName:'联系人'+i,status:'approved',updatedAt:1}))};
+function Fixture(){const [channel,setChannel]=useState(true);return <main className="dsh-partner-workspace"><button id="switch" onClick={()=>setChannel(!channel)}>切换页面</button>{channel?<ChannelsPanel companion={companion} snapshot={snapshot} onChanged={async()=>{}} weixin={<p>微信配置</p>}/>:<IdentityEditor companion={companion} count={2} onChanged={async()=>{}} onRemoved={async()=>{}}/>}</main>};createRoot(document.getElementById('app')).render(<Fixture/>);
+` }, bundle:true, write:false, format:'iife', jsx:'automatic', loader:{'.css':'text','.module.css':'text'} })
+const css = (await Promise.all(['client.css','ui/workspace-ui.css','ui/responsive-ui.css','ui/identity-editor.css','ui/form-surface.css','ui/interaction-theme.css','ui/control-surfaces.css'].map(name=>readFile(new URL('../src/'+name,import.meta.url),'utf8')))).join('\n')
+const server=createServer((req,res)=>{res.setHeader('content-type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].contents:'<meta name="viewport" content="width=device-width,initial-scale=1"><body id="root"><div id="app"></div><script src="/app.js"></script>')})
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+const browser=await chromium.launch({headless:true})
+try {
+  for(const dark of [false,true]) for(const width of [375,1024]) {
+    const page=await browser.newPage({viewport:{width,height:900},reducedMotion:'reduce'})
+    await page.goto(`http://127.0.0.1:${server.address().port}`)
+    await page.addStyleTag({content:css})
+    await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
+    await page.getByRole('button',{name:'配置 qq',exact:true}).click()
+    const dialog=page.getByRole('dialog')
+    await page.getByLabel(/^正向 WebSocket 地址/).fill('ws://snowluma:3001')
+    await page.getByLabel(/^WS Access Token/).fill('fixture-token')
+    assert.equal(await dialog.getByLabel('登录方式',{exact:true}).count(),0)
+    assert.equal(await dialog.getByLabel('密码',{exact:true}).count(),0)
+    assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true)
+    assert.equal(await dialog.getByRole('button',{name:'测试连接',exact:true}).isEnabled(),true)
+    assert.match(await dialog.innerText(),/无需 HTTP API/)
+    await page.screenshot({path:`/tmp/partner-qq-${width}-${dark?'dark':'light'}.png`})
+    await page.keyboard.press('Escape');assert.equal(await dialog.count(),0)
+    await page.close()
+  }
+  console.log('QQ forward WS form: mobile/desktop, light/dark, token-only login and dismissal passed.')
+} finally {await browser.close();await new Promise(resolve=>server.close(resolve))}

@@ -70,21 +70,7 @@ export class DirectMediaTransfer {
 
   async send(file: PartnerOutboundAttachment, signal: AbortSignal): Promise<void> {
     await this.guard()
-    const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    let data: Buffer
-    try {
-      const before = await handle.stat()
-      if (!before.isFile() || before.size > PARTNER_MEDIA_MAX_BYTES) throw new Error('待发送附件必须是 64 MB 以内的普通文件')
-      data = Buffer.alloc(before.size); let offset = 0
-      while (offset < data.length) {
-        signal.throwIfAborted()
-        const { bytesRead } = await handle.read(data, offset, data.length - offset, offset)
-        if (!bytesRead) break
-        offset += bytesRead
-      }
-      const after = await handle.stat()
-      if (offset !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error('文件正在变化，请生成完成后发送')
-    } finally { await handle.close() }
+    const data = await readOutboundMedia(file, signal)
     const name = safeMediaName(file.name, '附件.bin'), mediaType = imageType(data) ?? safeType(file.mediaType)
     if (this.config.platform === 'matrix') {
       const uploaded = await this.json('/_matrix/media/v3/upload?filename=' + encodeURIComponent(name), signal, new Uint8Array(data), mediaType)
@@ -110,10 +96,29 @@ export class DirectMediaTransfer {
 function safeType(value: unknown): string {
   return typeof value === 'string' && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(value) ? value : 'application/octet-stream'
 }
-function imageType(data: Buffer): string | undefined {
+export function imageType(data: Buffer): string | undefined {
   if (data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png'
   if (data[0] === 255 && data[1] === 216 && data[2] === 255) return 'image/jpeg'
   if (/^GIF8[79]a$/.test(data.subarray(0, 6).toString('ascii'))) return 'image/gif'
   if (data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
   return undefined
+}
+
+export async function readOutboundMedia(file: PartnerOutboundAttachment, signal: AbortSignal): Promise<Buffer> {
+    const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    let data: Buffer
+    try {
+      const before = await handle.stat()
+      if (!before.isFile() || before.size > PARTNER_MEDIA_MAX_BYTES) throw new Error('待发送附件必须是 64 MB 以内的普通文件')
+      data = Buffer.alloc(before.size); let offset = 0
+      while (offset < data.length) {
+        signal.throwIfAborted()
+        const { bytesRead } = await handle.read(data, offset, data.length - offset, offset)
+        if (!bytesRead) break
+        offset += bytesRead
+      }
+      const after = await handle.stat()
+      if (offset !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error('文件正在变化，请生成完成后发送')
+    } finally { await handle.close() }
+  return data
 }

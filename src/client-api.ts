@@ -20,7 +20,7 @@ export interface CompanionView {
   automation: AutomationView
 }
 export interface ChannelView {
-  platform?: 'weixin' | 'matrix' | 'mattermost'
+  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
   direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'

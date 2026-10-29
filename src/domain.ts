@@ -69,7 +69,7 @@ export interface HeartbeatRuntimeState {
 
 export interface WeixinChannel {
   /** Missing platform is legacy WeChat; IDs and credential keys stay unchanged. */
-  platform?: 'weixin' | 'matrix' | 'mattermost'
+  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
   direct?: { baseUrl: string; targetId: string; peerId: string; cursor?: string }
   id: string
   companionId: string

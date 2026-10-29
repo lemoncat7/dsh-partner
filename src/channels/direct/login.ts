@@ -14,6 +14,7 @@ async function readLoginBody(response:Response):Promise<any> {
 
 /** Revoke only sessions created by password login, never a user-supplied token. */
 export async function discardDirectLogin(config: DirectConfig, token: string): Promise<void> {
+  if (config.platform === 'qq') return
   const path = config.platform === 'matrix' ? '/_matrix/client/v3/logout' : '/api/v4/users/logout'
   const response = await fetch(config.baseUrl + path, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
@@ -25,6 +26,7 @@ export async function discardDirectLogin(config: DirectConfig, token: string): P
 
 /** Exchange a password once. Only the access token is returned to the credential vault. */
 export async function directLogin(config: DirectConfig, input: {username: unknown; password: unknown; mfaToken?: unknown}, signal = AbortSignal.timeout(30_000)): Promise<string> {
+  if (config.platform === 'qq') throw new Error('QQ 正向连接请使用 SnowLuma 的 WS Token')
   if(typeof input.username!=='string'||!input.username.trim()||input.username.length>255||typeof input.password!=='string'||!input.password||input.password.length>8192)throw new Error('请输入账号和密码')
   if(input.mfaToken!==undefined&&(typeof input.mfaToken!=='string'||input.mfaToken.length>64))throw new Error('验证码格式无效')
   const remaining=(cooldowns.get(config.baseUrl)??0)-Date.now()

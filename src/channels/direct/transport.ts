@@ -1,3 +1,6 @@
+import { OneBotTransport } from '../qq/transport.js'
+import { qqId } from '../qq/message.js'
+import type { OneBotConnection } from '../qq/connection.js'
 import { randomUUID } from 'node:crypto'
 import type { PartnerOutboundAttachment } from '../../channel-message.js'
 import { pollDiscovered } from './discovery.js'
@@ -7,7 +10,7 @@ import { DirectMediaTransfer, type DirectMedia } from './media.js'
 import { matrixMessage } from './message.js'
 import {matrixTimeline} from './matrix-timeline.js'
 
-export type DirectPlatform = 'matrix' | 'mattermost'
+export type DirectPlatform = 'matrix' | 'mattermost' | 'qq'
 export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
 export interface DirectMessage { id: string; sender: string; text: string; targetId?: string; media?: DirectMedia[]; timestamp?: number }
 export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
@@ -19,10 +22,11 @@ export class ChannelHttpError extends Error {
   constructor(readonly status: number, readonly retryAfterMs = 0) { super(`渠道请求失败（HTTP ${status}）`) }
 }
 export function directConfig(value: Record<string, unknown>): DirectConfig {
-  if (value.platform !== 'matrix' && value.platform !== 'mattermost') throw new Error('请选择 Matrix 或 Mattermost')
+  if (value.platform !== 'matrix' && value.platform !== 'mattermost' && value.platform !== 'qq') throw new Error('请选择 QQ、Matrix 或 Mattermost')
   if (typeof value.baseUrl !== 'string' || (value.targetId !== undefined && (typeof value.targetId !== 'string' || value.targetId.length > 512))) throw new Error('服务器地址或会话 ID 无效')
   const url = new URL(value.baseUrl)
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('服务器地址只能包含 HTTP(S) 地址和路径，不得带凭据或查询参数')
+  if (!(value.platform === 'qq' ? ['ws:', 'wss:'] : ['http:', 'https:']).includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('连接地址协议不匹配；QQ 使用 ws:// 或 wss://，其他平台使用 HTTP(S)，令牌请单独填写')
+  if (value.platform === 'qq' && value.targetId && !qqId(String(value.targetId).trim())) throw new Error('固定联系人请填写 QQ 号码')
   return { platform: value.platform, baseUrl: url.toString().replace(/\/$/, ''), targetId: (value.targetId as string|undefined)?.trim() ?? '' }
 }
 
@@ -30,7 +34,15 @@ export function directConfig(value: Record<string, unknown>): DirectConfig {
 export class DirectTransport implements ChannelSender {
   private botId = ''
   private peerId = ''
-  constructor(readonly config: DirectConfig, private readonly token: string, private readonly expected?: {accountId: string; peerId: string}, private readonly authorize?: () => void) {}
+  private readonly qq: OneBotTransport | undefined
+  constructor(readonly config: DirectConfig, private readonly token: string, private readonly expected?: {accountId: string; peerId: string}, private readonly authorize?: () => void, connection?: OneBotConnection) {
+    if (config.platform === 'qq') this.qq = new OneBotTransport(config, token, expected, connection)
+  }
+  forTarget(targetId: string, expected: {accountId: string; peerId: string}, authorize?: () => void): DirectTransport {
+    return new DirectTransport({...this.config,targetId},this.token,expected,authorize,this.qq?.connection)
+  }
+  close(): void { this.qq?.connection.close() }
+
 
   private async request(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<any> {
     const response = await fetch(this.config.baseUrl + path, {
@@ -57,6 +69,7 @@ export class DirectTransport implements ChannelSender {
 
   async validate(signal?: AbortSignal): Promise<{accountId: string; peerId: string}> {
     this.authorize?.()
+    if (this.qq) return this.qq.validate(signal)
     if(!this.config.targetId) {
       const who=await this.request(this.config.platform==='matrix'?'/_matrix/client/v3/account/whoami':'/api/v4/users/me',signal)
       const id=this.config.platform==='matrix'?who.user_id:who.id
@@ -88,6 +101,7 @@ export class DirectTransport implements ChannelSender {
   }
 
   async poll(cursor: string | undefined, signal: AbortSignal, waitMs = 20000): Promise<DirectBatch> {
+    if (this.qq) return this.qq.poll(signal, waitMs)
     await this.validate(signal)
     if(!this.config.targetId)return pollDiscovered(this.config.platform,this.botId,cursor,signal,
       (path,body)=>this.request(path,signal,body),
@@ -120,6 +134,8 @@ export class DirectTransport implements ChannelSender {
   }
 
   async sendText(userId: string, text: string, _context: string | undefined, signal?: AbortSignal): Promise<void> {
+    this.authorize?.()
+    if (this.qq) return this.qq.sendText(userId, text, signal, this.authorize)
     if(!this.config.targetId)throw new Error('联系人尚未配对，不能投递')
     await this.validate(signal)
     if (userId !== this.peerId) throw new Error('目标联系人与当前双人会话不匹配，拒绝投递')
@@ -128,13 +144,15 @@ export class DirectTransport implements ChannelSender {
       else await this.request('/api/v4/posts',signal,{channel_id:this.config.targetId,message:content.markdown})
     }
   }
-  progress(userId:string):ProgressTransport {
+  progress(userId:string):ProgressTransport | undefined {
+    if (this.qq) return undefined
     return directProgressTransport(this.config,userId,signal=>this.validate(signal),
       (path,signal,body,method)=>this.request(path,signal,body,method),
       (text,signal)=>this.sendText(userId,text,undefined,signal))
   }
   async receiveAttachments(message: DirectMessage, signal: AbortSignal, allowed: () => boolean, maxBytes?: number) {
     const lifetime = AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+    if (this.qq) return this.qq.receiveAttachments(message, lifetime, allowed, maxBytes)
     const transfer = new DirectMediaTransfer(this.config, this.token, async () => {
       if (!allowed()) throw new Error('渠道或联系人授权已撤销')
       const who = await this.validate(lifetime)
@@ -145,6 +163,8 @@ export class DirectTransport implements ChannelSender {
   }
   async sendAttachment(userId: string, file: PartnerOutboundAttachment, _context: string | undefined, signal?: AbortSignal, allowed: () => boolean = () => true): Promise<void> {
     const lifetime = signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000)
+    this.authorize?.()
+    if (this.qq) return this.qq.sendAttachment(userId, file, lifetime, () => { this.authorize?.(); return allowed() })
     const transfer = new DirectMediaTransfer(this.config, this.token, async () => {
       if (!allowed()) throw new Error('渠道或联系人授权已撤销')
       const who = await this.validate(lifetime)

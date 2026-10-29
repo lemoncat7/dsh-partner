@@ -429,27 +429,29 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const login=body.authMode==='password'?await loginCache(runtime.store).acquire(companionId,config,{username:body.username,password:body.password,...(body.mfaToken?{mfaToken:body.mfaToken}:{})}):undefined
       const botToken=login?.token??text(body.botToken,'botToken',8192)
       const adapter = new DirectTransport(config, botToken)
-      const identity = await adapter.validate()
-      if (segments[1] === 'test') {
-        return sendJson(res, 200, {ok: true, ...identity})
-      }
-      const baseline = await adapter.poll(undefined, AbortSignal.timeout(35_000))
-      await new DirectTransport(config, botToken, identity).validate()
-      const now = Date.now()
-      const channel = {id:createId(config.platform),companionId,platform:config.platform,accountId:identity.accountId,
-        name:text(body.name, 'name', 80),enabled:false,createdAt:now,updatedAt:now,
-        direct:{baseUrl:config.baseUrl,targetId:config.targetId,peerId:identity.peerId,cursor:baseline.cursor}}
-      await runtime.credentials.write(channel.id,{baseUrl:config.baseUrl,botToken})
       try {
-        await runtime.store.update(state=>{
-          if(state.channels.some(c=>c.platform===config.platform&&c.accountId===identity.accountId&&c.direct?.baseUrl===config.baseUrl))throw httpError(409,'此机器人已配置，请先管理现有渠道，不能绑定到另一个伙伴')
-          if(!state.companions.some(c=>c.id===companionId))throw httpError(409,'伙伴已不存在')
-          state.channels.push(channel)
-          if(identity.peerId)state.pairings.push({id:createId('pairing'),channelId:channel.id,userId:identity.peerId,displayName:identity.peerId,directTargetId:config.targetId,status:'pending',createdAt:now,updatedAt:now})
-        })
-      } catch(error) {await runtime.credentials.delete(channel.id);throw error}
-      login?.retain()
-      return sendJson(res,201,{channel})
+        const identity = await adapter.validate()
+        if (segments[1] === 'test') {
+          return sendJson(res, 200, {ok: true, ...identity})
+        }
+        const baseline = config.platform === 'qq' ? {cursor:'onebot-live'} : await adapter.poll(undefined, AbortSignal.timeout(35_000))
+        if (config.platform !== 'qq') await new DirectTransport(config, botToken, identity).validate()
+        const now = Date.now()
+        const channel = {id:createId(config.platform),companionId,platform:config.platform,accountId:identity.accountId,
+          name:text(body.name, 'name', 80),enabled:false,createdAt:now,updatedAt:now,
+          direct:{baseUrl:config.baseUrl,targetId:config.targetId,peerId:identity.peerId,cursor:baseline.cursor}}
+        await runtime.credentials.write(channel.id,{baseUrl:config.baseUrl,botToken})
+        try {
+          await runtime.store.update(state=>{
+            if(state.channels.some(c=>c.platform===config.platform&&c.accountId===identity.accountId&&c.direct?.baseUrl===config.baseUrl))throw httpError(409,'此机器人已配置，请先管理现有渠道，不能绑定到另一个伙伴')
+            if(!state.companions.some(c=>c.id===companionId))throw httpError(409,'伙伴已不存在')
+            state.channels.push(channel)
+            if(identity.peerId)state.pairings.push({id:createId('pairing'),channelId:channel.id,userId:identity.peerId,displayName:identity.peerId,directTargetId:config.targetId,status:'pending',createdAt:now,updatedAt:now})
+          })
+        } catch(error) {await runtime.credentials.delete(channel.id);throw error}
+        login?.retain()
+        return sendJson(res,201,{channel})
+      } finally { adapter.close() }
     }
     const id = segments[1]
     if (id !== undefined && method === 'POST' && segments[2] === 'enabled' && segments.length === 3) {

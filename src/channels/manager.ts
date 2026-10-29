@@ -1,3 +1,4 @@
+import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
@@ -66,6 +67,7 @@ export class ChannelManager {
   private readonly runtime = new Map<string, RuntimeState>()
   private readonly contextTokens = new Map<string, string>()
   private readonly operations = new Map<string, Set<Promise<void>>>()
+  private readonly directTransports = new Map<string, DirectTransport>()
   private readonly directDispatchers = new Map<string, DirectDispatcher>()
   private readonly directReplyProgress = new Map<string, ReplyProgressController>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
@@ -625,11 +627,18 @@ export class ChannelManager {
     const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id&&p.userId===userId&&p.status==='approved')
     const targetId=channel.direct.targetId||pairing?.directTargetId
     if(!targetId)throw new Error('联系人尚未绑定私聊会话')
-    return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId||userId},()=>{
+    const authorize=()=>{
       const state=this.store.snapshot()
       if(!state.channels.some(c=>c.id===channel.id&&c.enabled&&c.accountId===channel.accountId&&c.companionId===channel.companionId)
         ||!state.pairings.some(p=>p.channelId===channel.id&&p.userId===userId&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===targetId)))throw new Error('渠道或联系人授权已撤销')
-    })
+    }
+    const expected={accountId:channel.accountId,peerId:channel.direct.peerId||userId}
+    if(channel.platform==='qq') {
+      const live=this.directTransports.get(channel.id)
+      if(!live)throw new Error('QQ 渠道尚未连接，请稍后重试')
+      return live.forTarget(targetId,expected,authorize)
+    }
+    return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,expected,authorize)
   }
 
   /** Independent connector loop. Cursor is persisted only after receipt handoff. */
@@ -637,6 +646,7 @@ export class ChannelManager {
     if (!channel.direct || !channel.platform || channel.platform==='weixin') throw new Error('渠道配置无效')
     const credential = await this.credentials.read(channel.id)
     const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
+    this.directTransports.set(channel.id,api)
     const failure=new AbortController()
     const signal=AbortSignal.any([outerSignal,failure.signal])
     let dispatchError:unknown
@@ -659,14 +669,14 @@ export class ChannelManager {
           const message=group[0]!
           if(signal.aborted)break
           try {
-            const targetApi=message.targetId?new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:message.targetId},credential.botToken,{accountId:channel.accountId,peerId:message.sender}):api
+            const targetApi=message.targetId?api.forTarget(message.targetId,{accountId:channel.accountId,peerId:message.sender}):api
             const pending=[...this.pendingQuestions.values()].find(p=>p.channelId===channel.id&&p.userId===message.sender)
             if(pending&&group.length===1&&message.text&&!message.media?.length){
               await targetApi.validate(signal)
               if(await this.answerPendingQuestion(pending.sessionId,message.text,channel,targetApi,message.sender,signal)){await this.rememberReceipt(`${channel.id}:${message.id}`);continue}
             }
             const mode=busyEnterMode(this.ctx.settings)
-            if (channel.platform === 'matrix') await dispatcher.waitForCapacity()
+            if (channel.platform === 'matrix' || channel.platform === 'qq') await dispatcher.waitForCapacity()
             dispatcher.enqueue(group.map(item=>item.id),mode,async prepared=>{
               await targetApi.validate(signal)
               await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode)
@@ -683,8 +693,9 @@ export class ChannelManager {
         await delay(channel.platform==='mattermost'?(dispatcher.busy?1000:10_000):1000,signal)
       } catch(error) {
         if(signal.aborted)break
+        if(error instanceof OneBotError && !error.retryable)throw error
         if(error instanceof DirectDeliveryError || (error instanceof ChannelHttpError && [401,403].includes(error.status)))throw error
-        const persistentRetry = channel.platform === 'matrix' && matrixTransientFailure(error)
+        const persistentRetry = channel.platform === 'qq' || channel.platform === 'matrix' && matrixTransientFailure(error)
         failures = Math.min(failures + 1, 30)
         if(failures>=6 && !persistentRetry)throw error
         const reason=error instanceof ChannelHttpError?`HTTP ${error.status}`:error instanceof Error&&error.message==='fetch failed'?'网络连接失败，请检查地址、端口和容器 DNS':error instanceof Error&&error.name==='TimeoutError'?'服务器请求超时':error instanceof Error?error.message:'连接异常'
@@ -693,6 +704,8 @@ export class ChannelManager {
       }
     } } finally {
       failure.abort()
+      api.close()
+      if(this.directTransports.get(channel.id)===api)this.directTransports.delete(channel.id)
       for(const pending of this.pendingQuestions.values())if(pending.channelId===channel.id){
         pending.reject(new Error('提问来源渠道已停止'))
         this.clearPendingQuestion(pending)
@@ -735,7 +748,8 @@ export class ChannelManager {
           const state=this.store.snapshot()
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(event.targetId||channel.direct?.targetId)))
         }
-        const progress=typeof api.progress==='function'?new ReplyProgressController(api.progress(event.sender),allowed,signal):undefined
+        const progressTransport=api.progress?.(event.sender)
+        const progress=progressTransport?new ReplyProgressController(progressTransport,allowed,signal):undefined
         const progressKey=JSON.stringify([channel.id,event.targetId||api.config?.targetId||'',event.sender])
         try {
         const attachments:PartnerInboundAttachment[]=[]

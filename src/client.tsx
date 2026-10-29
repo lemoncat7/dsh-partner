@@ -267,7 +267,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
         <span className="dsh-partner-route-weixin"><WeixinGlyph large /></span>
       </div>
       <div className="dsh-partner-home-channel-copy">
-        <span className="dsh-partner-home-kicker"><i />消息渠道 · {channel?.platform==='matrix'?'Matrix':channel?.platform==='mattermost'?'Mattermost':'微信'}</span>
+        <span className="dsh-partner-home-kicker"><i />消息渠道 · {channel?.platform==='qq'?'QQ':channel?.platform==='matrix'?'Matrix':channel?.platform==='mattermost'?'Mattermost':'微信'}</span>
         <h3>{!channel ? '等待扫码连接' : online ? '连接正常，正在接收消息' : channel.runtimeStatus === 'error' ? '渠道连接需要处理' : '渠道当前已停用'}</h3>
         <p>{!channel ? '连接微信、Matrix 或 Mattermost，联系人首次发消息需批准。' : online ? '本地与所有已授权渠道共用伙伴主对话，回复返回消息来源。' : channel.lastError || '渠道配置仍然保留，可以随时重新启用。'}</p>
         <div className="dsh-partner-home-channel-actions">

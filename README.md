@@ -44,3 +44,5 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 - [架构与隐私边界](docs/architecture.md)
 - [版本与发布说明](https://github.com/lemoncat7/dsh-partner/releases)
 - [发布维护约定](docs/releases/README.md)
+
+QQ 接入说明见 [QQ 渠道（SnowLuma / OneBot v11）](docs/qq-channel.md)：正向 WebSocket 同时收发消息，填写 WS 地址与对应 Token 即可，无需单独填写 HTTP API。
