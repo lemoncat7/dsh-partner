@@ -1,4 +1,9 @@
+import { QQ_ACTION_MAP } from './action-catalog.js'
 export interface QqSettings {
+  autonomousActions: boolean
+  enabledActions: string[]
+  qzoneVisibility: 1 | 4 | 64
+  voiceCharacter: string
   privateReplies: boolean
   groupReplies: boolean
   groupIds: string[]
@@ -10,9 +15,9 @@ export interface QqSettings {
   facesEnabled: boolean
   imagesEnabled: boolean
 }
-export const DEFAULT_QQ_SETTINGS: QqSettings = { privateReplies:true, groupReplies:false, groupIds:[], mainSessionPeers:[], autonomousGroupIds:[], stickerSource:'channel', groupTrigger:'mention', mentionSender:true, facesEnabled:true, imagesEnabled:true }
+export const DEFAULT_QQ_SETTINGS: QqSettings = { autonomousActions:false, enabledActions:[], qzoneVisibility:4, voiceCharacter:'', privateReplies:true, groupReplies:false, groupIds:[], mainSessionPeers:[], autonomousGroupIds:[], stickerSource:'channel', groupTrigger:'mention', mentionSender:true, facesEnabled:true, imagesEnabled:true }
 export function qqSettings(value?: Partial<QqSettings>): QqSettings {
-  return {...DEFAULT_QQ_SETTINGS,...value,groupIds:[...(value?.groupIds??[])],mainSessionPeers:[...(value?.mainSessionPeers??[])],autonomousGroupIds:[...(value?.autonomousGroupIds??[])]}
+  return {...DEFAULT_QQ_SETTINGS,...value,enabledActions:[...(value?.enabledActions??[])],groupIds:[...(value?.groupIds??[])],mainSessionPeers:[...(value?.mainSessionPeers??[])],autonomousGroupIds:[...(value?.autonomousGroupIds??[])]}
 }
 export function parseQqSettings(value: unknown): QqSettings {
   if (!value || typeof value!=='object' || Array.isArray(value)) throw Error('QQ 设置格式无效')
@@ -25,7 +30,12 @@ export function parseQqSettings(value: unknown): QqSettings {
   const autonomous=v.autonomousGroupIds??[]
   if(!Array.isArray(autonomous)||autonomous.length>100||autonomous.some(id=>!(v.groupIds as string[]).includes(id)))throw Error('自主回复白名单必须从已选群组中选择')
   if(v.stickerSource!==undefined&&v.stickerSource!=='channel'&&v.stickerSource!=='default')throw Error('请选择表情来源')
-  return {mainSessionPeers:[...new Set(peers)],autonomousGroupIds:[...new Set(autonomous)],stickerSource:v.stickerSource??'channel',privateReplies:v.privateReplies,groupReplies:v.groupReplies,mentionSender:v.mentionSender,facesEnabled:v.facesEnabled,imagesEnabled:v.imagesEnabled,groupTrigger:v.groupTrigger,groupIds:[...new Set(v.groupIds)]} as QqSettings
+  if(v.autonomousActions!==undefined&&typeof v.autonomousActions!=='boolean')throw Error('自主能力开关无效')
+  const actions=v.enabledActions??[]
+  if(!Array.isArray(actions)||actions.length>100||actions.some(id=>typeof id!=='string'||!QQ_ACTION_MAP.has(id)))throw Error('自主能力列表无效')
+  if(v.qzoneVisibility!==undefined&&![1,4,64].includes(v.qzoneVisibility as number))throw Error('空间默认可见范围无效')
+  if(v.voiceCharacter!==undefined&&(typeof v.voiceCharacter!=='string'||v.voiceCharacter.length>200))throw Error('默认音色无效')
+  return {autonomousActions:v.autonomousActions??false,enabledActions:[...new Set(actions)],qzoneVisibility:v.qzoneVisibility??4,voiceCharacter:v.voiceCharacter??'',mainSessionPeers:[...new Set(peers)],autonomousGroupIds:[...new Set(autonomous)],stickerSource:v.stickerSource??'channel',privateReplies:v.privateReplies,groupReplies:v.groupReplies,mentionSender:v.mentionSender,facesEnabled:v.facesEnabled,imagesEnabled:v.imagesEnabled,groupTrigger:v.groupTrigger,groupIds:[...new Set(v.groupIds)]} as QqSettings
 }
 export function validQqId(id: string): boolean { return /^[1-9]\d{4,15}$/.test(id)&&Number.isSafeInteger(Number(id)) }
 export function qqGroupPeer(value: string): {groupId:string;userId:string}|undefined {

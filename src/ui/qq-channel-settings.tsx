@@ -1,12 +1,13 @@
+import {QqCapabilitySettings} from './qq-capability-settings.js'
 import {useState, useEffect, type MutableRefObject, type ReactNode} from 'react'
 import {api,type ChannelView,type PairingView} from '../client-api.js'
 import {qqSettings,type QqSettings} from '../channels/qq/settings.js'
 import {ChannelStatus} from './partner-components.js'
 import {errorMessage} from './workspace-components.js'
 
-type Page='home'|'connection'|'private'|'group'|'groups'|'autonomy'|'sessions'|'media'|'access'|'send'
+type Page='capabilities'|'home'|'connection'|'private'|'group'|'groups'|'autonomy'|'sessions'|'media'|'access'|'send'
 type Face={kind?:'custom';nativeId?:string;id:string;name:string;category:string;image?:string}
-const titles:Record<Page,string>={home:'QQ 设置',connection:'连接与账号',private:'私聊回复',group:'群聊回复',groups:'选择群组',autonomy:'自主回复白名单',sessions:'会话与记忆',media:'表情与图片',access:'访问权限',send:'发送消息'}
+const titles:Record<Page,string>={capabilities:'自主能力',home:'QQ 设置',connection:'连接与账号',private:'私聊回复',group:'群聊回复',groups:'选择群组',autonomy:'自主回复白名单',sessions:'会话与记忆',media:'表情与图片',access:'访问权限',send:'发送消息'}
 export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editState}:{editState:MutableRefObject<{dirty:boolean;busy:boolean}>;channel:ChannelView;pairings:PairingView[];onChanged():Promise<void>;onDeleted():void}):JSX.Element {
  const [page,setPage]=useState<Page>('home'),[policy,setPolicy]=useState(()=>qqSettings(channel.qq)),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(''),[failed,setFailed]=useState(false)
  const [url,setUrl]=useState(channel.direct?.baseUrl??''),[token,setToken]=useState(''),[confirmDelete,setConfirmDelete]=useState(false)
@@ -32,9 +33,9 @@ export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editStat
   {page==='home'?<>
    <div className="dsh-partner-qq-account"><div><small>QQ 账号</small><strong>{channel.accountId}</strong><span>SnowLuma · 正向 WebSocket</span></div><ChannelStatus channel={channel}/></div>
    <div className="dsh-partner-qq-section-label">连接</div>{entry('connection','管理服务器、凭据与连接状态')}
-   <div className="dsh-partner-qq-section-label">回复方式</div>{entry('private','好友私聊与配对授权',policy.privateReplies?'开启':'关闭')}{entry('group','选择群组，设置何时回复',policy.groupReplies?`${policy.groupIds.length} 个群`:'关闭')}{entry('sessions','独立聊天，按需接入主会话',`${policy.mainSessionPeers.length} 个共用`)}{entry('media','QQ 原生表情、收藏与默认库')}
+   <div className="dsh-partner-qq-section-label">回复方式</div>{entry('private','好友私聊与配对授权',policy.privateReplies?'开启':'关闭')}{entry('group','选择群组，设置何时回复',policy.groupReplies?`${policy.groupIds.length} 个群`:'关闭')}{entry('sessions','独立聊天，按需接入主会话',`${policy.mainSessionPeers.length} 个共用`)}{entry('media','QQ 原生表情、收藏与默认库')}{entry('capabilities','空间、语音、互动、群与文件',policy.autonomousActions?`${policy.enabledActions.length} 项开启`:'关闭')}
    <div className="dsh-partner-qq-section-label">管理与操作</div>{entry('access','联系人与群成员分别授权',`${owned.filter(p=>p.status==='pending').length} 待批准`)}{entry('send','选择已授权接收人，发送文字或表情')}
-  </>:page==='connection'?<div className="dsh-partner-qq-pane">
+  </>:page==='capabilities'?<QqCapabilitySettings channel={channel} policy={policy} change={change} busy={busy}/>:page==='connection'?<div className="dsh-partner-qq-pane">
    <p className="dsh-partner-qq-hint">WS 同时收发消息，无需 HTTP API。修改连接时会核对 QQ 账号，保留已有授权。</p>
    <Field label="WebSocket 地址"><input value={url} onChange={e=>setUrl(e.target.value)} disabled={busy} placeholder="ws://snowluma:3001" /></Field>
    <Field label="WS Access Token" hint="留空保留已保存令牌；不会显示原令牌。"><input type="password" autoComplete="new-password" value={token} onChange={e=>setToken(e.target.value)} disabled={busy}/></Field>
@@ -68,4 +69,4 @@ export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editStat
 }
 function Field({label,hint,children}:{label:string;hint?:string;children:ReactNode}):JSX.Element{return <label className="dsh-partner-qq-field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>}
 function Toggle({title,detail,value,disabled,onChange}:{title:string;detail:string;value:boolean;disabled:boolean;onChange(value:boolean):void}):JSX.Element{return <div className="dsh-partner-qq-toggle"><span><strong>{title}</strong><small>{detail}</small></span><div><button type="button" role="switch" className="dsh-partner-switch" aria-label={title} aria-checked={value} data-on={value} disabled={disabled} onClick={()=>onChange(!value)}><i/></button><small>{value?'已开启':'已关闭'}</small></div></div>}
-function Glyph({name}:{name:Page}):JSX.Element {const paths:Partial<Record<Page,string>>={sessions:'M4 4h16v7H4z M4 15h7v5H4z M15 15h5v5h-5z M8 11v4 M17 11v4',autonomy:'M4 4h16v12H9l-5 4z M8 10h8',connection:'M8 8h8v8H8z M12 3v5 M12 16v5 M3 12h5 M16 12h5',private:'M4 4h16v12H9l-5 4z',group:'M3 4h12v10H7l-4 3z M15 8h6v12l-4-3h-6v-3',groups:'M4 5h16v14H4z M4 10h16 M9 5v14',media:'M8 9h.01 M16 9h.01 M8 14q4 5 8 0 M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18',access:'M12 3l8 3v6q0 6-8 9q-8-3-8-9V6z M8 12l3 3l5-6',send:'M3 3l18 9-18 9l4-9z M7 12h14'};return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]}/></svg>}
+function Glyph({name}:{name:Page}):JSX.Element {const paths:Partial<Record<Page,string>>={capabilities:'M12 3v18 M3 12h18 M5 5l14 14 M5 19L19 5',sessions:'M4 4h16v7H4z M4 15h7v5H4z M15 15h5v5h-5z M8 11v4 M17 11v4',autonomy:'M4 4h16v12H9l-5 4z M8 10h8',connection:'M8 8h8v8H8z M12 3v5 M12 16v5 M3 12h5 M16 12h5',private:'M4 4h16v12H9l-5 4z',group:'M3 4h12v10H7l-4 3z M15 8h6v12l-4-3h-6v-3',groups:'M4 5h16v14H4z M4 10h16 M9 5v14',media:'M8 9h.01 M16 9h.01 M8 14q4 5 8 0 M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18',access:'M12 3l8 3v6q0 6-8 9q-8-3-8-9V6z M8 12l3 3l5-6',send:'M3 3l18 9-18 9l4-9z M7 12h14'};return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]}/></svg>}

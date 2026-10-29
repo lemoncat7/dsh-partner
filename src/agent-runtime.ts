@@ -857,10 +857,21 @@ export class PartnerAgentRuntime {
     return renewed
   }
 
-  isCompanionBusy(companionId: string): boolean {
-    return this.reflection?.isRunning(companionId) === true || this.observationJobs.has(companionId) || this.agentSetupJobs.has(companionId) || this.store.snapshot().sessions.some(route => route.companionId === companionId
-      && (this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId))?.status === 'running')
+  companionActivity(companionId: string): {kind:string;label:string;sessionId?:string}[] {
+    const activity:{kind:string;label:string;sessionId?:string}[]=[]
+    if(this.reflection?.isRunning(companionId))activity.push({kind:'memory',label:'后台记忆整理（不阻止群聊判断）'})
+    if(this.observationJobs.has(companionId))activity.push({kind:'observation',label:'归档已完成的聊天'})
+    if(this.agentSetupJobs.has(companionId))activity.push({kind:'setup',label:'准备伙伴会话'})
+    const seen=new Set<string>()
+    for(const route of this.store.snapshot().sessions.filter(r=>r.companionId===companionId)) {
+      if(seen.has(route.sessionId))continue
+      seen.add(route.sessionId)
+      if((this.handles.get(route.sessionId)?.agent??this.ctx.agents.get(route.sessionId as SessionId))?.status==='running')activity.push({kind:'conversation',label:route.qqSessionTitle|| (route.kind==='local'?'主会话正在运行':'渠道会话正在运行'),sessionId:route.sessionId})
+    }
+    return activity
   }
+
+  isCompanionBusy(companionId: string): boolean { return this.companionActivity(companionId).length>0 }
 
   private async releaseCompanion(companionId: string): Promise<void> {
     const sessions = this.store.snapshot().sessions.filter(item => item.companionId === companionId)

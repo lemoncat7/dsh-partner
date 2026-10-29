@@ -72,6 +72,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       <div className="dsh-partner-channel-connection"><span><small>登录账号</small><strong>{channel.accountId}</strong>{channel.direct?.targetId&&<small>{channel.direct.targetId}</small>}</span><ChannelStatus channel={channel}/></div>
       {channel.platform==='matrix'&&<p>仅支持未加密的双人会话。加密会话无法读取消息或发送配对码；请新建未开启端到端加密的会话，邀请机器人后发送文字消息。检测到加密会话时会在此提示，不影响其他未加密会话。</p>}
       {!channel.direct?.targetId&&<p>向机器人发私聊消息，在下方核对配对码后批准。请求会自动更新。</p>}
+      {!!channel.activity?.length&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>当前任务</strong>{channel.activity.map((a,i)=><p key={i}>{a.label}{a.sessionId&&<small> · {a.sessionId.slice(-8)}</small>}</p>)}</div>}
       {channel.groupDecision&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>最近群聊判断 · {new Date(channel.groupDecision.at).toLocaleTimeString()}</strong><p>群 {channel.groupDecision.groupId}：{channel.groupDecision.reason}</p></div>}
       {channel.idleDelivery&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>主动联系投递</strong><p>{channel.idleDelivery}</p></div>}
       {channel.lastError&&<p role="alert">{channel.lastError}</p>}
@@ -85,6 +86,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       </section>
       {feedback&&<p role="status">{feedback}</p>}
     </div>}</WorkspaceDialog>}
+      {!!channel.activity?.length&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>当前任务</strong>{channel.activity.map((a,i)=><p key={i}>{a.label}{a.sessionId&&<small> · {a.sessionId.slice(-8)}</small>}</p>)}</div>}
       {channel.groupDecision&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>最近群聊判断 · {new Date(channel.groupDecision.at).toLocaleTimeString()}</strong><p>群 {channel.groupDecision.groupId}：{channel.groupDecision.reason}</p></div>}
       {channel.idleDelivery&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>主动联系投递</strong><p>{channel.idleDelivery}</p></div>}
       {channel.lastError&&<div className="dsh-partner-channel-inline-notice" role="status" aria-atomic="true"><strong>{channel.runtimeStatus==='running'?'会话提示':'连接提示'}</strong><p>{channel.lastError}</p></div>}

@@ -98,7 +98,7 @@ test('media URLs reject arbitrary hosts, credentials and local files',()=>{
 
 const group='99887766', groupUser=`group:${group}:${peer}`
 const groupEvent=(extra={})=>event({message_type:'group',sub_type:'normal',group_id:Number(group),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}],...extra})
-const groupSettings={mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
+const groupSettings={autonomousActions:false,enabledActions:[],qzoneVisibility:4,voiceCharacter:'',mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
 test('group intake is opt-in, allowlisted, requires real bot mention and rejects anonymous messages',()=>{
   assert.equal(oneBotMessage(groupEvent(),bot),undefined)
   const parsed=oneBotMessage(groupEvent(),bot,'',groupSettings)
@@ -200,4 +200,10 @@ test('main-session selections accept private/group IDs, default off and reject m
  assert.deepEqual(parseQqSettings({...groupSettings,mainSessionPeers:undefined}).mainSessionPeers,[])
  assert.deepEqual(parseQqSettings({...groupSettings,mainSessionPeers:['private:12345678','group:99887766','private:12345678']}).mainSessionPeers,['private:12345678','group:99887766'])
  for(const peers of [['12345678'],['group:99887766:12345678'],['private:abc'],Array(101).fill('private:12345678')])assert.throws(()=>parseQqSettings({...groupSettings,mainSessionPeers:peers}),/主会话对象/)
+})
+
+test('action authorization is rechecked after websocket connection before writing',async t=>{
+ const s=await server(t),connection=new OneBotConnection(s.url,'secret');t.after(()=>connection.close())
+ await assert.rejects(connection.call('send_group_msg',{group_id:99887766,message:[]},AbortSignal.timeout(2000),()=>{throw Error('revoked after connect')}),/revoked/)
+ assert.equal(s.requests.length,0)
 })

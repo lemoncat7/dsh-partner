@@ -80,10 +80,11 @@ export class OneBotConnection {
     })
   }
 
-  async call(action: string, params: Record<string, unknown>, signal = AbortSignal.timeout(30000)): Promise<any> {
+  async call(action: string, params: Record<string, unknown>, signal = AbortSignal.timeout(30000), beforeSend?:()=>void): Promise<any> {
     const lifetime = AbortSignal.any([signal, AbortSignal.timeout(30000)])
     await this.connect(lifetime)
     lifetime.throwIfAborted()
+    beforeSend?.()
     const echo = randomUUID()
     let abort: () => void = () => {}
     try {

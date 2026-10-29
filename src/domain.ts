@@ -13,6 +13,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  toolDiscovery?: boolean
   sleepPolicy?: import('./character/sleep.js').SleepPolicy
   sleepState?: import('./character/sleep.js').SleepState
   identityDraft?: import('./companions/identity.js').CompanionIdentity
@@ -70,6 +71,7 @@ export interface HeartbeatRuntimeState {
 export interface WeixinChannel {
   /** Missing platform is legacy WeChat; IDs and credential keys stay unchanged. */
   qq?: import('./channels/qq/settings.js').QqSettings
+  qqActivity?: import('./channels/qq/actions.js').QqActionReceipt[]
   platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
   direct?: { baseUrl: string; targetId: string; peerId: string; cursor?: string }
   id: string
@@ -160,6 +162,7 @@ export interface CompanionAccessGrant {
 }
 
 export interface CompanionDraft {
+  toolDiscovery?: boolean
   sleepPolicy?: import('./character/sleep.js').SleepPolicy
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
@@ -231,6 +234,7 @@ function optionalRoute(value: Record<string, unknown>): { provider?: string; mod
 
 export interface ChannelView extends WeixinChannel {
   runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
+  activity?: {kind:string;label:string;sessionId?:string}[]
   groupDecision?: {at:number;groupId:string;reason:string}
   idleDelivery?: string
   lastError?: string
@@ -239,10 +243,12 @@ export interface ChannelView extends WeixinChannel {
 
 export function normalizeCompanionDraft(value: unknown): CompanionDraft {
   const input = object(value, 'companion')
+  if(input.toolDiscovery!==undefined&&typeof input.toolDiscovery!=='boolean')throw Error('按需加载工具开关无效')
   const capabilities = Array.isArray(input.capabilities)
     ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCompanionCapability)
     : []
   const draft: CompanionDraft = {
+    ...(input.toolDiscovery===undefined?{}:{toolDiscovery:input.toolDiscovery}),
     ...(input.sleepPolicy === undefined ? {} : { sleepPolicy: normalizeSleepPolicy(input.sleepPolicy) }),
     ...(input.idleContact === undefined ? {} : { idleContact: normalizeIdleContact(input.idleContact) }),
     ...(input.characterCard === undefined ? {} : { characterCard: normalizeCharacterCard(input.characterCard) }),

@@ -1,3 +1,4 @@
+import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
 import { SLEEP_PROMPT } from '../character/sleep.js'
 import { identityTool, IDENTITY_PROMPT } from '../companions/identity-tool.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -59,20 +60,25 @@ export class PartnerAgentComposition {
     const inlineSkills = await loadInlineSkills(this.skills, enabledSkills)
     const injectedSkillIds = new Set(inlineSkills.map(skill => skill.id))
     const disposers: Array<() => void> = []
+    const catalog:DiscoverableTool[]=[]
+    const add=(tool:ToolDefinition,allowed=()=>true):void=>{
+      if(companion.toolDiscovery&&!['partner_chat_reply','partner_stickers'].includes(tool.name))catalog.push({tool,allowed})
+      else disposers.push(ctx.tools.register(tool))
+    }
     const register = (tool: ToolDefinition, capability: CompanionCapability): void => {
-      disposers.push(ctx.tools.register({ ...tool, execute: async (args, execution) => {
+      add({ ...tool, execute: async (args, execution) => {
         // Old schemas must not authorize calls after a saved revocation.
         if (!this.store.hasCapability(companion.id, capability)) throw new Error(`伙伴的 ${capability} 能力已撤回，当前调用未执行`)
         return tool.execute(args, execution)
-      } }))
+      } },()=>this.store.hasCapability(companion.id,capability))
     }
     try {
-      if (this.sleepToolFactory) disposers.push(ctx.tools.register(this.sleepToolFactory(companion.id)))
-      disposers.push(ctx.tools.register(identityTool(companion.id, this.store)))
+      if (this.sleepToolFactory) add(this.sleepToolFactory(companion.id))
+      add(identityTool(companion.id, this.store))
       for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
-      if (this.attachmentToolFactory) disposers.push(ctx.tools.register(this.attachmentToolFactory(companion.id)))
-      for (const tool of this.chatToolFactory?.(companion.id) ?? []) disposers.push(ctx.tools.register(tool))
-      if (this.avatarToolFactory) disposers.push(ctx.tools.register(this.avatarToolFactory(companion.id)))
+      if (this.attachmentToolFactory) add(this.attachmentToolFactory(companion.id))
+      for (const tool of this.chatToolFactory?.(companion.id) ?? []) add(tool)
+      if (this.avatarToolFactory) add(this.avatarToolFactory(companion.id))
       if (skillsEnabled) register(skillTool(companion, this.skills, this.executor), 'skills')
       if (companion.capabilities.includes('companions')) register(companionTool(this.companions), 'companions')
       if (companion.capabilities.includes('access')) register(accessGrantTool(companion, this.collaboration), 'access')
@@ -80,15 +86,17 @@ export class PartnerAgentComposition {
         if (!this.management || !this.knowledgeMounts) throw new Error('伙伴管理服务尚未就绪')
         register(companionManagementTool(companion.id, this.management, this.knowledgeMounts), 'administration')
       }
-      disposers.push(ctx.tools.register(taskTool(companion, this.tasks, this.collaboration)))
-      disposers.push(ctx.tools.register(requirementTool(companion.id, this.requirements, this.tasks, () => this.collaboration.dispatchReadyTasks())))
-      disposers.push(ctx.tools.register(collaborationTool(companion, this.store, this.collaboration)))
+      add(taskTool(companion, this.tasks, this.collaboration))
+      add(requirementTool(companion.id, this.requirements, this.tasks, () => this.collaboration.dispatchReadyTasks()))
+      add(collaborationTool(companion, this.store, this.collaboration))
       if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler, this.store), 'schedules')
+      if(companion.toolDiscovery)disposers.push(installToolDiscovery(ctx.tools,companion.id,this.store,catalog))
       const directory = this.collaboration.directoryFor(companion.id)
       disposers.push(ctx.systemPrompt.section({
         name: 'partner-collaboration', order: -7,
         text: [
         '以下是工作能力与执行流程，适用于用户的实际任务、已接受任务的续接及自动化执行。所有已授权工具始终可用；普通闲聊、玩笑、告别和情绪表达无需创建需求、看板或协作，不把聊天改写成工作计划或验收汇报。需要核实事实时仍正常使用工具。',
+        companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '',
         IDENTITY_PROMPT,
         this.sleepToolFactory ? SLEEP_PROMPT : '',
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),

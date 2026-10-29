@@ -1,4 +1,4 @@
-import { normalizeCharacterState } from './character/domain.js'
+import { normalizeReflectedCharacterState } from './character/domain.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -130,7 +130,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
-        system: REFLECTION_SYSTEM + (story ? '\n此轮启用了角色扮演。虚构设定、角色称呼、剧情与角色关系只能进入 characterState，不得写入真实用户 memories 或 concerns。额外输出 characterState:{scene,relationship,facts:[],events:[],pins:[]}，承接已有状态，仅更新本轮明确发生的剧情，不推测好感或亲密程度；保留仍有效事实，pins 不输出。已有状态：' + JSON.stringify(story) : '') + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
+        system: REFLECTION_SYSTEM + (story ? '\n此轮启用了角色扮演。虚构设定、角色称呼、剧情与角色关系只能进入 characterState，不得写入真实用户 memories 或 concerns。额外输出 characterState:{scene,relationship,facts:[],events:[],pins:[]}，承接已有状态，仅更新本轮明确发生的剧情，不推测好感或亲密程度；保留仍有效事实；facts、events 各最多 20 条，每条最多 300 字，事件按时间排序、合并旧事保留近期；scene 最多 1500 字，relationship 最多 1000 字；pins 不输出。已有状态：' + JSON.stringify(story) : '') + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
         temperature: 0.1,
         maxTokens: 1800,
         signal: controller.signal,
@@ -241,7 +241,7 @@ export function parseReflection(raw: string, strict = false): ReflectionResult {
     },
     memories,
     concerns,
-    ...(value.characterState === undefined ? {} : { characterState: normalizeCharacterState(value.characterState) }),
+    ...(value.characterState === undefined ? {} : { characterState: normalizeReflectedCharacterState(value.characterState) }),
   }
 }
 

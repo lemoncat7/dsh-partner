@@ -158,3 +158,15 @@ test('independent 04:00 schedule runs once and does not reset immediately after 
   await restarted.close()
  }finally{Date.now=realNow}
 })
+
+test('oversized generated roleplay summaries settle while manual edits retain strict limits',async t=>{
+ const {parseReflection}=await import('../lib/memory-reflection.js')
+ const {normalizeCharacterState}=await import('../lib/character/domain.js')
+ const events=Array.from({length:28},(_,i)=>'事件 '+i)
+ assert.throws(()=>normalizeCharacterState({events}),/最多 20/)
+ const reflected=parseReflection(JSON.stringify({...result,characterState:{events,facts:['相同','相同'],pins:Array(50).fill('不应覆盖')}}),true)
+ assert.deepEqual(reflected.characterState.events,events.slice(-20));assert.deepEqual(reflected.characterState.facts,['相同']);assert.deepEqual(reflected.characterState.pins,[])
+ const store=await fixture(t);await complete(store,turn('overflow'),reflected)
+ assert.deepEqual((await store.characterState('c','local')).events,events.slice(-20))
+ assert.equal(await store.claimJob('c'),undefined)
+})

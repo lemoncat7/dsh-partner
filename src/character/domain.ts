@@ -88,6 +88,20 @@ export function normalizeCharacterState(value: unknown): CharacterState {
     events: list(v.events, '剧情事件', 20).map(x => str(x, '剧情事件', 300)).filter(Boolean),
     pins: list(v.pins, '固定记忆', 12).map(x => str(x, '固定记忆', 500)).filter(Boolean), updatedAt: 0 }
 }
+/** Model-produced state is a bounded rolling summary; manual edits stay strict.
+ * Full conversation evidence remains in the memory journal and archives. */
+export function normalizeReflectedCharacterState(value: unknown): CharacterState {
+  const v=record(value)
+  const clipped=(key:string,count:number,max:number)=>{
+    const items=v[key]??[]
+    if(!Array.isArray(items)||items.some(x=>typeof x!=='string'))throw Error('角色记忆列表格式无效')
+    return [...new Set(items.map(x=>x.trim().slice(0,max)).filter(Boolean))].slice(-count)
+  }
+  return normalizeCharacterState({...v,
+    scene:typeof v.scene==='string'?v.scene.slice(0,1500):v.scene,
+    relationship:typeof v.relationship==='string'?v.relationship.slice(0,1000):v.relationship,
+    facts:clipped('facts',20,300),events:clipped('events',20,300),pins:[]})
+}
 export function renderCharacterCore(card: CharacterCard | undefined, surface = 'conversation'): string {
   if (!card?.enabled) return ''
   const chat = surface === 'conversation' || surface === 'local'

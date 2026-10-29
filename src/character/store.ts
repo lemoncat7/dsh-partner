@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { emptyCharacterState, normalizeCharacterState, type CharacterState } from './domain.js'
+import { emptyCharacterState, normalizeCharacterState, normalizeReflectedCharacterState, type CharacterState } from './domain.js'
 export function initializeCharacterState(db: DatabaseSync): void {
   db.exec(`CREATE TABLE IF NOT EXISTS character_states(scope_id TEXT PRIMARY KEY, state_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS context_renewals(session_id TEXT PRIMARY KEY, day TEXT NOT NULL, at INTEGER NOT NULL, removed INTEGER NOT NULL);`)
@@ -19,7 +19,7 @@ export function saveCharacterState(db: DatabaseSync, scope: string, value: unkno
 export function applyCharacterState(db: DatabaseSync, scope: string, value: unknown, at: number, sourceTurnId: string): void {
   const previous = readCharacterState(db, scope)
   if (previous.updatedAt > at || previous.sourceTurnId === sourceTurnId) return
-  const next = normalizeCharacterState(value)
+  const next = normalizeReflectedCharacterState(value)
   const state: CharacterState = { ...next, pins: previous.pins, updatedAt: at, sourceTurnId }
   db.prepare('INSERT INTO character_states VALUES (?,?) ON CONFLICT(scope_id) DO UPDATE SET state_json=excluded.state_json').run(scope, JSON.stringify(state))
 }

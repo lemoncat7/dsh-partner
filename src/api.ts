@@ -228,7 +228,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, identityDraft: pageIdentity(previous), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), identityDraft: pageIdentity(previous), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         if (next.idleContact?.enabled && !idleContactRouteAllowed(state, next, next.idleContact.routeId)) throw httpError(400, '请选择本伙伴可用的会话；渠道联系人须已授权')
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })
@@ -455,6 +455,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     const id = segments[1]
     if(id&&segments[2]==='qq'&&segments.length===4) {
+      if(method==='GET'&&segments[3]==='voices')return sendJson(res,200,await runtime.channels.qqVoices(id,url.searchParams.get('groupId')??''))
       if(method==='GET'&&(segments[3]==='groups'||segments[3]==='friends'||segments[3]==='faces'))return sendJson(res,200,await runtime.channels.qqDirectory(id,segments[3]))
       if(method==='POST'&&segments[3]==='connection') {
         mutation(req);const body=await readObject(req)

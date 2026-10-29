@@ -8,6 +8,7 @@ export interface AutomationView {
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
 }
 export interface CompanionView {
+  toolDiscovery?: boolean
   sleepPolicy?: import('./character/sleep.js').SleepPolicy
   sleepState?: import('./character/sleep.js').SleepState
   identityDraft?: import('./companions/identity.js').CompanionIdentity
@@ -21,10 +22,12 @@ export interface CompanionView {
 }
 export interface ChannelView {
   qq?: import('./channels/qq/settings.js').QqSettings
+  qqActivity?: import('./channels/qq/actions.js').QqActionReceipt[]
   platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
   direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
+  activity?: {kind:string;label:string;sessionId?:string}[]
   groupDecision?: {at:number;groupId:string;reason:string}
   idleDelivery?: string
   lastError?: string; credentialConfigured: boolean
