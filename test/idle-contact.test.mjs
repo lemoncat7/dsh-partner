@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {DEFAULT_IDLE_CONTACT,IDLE_CONTACT_NOTICE,normalizeIdleContact,idleActivityProbability,idleContactDue,idleContactDay,idleContactQuiet,lastIdleContactUser} from '../lib/character/idle-contact.js'
+import {DEFAULT_IDLE_CONTACT,IDLE_CONTACT_NOTICE,normalizeIdleContact,idleActivityProbability,idleContactDue,idleContactDay,idleContactQuiet,lastIdleContactUser,idleActivityPrompt} from '../lib/character/idle-contact.js'
 import {PartnerAgentRuntime} from '../lib/agent-runtime.js'
 import {ChannelManager} from '../lib/channels/manager.js'
 import {PartnerStore} from '../lib/store.js'
@@ -55,6 +55,31 @@ function runtimeFixture(){
   runtime.ensureAgent=async()=>agent;runtime.isArchived=()=>false
   return {runtime,store,agent,events,followed,state,companion,route}
 }
+test('idle capability hints include only enabled operations on this companion enabled QQ channels',()=>{
+  const {state,companion}=fixture()
+  const qq={autonomousActions:true,enabledActions:['get_qzone_feeds','send_qzone_msg','unknown_action'],privateReplies:true,groupReplies:false}
+  const channel={id:'qq',companionId:'c',platform:'qq',enabled:true,qq}
+  state.channels.push(channel,{...channel,id:'foreign',companionId:'other'},{...channel,id:'disabled',enabled:false},{...channel,id:'off',qq:{...qq,autonomousActions:false}})
+  const before=structuredClone(state)
+  const hints=JSON.parse(idleActivityPrompt(state,companion).split('：').at(-1))
+  assert.deepEqual(hints,[{channelId:'qq',categories:[{id:'space',title:'QQ 空间'}],operations:['get_qzone_feeds','send_qzone_msg']}])
+  assert.deepEqual(state,before)
+  channel.qq={...qq,enabledActions:[]}
+  assert.deepEqual(JSON.parse(idleActivityPrompt(state,companion).split('：').at(-1)),[])
+})
+test('autonomous followup carries current capability hints and reflects revocation next time',async()=>{
+  const f=runtimeFixture()
+  const channel={id:'qq',companionId:'c',platform:'qq',enabled:true,qq:{autonomousActions:true,enabledActions:['send_qzone_msg'],privateReplies:true,groupReplies:false}}
+  f.state.channels.push(channel)
+  await f.runtime.idleContact('c')
+  assert.equal(f.followed.length,1)
+  assert.match(f.followed[0].content[0].text,/"operations":\["send_qzone_msg"\]/)
+  channel.qq.autonomousActions=false
+  delete f.route.idleActivityCheck;delete f.route.idleContactState
+  await f.runtime.idleContact('c')
+  assert.equal(f.followed.length,2)
+  assert.ok(f.followed[1].content[0].text.endsWith('[]'))
+})
 test('claims before followup; concurrent checks and restart cannot repeat an uncertain attempt',async()=>{
   const f=runtimeFixture()
   await Promise.all([f.runtime.idleContact('c'),f.runtime.idleContact('c')])

@@ -24,7 +24,7 @@ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { IDLE_CONTACT_NOTICE, IDLE_ACTIVITY_PROMPT, isIdleContactNotice, idleActivityProbability, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
+import { IDLE_CONTACT_NOTICE, idleActivityPrompt, isIdleContactNotice, idleActivityProbability, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -225,7 +225,7 @@ export class PartnerAgentRuntime {
     if (!idleContactDue(this.store.snapshot(), companion, user, Date.now(), timeZone)) return
     const stableSeq = agent.session.seq
     const message = createUserMessage({ content: [{type:'text',text:
-      IDLE_ACTIVITY_PROMPT
+      idleActivityPrompt(this.store.snapshot(),companion)
     }], source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE} })
     let claimed = false
     await this.store.update(draft => {
