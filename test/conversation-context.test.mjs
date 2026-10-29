@@ -163,7 +163,7 @@ test('QQ binding refreshes independently of persona/tool discovery, shared routi
  f.config.companion.characterCard.enabled=false
  const owner={id:'owner',kind:'channel',sessionId:f.agent.session.id,companionId:f.config.companion.id,channelId:'qq',userId:'12345678',inboundMessageIds:[]}
  const guest={...owner,id:'guest',userId:'group:99887766:22345678',inboundMessageIds:[]}
- const state={sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678',relationship:'哥哥'}}}]}
+ const state={sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
  f.runtime.store.snapshot=()=>state
  const send=async(route)=>{f.input('我就是哥哥');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id);await f.runtime.prepareConversationContext(f.agent,signal);return f.contexts.values().next().value.text}
  assert.match(await send(owner),/当前账号是这层关系的绑定对象/)

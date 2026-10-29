@@ -35,7 +35,7 @@ export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editStat
    <div className="dsh-partner-qq-account"><div><small>QQ 账号</small><strong>{channel.accountId}</strong><span>SnowLuma · 正向 WebSocket</span></div><ChannelStatus channel={channel}/></div>
    <div className="dsh-partner-qq-section-label">连接</div>{entry('connection','管理服务器、凭据与连接状态')}
    <div className="dsh-partner-qq-section-label">回复方式</div>{entry('private','好友私聊与配对授权',policy.privateReplies?'开启':'关闭')}{entry('group','选择群组，设置何时回复',policy.groupReplies?`${policy.groupIds.length} 个群`:'关闭')}{entry('sessions','独立聊天，按需接入主会话',`${policy.mainSessionPeers.length} 个共用`)}{entry('media','QQ 原生表情、收藏与默认库')}{entry('capabilities','空间、语音、互动、群与文件',policy.autonomousActions?`${policy.enabledActions.length} 项开启`:'关闭')}
-   <div className="dsh-partner-qq-section-label">管理与操作</div>{entry('access','身份关系绑定与联系人授权',`${owned.filter(p=>p.status==='pending').length} 待批准`)}{entry('send','选择已授权接收人，发送文字或表情')}
+   <div className="dsh-partner-qq-section-label">管理与操作</div>{entry('access','归属账号与联系人授权',`${owned.filter(p=>p.status==='pending').length} 待批准`)}{entry('send','选择已授权接收人，发送文字或表情')}
   </>:page==='capabilities'?<QqCapabilitySettings channel={channel} policy={policy} change={change} busy={busy}/>:page==='connection'?<div className="dsh-partner-qq-pane">
    <p className="dsh-partner-qq-hint">WS 同时收发消息，无需 HTTP API。修改连接时会核对 QQ 账号，保留已有授权。</p>
    <Field label="WebSocket 地址"><input value={url} onChange={e=>setUrl(e.target.value)} disabled={busy} placeholder="ws://snowluma:3001" /></Field>

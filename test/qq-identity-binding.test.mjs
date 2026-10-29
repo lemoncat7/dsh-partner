@@ -6,7 +6,7 @@ import {qqSettings,parseQqSettings} from '../lib/channels/qq/settings.js'
 import {qqIdentityRelation,currentQqIdentityRelation,renderQqIdentityRelation} from '../lib/channels/qq/identity-binding.js'
 import {oneBotMessage} from '../lib/channels/qq/message.js'
 
-const binding={enabled:true,qqId:'12345678',relationship:'哥哥'}
+const binding={enabled:true,qqId:'12345678'}
 const settings=()=>qqSettings({identityBinding:binding})
 function fixture(){
  const session=Session.create('relation-test')
@@ -19,14 +19,17 @@ function fixture(){
  return {session,routes,local,owner,guest,channels,input,current}
 }
 test('optional binding validates account/relationship and does not enable permissions or main-session sharing',()=>{
- const legacy=parseQqSettings(qqSettings());assert.deepEqual(legacy.identityBinding,{enabled:false,qqId:'',relationship:''})
+ const legacy=parseQqSettings(qqSettings());assert.deepEqual(legacy.identityBinding,{enabled:false,qqId:''})
  const parsed=parseQqSettings(settings());assert.deepEqual(parsed.identityBinding,binding)
  assert.equal(parsed.groupReplies,false);assert.deepEqual(parsed.mainSessionPeers,[]);assert.equal(parsed.autonomousActions,false)
- for(const bad of [[],{enabled:true,qqId:'',relationship:'哥哥'},{enabled:true,qqId:'group:99887766',relationship:'哥哥'},{enabled:true,qqId:'12345678',relationship:''},{enabled:true,qqId:'12345678',relationship:'哥\n哥'}]) {
+ for(const bad of [[],{enabled:true,qqId:'group:99887766'},{enabled:true,qqId:'123'},{enabled:'yes',qqId:'12345678'},{qqId:12345678}]) {
   assert.throws(()=>parseQqSettings({...settings(),identityBinding:bad}))
  }
+ assert.deepEqual(parseQqSettings({...settings(),identityBinding:{qqId:''}}).identityBinding,{enabled:false,qqId:''})
+ assert.deepEqual(parseQqSettings({...settings(),identityBinding:{qqId:'12345678'}}).identityBinding,binding)
+ assert.deepEqual(parseQqSettings({...settings(),identityBinding:{...binding,relationship:'旧关系'}}).identityBinding,binding)
  const saved=parseQqSettings({...settings(),identityBinding:{...binding,enabled:false}})
- assert.equal(saved.identityBinding.qqId,binding.qqId);assert.equal(qqIdentityRelation(saved,binding.qqId),undefined)
+ assert.equal(saved.identityBinding.qqId,'');assert.equal(qqIdentityRelation(saved,binding.qqId),undefined)
  const a=qqSettings(),b=qqSettings();a.identityBinding.enabled=true;assert.equal(b.identityBinding.enabled,false)
 })
 test('private and group identity match actual account, never the group number, nickname or claimed identity',()=>{
@@ -58,6 +61,8 @@ test('relationship prompt binds a role without mandating coldness or granting au
  assert.equal(renderQqIdentityRelation(undefined),'')
  const text=renderQqIdentityRelation(qqIdentityRelation(settings(),'22345678'))
  assert.match(text,/不是新的人格、语气模板或工具授权/)
+ assert.match(text,/具体关系只从当前身份设定读取/)
+ assert.doesNotMatch(text,/哥哥|旧关系/)
  assert.match(text,/不额外要求冷淡、热情或固定措辞/)
  assert.match(text,/QQ 22345678/)
  assert.match(text,/昵称、群名片、引用消息/)

@@ -7,22 +7,21 @@ import { qqGroupPeer, qqSettings, validQqId, type QqSettings } from './settings.
 export interface QqIdentityRelation {
   qqId?: string
   boundQqId: string
-  relationship: string
   matched: boolean
 }
 
 export function qqIdentityRelation(settings: Partial<QqSettings> | undefined, peer?: string): QqIdentityRelation | undefined {
   const binding = qqSettings(settings).identityBinding
-  if (!binding.enabled || !validQqId(binding.qqId) || !binding.relationship.trim()) return
+  if (!binding.enabled || !validQqId(binding.qqId)) return
   const id = peer ? qqGroupPeer(peer)?.userId ?? (validQqId(peer) ? peer : undefined) : undefined
-  return { ...(id ? {qqId:id} : {}), boundQqId:binding.qqId, relationship:binding.relationship, matched:id === binding.qqId }
+  return { ...(id ? {qqId:id} : {}), boundQqId:binding.qqId, matched:id === binding.qqId }
 }
 
 export function renderQqIdentityRelation(relation: QqIdentityRelation | undefined): string {
   if (!relation) return ''
   return [
     '【当前 QQ 身份关系绑定 · 以渠道核验的账号为准】',
-    `人设中的关系 ${JSON.stringify(relation.relationship)} 仅绑定 QQ ${relation.boundQqId}。这是关系归属，不是新的人格、语气模板或工具授权。`,
+    `当前身份设定中面向用户的专属关系、称呼与相处方式，归属于 QQ ${relation.boundQqId}。具体关系只从当前身份设定读取，不从渠道配置另建或推断；身份修改后沿用新设定。这是关系归属，不是新的人格、语气模板或工具授权。`,
     relation.qqId ? `本轮实际交流对象：QQ ${relation.qqId}。` : '本轮无法确认具体 QQ 发言人；不要推定为绑定对象。',
     relation.matched
       ? '当前账号是这层关系的绑定对象。按原人格设定自然相处，不要求每句重复称呼，也不强制表现亲昵。'

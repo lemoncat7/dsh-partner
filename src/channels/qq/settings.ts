@@ -1,6 +1,6 @@
 import { QQ_ACTION_MAP } from './action-catalog.js'
 export interface QqSettings {
-  identityBinding: { enabled: boolean; qqId: string; relationship: string }
+  identityBinding: { enabled: boolean; qqId: string }
   autonomousActions: boolean
   enabledActions: string[]
   qzoneVisibility: 1 | 4 | 64
@@ -16,9 +16,9 @@ export interface QqSettings {
   facesEnabled: boolean
   imagesEnabled: boolean
 }
-export const DEFAULT_QQ_SETTINGS: QqSettings = { identityBinding:{enabled:false,qqId:'',relationship:''}, autonomousActions:false, enabledActions:[], qzoneVisibility:4, voiceCharacter:'', privateReplies:true, groupReplies:false, groupIds:[], mainSessionPeers:[], autonomousGroupIds:[], stickerSource:'channel', groupTrigger:'mention', mentionSender:true, facesEnabled:true, imagesEnabled:true }
+export const DEFAULT_QQ_SETTINGS: QqSettings = { identityBinding:{enabled:false,qqId:''}, autonomousActions:false, enabledActions:[], qzoneVisibility:4, voiceCharacter:'', privateReplies:true, groupReplies:false, groupIds:[], mainSessionPeers:[], autonomousGroupIds:[], stickerSource:'channel', groupTrigger:'mention', mentionSender:true, facesEnabled:true, imagesEnabled:true }
 export function qqSettings(value?: Partial<QqSettings>): QqSettings {
-  return {...DEFAULT_QQ_SETTINGS,...value,identityBinding:{...DEFAULT_QQ_SETTINGS.identityBinding,...value?.identityBinding},enabledActions:[...(value?.enabledActions??[])],groupIds:[...(value?.groupIds??[])],mainSessionPeers:[...(value?.mainSessionPeers??[])],autonomousGroupIds:[...(value?.autonomousGroupIds??[])]}
+  return {...DEFAULT_QQ_SETTINGS,...value,identityBinding:{enabled:value?.identityBinding?.enabled ?? Boolean(value?.identityBinding?.qqId),qqId:value?.identityBinding?.enabled===false?'':value?.identityBinding?.qqId??''},enabledActions:[...(value?.enabledActions??[])],groupIds:[...(value?.groupIds??[])],mainSessionPeers:[...(value?.mainSessionPeers??[])],autonomousGroupIds:[...(value?.autonomousGroupIds??[])]}
 }
 export function parseQqSettings(value: unknown): QqSettings {
   if (!value || typeof value!=='object' || Array.isArray(value)) throw Error('QQ 设置格式无效')
@@ -36,14 +36,15 @@ export function parseQqSettings(value: unknown): QqSettings {
   if(!Array.isArray(actions)||actions.length>100||actions.some(id=>typeof id!=='string'||!QQ_ACTION_MAP.has(id)))throw Error('自主能力列表无效')
   if(v.qzoneVisibility!==undefined&&![1,4,64].includes(v.qzoneVisibility as number))throw Error('空间默认可见范围无效')
   if(v.voiceCharacter!==undefined&&(typeof v.voiceCharacter!=='string'||v.voiceCharacter.length>200))throw Error('默认音色无效')
-  const binding=v.identityBinding??{enabled:false,qqId:'',relationship:''}
+  const binding=v.identityBinding??{enabled:false,qqId:''}
   if(!binding||typeof binding!=='object'||Array.isArray(binding))throw Error('身份关系绑定格式无效')
   const relation=binding as Record<string,unknown>
-  if(typeof relation.enabled!=='boolean'||typeof relation.qqId!=='string'||typeof relation.relationship!=='string')throw Error('请填写身份关系绑定')
-  const qqId=relation.qqId.trim(),relationship=relation.relationship.trim()
-  if((qqId&&!validQqId(qqId))||relationship.length>40||/[\r\n]/.test(relationship))throw Error('请填写有效 QQ 号及 40 字以内的关系名称')
-  if(relation.enabled&&(!qqId||!relationship))throw Error('开启身份关系绑定后，请填写 QQ 号和人设中的关系')
-  return {identityBinding:{enabled:relation.enabled,qqId,relationship},autonomousActions:v.autonomousActions??false,enabledActions:[...new Set(actions)],qzoneVisibility:v.qzoneVisibility??4,voiceCharacter:v.voiceCharacter??'',mainSessionPeers:[...new Set(peers)],autonomousGroupIds:[...new Set(autonomous)],stickerSource:v.stickerSource??'channel',privateReplies:v.privateReplies,groupReplies:v.groupReplies,mentionSender:v.mentionSender,facesEnabled:v.facesEnabled,imagesEnabled:v.imagesEnabled,groupTrigger:v.groupTrigger,groupIds:[...new Set(v.groupIds)]} as QqSettings
+  if((relation.enabled!==undefined&&typeof relation.enabled!=='boolean')||typeof relation.qqId!=='string')throw Error('请填写归属 QQ 号')
+  const qqId=relation.qqId.trim()
+  if(qqId&&!validQqId(qqId))throw Error('请填写有效的归属 QQ 号，留空则关闭')
+  // Preserve an explicitly disabled legacy binding; the page now clears to disable.
+  const enabled=relation.enabled!==false&&Boolean(qqId)
+  return {identityBinding:{enabled,qqId:enabled?qqId:''},autonomousActions:v.autonomousActions??false,enabledActions:[...new Set(actions)],qzoneVisibility:v.qzoneVisibility??4,voiceCharacter:v.voiceCharacter??'',mainSessionPeers:[...new Set(peers)],autonomousGroupIds:[...new Set(autonomous)],stickerSource:v.stickerSource??'channel',privateReplies:v.privateReplies,groupReplies:v.groupReplies,mentionSender:v.mentionSender,facesEnabled:v.facesEnabled,imagesEnabled:v.imagesEnabled,groupTrigger:v.groupTrigger,groupIds:[...new Set(v.groupIds)]} as QqSettings
 }
 export function validQqId(id: string): boolean { return /^[1-9]\d{4,15}$/.test(id)&&Number.isSafeInteger(Number(id)) }
 export function qqGroupPeer(value: string): {groupId:string;userId:string}|undefined {

@@ -100,7 +100,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
-        system: DAILY_REVIEW_SYSTEM + '\n若轮次带 identityRelation，按 qqId 区分发言人；boundQqId 与 relationship 是配置的专属关系，不因其他人的自称或共享记忆转移给其他账号。不要将不同人的事实合并为同一用户。\ncharacterEnabled=true 的轮次可能含角色扮演。虚构身份、剧情与称呼不是现实用户事实，不能据此生成用户画像、现实关系、挂念；剧情只在日记中明确标为虚构。', temperature: 0.05, maxTokens: 3000, signal: controller.signal,
+        system: DAILY_REVIEW_SYSTEM + '\n若轮次带 identityRelation，按 qqId 区分发言人；boundQqId 是当前身份设定所指的归属账号，不因其他人的自称或共享记忆转移给其他账号。不要将不同人的事实合并为同一用户。\ncharacterEnabled=true 的轮次可能含角色扮演。虚构身份、剧情与称呼不是现实用户事实，不能据此生成用户画像、现实关系、挂念；剧情只在日记中明确标为虚构。', temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`每日记忆终审失败：${memoryFinishError(chunk.reason)}`)

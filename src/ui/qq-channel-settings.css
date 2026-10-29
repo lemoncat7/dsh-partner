@@ -83,5 +83,3 @@
 @media(max-width:480px) { .dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-capability { grid-template-columns: 18px minmax(0,1fr); gap: 12px; } .dsh-partner-qq-capability em { grid-column: 2; justify-self: start; } }
 
 .dsh-partner-qq-identity-binding { display: grid; gap: 16px; min-width: 0; }
-.dsh-partner-qq-identity-binding .dsh-partner-qq-toggle { padding-top: 0; }
-.dsh-partner-qq-binding-fields { display: grid; gap: 18px; min-width: 0; }
