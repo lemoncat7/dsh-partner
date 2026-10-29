@@ -1,3 +1,5 @@
+import {PARTNER_TOOL_ENTRIES} from './collaboration/tool-discovery.js'
+import {setReplyTiming} from './channels/qq/latency.js'
 import { resolveToolAccess, installToolAccessGuard } from './execution/tool-access-adapter.js'
 import { renderIdentityRelationship, relationshipTextForIdentity } from './character/relationship-adapter.js'
 import { currentQqIdentityRelation, renderQqIdentityRelation } from './channels/qq/identity-binding.js'
@@ -169,6 +171,8 @@ export class PartnerAgentRuntime {
         if (!context.agent || !context.signal) return next()
         const enforce = (assembly: typeof _assembly) => {
           if (this.autonomousAssemblyContexts.has(context)) return assembly
+          const configuration=this.configurations.forSession(context.agent!.session.id)
+          if(configuration?.companion.toolDiscovery)return {...assembly,tools:assembly.tools.filter(tool=>PARTNER_TOOL_ENTRIES.some(name=>name===tool.name))}
           const access = resolveToolAccess({agent:context.agent!, state:this.store.snapshot()})
           return { ...assembly, tools: !access.sendTools ? [] : access.allowedTools ? assembly.tools.filter(tool => access.allowedTools!.includes(tool.name)) : assembly.tools }
         }
@@ -254,10 +258,11 @@ export class PartnerAgentRuntime {
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
     const key = `companion:${companion.id}`
+    const queuedAt=Date.now()
     const previous = this.queues.get(key) ?? Promise.resolve()
     let output: PartnerReply = { text: '', attachments: [] }
     reportProgress(progress,'queued')
-    const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message, progress) })
+    const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message, progress,queuedAt) })
     this.queues.set(key, current)
     try { await current; return output } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
   }
@@ -765,9 +770,10 @@ export class PartnerAgentRuntime {
     signal.throwIfAborted()
     const access = resolveToolAccess({agent, state:this.store.snapshot()})
     let presentationChanged = false
-    if (access.allowedTools && !this.replyPresentations.has(agent) && typeof agent.ctx.tools?.presentAs === 'function') {
+    const stableNative=configuration.companion.toolDiscovery||!!access.allowedTools
+    if (stableNative && !this.replyPresentations.has(agent) && typeof agent.ctx.tools?.presentAs === 'function') {
       this.replyPresentations.set(agent, agent.ctx.tools.presentAs('native')); presentationChanged = true
-    } else if (!access.allowedTools && this.replyPresentations.has(agent)) {
+    } else if (!stableNative && this.replyPresentations.has(agent)) {
       this.replyPresentations.get(agent)!(); this.replyPresentations.delete(agent); presentationChanged = true
     }
     const installed = this.restoredCompositions.get(agent.session.id)
@@ -821,7 +827,7 @@ export class PartnerAgentRuntime {
     signal.throwIfAborted()
     const relationshipAllowed = !identityRelation || identityRelation.matched
     const access = resolveToolAccess({agent, state})
-    const text = [access.allowedTools || !access.sendTools ? access.denialReason + ' 可以用已提供的回复工具自然回应，语音使用 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
+    const text = [access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音能力为 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
       renderCharacterContext(companion.characterCard, messages.slice(-6).filter(m => m.role === 'user' || m.role === 'assistant').map(m => textContent(m.content)).join('\n').slice(-12000), relationshipAllowed ? story : undefined),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
@@ -971,10 +977,10 @@ export class PartnerAgentRuntime {
     this.restoredCompositions.delete(sessionId)
   }
 
-  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
+  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress,queuedAt=Date.now()): Promise<PartnerReply> {
     reportProgress(progress,'working')
     const enteredAt=Date.now()
-    let submittedAt=enteredAt, modelEndedAt=enteredAt
+    let submittedAt=enteredAt, modelEndedAt=enteredAt,lastTurnEnd:number|undefined
     const session = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
@@ -986,13 +992,14 @@ export class PartnerAgentRuntime {
     }))
     const startSeq = agent.session.seq
     let directProgress=false
-    const detach=progress?this.ctx.on('session/event',(current,event)=>{
+    const detach=this.ctx.on('session/event',(current,event)=>{
       if(current.id!==agent.session.id||event.seq<startSeq)return
+      if(event.type==='turn/end')lastTurnEnd=event.time
       if(event.type==='turn/start'||event.type==='turn/end'||(isInternalTaskNotice(event)&&!isRequirementDeliveryReceipt(event)))directProgress=false
       if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=true
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
       if(directProgress){const activity=replyActivity(event);if(activity)reportProgress(progress,activity)}
-    }):()=>{}
+    })
     try {
       const userMessage = createUserMessage({
         content: inbound.content,
@@ -1005,12 +1012,15 @@ export class PartnerAgentRuntime {
       modelEndedAt=Date.now()
     } finally { detach() }
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
+    const stateStarted=Date.now()
     await this.store.update(state => {
       for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()
     })
+    const stateEnded=Date.now()
     if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     const reply=await prepareChannelReply(response, session.cwd ?? this.defaultCwd)
     if(this.store.snapshot().channels.some(c=>c.id===channelId&&c.platform==='qq'))this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'agent',sessionId:session.sessionId,inputPrepMs:submittedAt-enteredAt,modelMs:modelEndedAt-submittedAt,afterModelMs:Date.now()-modelEndedAt})}`)
+    setReplyTiming(reply,{queueMs:enteredAt-queuedAt,inputPrepMs:submittedAt-enteredAt,modelAndIdleMs:modelEndedAt-submittedAt,idleAfterTurnEndMs:lastTurnEnd===undefined?0:Math.max(0,modelEndedAt-lastTurnEnd),stateCommitMs:stateEnded-stateStarted,outboundPrepMs:Date.now()-stateEnded})
     return reply
   }
 

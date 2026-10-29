@@ -207,3 +207,16 @@ test('action authorization is rechecked after websocket connection before writin
  await assert.rejects(connection.call('send_group_msg',{group_id:99887766,message:[]},AbortSignal.timeout(2000),()=>{throw Error('revoked after connect')}),/revoked/)
  assert.equal(s.requests.length,0)
 })
+
+test('independent QQ validation calls overlap while all identity checks remain mandatory',async()=>{
+ const {OneBotTransport}=await import('../lib/channels/qq/transport.js')
+ const calls=[],waiters=new Map()
+ const api=new OneBotTransport({baseUrl:'ws://local',targetId:'group:99887766',qq:{groupReplies:true,groupIds:['99887766']}},'',{accountId:'12345678',peerId:'group:99887766:22345678'},{call(action){calls.push(action);return new Promise(resolve=>waiters.set(action,resolve))}})
+ const validation=api.validate()
+ assert.deepEqual(calls,['get_login_info','get_status'])
+ waiters.get('get_login_info')({user_id:12345678});waiters.get('get_status')({online:true,good:true})
+ await new Promise(resolve=>setImmediate(resolve))
+ assert.deepEqual(calls.slice(2),['get_group_list','get_group_member_info'])
+ waiters.get('get_group_list')([{group_id:99887766}]);waiters.get('get_group_member_info')({group_id:99887766,user_id:22345678})
+ assert.deepEqual(await validation,{accountId:'12345678',peerId:'group:99887766:22345678'})
+})

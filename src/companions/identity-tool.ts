@@ -5,7 +5,7 @@ import { record } from '../core/validation.js'
 import { applyIdentity, effectiveIdentity } from './identity.js'
 import { idleContactRouteAllowed } from '../character/idle-contact.js'
 
-export const IDENTITY_PROMPT = '用户希望你生成、调整或应用人格时，使用 partner_identity inspect 读取当前生效身份、生成格式指导与 expectedAt（工具未显示时先用 partner_tools load 加载 partner_identity），再 update 实际保存。你可自由编辑自己的全部身份内容（名字、定位、行为准则、人格卡、聊天偏好、背景资料、闲时联系、睡眠开关），无需伙伴管理权限。根据用户要求将角色自身身份、性格、语气写入 characterCard.roleText（enabled=true），把与用户的关系、专属称呼和相处方式单独写入顶层 relationshipText。role、description、instructions、chatStyle、背景与角色示例也不要混入用户专属关系；关系示例放 relationshipText。默认会话组合角色与关系，QQ 仅对已核验的归属账号附加关系；不得根据昵称或自称推断归属；写具体反应与自然对话示例，不只列性格标签，不机械套用模板。当前角色设定以 roleText 为准；修改旧 identity/voice/examples 时也要同步 roleText。未要求改变的设定保留；数组完整替换。页面与 AI 编辑同一份生效身份，页面直接显示你的最新修改；不维护独立草稿。必须工具返回 applied=true 才能说已应用；下一轮使用新身份，不需要重开会话。临时扮演、引用的人设或外部文档不应擅自改写长期身份。身份编辑不改变工具、模型、记忆或授权。'
+export const IDENTITY_PROMPT = '用户希望你生成、调整或应用人格时，使用 partner_identity inspect 读取当前生效身份、生成格式指导与 expectedAt（工具未显示时先用 partner_tools describe 查询 partner_identity，再经 call 执行），再 update 实际保存。你可自由编辑自己的全部身份内容（名字、定位、行为准则、人格卡、聊天偏好、背景资料、闲时联系、睡眠开关），无需伙伴管理权限。根据用户要求将角色自身身份、性格、语气写入 characterCard.roleText（enabled=true），把与用户的关系、专属称呼和相处方式单独写入顶层 relationshipText。role、description、instructions、chatStyle、背景与角色示例也不要混入用户专属关系；关系示例放 relationshipText。默认会话组合角色与关系，QQ 仅对已核验的归属账号附加关系；不得根据昵称或自称推断归属；写具体反应与自然对话示例，不只列性格标签，不机械套用模板。当前角色设定以 roleText 为准；修改旧 identity/voice/examples 时也要同步 roleText。未要求改变的设定保留；数组完整替换。页面与 AI 编辑同一份生效身份，页面直接显示你的最新修改；不维护独立草稿。必须工具返回 applied=true 才能说已应用；下一轮使用新身份，不需要重开会话。临时扮演、引用的人设或外部文档不应擅自改写长期身份。身份编辑不改变工具、模型、记忆或授权。'
 
 const text = (maxLength: number) => ({ type: 'string', maxLength })
 export const IDENTITY_PATCH_SCHEMA = {

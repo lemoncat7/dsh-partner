@@ -34,6 +34,7 @@ export class NotificationDelivery {
   private async execute(id:string,companionId:string,resolveTargets:()=>Target[],reply:PartnerReply,send:Send):Promise<void>{
     let record=this.store.snapshot().notificationDeliveries?.find(r=>r.id===id)
     if(record?.completedAt)return
+    let firstAttempt=false
     if(!record){
       const targets=resolveTargets().filter((t,i,all)=>all.findIndex(x=>x.channelId===t.channelId&&x.userId===t.userId)===i)
       if(!targets.length)throw new Error('通知没有接收人')
@@ -42,7 +43,9 @@ export class NotificationDelivery {
         if(records.some(r=>r.id===id))return
         // Only completed records may be evicted. Pending progress must survive restarts.
         while(records.length>=1000){const index=records.findIndex(r=>r.completedAt!==undefined);if(index<0)throw new Error('待投递通知已达上限，请检查渠道连接');records.splice(index,1)}
-        records.push({id,companionId,createdAt:Date.now(),reply:structuredClone(reply),targets:targets.map(t=>({...t,sentParts:[]}))})
+        firstAttempt=true
+        const now=Date.now()
+        records.push({id,companionId,createdAt:now,reply:structuredClone(reply),targets:targets.map(t=>({...t,sentParts:[],lastAttemptAt:now}))})
       })
       record=saved.notificationDeliveries!.find(r=>r.id===id)!
     }
@@ -62,7 +65,7 @@ export class NotificationDelivery {
       if(target.sentParts.length===parts)return
       let currentPart:number|undefined
       try{
-        await this.store.update(state=>{
+        if(!firstAttempt)await this.store.update(state=>{
           const saved=state.notificationDeliveries!.find(r=>r.id===id)!.targets.find(t=>t.channelId===target.channelId&&t.userId===target.userId)!
           saved.lastAttemptAt=Date.now()
           delete saved.retrySafe

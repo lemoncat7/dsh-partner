@@ -151,3 +151,23 @@ for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} 
  assert.ok(owner.tools.some(t=>t.name===(mode==='ptc'?'run_code':'partner_identity')))
  assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
 })
+
+for(const mode of ['native','ptc'])test(`two-entry assembly remains identical across QQ owner and guest under ${mode}`,async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const {installToolDiscovery}=await import('../lib/collaboration/tool-discovery.js')
+ let compositions=0,store
+ const f=await fixture(t,{async compose(ctx,companion){compositions++;return installToolDiscovery(ctx.tools,companion.id,store,['partner_identity','partner_chat_reply'].map(name=>({tool:defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]}),allowed:()=>true}))) }},mode)
+ store=f.store;f.agent.session=Session.create('session-stable-tools')
+ await store.update(s=>{
+  s.companions[0].toolDiscovery=true;s.sessions[0].sessionId=f.agent.session.id
+  s.channels.push({id:'qq',platform:'qq',companionId:s.companions[0].id,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}})
+  for(const [id,userId] of [['owner','12345678'],['guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId,lastMessageAt:1,inboundMessageIds:[]})
+ })
+ let first
+ for(const id of ['owner','guest','owner','guest']){
+  const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
+  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),['partner_channel_access','partner_tools']);assert.equal(f.root.tools.modeFor(f.agent),'native')
+  if(first)assert.deepEqual(a.tools,first);else first=a.tools
+ }
+ assert.equal(compositions,1)
+})

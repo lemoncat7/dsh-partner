@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, unlink } from 'node:fs/promises'
+import { readFile, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PartnerState } from '../domain.js'
 import { atomicJson } from './atomic.js'
@@ -25,6 +25,7 @@ const hash = (text: string) => createHash('sha256').update(text).digest('hex')
  * only, not copies of identity, channel configuration or private runtime state.
  */
 export class SplitStatePersistence {
+  private committedRefs=new Map<string,string>()
   constructor(readonly publicRoot: string, private readonly privateRoot: (id: string) => string) {}
   async read(): Promise<PartnerState> {
     const commit = JSON.parse(await readFile(join(this.publicRoot, 'state.json'), 'utf8')) as Commit
@@ -44,6 +45,7 @@ export class SplitStatePersistence {
         ;(result[key] as unknown[]).push(...rows)
       }
     }
+    this.committedRefs=new Map(commit.privateRefs.map(ref=>[ref.id,ref.hash]))
     return result
   }
   async write(state: PartnerState): Promise<void> {
@@ -65,7 +67,6 @@ export class SplitStatePersistence {
     for (const [id, data] of owners) {
       const text = JSON.stringify(data) + '\n', digest = hash(text)
       const directory = join(this.privateRoot(id), 'state')
-      await mkdir(directory, { recursive: true, mode: 0o700 })
       const path = join(directory, digest + '.json')
       try {
         if (await readFile(path, 'utf8') !== text) throw Error('私有数据版本冲突')
@@ -80,7 +81,12 @@ export class SplitStatePersistence {
     await atomicJson(join(this.publicRoot, 'state.json'), { version: 1, publicState, privateRefs: refs } satisfies Commit)
     // Cleanup is post-commit and cannot turn success into an apparent failure.
     // Keep current and previous revision; migration backups live elsewhere.
+    const previousRefs=this.committedRefs
+    this.committedRefs=new Map(refs.map(ref=>[ref.id,ref.hash]))
     for (const ref of refs) {
+      // Unchanged immutable revisions need no directory scan on every chat receipt.
+      // Integrity is still checked above for every referenced file.
+      if(previousRefs.get(ref.id)===ref.hash)continue
       const directory = join(this.privateRoot(ref.id), 'state')
       const files = await readdir(directory).catch(() => [] as string[])
       // Only clean our content-addressed files; never user files.

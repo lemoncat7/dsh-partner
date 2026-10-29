@@ -24,19 +24,18 @@ export class OneBotTransport {
   }
 
   async validate(signal = AbortSignal.timeout(30000)): Promise<{accountId: string; peerId: string}> {
-    const who = await this.connection.call('get_login_info', {}, signal)
+    // Independent read-only checks share one round trip; all must pass before delivery.
+    const [who,status] = await Promise.all([this.connection.call('get_login_info', {}, signal),this.connection.call('get_status', {}, signal)])
     const accountId = qqId(who?.user_id)
     if (!accountId || this.expected && accountId !== this.expected.accountId) throw new OneBotError('QQ 登录账号无效或已变化，请重新配置渠道', false)
-    const status = await this.connection.call('get_status', {}, signal)
     if (status?.online !== true || status?.good === false) throw new OneBotError('SnowLuma QQ 尚未上线，请先在远程桌面登录')
     const group=this.config.targetId.startsWith('group:')?this.config.targetId.slice(6):undefined
     if(group) {
       const member=qqGroupPeer(this.expected?.peerId??'')
       const policy=qqSettings(this.config.qq)
       if(!qqId(group)||!member||member.groupId!==group||!policy.groupReplies||!policy.groupIds.includes(group))throw new OneBotError('群回复未开启或目标群未授权',false)
-      const groups=await this.connection.call('get_group_list',{},signal)
+      const [groups,info]=await Promise.all([this.connection.call('get_group_list',{},signal),this.connection.call('get_group_member_info',{group_id:Number(group),user_id:Number(member.userId)},signal)])
       if(!Array.isArray(groups)||!groups.some(g=>qqId(g.group_id)===group))throw new OneBotError('机器人已不在目标群中',false)
-      const info=await this.connection.call('get_group_member_info',{group_id:Number(group),user_id:Number(member.userId)},signal)
       if(qqId(info?.user_id)!==member.userId||qqId(info?.group_id)!==group)throw new OneBotError('群成员身份已变化',false)
       return {accountId,peerId:this.expected!.peerId}
     }

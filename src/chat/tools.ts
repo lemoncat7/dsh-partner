@@ -63,7 +63,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
     presentCall:()=>({card:'generic',title:'回复'}),
     async execute(raw,exec){
       const card=enabled(),agent=exec.agent
-      const input=withChatCompanionText(parseChatInput(raw),agent?.session.snapshotEvents()??[],exec.callId)
+      const input=withChatCompanionText(parseChatInput(raw),agent?.session.snapshotEvents()??[],exec.rootCallId??exec.callId)
       if(!card.segmentedReplies && input.filter(p=>'text'in p).length>1)throw new Error('分段回复未开启，请使用一条文字')
       if(!card.segmentedReplies&&!card.stickersEnabled)throw new Error('分段回复和表情包均未开启，请直接回复')
       if(!agent)throw new Error('需要当前伙伴会话')

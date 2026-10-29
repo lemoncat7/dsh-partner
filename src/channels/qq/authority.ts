@@ -36,6 +36,6 @@ export function qqChatOnly(agent: Pick<Agent, 'session'>, state: Pick<PartnerSta
 export const qqToolAccessAdapter: ToolAccessAdapter = {
   resolve({ agent, state }) {
     if (!state.channels?.some(c => c.platform === 'qq' && state.sessions.some(r => r.sessionId === agent.session.id && r.channelId === c.id))) return undefined
-    return qqChatOnly(agent, state) ? { sendTools: true, allowedTools: ['partner_chat_reply', 'partner_stickers', 'partner_qq_reply'], denialReason: QQ_CHAT_ONLY_REASON } : { sendTools: true }
+    return qqChatOnly(agent, state) ? { sendTools: true, allowedTools: ['partner_tools', 'partner_channel_access', 'partner_chat_reply', 'partner_stickers', 'partner_qq_reply'], denialReason: QQ_CHAT_ONLY_REASON } : { sendTools: true }
   },
 }

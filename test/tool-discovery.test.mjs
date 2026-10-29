@@ -1,92 +1,97 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {chatTools} from '../lib/chat/tools.js'
-import {qqActionTools} from '../lib/channels/qq/actions.js'
 import {Context} from '@deepseek-ai/cordis'
 import {createScope} from '@deepseek-ai/dsh-scope'
-import {ToolRuntime,renderToolsSdk} from '@deepseek-ai/dsh-tools'
-import {installToolDiscovery} from '../lib/collaboration/tool-discovery.js'
-import {PartnerAgentComposition} from '../lib/collaboration/composition.js'
+import {ToolRuntime} from '@deepseek-ai/dsh-tools'
+import {Session} from '@deepseek-ai/dsh-session'
+import {createUserMessage} from '@deepseek-ai/dsh-llm'
+import {installToolDiscovery,PARTNER_TOOL_ENTRIES} from '../lib/collaboration/tool-discovery.js'
+import {installToolAccessGuard} from '../lib/execution/tool-access-adapter.js'
+import {chatTools} from '../lib/chat/tools.js'
+import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 import {createDefaultCompanion,normalizeCompanionDraft} from '../lib/domain.js'
 import {SessionConfigurationIndex} from '../lib/companions/session-configuration.js'
 
 function fixture(t){
  const root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
- const agent={session:{id:'s',header:{}},options:{}},scope=createScope(root,agent);agent.ctx=scope.ctx
- const companion={id:'c',toolDiscovery:true},state={companions:[companion],sessions:[{companionId:'c',sessionId:'s'}]}
+ const agent={session:Session.create('discovery'),options:{}},scope=createScope(root,agent);agent.ctx=scope.ctx
+ const companion={id:'c',toolDiscovery:true},state={companions:[companion],channels:[],sessions:[{id:'local',kind:'local',companionId:'c',sessionId:agent.session.id,channelId:'local',userId:'owner'}]}
  const store={snapshot:()=>state,isCompanionRemoving:()=>false}
  const invoke=(name,args={},signal=new AbortController().signal)=>root.tools.execute({callId:'call-'+name,name,arguments:args,agent,signal})
- t.after(()=>scope.dispose());return {root,agent,scope,store,state,companion,invoke}
+ const call=(name,args={},signal)=>invoke('partner_tools',{action:'call',name,argumentsJson:JSON.stringify(args)},signal)
+ t.after(()=>scope.dispose());return {root,agent,scope,store,state,companion,invoke,call}
 }
-const definition=(name,execute=async()=>({ok:true}))=>({name,description:'工具说明 '+name,parameters:{type:'object',properties:{text:{type:'string'}}},output:{schema:{type:'object'},render:(_args,result)=>[{type:'text',text:JSON.stringify(result)}]},timeoutMs:5000,execute})
+const definition=(name,execute=async()=>({ok:true}))=>({name,description:'工具说明 '+name,parameters:{type:'object',properties:{text:{type:'string'}},additionalProperties:false},output:{schema:{type:'object'},render:(_args,result)=>[{type:'text',text:JSON.stringify(result)}]},timeoutMs:5000,execute})
+const names=f=>f.root.tools.schemas(f.agent).filter(t=>PARTNER_TOOL_ENTRIES.includes(t.name)).map(t=>t.name).sort()
 
-test('discovery loads original tools into the actual scoped runtime without executing; policies still deny',async t=>{
- const f=fixture(t);let calls=0
+test('fixed entries describe and invoke original tools without registry churn; host policies still deny',async t=>{
+ const f=fixture(t);let calls=0,changes=0
  const original=definition('partner_identity',async()=>{calls++;return {ok:true}})
- const dispose=installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:original,allowed:()=>true}]);t.after(dispose)
- assert.deepEqual(f.root.tools.schemas(f.agent).map(s=>s.name),['partner_tools'])
- assert.doesNotMatch(renderToolsSdk(f.root.tools.sdkSchemas(f.agent)),/partner_identity/)
- assert.equal((await f.invoke('partner_identity')).isError,true)
- const described=await f.invoke('partner_tools',{action:'describe',name:original.name});assert.equal(described.isError,false);assert.equal(calls,0)
- assert.deepEqual(f.root.tools.schemas(f.agent).map(s=>s.name),['partner_tools'])
- await f.invoke('partner_tools',{action:'load',name:original.name})
- assert.equal(f.root.tools.get(original.name,f.agent),original)
- assert.match(renderToolsSdk(f.root.tools.sdkSchemas(f.agent)),/partner_identity/)
- assert.equal(calls,0);assert.equal((await f.invoke(original.name,{text:'x'})).isError,false);assert.equal(calls,1)
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:original,allowed:()=>true}]))
+ t.after(f.root.on('tools/changed',()=>{changes++}))
+ assert.deepEqual(names(f),['partner_channel_access','partner_tools'])
+ const before=f.root.tools.schemas(f.agent)
+ for(const action of ['describe','load','unload'])assert.equal((await f.invoke('partner_tools',{action,name:original.name})).isError,false)
+ assert.equal(calls,0);assert.deepEqual(f.root.tools.schemas(f.agent),before);assert.equal(changes,0)
+ const result=await f.call(original.name,{text:'x'});assert.equal(result.isError,false);assert.equal(result.value.dispatch.isError,false);assert.equal(calls,1)
  f.scope.ctx.tools.guard(e=>e.name===original.name?'policy revoked':undefined)
- assert.equal((await f.invoke(original.name)).isError,true);assert.equal(calls,1)
- assert.equal(f.root.tools.schemas().some(s=>s.name===original.name),false,'tools never become global')
- dispose();assert.deepEqual(f.root.tools.schemas(f.agent),[])
+ const denied=await f.call(original.name);assert.equal(denied.value.dispatch.isError,true);assert.equal(calls,1)
+ assert.equal(f.root.tools.schemas().some(s=>s.name===original.name),false)
+ const logs=f.agent.session.snapshotEvents().filter(e=>e.type==='tool/ptc-dispatch')
+ assert.equal(logs.length,2);assert.equal(logs[1].data.isError,true)
 })
-test('active work tools stay bounded and lookup never executes; scope and capability checks remain',async t=>{
- const f=fixture(t),entries=Array.from({length:8},(_,i)=>({tool:definition('partner_mcp_'+i,()=>{throw Error('must not run')}),allowed:()=>true}))
- const dispose=installToolDiscovery(f.scope.ctx.tools,'c',f.store,entries);t.after(dispose)
- const initial=await f.invoke('partner_tools',{action:'list'});assert.equal(initial.value.categories[0].count,8);assert.equal(initial.value.tools,undefined)
- for(const e of entries)assert.equal((await f.invoke('partner_tools',{action:'load',name:e.tool.name})).isError,false)
- assert.equal(f.root.tools.schemas(f.agent).length,5)
- assert.equal(f.root.tools.get(entries[0].tool.name,f.agent),undefined)
- entries[0].allowed=()=>false;assert.equal((await f.invoke('partner_tools',{action:'load',name:entries[0].tool.name})).isError,true)
- f.state.sessions[0].companionId='other';assert.equal((await f.invoke('partner_tools',{action:'list'})).isError,true)
+test('QQ adapter lists only authorized abilities, changes identity without changing tools, and denies stale/nested calls',async t=>{
+ const f=fixture(t);let calls=0
+ const defs=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>definition(name,async()=>{calls++;return {ok:true}}))
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,defs.map(tool=>({tool,allowed:()=>true}))))
+ t.after(f.scope.ctx.tools.register(definition('host_private')))
+ t.after(installToolAccessGuard(f.root.tools,()=>f.state))
+ f.state.channels=[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
+ for(const [id,userId] of [['owner','12345678'],['guest','22345678']])f.state.sessions.push({id,kind:'channel',channelId:'qq',userId,companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[]})
+ const send=id=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'hello'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'});f.state.sessions.find(s=>s.id===id).inboundMessageIds.push(m.id)}
+ const before=f.root.tools.schemas(f.agent)
+ send('owner');let access=await f.invoke('partner_channel_access');assert.ok(access.value.tools.some(t=>t.name==='partner_identity'));assert.ok(access.value.tools.some(t=>t.name==='host_private'))
+ assert.equal((await f.call('partner_identity')).value.dispatch.isError,false)
+ send('guest');access=await f.invoke('partner_channel_access');assert.deepEqual(access.value.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.equal((await f.call('partner_identity')).isError,true);assert.equal((await f.invoke('partner_identity')).isError,true)
+ assert.equal((await f.invoke('partner_tools',{action:'describe',name:'host_private'})).isError,true)
+ assert.equal((await f.call('partner_chat_reply')).value.dispatch.isError,false)
+ send('owner');assert.equal((await f.call('host_private')).value.dispatch.isError,false)
+ f.state.channels[0].qq.identityBinding.qqIds=[];assert.equal((await f.call('host_private')).isError,true)
+ assert.deepEqual(f.root.tools.schemas(f.agent),before);assert.equal(calls,2)
 })
-test('loaded definition retains output, presentation and turn conclusion through DSH',async t=>{
- const f=fixture(t),tool=definition('partner_test',async(_args,exec)=>{exec.concludeTurn();return {ok:true}})
+test('gateway preserves validation, cancellation, additional context and terminal reply metadata',async t=>{
+ const f=fixture(t);let called=0
+ const tool=definition('partner_test',async(_args,exec)=>{if('bad' in _args)throw Error('invalid arguments');called++;exec.deferContext(createUserMessage({source:{kind:'plugin:test'},content:[{type:'text',text:'context'}]}));exec.concludeTurn();return {ok:true}})
  tool.output.presentationMeta=()=>({kind:'original'})
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool,allowed:()=>true}]))
- await f.invoke('partner_tools',{action:'load',name:tool.name})
- const result=await f.invoke(tool.name);assert.equal(result.isError,false);assert.equal(result.concludesTurn,true);assert.deepEqual(result.meta,{kind:'original'})
+ const invalid=await f.call(tool.name,{bad:1});assert.equal(invalid.value.dispatch.isError,true);assert.equal(called,0)
+ const result=await f.call(tool.name);assert.equal(result.concludesTurn,true);assert.deepEqual(result.value.dispatch.meta,{kind:'original'});assert.equal(result.meta,undefined);assert.equal(result.additionalContexts.length,1)
+ const canceled=await f.call(tool.name,{},AbortSignal.abort());assert.equal(canceled.isError,true);assert.equal(called,1)
 })
-test('composition reduces idle schemas while preserving native chat and full work tool loading',async()=>{
- const companion={...createDefaultCompanion(),capabilities:['skills','schedules','companions','access']},state={companions:[companion],sessions:[{sessionId:'s',companionId:companion.id}]}
- const store={snapshot:()=>state,isCompanionRemoving:()=>false,hasCapability:(_id,c)=>companion.capabilities.includes(c)}
- const composition=new PartnerAgentComposition(store,{bindings:()=>[]},{},{directoryFor:()=>[]},{},{},{})
- composition.setChatToolFactory(()=>[...chatTools(companion.id,store,{}, {},{},'/partner-local/v1'),...qqActionTools(companion.id,store,async()=>{})])
- const registered=new Map(),ctx={tools:{register(tool){registered.set(tool.name,tool);return()=>registered.delete(tool.name)}},systemPrompt:{section:()=>()=>{}}}
- const legacy=await composition.compose(ctx,companion),full=[...registered.values()].map(({name,description,parameters})=>({name,description,parameters})),before=JSON.stringify(full).length
- legacy();companion.toolDiscovery=true
- const dispose=await composition.compose(ctx,companion)
- assert.deepEqual([...registered.keys()].sort(),['partner_chat_reply','partner_stickers','partner_tools'])
- const after=JSON.stringify([...registered.values()].map(({name,description,parameters})=>({name,description,parameters}))).length
- assert.ok(after<before*0.25,`schema sizes ${before} -> ${after}`)
- const gateway=registered.get('partner_tools'),exec={agent:{session:{id:'s'}},signal:new AbortController().signal}
- await gateway.execute({action:'load',name:'partner_task_board'},exec);assert.ok(registered.has('partner_task_board'))
- const board=registered.get('partner_task_board');assert.deepEqual(board.parameters,full.find(t=>t.name===board.name).parameters)
- dispose();assert.equal(registered.size,0)
- console.log(JSON.stringify({partnerSchemasBefore:full.length,partnerSchemasAfter:3,schemaCharsBefore:before,schemaCharsAfter:after}))
+test('chat reply through the gateway ends the turn and remains deliverable as native chat',async t=>{
+ const f=fixture(t)
+ f.companion.characterCard={enabled:true,segmentedReplies:true,stickersEnabled:true}
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,chatTools('c',f.store,{}, {},{},'/partner-local/v1').map(tool=>({tool,allowed:()=>true}))))
+ f.agent.session.append('turn/start',{turn:1})
+ f.agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'hello'}]}),{surfaceOp:'append'})
+ const result=await f.call('partner_chat_reply',{messages:[{text:'好吧，被你抓到了。',stickerId:''}]})
+ assert.equal(result.isError,false);assert.equal(result.value.dispatch.isError,false);assert.equal(result.concludesTurn,true)
+ assert.equal(result.meta,undefined,'only the nested event renders chat, preventing duplicate bubbles');assert.equal(result.value.dispatch.meta.kind,'partner-chat-v1');assert.deepEqual(result.value.dispatch.meta.parts,[{type:'text',text:'好吧，被你抓到了。'}])
+ f.agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}})
+ assert.equal(channelReplyPartsAfter(f.agent.session.snapshotEvents(),0).chatParts[0].text,'好吧，被你抓到了。')
 })
-test('discovery setting is validated and participates in next-turn composition revision',()=>{
+test('revoked catalogue entries and recursive gateway calls never execute',async t=>{
+ const f=fixture(t);let allowed=true
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_test'),allowed:()=>allowed}]))
+ allowed=false
+ for(const name of ['partner_test','partner_tools','partner_channel_access','run_code'])assert.equal((await f.call(name)).isError,true)
+ const listed=await f.invoke('partner_channel_access');assert.deepEqual(listed.value.tools,[])
+ f.state.sessions=[];assert.equal((await f.invoke('partner_channel_access')).isError,true)
+})
+test('discovery setting remains validated and participates in next-turn composition revision',()=>{
  assert.throws(()=>normalizeCompanionDraft({name:'角色',toolDiscovery:'yes'}))
  const c={...createDefaultCompanion(),toolDiscovery:false},state={companions:[c],sessions:[{sessionId:'s',companionId:c.id}],skillBindings:[],companionAccessGrants:[],skills:[]}
  const index=new SessionConfigurationIndex({snapshot:()=>state,subscribe:()=>()=>{}})
  const before=index.forSession('s').revision;c.toolDiscovery=true;assert.notEqual(index.forSession('s').revision,before);index.close()
-})
-
-test('chat reply with provider-generated empty sticker field concludes through the real tool runtime',async t=>{
- const f=fixture(t)
- f.companion.characterCard={enabled:true,segmentedReplies:true,stickersEnabled:true}
- f.agent.session.snapshotEvents=()=>[{seq:1,type:'turn/start',data:{}},{seq:2,type:'user/message',data:{source:{kind:'user'},content:[{type:'text',text:'你好'}]}}]
- const tool=chatTools('c',f.store,{}, {},{},'/partner-local/v1')[1]
- t.after(f.scope.ctx.tools.register(tool))
- const result=await f.invoke('partner_chat_reply',{messages:[{text:'好吧，被你抓到了。',stickerId:''}]})
- assert.equal(result.isError,false);assert.equal(result.concludesTurn,true)
- assert.deepEqual(result.meta.parts,[{type:'text',text:'好吧，被你抓到了。'}])
 })

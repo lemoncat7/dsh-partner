@@ -47,3 +47,15 @@ test('coordinator rejects running agents, concurrent API calls and stale version
  await assert.rejects(service.migrate(1),/版本已变化/)
  assert.equal(stopped,0)
 }))
+
+test('split commits retain integrity checks for unchanged owners and leave prior manifest readable on failure',async()=>fixture(async(root,path,store)=>{
+ const {writeFile}=await import('node:fs/promises')
+ await store.update(s=>s.companions.push({...createDefaultCompanion(),id:'two'}))
+ const layout=storageLayout(path,root),split=new SplitStatePersistence(layout.publicRoot,layout.privateRoot)
+ await split.write(store.snapshot());await split.read()
+ const manifest=await readFile(join(layout.publicRoot,'state.json'),'utf8'),ref=JSON.parse(manifest).privateRefs.find(r=>r.id==='two')
+ await writeFile(join(layout.privateRoot('two'),'state',ref.hash+'.json'),'corrupt')
+ const changed=store.snapshot();changed.companions[0].name='changed'
+ await assert.rejects(split.write(changed),/版本冲突/)
+ assert.equal(await readFile(join(layout.publicRoot,'state.json'),'utf8'),manifest)
+}))

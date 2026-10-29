@@ -131,3 +131,15 @@ test('only explicitly deferred preflight failures are safe to retry, and the mar
  assert.equal(reopened.snapshot().notificationDeliveries[0].targets[0].retrySafe,false)
  assert.deepEqual(reopened.snapshot().notificationDeliveries[0].targets[0].sentParts,[])
 })
+
+test('first payload and attempt commit atomically before sending without a second durable write',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'notification-commit-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ const path=join(dir,'state.json'),store=await PartnerStore.open(path);let commits=0
+ const update=store.update.bind(store);store.update=async fn=>{commits++;return update(fn)}
+ await new NotificationDelivery(store).deliver('event','c',()=>[targets[0]],{text:'hello',attachments:[]},async(target,reply,part)=>{
+  assert.equal(commits,1)
+  const durable=(await PartnerStore.open(path)).snapshot().notificationDeliveries[0]
+  assert.equal(durable.reply.text,'hello');assert.ok(durable.targets[0].lastAttemptAt)
+  await part(0,async()=>{})
+ })
+})

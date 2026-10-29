@@ -63,7 +63,7 @@ export class PartnerAgentComposition {
     const disposers: Array<() => void> = []
     const catalog:DiscoverableTool[]=[]
     const add=(tool:ToolDefinition,allowed=()=>true):void=>{
-      if(companion.toolDiscovery&&!['partner_chat_reply','partner_stickers','partner_qq_reply'].includes(tool.name))catalog.push({tool,allowed})
+      if(companion.toolDiscovery)catalog.push({tool,allowed})
       else disposers.push(ctx.tools.register(tool))
     }
     const register = (tool: ToolDefinition, capability: CompanionCapability): void => {

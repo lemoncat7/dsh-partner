@@ -50,7 +50,12 @@ export function withChatCompanionText(input: Array<{text:string} | {stickerId:st
     const blocks=event.data.message.content
     const calls=blocks.filter(b=>b.type==='tool-call')
     if (!calls.some(c=>c.id===callId)) continue
-    if (event.data.interrupted||calls.length!==1||calls[0]!.name!=='partner_chat_reply') return input
+    if (event.data.interrupted||calls.length!==1) return input
+    const call=calls[0]!
+    if(call.name!=='partner_chat_reply'){
+      if(call.name!=='partner_tools')return input
+      try {const args=JSON.parse(call.arguments);if(args.action!=='call'||args.name!=='partner_chat_reply')return input}catch{return input}
+    }
     const speech=blocks.filter(b=>b.type==='text').map(b=>b.text.trim()).filter(Boolean).join('\n')
     if (!speech) return input
     // The protocol's size limits remain authoritative; a rejected oversized call can be corrected.

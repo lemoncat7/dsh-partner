@@ -115,3 +115,12 @@ test('two rapid admitted messages are both judged even while the companion is bu
  assert.match(f.manager.groupAutonomy.status('qq').reason,/决定旁听/)
  assert.ok(f.state.recentReceipts.includes('qq:first'));assert.ok(f.state.recentReceipts.includes('qq:second'))
 })
+
+test('steered QQ supplement is consumed without sending a channel acknowledgement',async()=>{
+ const f=fixture();let steered=0
+ f.agents.steer=async()=>{steered++;return true}
+ await f.manager.handleDirect(f.channel,f.api,f.event,new AbortController().signal,[f.event],()=>{},'steer')
+ assert.equal(steered,1);assert.equal(f.inputs.length,0);assert.deepEqual(f.sent,[])
+ assert.ok(f.state.recentReceipts.includes('qq:m'))
+ assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'steered')
+})
