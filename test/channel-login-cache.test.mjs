@@ -21,8 +21,8 @@ test('unretained test session expires and is revoked',async()=>{
  await new Promise(r=>setTimeout(r,40))
  assert.equal(logouts,1)
 })
-test('all channel routes reuse local primary session, with different companions isolated',async()=>{
- const state={companions:[{id:'c'},{id:'other'}],sessions:[]}
+test('non-QQ channel routes reuse local primary session, with different companions isolated',async()=>{
+ const state={companions:[{id:'c'},{id:'other'}],channels:[],sessions:[]}
  const runtime=Object.create(PartnerAgentRuntime.prototype)
  runtime.store={isCompanionRemoving:()=>false,snapshot:()=>structuredClone(state),update:async fn=>fn(state)}
  runtime.ctx={workspaceRegistry:{archivedSessionIds:[]}}

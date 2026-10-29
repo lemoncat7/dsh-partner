@@ -1,4 +1,4 @@
-import { qqGroupRoute } from './channels/qq/settings.js'
+import { qqSettings, qqSessionTarget } from './channels/qq/settings.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
 import { questionOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
@@ -244,6 +244,8 @@ export class PartnerAgentRuntime {
   private async deliverSteering(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<boolean> {
     const route = this.store.snapshot().sessions.find(item => item.channelId === channelId && item.userId === userId && item.companionId === companion.id)
     if (route === undefined) return false
+    const channel=this.store.snapshot().channels.find(c=>c.id===channelId)
+    if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(userId))?'main':'separate'))return false
     const agent = this.handles.get(route.sessionId)?.agent ?? this.ctx.agents.get(route.sessionId as SessionId)
     if (agent === undefined || agent.status !== 'running') return false
     // Shared history is not shared delivery ownership: queue cross-channel input.
@@ -298,7 +300,7 @@ export class PartnerAgentRuntime {
       // If there was no local conversation, continue the newest existing channel
       // conversation. Do not concatenate unrelated historical transcripts.
       if(!existing) {
-        const previous=state.sessions.filter(item=>!qqGroupRoute(item,state.channels)&&item.companionId===companion.id&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds)).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)[0]
+        const previous=state.sessions.filter(item=>item.companionId===companion.id&&!state.channels.some(c=>c.id===item.channelId&&c.platform==='qq')&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds)).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)[0]
         if(previous){route.sessionId=previous.sessionId;if(previous.cwd)route.cwd=previous.cwd}
       }
       state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
@@ -901,7 +903,7 @@ export class PartnerAgentRuntime {
 
   private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
     reportProgress(progress,'working')
-    const session = await this.ensureSession(companion, channelId, userId)
+    const session = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
     const inbound = await this.persistInbound(session, message)
@@ -968,38 +970,65 @@ export class PartnerAgentRuntime {
     return { content, query: [message.text, ...message.attachments.map(item => item.name)].filter(Boolean).join(' ') }
   }
 
-  private async ensureSession(companion: Companion, channelId: string, userId: string): Promise<ChannelSession> {
-    if(qqGroupRoute({channelId,userId},this.store.snapshot().channels)) {
-      const existing=this.store.snapshot().sessions.find(r=>r.channelId===channelId&&r.userId===userId&&canReuseSession(r,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))
-      if(existing)return existing
-      const route:ChannelSession={id:`route-${randomUUID()}`,kind:'channel',channelId,userId,companionId:companion.id,sessionId:`session-${randomUUID()}`,cwd:partnerCwd(this.defaultCwd,companion.id),lastMessageAt:Date.now()}
-      await this.store.update(state=>{
-        const concurrent=state.sessions.find(r=>r.channelId===channelId&&r.userId===userId&&canReuseSession(r,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))
-        if(concurrent){Object.assign(route,concurrent);return}
-        state.sessions=state.sessions.filter(r=>!(r.channelId===channelId&&r.userId===userId));state.sessions.push(route)
-      })
-      return route
+  async reconcileQqSessions():Promise<void> {
+    const state=this.store.snapshot()
+    // Startup only: workers have not started, so stale leases can be recovered.
+    for(const route of state.sessions.filter(r=>r.kind==='channel'&&state.channels.some(c=>c.id===r.channelId&&c.platform==='qq'))) {
+      const companion=state.companions.find(c=>c.id===route.companionId)
+      if(companion)await this.ensureSession(companion,route.channelId,route.userId,undefined,true)
     }
+  }
+
+  private async ensureSession(companion: Companion, channelId: string, userId: string, title?:string, recoverLeases=false): Promise<ChannelSession> {
     const primary=await this.ensureLocalSessionRecord(companion.id)
-    const existing = this.store.snapshot().sessions.find(item => item.channelId === channelId && item.userId === userId)
-    if (existing !== undefined && existing.sessionId===primary.sessionId && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) return existing
-    const now = Date.now()
-    const session: ChannelSession = {
-      id: `route-${randomUUID()}`,
-      kind: 'channel',
-      channelId,
-      userId,
-      companionId: companion.id,
-      sessionId: primary.sessionId,
-      cwd: primary.cwd??partnerCwd(this.defaultCwd, companion.id),
-      lastMessageAt: now,
-    }
-    await this.memory?.mergeScopes(companion.id, conversationMemoryScope(primary, [primary]), [memoryScope(channelId, userId)])
-    await this.store.update(state => {
-      state.sessions = state.sessions.filter(item => !(item.channelId === channelId && item.userId === userId))
-      state.sessions.push(session)
+    const snapshot=this.store.snapshot(),channel=snapshot.channels.find(c=>c.id===channelId)
+    const existing=snapshot.sessions.find(item=>item.channelId===channelId&&item.userId===userId&&item.companionId===companion.id)
+    const isQq=channel?.platform==='qq',target=qqSessionTarget(userId)
+    if(!isQq&&existing?.sessionId===primary.sessionId&&canReuseSession(existing,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))return existing
+    const sharedScope=conversationMemoryScope(primary,[primary])
+    const sources=isQq?snapshot.sessions.filter(r=>r.channelId===channelId&&r.companionId===companion.id&&qqSessionTarget(r.userId)===target&&r.memoryScopeId!==sharedScope).map(r=>memoryScope(r.channelId,r.userId)):[]
+    if(existing?.memoryScopeId!==sharedScope||sources.length)await this.memory?.mergeScopes(companion.id,sharedScope,[...new Set([...sources,memoryScope(channelId,userId)])],recoverLeases)
+    let result:ChannelSession
+    await this.store.update(state=>{
+      const currentChannel=state.channels.find(c=>c.id===channelId)
+      if(this.store.isCompanionRemoving(companion.id)||!state.companions.some(c=>c.id===companion.id))throw Error('伙伴已移除')
+      const main=!isQq||qqSettings(currentChannel?.qq).mainSessionPeers.includes(target)
+      const current=state.sessions.find(r=>r.channelId===channelId&&r.userId===userId&&r.companionId===companion.id)
+      const peers=state.sessions.filter(r=>r.channelId===channelId&&r.companionId===companion.id&&qqSessionTarget(r.userId)===target).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)
+      const archived=this.ctx.workspaceRegistry.archivedSessionIds as readonly string[]
+      // Prefer an active shared group route, then its saved separate conversation.
+      const separate=peers.find(r=>r.qqSessionMode!=='main'&&r.sessionId!==primary.sessionId&&!archived.includes(r.sessionId))
+      const saved=peers.find(r=>r.qqSeparateSessionId&&!archived.includes(r.qqSeparateSessionId))
+      const separateId=separate?.sessionId??saved?.qqSeparateSessionId??`session-${randomUUID()}`
+      const separateCwd=separate?.cwd??saved?.qqSeparateCwd??partnerCwd(this.defaultCwd,companion.id)
+      const sessionId=main?primary.sessionId:separateId
+      const name=title?.replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,140)||peers.find(r=>r.qqSessionTitle)?.qqSessionTitle||`${target.startsWith('group:')?'群聊':'私聊'} · ${target.split(':')[1]}`
+      const route:ChannelSession={...current,id:current?.id??`route-${randomUUID()}`,kind:'channel',channelId,userId,companionId:companion.id,sessionId,cwd:main?(primary.cwd??partnerCwd(this.defaultCwd,companion.id)):separateCwd,lastMessageAt:current?.lastMessageAt??Date.now(),
+        ...(isQq?{memoryScopeId:sharedScope,qqSessionTarget:target,qqSessionMode:main?'main':'separate',qqSeparateSessionId:separateId,qqSeparateCwd:separateCwd,qqSessionTitle:name}:{})}
+      const applied=peers.find(r=>r.sessionId===sessionId&&r.qqAppliedTitle)?.qqAppliedTitle
+      if(applied)route.qqAppliedTitle=applied
+      if(current?.sessionId!==sessionId)delete route.inboundMessageIds
+      // One group context for all members, with separate delivery/grant identities.
+      if(isQq)for(const peer of peers){
+        if(peer.sessionId!==sessionId)delete peer.inboundMessageIds
+        Object.assign(peer,{sessionId,cwd:route.cwd,memoryScopeId:sharedScope,qqSessionTarget:target,qqSessionMode:route.qqSessionMode,qqSeparateSessionId:separateId,qqSeparateCwd:separateCwd,qqSessionTitle:name})
+      }
+      state.sessions=state.sessions.filter(r=>!(r.channelId===channelId&&r.userId===userId))
+      state.sessions.push(route);result=route
     })
-    return session
+    return result!
+  }
+
+  private async nameQqSession(agent:Agent,route:ChannelSession):Promise<void> {
+    if(route.qqSessionMode!=='separate'||!route.qqSessionTitle)return
+    const titles=this.ctx.get('sessionTitle') as {get(session:Session):{title:string;source:{kind:string}}|undefined;rename(session:Session,title:string):unknown}|undefined
+    if(!titles)return
+    const current=titles.get(agent.session)
+    // Respect a user-edited title; only refresh our own generated names.
+    if(current?.source.kind==='user'&&current.title!==route.qqAppliedTitle)return
+    if(current?.title===route.qqSessionTitle)return
+    titles.rename(agent.session,route.qqSessionTitle)
+    await this.store.update(state=>{for(const peer of state.sessions)if(peer.sessionId===route.sessionId)peer.qqAppliedTitle=route.qqSessionTitle!})
   }
 
   private async ensureAgent(companion: Companion, route: ChannelSession): Promise<Agent> {
@@ -1016,11 +1045,13 @@ export class PartnerAgentRuntime {
     const held = this.handles.get(route.sessionId)
     if (held !== undefined) {
       await this.attachSession(companion, route)
+      await this.nameQqSession(held.agent,route)
       return held.agent
     }
     const live = this.ctx.agents.get(route.sessionId as SessionId)
     if (live !== undefined) {
       await this.attachSession(companion, route)
+      await this.nameQqSession(live,route)
       return live
     }
     const options = resolveAgentOptions(this.ctx.agentDefaultModel, companion)
@@ -1053,6 +1084,7 @@ export class PartnerAgentRuntime {
     }
     this.handles.set(route.sessionId, handle)
     await this.attachSession(companion, route)
+    await this.nameQqSession(handle.agent,route)
     return handle.agent
   }
 

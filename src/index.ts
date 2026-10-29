@@ -50,6 +50,9 @@ import { PushObserver } from './notifications/push-observer.js'
 import { AttachmentDeliveryService } from './attachments/service.js'
 import { openSharedAttachmentStorage } from './attachments/shared-storage.js'
 import { StickerLibrary } from './chat/stickers.js'
+import { StickerAdapters } from './chat/sticker-adapter.js'
+import { qqStickerAdapter } from './channels/qq/sticker-adapter.js'
+import type { QqFace } from './channels/qq/catalog.js'
 import { chatTools } from './chat/tools.js'
 import { attachmentTool } from './attachments/tool.js'
 import { StorageCoordinator } from './storage/coordinator.js'
@@ -180,7 +183,16 @@ export function apply(context: Context, config: PartnerConfig): void {
     const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     const stickers = new StickerLibrary(layout.privateRoot)
-    composer.setChatToolFactory(id => chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix))
+    const stickerAdapters=new StickerAdapters(stickers)
+    const qqCatalogs=new Map<string,{at:number;faces:Promise<QqFace[]>}>()
+    stickerAdapters.register('qq',channel=>qqStickerAdapter(channel,stickerAdapters.fallback,async()=>{
+      const key=channel.id+':'+channel.updatedAt,cached=qqCatalogs.get(key)
+      if(cached&&Date.now()-cached.at<300000)return cached.faces
+      const faces=channels.qqDirectory(channel.id,'stickers').then(value=>(value as {faces:QqFace[]}).faces)
+      qqCatalogs.set(key,{at:Date.now(),faces});if(qqCatalogs.size>100)qqCatalogs.delete(qqCatalogs.keys().next().value!)
+      try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
+    }))
+    composer.setChatToolFactory(id => chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters))
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -239,6 +251,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
     else ctx.logger.warn('dsh-partner: webServer is unavailable; companion management is disabled')
+    await agents.reconcileQqSessions()
     if (resolved.autoStartChannels) await channels.startEnabled()
     await push.start()
     sleep.start()

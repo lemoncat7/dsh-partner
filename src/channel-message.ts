@@ -8,6 +8,7 @@ export interface PartnerInboundAttachment {
 }
 
 export interface PartnerInboundMessage {
+  sessionTitle?: string
   text: string
   attachments: PartnerInboundAttachment[]
 }

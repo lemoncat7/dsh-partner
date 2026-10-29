@@ -55,7 +55,7 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
   const messages: string[] = [], referenceTexts: string[] = []
   const flush = (): void => {
     if (direct) {
-      if (chat) { ordered.push(...chat); hasChat = true; messages.push(chat.map(p => p.type === 'text' ? p.text : `[表情：${p.label}]`).join('\n\n')) }
+      if (chat) { ordered.push(...chat); hasChat = true; messages.push(chat.map(p => p.type === 'text' ? p.text : `[表情：${p.type==='emoji'?p.emoji.label:p.label}]`).join('\n\n')) }
       else if (answer) { messages.push(answer); ordered.push({type:'text',text:answer}) }
       referenceTexts.push(...references)
     }

@@ -101,6 +101,14 @@ export class OneBotTransport {
     const group=qqGroupPeer(userId)
     return group&&qqSettings(this.config.qq).mentionSender?[{type:'at',data:{qq:group.userId}},{type:'text',data:{text:' '}}]:[]
   }
+  async sendCustomFace(userId:string,emojiId:string,signal:AbortSignal,authorize:()=>void):Promise<void> {
+    if(!qqSettings(this.config.qq).imagesEnabled)throw new OneBotError('QQ 图片与表情包发送已关闭',false)
+    if(!emojiId||emojiId.length>512||/[\x00-\x1f]/.test(emojiId))throw new OneBotError('QQ 收藏表情标识无效',false)
+    await this.recipient(userId,signal);authorize()
+    const sent=await this.connection.call('send_custom_face',{...this.destination(userId),emoji_id:emojiId},signal)
+    if(!sent||!['string','number'].includes(typeof sent.message_id))throw new OneBotError('QQ 未确认收藏表情发送结果',false)
+  }
+
   async sendFace(userId:string,faceId:string,signal:AbortSignal,authorize:()=>void):Promise<void> {
     if(!qqSettings(this.config.qq).facesEnabled)throw new OneBotError('QQ 系统表情发送已关闭',false)
     if(!/^\d{1,6}$/.test(faceId))throw new OneBotError('QQ 表情编号无效',false)

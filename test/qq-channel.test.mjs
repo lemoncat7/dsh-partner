@@ -1,3 +1,4 @@
+import {parseQqSettings} from '../lib/channels/qq/settings.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { WebSocketServer } from 'ws'
@@ -97,7 +98,7 @@ test('media URLs reject arbitrary hosts, credentials and local files',()=>{
 
 const group='99887766', groupUser=`group:${group}:${peer}`
 const groupEvent=(extra={})=>event({message_type:'group',sub_type:'normal',group_id:Number(group),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}],...extra})
-const groupSettings={privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
+const groupSettings={mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
 test('group intake is opt-in, allowlisted, requires real bot mention and rejects anonymous messages',()=>{
   assert.equal(oneBotMessage(groupEvent(),bot),undefined)
   const parsed=oneBotMessage(groupEvent(),bot,'',groupSettings)
@@ -178,4 +179,25 @@ test('QQ connection validation preserves token, checks identity and rolls creden
  assert.equal(writes,0);assert.equal(s.connections[0].token,'original')
  await assert.rejects(manager.updateQqConnection('qq',{baseUrl:s.url,botToken:'new',testOnly:false,expectedUpdatedAt:1}),/disk full/)
  assert.equal(credential.botToken,'original');assert.equal(credential.baseUrl,'ws://old:3001');assert.equal(starts,1)
+})
+
+test('autonomous group whitelist receives unmentioned group messages without expanding other groups',()=>{
+ const policy={...groupSettings,autonomousGroupIds:[group]}
+ const message=oneBotMessage(groupEvent({message:[{type:'text',data:{text:'今天好累'}}]}),bot,'',policy)
+ assert.equal(message.qqGroup.autonomous,true);assert.equal(message.qqGroup.mentioned,false)
+ assert.equal(oneBotMessage(groupEvent({group_id:88776655,message:'hello'}),bot,'',policy),undefined)
+})
+test('native custom stickers use the QQ favorite API and never turn a failed send into a second message',async t=>{
+ const s=await server(t),api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:peer,qq:groupSettings},'secret',{accountId:bot,peerId:peer});t.after(()=>api.close())
+ await api.onebot.sendCustomFace(peer,'favorite-id',AbortSignal.timeout(2000),()=>{})
+ assert.equal(s.requests.at(-1).action,'send_custom_face');assert.deepEqual(s.requests.at(-1).params,{user_id:Number(peer),emoji_id:'favorite-id'})
+ await assert.rejects(api.onebot.sendCustomFace(peer,'favorite-id',AbortSignal.timeout(2000),()=>{throw Error('revoked')}),/revoked/)
+ assert.equal(s.requests.filter(r=>r.action==='send_custom_face').length,1)
+})
+
+
+test('main-session selections accept private/group IDs, default off and reject malformed peers',()=>{
+ assert.deepEqual(parseQqSettings({...groupSettings,mainSessionPeers:undefined}).mainSessionPeers,[])
+ assert.deepEqual(parseQqSettings({...groupSettings,mainSessionPeers:['private:12345678','group:99887766','private:12345678']}).mainSessionPeers,['private:12345678','group:99887766'])
+ for(const peers of [['12345678'],['group:99887766:12345678'],['private:abc'],Array(101).fill('private:12345678')])assert.throws(()=>parseQqSettings({...groupSettings,mainSessionPeers:peers}),/主会话对象/)
 })

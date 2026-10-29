@@ -97,6 +97,14 @@ export interface PairingRequest {
 }
 
 export interface ChannelSession {
+  /** QQ contexts can be separate while using companion-wide long-term memory. */
+  memoryScopeId?: string
+  qqSessionTarget?: string
+  qqSessionMode?: 'main' | 'separate'
+  qqSeparateSessionId?: string
+  qqSeparateCwd?: string
+  qqSessionTitle?: string
+  qqAppliedTitle?: string
   idleContactState?: import('./character/idle-contact.js').IdleContactState
   id: string
   /** Local DSH conversation or a channel-backed contact conversation. */

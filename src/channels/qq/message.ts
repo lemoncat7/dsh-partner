@@ -14,9 +14,11 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
   const realSender=qqId(raw.user_id),groupId=raw.message_type==='group'?qqId(raw.group_id):undefined
   if (!realSender || realSender===accountId || qqId(raw.self_id)!==accountId) return
   if (raw.message_type==='private' && (!policy.privateReplies || raw.sub_type!=='friend' || targetId&&targetId!==realSender)) return
+  const mentioned=Array.isArray(raw.message)&&raw.message.some((p:any)=>p?.type==='at'&&String(p.data?.qq)===accountId)
+  const autonomous=!!groupId&&policy.autonomousGroupIds.includes(groupId)
   if (raw.message_type==='group') {
     if (raw.anonymous || !groupId || !policy.groupReplies || !policy.groupIds.includes(groupId) || targetId&&targetId!==`group:${groupId}`) return
-    if (policy.groupTrigger==='mention' && (!Array.isArray(raw.message) || !raw.message.some((p:any)=>p?.type==='at'&&String(p.data?.qq)===accountId))) return
+    if (policy.groupTrigger==='mention'&&!mentioned&&!autonomous)return
   }
   const sender=groupId?`group:${groupId}:${realSender}`:realSender
   const id = raw.message_id
@@ -31,5 +33,5 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
       media.push({ source: typeof data.url === 'string' ? data.url : '', ...(typeof data.name === 'string' ? { name: data.name } : {}), ...(typeof data.file_size === 'number' ? { size: data.file_size } : {}) })
     }
   }
-  return { id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
+  return { senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }

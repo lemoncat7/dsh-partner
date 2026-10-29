@@ -47,7 +47,7 @@
 .dsh-partner-workspace .dsh-partner-qq-faces button[aria-pressed=true] { outline: 2px solid var(--partner-accent-strong); outline-offset: -2px; background: var(--partner-interaction-well); }
 .dsh-partner-qq-face-number { height: 32px; display: grid; place-items: center; color: var(--partner-text-secondary); font-variant-numeric: tabular-nums; }
 .dsh-partner-qq-feedback { padding: 12px 14px; margin: 18px 0 0; border-radius: 10px; background: var(--partner-interaction-well); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.dsh-partner-qq-save { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 14px 0 0; margin-top: 24px; border-top: 1px solid var(--partner-separator); background: var(--partner-solid-panel); }
+.dsh-partner-qq-save { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 14px 0 0; margin-top: 24px; border-top: 1px solid var(--partner-separator); background: transparent; }
 .dsh-partner-qq-save > span { margin-right: auto; font-size: 12px; color: var(--partner-text-secondary); }
 @media(max-width:480px) { .dsh-partner-workspace button.dsh-partner-qq-entry { padding: 12px 4px; gap: 10px; } .dsh-partner-qq-entry small { font-size: 11px; } .dsh-partner-qq-account { padding: 14px; } .dsh-partner-qq-save > span { flex-basis: 100%; } }
 /* Existing channel form rules use !important; scope these exceptions to QQ. */
@@ -62,3 +62,12 @@
 .dsh-partner-qq-catalog-info { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--partner-text-secondary); }
 .dsh-partner-qq-face-preview { display: grid; place-items: center; height: 32px; }
 .dsh-partner-qq-face-preview img:not([hidden]) + .dsh-partner-qq-face-number { display: none; }
+
+/* Match the actual host dialog surface; never paint an opaque white footer. */
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-save { position: static; background: transparent !important; box-shadow: none !important; padding: 18px 0 0; margin: 20px 0 0; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-save > span { margin: 0; line-height: 1.6; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-field { display: grid; gap: 9px; align-items: stretch; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-field > :is(input,select,textarea) { width: 100%; margin: 0; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-toggle { align-items: center; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-toggle > div { min-width: 48px; }
+@media(max-width:480px) { .dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-save { grid-template-columns: 1fr 1fr; } .dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-save > span { grid-column: 1/-1; } }

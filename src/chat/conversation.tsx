@@ -8,7 +8,7 @@ import { chatReplyFromEvent, type ChatReply } from './protocol.js'
  */
 export function nativeChatBlocks(reply: ChatReply, base = typeof document === 'undefined' ? undefined : document.baseURI): Array<{kind:'text';text:string}> {
   return reply.parts.map(part => ({kind:'text', text:part.type==='text' ? part.text
-    : `![${part.label.replace(/[\\\[\]]/g,'\\$&')}](${encodeURI(base ? new URL(part.url, base).href : part.url).replace(/[()]/g,c=>`%${c.charCodeAt(0).toString(16)}`)})`}))
+    : part.type==='emoji' ? (part.emoji.previewUrl ? `![${part.emoji.label.replace(/[\\\[\]]/g,'')}](${encodeURI(part.emoji.previewUrl).replace(/[()]/g,c=>`%${c.charCodeAt(0).toString(16)}`)})` : `[表情：${part.emoji.label}]`) : `![${part.label.replace(/[\\\[\]]/g,'\\$&')}](${encodeURI(base ? new URL(part.url, base).href : part.url).replace(/[()]/g,c=>`%${c.charCodeAt(0).toString(16)}`)})`}))
 }
 export const chatReplyDefinition:ConversationNodeDefinition<ChatReply>={
   kind:'partner-chat-reply',target:'chat',

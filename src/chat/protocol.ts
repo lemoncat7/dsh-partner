@@ -1,19 +1,20 @@
+import {validNativeEmoji,type NativeEmoji} from './sticker-adapter.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerOutboundAttachment, PartnerReply } from '../channel-message.js'
 
-export type ChatPart = { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
+export type ChatPart = {type:'emoji';emoji:NativeEmoji} | { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
 export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; originRouteId?: string | null }
 export function chatReplyFromEvent(event: SessionEvent): ChatReply | undefined {
   if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch') return
   if (!event.data || (event.type === 'tool/result' ? event.data.message?.isError : event.data.isError)) return
   const value = event.data.meta as unknown as ChatReply | undefined
   if (value?.kind !== 'partner-chat-v1' || !Array.isArray(value.parts) || !value.parts.length || value.parts.length > 8) return
-  if (!value.parts.every(p => p && typeof p === 'object' && (p.type === 'text' ? typeof p.text === 'string' && !!p.text.trim() : p.type === 'image' && p.attachment?.kind === 'image' && typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//') && typeof p.label === 'string'))) return
+  if (!value.parts.every(p => p && typeof p === 'object' && (p.type === 'text' ? typeof p.text === 'string' && !!p.text.trim() : p.type==='emoji'?validNativeEmoji(p.emoji):p.type === 'image' && p.attachment?.kind === 'image' && typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//') && typeof p.label === 'string'))) return
   return value
 }
 /** Legacy records keep text at 0 and attachments at 1+. New replies preserve authored order. */
-export function replyDeliveryParts(reply: PartnerReply): Array<{type:'text';text:string} | {type:'image';attachment:PartnerOutboundAttachment}> {
-  if (reply.chatParts?.length) return reply.chatParts.map(p => reply.attachmentPolicy === 'text-only' && p.type === 'image' ? {type:'text' as const,text:''} : p)
+export function replyDeliveryParts(reply: PartnerReply): Array<{type:'text';text:string} | {type:'image';attachment:PartnerOutboundAttachment} | {type:'emoji';emoji:NativeEmoji}> {
+  if (reply.chatParts?.length) return reply.chatParts.map(p => reply.attachmentPolicy === 'text-only' && p.type !== 'text' ? {type:'text' as const,text:''} : p)
   return [{type:'text',text:reply.text}, ...(reply.attachmentPolicy === 'text-only' ? [] : reply.attachments.map(attachment => ({type:'image' as const,attachment})))]
 }
 export function parseChatInput(raw: unknown): Array<{text:string} | {stickerId:string}> {

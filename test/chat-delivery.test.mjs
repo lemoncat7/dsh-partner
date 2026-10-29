@@ -186,3 +186,20 @@ test('mixed provider speech belongs only to its exact terminal call, never reaso
   const split=[{text:'来了，'},{text:'给你留着呢。'},...input]
   assert.deepEqual(withChatCompanionText(split,events,'chat-1'),split)
 })
+
+test('QQ origin selects native emoji without dropping text or creating a default sticker attachment',async()=>{
+ const {StickerAdapters}=await import('../lib/chat/sticker-adapter.js'),{qqStickerAdapter}=await import('../lib/channels/qq/sticker-adapter.js')
+ const channel={id:'qq',platform:'qq',accountId:'12345678',companionId:'a',enabled:true}
+ const route={id:'r',kind:'channel',channelId:'qq',userId:'22345678',sessionId:'s',companionId:'a',inboundMessageIds:['u']}
+ const state={channels:[channel],sessions:[route],companions:[{id:'a',characterCard:{enabled:true,stickersEnabled:true,segmentedReplies:true}}]}
+ const store={snapshot:()=>state,isCompanionRemoving:()=>false},library={list:async()=>[],image:async()=>assert.fail('must not load a default bitmap')}
+ const adapters=new StickerAdapters(library)
+ adapters.register('qq',c=>qqStickerAdapter(c,adapters.fallback,async()=>[{id:'14',name:'微笑',category:'QQ'}]))
+ let done=0
+ const tool=chatTools('a',store,library,{}, {},'/partner-local/v1',adapters)[1]
+ const outcome=await tool.execute({messages:[{text:'当然记得你'},{stickerId:'qq-face-14'}]},{signal:AbortSignal.timeout(2000),concludeTurn:()=>done++,agent:{session:{id:'s',snapshotEvents:()=>[start,user]}}})
+ assert.equal(done,1);assert.equal(outcome.originRouteId,'r');assert.deepEqual(outcome.parts.map(p=>p.type),['text','emoji'])
+ const projected=channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta:outcome}},end],0)
+ assert.match(projected.text,/当然记得你/);assert.equal(projected.chatParts[1].emoji.id,'14')
+ assert.equal(nativeChatBlocks(outcome)[0].text,'当然记得你')
+})

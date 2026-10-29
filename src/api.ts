@@ -455,7 +455,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     const id = segments[1]
     if(id&&segments[2]==='qq'&&segments.length===4) {
-      if(method==='GET'&&(segments[3]==='groups'||segments[3]==='faces'))return sendJson(res,200,await runtime.channels.qqDirectory(id,segments[3]))
+      if(method==='GET'&&(segments[3]==='groups'||segments[3]==='friends'||segments[3]==='faces'))return sendJson(res,200,await runtime.channels.qqDirectory(id,segments[3]))
       if(method==='POST'&&segments[3]==='connection') {
         mutation(req);const body=await readObject(req)
         if(typeof body.expectedUpdatedAt!=='number'||typeof body.testOnly!=='boolean')throw httpError(400,'连接参数无效')
@@ -470,8 +470,8 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       }
       if(method==='POST'&&segments[3]==='send') {
         mutation(req);const body=await readObject(req),userId=text(body.userId,'接收人',120)
-        if((body.text!==undefined)===(body.faceId!==undefined))throw httpError(400,'每次请选择发送文字或表情')
-        const input=body.faceId!==undefined?{faceId:text(body.faceId,'表情编号',6)}:{text:text(body.text,'消息',3000)}
+        if([body.text,body.faceId,body.customFaceId].filter(value=>value!==undefined).length!==1)throw httpError(400,'每次请选择发送文字或表情')
+        const input=body.customFaceId!==undefined?{customFaceId:text(body.customFaceId,'收藏表情标识',512)}:body.faceId!==undefined?{faceId:text(body.faceId,'表情编号',6)}:{text:text(body.text,'消息',3000)}
         await runtime.channels.sendManualQq(id,userId,input)
         return sendJson(res,200,{sent:true})
       }

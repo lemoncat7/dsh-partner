@@ -67,20 +67,80 @@ test('automatic history opt-out preserves explicit historical detail lookup and 
   assert.match((await memory.searchHistory('c','s','XK928'))[0].assistant,/琥珀橙/)
 })
 
-test('QQ group members get independent contexts; local and private routes still share the primary session',async()=>{
- const companion=createDefaultCompanion(),state={companions:[companion],channels:[{id:'qq',platform:'qq',companionId:companion.id}],sessions:[]}
- let merges=0
+function routingFixture(sessions=[]) {
+ const companion=createDefaultCompanion(),state={companions:[companion],channels:[{id:'qq',platform:'qq',companionId:companion.id}],sessions},calls=[]
  const runtime=Object.create(PartnerAgentRuntime.prototype)
- Object.assign(runtime,{ctx:{workspaceRegistry:{archivedSessionIds:[]}},defaultCwd:'/tmp/qq-context',store:{snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)},memory:{mergeScopes:async()=>{merges++}}})
+ Object.assign(runtime,{ctx:{workspaceRegistry:{archivedSessionIds:[]}},defaultCwd:'/tmp/qq-context',store:{snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,update:async fn=>{const draft=structuredClone(state);fn(draft);Object.assign(state,draft)}},memory:{mergeScopes:async(...args)=>calls.push(args)}})
+ return {companion,state,runtime,calls}
+}
+
+test('QQ defaults to one session per contact/group while sharing companion memory',async()=>{
+ const {runtime,companion,calls}=routingFixture()
  const group=await runtime.ensureSession(companion,'qq','group:99887766:12345678')
  const local=await runtime.ensureLocalSessionRecord(companion.id)
- assert.notEqual(local.sessionId,group.sessionId)
  const privateRoute=await runtime.ensureSession(companion,'qq','12345678')
- assert.equal(privateRoute.sessionId,local.sessionId)
- assert.equal(merges,1)
+ assert.notEqual(group.sessionId,local.sessionId);assert.notEqual(privateRoute.sessionId,local.sessionId);assert.notEqual(privateRoute.sessionId,group.sessionId)
  const sameGroup=await runtime.ensureSession(companion,'qq','group:99887766:12345678')
  assert.equal(sameGroup.sessionId,group.sessionId)
  const secondMember=await runtime.ensureSession(companion,'qq','group:99887766:22345678')
- assert.notEqual(secondMember.sessionId,group.sessionId);assert.notEqual(secondMember.sessionId,local.sessionId)
- assert.equal(merges,1)
+ assert.equal(secondMember.sessionId,group.sessionId)
+ const other=await runtime.ensureSession(companion,'qq','group:88776655:12345678')
+ assert.notEqual(other.sessionId,group.sessionId)
+ for(const route of [group,privateRoute,secondMember,other])assert.equal(route.memoryScopeId,'@local:owner:'+companion.id)
+ assert.equal(calls.length,4)
+})
+
+test('selected main-session peers share only after selection and resume separate history on deselection',async()=>{
+ const {runtime,companion,state}=routingFixture()
+ const group=await runtime.ensureSession(companion,'qq','group:99887766:12345678','群聊 · 测试群')
+ const member=await runtime.ensureSession(companion,'qq','group:99887766:22345678')
+ const local=await runtime.ensureLocalSessionRecord(companion.id)
+ state.channels[0].qq={mainSessionPeers:['group:99887766','private:12345678']}
+ const selected=await runtime.ensureSession(companion,'qq',group.userId)
+ assert.equal(selected.sessionId,local.sessionId);assert.equal(selected.id,group.id)
+ assert.equal(state.sessions.find(r=>r.id===member.id).sessionId,local.sessionId)
+ assert.equal((await runtime.ensureSession(companion,'qq','12345678')).sessionId,local.sessionId)
+ assert.notEqual((await runtime.ensureSession(companion,'qq','32345678')).sessionId,local.sessionId)
+ state.channels[0].qq.mainSessionPeers=[]
+ const restored=await runtime.ensureSession(companion,'qq',group.userId)
+ assert.equal(restored.sessionId,group.sessionId);assert.equal(restored.qqSessionTitle,'群聊 · 测试群')
+ assert.equal(state.sessions.find(r=>r.id===member.id).sessionId,group.sessionId)
+})
+
+test('upgrade keeps old separate group history and merges all member memories before sharing',async()=>{
+ const f=routingFixture(),{companion,state,runtime,calls}=f
+ const local={id:'local',kind:'local',companionId:companion.id,channelId:'@local',userId:'owner',sessionId:'session-main',lastMessageAt:1}
+ const group={id:'group-route',kind:'channel',companionId:companion.id,channelId:'qq',userId:'group:99887766:12345678',sessionId:'session-old-group',lastMessageAt:3}
+ state.sessions.push(local,group,{...group,id:'member',userId:'group:99887766:22345678',sessionId:'session-other',lastMessageAt:2})
+ await runtime.reconcileQqSessions()
+ const route=state.sessions.find(r=>r.id===group.id)
+ assert.equal(route.sessionId,group.sessionId);assert.equal(route.id,group.id)
+ assert.equal(state.sessions.find(r=>r.id==='member').sessionId,group.sessionId)
+ assert.deepEqual(calls,[[companion.id,'@local:owner',['qq:'+group.userId,'qq:group:99887766:22345678'],true]])
+})
+
+test('local main never adopts a QQ group context; archived separate sessions are replaced',async()=>{
+ const {runtime,companion,state}=routingFixture()
+ state.sessions.push({id:'old',kind:'channel',companionId:companion.id,channelId:'qq',userId:'group:99887766:12345678',sessionId:'session-group',lastMessageAt:1})
+ const local=await runtime.ensureLocalSessionRecord(companion.id)
+ assert.notEqual(local.sessionId,'session-group')
+ runtime.ctx.workspaceRegistry.archivedSessionIds=['session-group']
+ const replacement=await runtime.ensureSession(companion,'qq','group:99887766:12345678')
+ assert.notEqual(replacement.sessionId,'session-group');assert.notEqual(replacement.sessionId,local.sessionId)
+})
+
+test('session naming updates generated group names but preserves a manual title',async()=>{
+ const {runtime,companion,state}=routingFixture()
+ const route=await runtime.ensureSession(companion,'qq','group:99887766:12345678','群聊 · 朋友们')
+ let current;const titles=[]
+ runtime.ctx.get=()=>({get:()=>current,rename:(_,title)=>{titles.push(title);current={title,source:{kind:'user'}}}})
+ const agent={session:{id:route.sessionId}}
+ await runtime.nameQqSession(agent,route)
+ assert.deepEqual(titles,['群聊 · 朋友们'])
+ const renamed=await runtime.ensureSession(companion,'qq',route.userId,'群聊 · 新群名')
+ await runtime.nameQqSession(agent,renamed)
+ assert.equal(titles.at(-1),'群聊 · 新群名')
+ current={title:'我的自定义标题',source:{kind:'user'}}
+ await runtime.nameQqSession(agent,await runtime.ensureSession(companion,'qq',route.userId,'群聊 · 再次改名'))
+ assert.equal(titles.length,2)
 })

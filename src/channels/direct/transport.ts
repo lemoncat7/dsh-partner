@@ -12,7 +12,7 @@ import {matrixTimeline} from './matrix-timeline.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost' | 'qq'
 export interface DirectConfig { qq?: import('../qq/settings.js').QqSettings; platform: DirectPlatform; baseUrl: string; targetId: string }
-export interface DirectMessage { id: string; sender: string; text: string; targetId?: string; media?: DirectMedia[]; timestamp?: number }
+export interface DirectMessage { senderName?: string; qqGroup?: {groupId:string;userId:string;senderName:string;mentioned:boolean;autonomous:boolean}; id: string; sender: string; text: string; targetId?: string; media?: DirectMedia[]; timestamp?: number }
 export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
 export interface ChannelSender {
   sendText(userId: string, text: string, context: string | undefined, signal?: AbortSignal): Promise<void>
