@@ -122,19 +122,13 @@
 .dsh-partner-sticker-import-preview li { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 0; border-bottom: 1px solid var(--partner-border); overflow-wrap: anywhere; }
 .dsh-partner-sticker-import-preview span { color: var(--partner-text-secondary); }
 
-/* Relationship progression follows the existing host palette in both themes. */
-.dsh-partner-affection { padding: 20px 0 4px; min-width: 0; }
-.dsh-partner-affection-heading { display: flex; align-items: flex-start; gap: 24px; justify-content: space-between; }
-.dsh-partner-affection-heading > div:first-child { min-width: 0; }
-.dsh-partner-affection h4 { margin: 0 0 8px; font-size: 17px; }
-.dsh-partner-affection-heading p { color: var(--partner-text-secondary); }
-.dsh-partner-affection-score { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin-top: 18px; }
-.dsh-partner-affection-score > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 20px; }
-.dsh-partner-affection-level { font-size: 14px; font-weight: 600; }
-.dsh-partner-affection-score strong { font-size: 36px; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.dsh-partner-affection-score strong small, .dsh-partner-affection-score > span { font-size: 13px; font-weight: 400; color: var(--partner-text-secondary); }
-.dsh-partner-affection-track { height: 10px; background: var(--partner-control); border: 1px solid var(--partner-border); border-radius: 999px; overflow: hidden; margin: 16px 0 20px; }
+/* Compact relationship meter, directly beneath the role text. */
+.dsh-partner-affection { margin: 16px 0 24px; padding: 14px 16px; border-radius: 10px; background: var(--partner-control); min-width: 0; }
+.dsh-partner-affection-line { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; font-size: 13px; }
+.dsh-partner-affection-line > span:first-child { flex: 1; }
+.dsh-partner-affection-line strong { margin-left: 6px; font-variant-numeric: tabular-nums; }
+.dsh-partner-affection-line small, .dsh-partner-affection-caption { color: var(--partner-text-secondary); font-size: 12px; }
+.dsh-partner-affection-track { height: 6px; background: var(--partner-control); border: 1px solid var(--partner-border); border-radius: 999px; overflow: hidden; margin: 10px 0 6px; }
 .dsh-partner-affection-track > span { display: block; height: 100%; width: 100%; background: var(--partner-accent-strong); transform-origin: left center; transition: transform .3s ease; }
-.dsh-partner-affection-effect { padding: 16px 18px; border-left: 3px solid var(--partner-accent-strong); background: var(--partner-control); border-radius: 0 10px 10px 0; margin-bottom: 16px; }
-.dsh-partner-affection-effect p { margin: 6px 0 0; }
+.dsh-partner-affection-error { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) { .dsh-partner-affection-track > span { transition: none; } }

@@ -6,6 +6,8 @@ export interface QqLatencySample {
  outcome:'processing'|'replied'|'silent'|'steered'|'not-admitted'|'failed'
  beforeHandleMs?:number
  decisionMs?:number
+ decisionMethod?:'local'
+ decisionScore?:number
  agentMs?:number
  sendMs?:number
  totalMs?:number

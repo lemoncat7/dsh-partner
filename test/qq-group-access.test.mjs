@@ -102,18 +102,20 @@ test('private approval never grants non-whitelisted group access and whitelist r
  f.state.pairings.push({channelId:'qq',userId:f.peer,status:'approved',directTargetId:f.target});assert.equal(channelReplyAllowed(f.state,'qq',f.peer),true)
 })
 
-test('two rapid admitted messages are both judged even while the companion is busy; silence is a model choice',async()=>{
+test('two rapid admitted messages are both locally judged while busy, without a model request',async()=>{
  const f=fixture(),judged=[]
  Object.assign(f.state.companions[0],{name:'朋友',role:'朋友',instructions:'自然聊天'})
  f.agents.isCompanionBusy=()=>true
- f.manager.groupAutonomy=new QqGroupAutonomy({get:()=>({currentSelection:()=>({})}),llm:{async *stream(req){
-  judged.push(JSON.stringify(req.messages));yield {type:'text-delta',text:JSON.stringify({reply:judged.length===1})};yield {type:'finish',reason:{kind:'stop'}}
- }}},()=>100000)
- for(const [id,text] of [['first','刚刚在做什么'],['second','是不是']])await f.handle({...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}})
- assert.equal(judged.length,2);assert.match(judged[0],/刚刚在做什么/);assert.match(judged[1],/是不是/)
+ f.manager.groupAutonomy=new QqGroupAutonomy({get:()=>{throw Error('no model needed')}},()=>100000)
+ const decide=f.manager.groupAutonomy.shouldReply.bind(f.manager.groupAutonomy)
+ f.manager.groupAutonomy.shouldReply=async(...args)=>{judged.push(args[1].text);return decide(...args)}
+ for(const [id,text] of [['first','朋友，你刚刚在做什么'],['second','好的']])await f.handle({...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}})
+ assert.deepEqual(judged,['朋友，你刚刚在做什么','好的'])
  assert.equal(f.inputs.length,1);assert.equal(f.sent.length,1)
  assert.match(f.manager.groupAutonomy.status('qq').reason,/决定旁听/)
  assert.ok(f.state.recentReceipts.includes('qq:first'));assert.ok(f.state.recentReceipts.includes('qq:second'))
+ assert.equal(f.manager.qqLatency.view('qq')[0].decisionMethod,'local')
+ assert.equal(f.manager.qqLatency.view('qq')[1].decisionScore,0)
 })
 
 test('steered QQ supplement is consumed without sending a channel acknowledgement',async()=>{
@@ -123,4 +125,17 @@ test('steered QQ supplement is consumed without sending a channel acknowledgemen
  assert.equal(steered,1);assert.equal(f.inputs.length,0);assert.deepEqual(f.sent,[])
  assert.ok(f.state.recentReceipts.includes('qq:m'))
  assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'steered')
+})
+
+test('only delivered replies establish continuation; failed sends and revoked access do not',async()=>{
+ for(const mode of ['success','failed','revoked','silent']){
+  const f=fixture(),replied=[]
+  f.manager.groupAutonomy.replied=(...args)=>replied.push(args)
+  if(mode==='failed')f.api.sendText=async()=>{throw Error('send failed')}
+  if(mode==='revoked')f.agents.reply=async()=>{f.channel.qq.groupReplies=false;return {text:'late',attachments:[]}}
+  if(mode==='silent')f.setReply({text:'',attachments:[]})
+  if(mode==='failed'||mode==='revoked')await assert.rejects(f.handle())
+  else await f.handle()
+  assert.equal(replied.length,mode==='success'?1:0,mode)
+ }
 })

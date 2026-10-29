@@ -99,6 +99,16 @@ test('media URLs reject arbitrary hosts, credentials and local files',()=>{
 const group='99887766', groupUser=`group:${group}:${peer}`
 const groupEvent=(extra={})=>event({message_type:'group',sub_type:'normal',group_id:Number(group),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}],...extra})
 const groupSettings={replyVoiceEnabled:false,replyVoiceGroupId:'',identityBinding:{enabled:false,qqIds:[]},autonomousActions:false,enabledActions:[],qzoneVisibility:4,voiceCharacter:'',mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
+test('group scoring cues trust structured mentions and replies, never literal CQ strings',()=>{
+ const policy={...groupSettings,autonomousGroupIds:[group]}
+ const parse=message=>oneBotMessage(event({message_type:'group',group_id:Number(group),message}),bot,'',policy)
+ const quoted=parse([{type:'at',data:{qq:peer}},{type:'reply',data:{id:7}},{type:'text',data:{text:'你怎么看'}}])
+ assert.equal(quoted.qqGroup.otherMention,true);assert.equal(quoted.qqGroup.hasReply,true);assert.equal(quoted.qqGroup.mentioned,false)
+ const direct=parse([{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}])
+ assert.equal(direct.qqGroup.mentioned,true);assert.equal(direct.qqGroup.otherMention,undefined)
+ const literal=parse(`[CQ:at,qq=${bot}][CQ:reply,id=7]`)
+ assert.equal(literal.qqGroup.mentioned,false);assert.equal(literal.qqGroup.hasReply,undefined);assert.equal(literal.qqGroup.otherMention,undefined)
+})
 test('group intake is opt-in, allowlisted, requires real bot mention and rejects anonymous messages',()=>{
   assert.equal(oneBotMessage(groupEvent(),bot),undefined)
   const parsed=oneBotMessage(groupEvent(),bot,'',groupSettings)

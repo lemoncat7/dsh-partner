@@ -87,7 +87,7 @@ test('background memory does not prevent a real group autonomy decision',async()
  const f=fixture();f.state.recentReceipts=[];f.state.pairings=[{channelId:'qq',userId:'group:493531768:834426963',status:'approved'}]
  let judgments=0
  const manager=new ChannelManager({},f.store,{}, {isCompanionBusy:()=>true},'/tmp')
- manager.groupAutonomy={observe(){},shouldReply:async()=>{judgments++;return false},record:()=>{throw Error('busy should not suppress decision')}}
+ manager.groupAutonomy={status:()=>undefined,replied(){},observe(){},shouldReply:async()=>{judgments++;return false},record:()=>{throw Error('busy should not suppress decision')}}
  f.state.companions=[{id:'c'}];manager.rememberReceipts=async()=>{}
  await manager.handleDirect(f.channel,{}, {id:'e',sender:'group:493531768:834426963',text:'hello',qqGroup:{groupId:'493531768',autonomous:true,mentioned:false}},signal())
  assert.equal(judgments,1)
