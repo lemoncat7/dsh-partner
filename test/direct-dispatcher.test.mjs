@@ -104,3 +104,30 @@ test('question answers bypass the queue while a model turn is waiting', {timeout
   assert.ok(f.state.recentReceipts.includes('c:answer'))
   assert.equal(f.manager.pendingQuestions.size,0)
 })
+
+
+test('different QQ rooms prepare independently while the same room stays ordered',async()=>{
+  const controller=new AbortController(),events=[],gate=deferred()
+  const dispatcher=new DirectDispatcher(controller.signal,e=>assert.fail(e))
+  dispatcher.enqueue(['group-a'],'queue',async ready=>{events.push('a');await gate.promise;ready()},'group:1')
+  dispatcher.enqueue(['group-b'],'queue',async ready=>{events.push('b');ready()},'group:1')
+  dispatcher.enqueue(['private'],'queue',async ready=>{events.push('private');ready()},'private:2')
+  await tick();assert.deepEqual(events,['a','private']);assert.equal(dispatcher.has('group-b'),true)
+  gate.resolve();await dispatcher.drain();assert.deepEqual(events,['a','private','b']);assert.equal(dispatcher.lanes.size,0)
+})
+
+test('QQ hands a complete text/media event to the agent without waiting for another WS batch', {timeout:5000},async t=>{
+  const f=fixture('queue');f.channel.platform='qq';let calls=0
+  const handled=deferred()
+  t.mock.method(DirectTransport.prototype,'validate',async()=>({accountId:'bot',peerId:'peer'}))
+  t.mock.method(DirectTransport.prototype,'poll',async()=>{
+    if(++calls===1)return {cursor:'onebot-live',messages:[{id:'event',sender:'peer',text:'caption',media:[{source:'https://qpic.cn/image'}]}]}
+    await handled.promise;return {cursor:'onebot-live',messages:[]}
+  })
+  t.mock.method(DirectTransport.prototype,'receiveAttachments',async()=>[{kind:'image',name:'image.png',data:Buffer.from('image')}])
+  t.mock.method(DirectTransport.prototype,'sendText',async()=>{f.controller.abort();handled.resolve()})
+  t.mock.method(DirectTransport.prototype,'progress',()=>undefined)
+  f.agents.reply=async(_c,_channel,_peer,input)=>{assert.equal(input.text,'caption');assert.equal(input.attachments.length,1);return {text:'done',attachments:[]}}
+  await f.manager.directLoop(f.channel,f.controller.signal)
+  assert.ok(f.state.recentReceipts.includes('c:event'))
+})

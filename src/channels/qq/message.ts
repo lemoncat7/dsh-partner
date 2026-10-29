@@ -33,5 +33,5 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
       media.push({ source: typeof data.url === 'string' ? data.url : '', ...(typeof data.name === 'string' ? { name: data.name } : {}), ...(typeof data.file_size === 'number' ? { size: data.file_size } : {}) })
     }
   }
-  return { senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
+  return { ...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }

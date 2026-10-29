@@ -973,6 +973,8 @@ export class PartnerAgentRuntime {
 
   private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
     reportProgress(progress,'working')
+    const enteredAt=Date.now()
+    let submittedAt=enteredAt, modelEndedAt=enteredAt
     const session = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
@@ -997,15 +999,19 @@ export class PartnerAgentRuntime {
         source: { kind: 'user' },
       })
       await this.rememberMessageOrigin(session, userMessage.id)
+      submittedAt=Date.now()
       agent.followup(userMessage)
       await agent.whenIdle()
+      modelEndedAt=Date.now()
     } finally { detach() }
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
     await this.store.update(state => {
       for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()
     })
     if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
-    return prepareChannelReply(response, session.cwd ?? this.defaultCwd)
+    const reply=await prepareChannelReply(response, session.cwd ?? this.defaultCwd)
+    if(this.store.snapshot().channels.some(c=>c.id===channelId&&c.platform==='qq'))this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'agent',sessionId:session.sessionId,inputPrepMs:submittedAt-enteredAt,modelMs:modelEndedAt-submittedAt,afterModelMs:Date.now()-modelEndedAt})}`)
+    return reply
   }
 
   private async rememberMessageOrigin(route: ChannelSession, messageId: string): Promise<void> {

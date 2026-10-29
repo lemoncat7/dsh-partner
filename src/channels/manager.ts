@@ -826,7 +826,8 @@ export class ChannelManager {
     try { while(!signal.aborted) {
       try {
         const initial=await api.poll(cursor,signal)
-        const batch=await collectDirectBatch(initial,(next,lifetime)=>api.poll(next,lifetime,0),signal)
+        // OneBot sends text and media together in one event; Matrix needs lookahead.
+        const batch=channel.platform==='qq'?initial:await collectDirectBatch(initial,(next,lifetime)=>api.poll(next,lifetime,0),signal)
         if(signal.aborted)break
         if(batch.warning)roomWarning=batch.warning
         else if(batch.messages.length)roomWarning=undefined
@@ -846,19 +847,23 @@ export class ChannelManager {
             const mode=busyEnterMode(this.ctx.settings)
             if (channel.platform === 'matrix' || channel.platform === 'qq') await dispatcher.waitForCapacity()
             dispatcher.enqueue(group.map(item=>item.id),mode,async prepared=>{
+              const started=Date.now()
               await targetApi.validate(signal)
-              await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode)
-            })
+              const validated=Date.now()
+              try { await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode) }
+              finally { if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'dispatch',queueMs:message.receivedAt===undefined?undefined:started-message.receivedAt,validateMs:validated-started,totalMs:Date.now()-(message.receivedAt??started)})}`) }
+            },channel.platform==='qq'?(message.targetId||message.sender):'')
           }
           catch { throw new DirectDeliveryError() }
         }
         if(signal.aborted)break
         if(!dispatcher.busy)await this.store.update(state=>{
           const current=state.channels.find(c=>c.id===channel.id && c.enabled)
-          if(current?.direct)current.direct.cursor=batch.cursor
+          if(current?.direct&&current.direct.cursor!==batch.cursor)current.direct.cursor=batch.cursor
         })
         cursor=batch.cursor;failures=0
-        await delay(channel.platform==='mattermost'?(dispatcher.busy?1000:10_000):1000,signal)
+        // QQ read() sleeps until a WS event arrives; no extra polling delay.
+        if(channel.platform!=='qq')await delay(channel.platform==='mattermost'?(dispatcher.busy?1000:10_000):1000,signal)
       } catch(error) {
         if(signal.aborted)break
         if(error instanceof OneBotError && !error.retryable)throw error
@@ -934,12 +939,11 @@ export class ChannelManager {
       })
       await api.sendText(event.sender,`配对码：${pairingCode}\n请在「伙伴 → 渠道 → 配置」核对该码并批准联系人，然后重新发送消息。未批准前不会交给伙伴处理。`,undefined,signal)
     } else if(groupAccess||pairing?.status==='approved') {
-      await this.markInbound(channel.id,event.sender)
+      await this.markInbound(channel.id,event.sender,receipts)
       if(!text&&!mediaCount)await api.sendText(event.sender,'消息类型暂不支持；可发送文字、图片、文件、音频或视频。',undefined,signal)
       else {
         // Claim before starting tools. A delivery failure must not execute the same
         // user command twice on reconnect; its result remains in the DSH session.
-        await this.rememberReceipts(receipts)
         const companion=requiredCompanion(this.store,channel.companionId)
         const allowed=()=>{
           const state=this.store.snapshot()
@@ -978,9 +982,11 @@ export class ChannelManager {
         signal.throwIfAborted()
         progress?.start()
         if(progress)this.directReplyProgress.set(progressKey,progress)
+        const agentStarted=Date.now()
         const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},progress?.update)
         prepared()
         const reply=await pendingReply
+        const replyReady=Date.now()
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!allowed())throw new Error('渠道或联系人授权已撤销，取消回复')
@@ -997,6 +1003,7 @@ export class ChannelManager {
           await api.sendAttachment(event.sender,attachment,undefined,signal,allowed)
         }
         }
+        if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'reply',agentMs:replyReady-agentStarted,sendMs:Date.now()-replyReady})}`)
         } catch(error) {
           await progress?.fail()
           if(allowed()&&!signal.aborted)await api.sendText(event.sender,'本次消息处理或附件传输未完成，请在 DSH 查看错误。附件接收失败时未交给伙伴执行；请检查文件大小后重新发送。',undefined,signal).catch(()=>{})
@@ -1009,8 +1016,12 @@ export class ChannelManager {
     await this.rememberReceipts(receipts)
   }
 
-  private async markInbound(channelId: string, userId: string): Promise<void> {
-    await this.store.update(state=>{const p=state.pairings.find(p=>p.channelId===channelId&&p.userId===userId&&p.status==='approved');if(p)p.lastInboundAt=Date.now()})
+  private async markInbound(channelId: string, userId: string, receipts: string[] = []): Promise<void> {
+    await this.store.update(state=>{
+      const p=state.pairings.find(p=>p.channelId===channelId&&p.userId===userId&&p.status==='approved');if(p)p.lastInboundAt=Date.now()
+      for(const receipt of receipts)if(!state.recentReceipts.includes(receipt))state.recentReceipts.push(receipt)
+      if(state.recentReceipts.length>800)state.recentReceipts.splice(0,state.recentReceipts.length-800)
+    })
   }
 }
 

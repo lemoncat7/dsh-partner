@@ -69,7 +69,7 @@ export class OneBotConnection {
               this.fault = new OneBotError('QQ 消息积压超过 500 条，请检查处理状态后重新启用渠道', false)
               socket.close(); this.wake?.(); return
             }
-            this.events.push(data)
+            this.events.push({...data, _partnerReceivedAt: Date.now()})
             this.wake?.()
           }
         } catch {

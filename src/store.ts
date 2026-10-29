@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { createDefaultCompanion, DEFAULT_AUTOMATION, normalizeLegacyHeartbeatFocus, type PartnerState } from './domain.js'
 import { mergeBuiltinMarketSources } from './skills/markets/builtin.js'
 import type { CompanionCapability } from './capabilities.js'
@@ -79,6 +80,9 @@ export class PartnerStore {
       change(next)
       reconcileBoardContinuations(next)
       validateState(next)
+      // Polling and repeated receipts often produce no change. Do not fsync or
+      // notify observers for an identical state; actual commits stay durable.
+      if (isDeepStrictEqual(next, this.state)) { resolveResult(this.snapshot()); return }
       await this.persist(next)
       const previous = this.state
       this.state = next
