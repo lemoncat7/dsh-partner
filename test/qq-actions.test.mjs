@@ -127,3 +127,15 @@ test('single QQ entry discovers categories before bounded operation lists and in
  assert.ok(page.channels[0].actions.length<=20)
  assert.equal(f.requests.length,0)
 })
+
+test('QQ discovery and empty API acknowledgements satisfy DSH canonical JSON output contracts',async t=>{
+ const {Context}=await import('@deepseek-ai/cordis'),{ToolRuntime}=await import('@deepseek-ai/dsh-tools'),{createScope}=await import('@deepseek-ai/dsh-scope')
+ const root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
+ const f=fixture();f.channel.name='QQ';const agent={session:{id:'s',header:{}},options:{}},scope=createScope(root,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())
+ scope.ctx.tools.register(qqActionTools('c',f.store,async()=>undefined)[0])
+ let n=0
+ for(const args of [{action:'list'},{action:'list',category:'profile'},{action:'describe',operation:'send_qzone_msg'},{action:'describe',operation:'send_voice'},{action:'call',operation:'set_qq_profile',params:{nickname:'测试昵称'}}]){
+  const result=await root.tools.execute({callId:'qq-'+(++n),name:'partner_qq',arguments:args,agent,signal:signal()})
+  assert.equal(result.isError,false,JSON.stringify(result));if(args.action==='call')assert.equal(result.value.result,null)
+ }
+})

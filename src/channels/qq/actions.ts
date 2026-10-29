@@ -103,7 +103,7 @@ export function qqActionTools(owner:string,store:PartnerStore,call:QqActionCall)
   if(!action)throw Error('操作不受支持，请先 list')
   const guard=()=>{owned();exec.signal.throwIfAborted();const current=available().find(c=>c.id===channel.id);if(!current||current.updatedAt!==channel.updatedAt||!qqSettings(current.qq).enabledActions.includes(action.id))throw Error('渠道能力已关闭或配置已变化');return current}
   guard()
-  if(args.action==='describe')return {operation:action.id,description:action.description,effect:action.effect,parameters:action.schema,defaults:{qzoneVisibility:qqSettings(channel.qq).qzoneVisibility,voiceCharacter:qqSettings(channel.qq).voiceCharacter},media:action.media??[],targets:action.schema.properties?.group_id||action.schema.properties?.user_id||action.messageScope?{groups:qqSettings(channel.qq).groupReplies?qqSettings(channel.qq).groupIds:[],privatePeers:qqSettings(channel.qq).privateReplies?store.snapshot().pairings.filter(p=>p.channelId===channel.id&&p.status==='approved'&&!qqGroupPeer(p.userId)).map(p=>p.userId):[]}:undefined}
+  if(args.action==='describe')return {operation:action.id,description:action.description,effect:action.effect,parameters:action.schema,defaults:{qzoneVisibility:qqSettings(channel.qq).qzoneVisibility,voiceCharacter:qqSettings(channel.qq).voiceCharacter},media:action.media??[],...(action.schema.properties?.group_id||action.schema.properties?.user_id||action.messageScope?{targets:{groups:qqSettings(channel.qq).groupReplies?qqSettings(channel.qq).groupIds:[],privatePeers:qqSettings(channel.qq).privateReplies?store.snapshot().pairings.filter(p=>p.channelId===channel.id&&p.status==='approved'&&!qqGroupPeer(p.userId)).map(p=>p.userId):[]}}:{})}
   const params=structuredClone(args.params??{}),settings=qqSettings(channel.qq)
   if(action.id==='send_qzone_msg'&&params.ugc_right===undefined)params.ugc_right=settings.qzoneVisibility
   if(['send_group_ai_record','get_ai_record'].includes(action.id)&&params.character===undefined&&settings.voiceCharacter)params.character=settings.voiceCharacter
@@ -132,7 +132,7 @@ export function qqActionTools(owner:string,store:PartnerStore,call:QqActionCall)
    guarded()
    if(action.id==='get_group_list'&&Array.isArray(result))result=result.filter(g=>settings.groupIds.includes(String(g.group_id)))
    if(action.id==='get_friend_list'&&Array.isArray(result))result=result.filter(g=>store.snapshot().pairings.some(p=>p.channelId===channel.id&&p.userId===String(g.user_id)&&p.status==='approved'))
-   const safe=cleanResult(result),encoded=JSON.stringify(safe)
+   const safe=cleanResult(result)??null,encoded=JSON.stringify(safe)
    return {operation:action.id,status:'confirmed',result:encoded&&encoded.length>64000?{truncated:true,excerpt:encoded.slice(0,64000)}:safe}
   }catch(error){
    if(action.effect!=='read')await store.update(state=>{const receipt=state.channels.find(c=>c.id===channel.id)?.qqActivity?.find(r=>r.id===receiptId);if(receipt&&receipt.status!=='confirmed')receipt.status='unknown'})
