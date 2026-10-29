@@ -20,6 +20,7 @@ export interface CompanionView {
   automation: AutomationView
 }
 export interface ChannelView {
+  qq?: import('./channels/qq/settings.js').QqSettings
   platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
   direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean

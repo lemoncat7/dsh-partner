@@ -1,0 +1,64 @@
+/* Flat category navigation inside the existing workspace dialog. */
+.dsh-partner-workspace .dsh-partner-qq-settings { min-width: 0; color: var(--partner-text); padding: 2px 4px 12px; }
+.dsh-partner-qq-settings :is(strong,small) { display: block; }
+.dsh-partner-qq-settings small { color: var(--partner-text-secondary); font-size: 12px; line-height: 1.6; }
+.dsh-partner-qq-account { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px; border-radius: 16px; background: var(--partner-interaction-well); }
+.dsh-partner-qq-account > div { display: grid; gap: 4px; min-width: 0; }
+.dsh-partner-qq-account strong { font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.dsh-partner-qq-account span { font-size: 12px; color: var(--partner-text-secondary); }
+.dsh-partner-qq-section-label { margin: 24px 12px 8px; color: var(--partner-text-tertiary); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+.dsh-partner-workspace button.dsh-partner-qq-entry { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 12px; border: 0; border-bottom: 1px solid var(--partner-separator); border-radius: 0; background: transparent; box-shadow: none; color: var(--partner-text); text-align: left; }
+.dsh-partner-qq-entry > span:nth-child(2) { flex: 1; min-width: 0; }
+.dsh-partner-qq-entry strong { font-size: 14px; font-weight: 600; line-height: 1.6; }
+.dsh-partner-qq-entry small { margin-top: 3px; font-weight: 400; }
+.dsh-partner-qq-entry em { font-size: 11px; font-style: normal; color: var(--partner-text-secondary); white-space: nowrap; }
+.dsh-partner-qq-entry > span:last-child { color: var(--partner-text-tertiary); font-size: 22px; }
+.dsh-partner-qq-glyph { flex: 0 0 36px; height: 36px; display: grid; place-items: center; background: var(--partner-interaction-well); border-radius: 10px; color: var(--partner-text-secondary); }
+.dsh-partner-workspace button.dsh-partner-qq-entry:hover { background: var(--partner-hover); border-radius: 10px; }
+.dsh-partner-qq-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 22px; font-size: 13px; }
+.dsh-partner-workspace .dsh-partner-qq-breadcrumb button { background: transparent; box-shadow: none; border: 0; padding: 8px 0; color: var(--partner-text-secondary); }
+.dsh-partner-qq-pane { display: grid; gap: 20px; min-width: 0; }
+.dsh-partner-qq-hint { margin: 0; color: var(--partner-text-secondary); font-size: 12px; line-height: 1.8; }
+.dsh-partner-qq-field { display: grid; gap: 9px; min-width: 0; font-size: 13px; }
+.dsh-partner-qq-field :is(input,select,textarea) { width: 100%; }
+.dsh-partner-qq-toggle { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 18px 0; border-bottom: 1px solid var(--partner-separator); }
+.dsh-partner-qq-toggle > span { min-width: 0; }
+.dsh-partner-qq-toggle strong { font-size: 14px; margin-bottom: 6px; }
+.dsh-partner-qq-toggle > div { flex: none; display: grid; gap: 8px; justify-items: center; }
+.dsh-partner-qq-toggle > div small { font-size: 10px; }
+.dsh-partner-qq-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.dsh-partner-qq-actions > span { margin-right: auto; font-size: 12px; color: var(--partner-text-secondary); }
+.dsh-partner-qq-divider { border-top: 1px solid var(--partner-separator); }
+.dsh-partner-qq-advanced { padding-top: 16px; border-top: 1px solid var(--partner-separator); font-size: 12px; color: var(--partner-text-secondary); }
+.dsh-partner-qq-advanced summary { cursor: pointer; padding: 10px 0; }
+.dsh-partner-qq-options { display: grid; max-height: 340px; overflow-y: auto; }
+.dsh-partner-workspace .dsh-partner-qq-options > label, .dsh-partner-qq-person { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 12px 8px; border-bottom: 1px solid var(--partner-separator); box-sizing: border-box; }
+.dsh-partner-workspace .dsh-partner-qq-options input[type=checkbox] { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; accent-color: var(--partner-accent-strong); }
+.dsh-partner-qq-options strong { font-size: 13px; overflow-wrap: anywhere; }
+.dsh-partner-qq-person > span { flex: 1; min-width: 0; }
+.dsh-partner-qq-person code { display: inline-block; margin-top: 6px; letter-spacing: .08em; }
+.dsh-partner-qq-segments { display: flex; padding: 4px; gap: 4px; border-radius: 12px; background: var(--partner-interaction-well); }
+.dsh-partner-workspace .dsh-partner-qq-segments button { flex: 1; background: transparent; border-color: transparent; box-shadow: none; }
+.dsh-partner-workspace .dsh-partner-qq-segments button[aria-pressed=true] { background: var(--partner-solid-panel); color: var(--partner-text); border-color: var(--partner-border); }
+.dsh-partner-qq-faces { display: grid; grid-template-columns: repeat(auto-fill,minmax(76px,1fr)); gap: 8px; max-height: 280px; overflow-y: auto; padding: 3px; }
+.dsh-partner-workspace .dsh-partner-qq-faces button { display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 82px; padding: 8px 4px; font-size: 11px; }
+.dsh-partner-qq-faces img { width: 32px; height: 32px; object-fit: contain; }
+.dsh-partner-qq-faces button > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-partner-workspace .dsh-partner-qq-faces button[aria-pressed=true] { outline: 2px solid var(--partner-accent-strong); outline-offset: -2px; background: var(--partner-interaction-well); }
+.dsh-partner-qq-face-number { height: 32px; display: grid; place-items: center; color: var(--partner-text-secondary); font-variant-numeric: tabular-nums; }
+.dsh-partner-qq-feedback { padding: 12px 14px; margin: 18px 0 0; border-radius: 10px; background: var(--partner-interaction-well); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.dsh-partner-qq-save { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 14px 0 0; margin-top: 24px; border-top: 1px solid var(--partner-separator); background: var(--partner-solid-panel); }
+.dsh-partner-qq-save > span { margin-right: auto; font-size: 12px; color: var(--partner-text-secondary); }
+@media(max-width:480px) { .dsh-partner-workspace button.dsh-partner-qq-entry { padding: 12px 4px; gap: 10px; } .dsh-partner-qq-entry small { font-size: 11px; } .dsh-partner-qq-account { padding: 14px; } .dsh-partner-qq-save > span { flex-basis: 100%; } }
+/* Existing channel form rules use !important; scope these exceptions to QQ. */
+.dsh-partner-workspace #dsh-partner-channels button.dsh-partner-qq-entry { display: flex; gap: 12px; justify-content: flex-start; padding: 14px 10px !important; border: 0 !important; border-bottom: 1px solid var(--partner-separator) !important; border-radius: 0 !important; background: transparent !important; }
+.dsh-partner-workspace #dsh-partner-channels button.dsh-partner-qq-entry:hover { background: var(--partner-hover) !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-breadcrumb button { padding: 8px 0 !important; border: 0 !important; background: transparent !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-options input[type=checkbox] { appearance: auto !important; width: 18px !important; height: 18px !important; min-height: 18px !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-segments button { background: transparent !important; border-color: transparent !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-segments button[aria-pressed=true] { background: var(--partner-solid-panel) !important; border-color: var(--partner-border) !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-faces button { display: grid; gap: 8px; padding: 8px 4px !important; font-size: 11px !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-qq-faces button[aria-pressed=true] { background: var(--partner-interaction-well) !important; }
+.dsh-partner-qq-catalog-info { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--partner-text-secondary); }
+.dsh-partner-qq-face-preview { display: grid; place-items: center; height: 32px; }
+.dsh-partner-qq-face-preview img:not([hidden]) + .dsh-partner-qq-face-number { display: none; }

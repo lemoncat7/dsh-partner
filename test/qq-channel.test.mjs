@@ -94,3 +94,88 @@ test('media URLs reject arbitrary hosts, credentials and local files',()=>{
   assert.equal(qqMediaUrl('https://multimedia.nt.qq.com/x').hostname,'multimedia.nt.qq.com')
   for(const url of ['file:///etc/passwd','http://127.0.0.1:5099/x','https://gchat.qpic.cn.evil.example/x','https://u:p@gchat.qpic.cn/x','https://qq.com/x'])assert.throws(()=>qqMediaUrl(url))
 })
+
+const group='99887766', groupUser=`group:${group}:${peer}`
+const groupEvent=(extra={})=>event({message_type:'group',sub_type:'normal',group_id:Number(group),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}],...extra})
+const groupSettings={privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
+test('group intake is opt-in, allowlisted, requires real bot mention and rejects anonymous messages',()=>{
+  assert.equal(oneBotMessage(groupEvent(),bot),undefined)
+  const parsed=oneBotMessage(groupEvent(),bot,'',groupSettings)
+  assert.equal(parsed.sender,groupUser);assert.equal(parsed.targetId,`group:${group}`)
+  assert.notEqual(parsed.id,oneBotMessage(event(),bot).id)
+  for(const patch of [{group_id:11223344},{anonymous:{id:1}},{message:[{type:'at',data:{qq:'all'}}]},{message:'[CQ:at,qq='+bot+']'}, {message:[{type:'text',data:{text:'@'+bot}}]}])assert.equal(oneBotMessage(groupEvent(patch),bot,'',groupSettings),undefined)
+  assert.ok(oneBotMessage(groupEvent({message:'没有 @'}),bot,'',{...groupSettings,groupTrigger:'all'}))
+  assert.equal(oneBotMessage(event(),bot,'',{...groupSettings,privateReplies:false}),undefined)
+  assert.equal(oneBotMessage(groupEvent(),bot,peer,groupSettings),undefined)
+})
+test('group text, image and native face use group API; member and group permissions checked before send',async t=>{
+  let joined=true,member=true
+  const s=await server(t,r=>r.action==='get_group_list'?(joined?[{group_id:Number(group)}]:[]):r.action==='get_group_member_info'?{group_id:Number(group),user_id:member?Number(peer):999999}:undefined)
+  const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:'',qq:groupSettings},'secret',{accountId:bot,peerId:''});t.after(()=>api.close())
+  const target=api.forTarget(`group:${group}`,{accountId:bot,peerId:groupUser})
+  await target.sendText(groupUser,'群回复',undefined)
+  let sent=s.requests.at(-1);assert.equal(sent.action,'send_group_msg');assert.equal(sent.params.group_id,Number(group));assert.equal(sent.params.user_id,undefined)
+  assert.deepEqual(sent.params.message[0],{type:'at',data:{qq:peer}})
+  await target.onebot.sendFace(groupUser,'14',AbortSignal.timeout(2000),()=>{})
+  assert.deepEqual(s.requests.at(-1).params.message.at(-1),{type:'face',data:{id:'14'}})
+  const dir=await mkdtemp(join(tmpdir(),'qq-group-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+  const path=join(dir,'face.png');await writeFile(path,Buffer.from([137,80,78,71,13,10,26,10,0]))
+  await target.sendAttachment(groupUser,{path,name:'face.png',mediaType:'image/png',kind:'image'},undefined)
+  assert.equal(s.requests.at(-1).action,'send_group_msg');assert.equal(s.requests.at(-1).params.message[0].type,'image')
+  const count=s.requests.filter(r=>r.action==='send_group_msg').length
+  member=false;await assert.rejects(target.sendText(groupUser,'no',undefined),/成员/)
+  member=true;joined=false;await assert.rejects(target.sendText(groupUser,'no',undefined),/不在目标群/)
+  assert.equal(s.requests.filter(r=>r.action==='send_group_msg').length,count)
+})
+test('media and private reply switches block sends and revoked authorization blocks after identity lookup',async t=>{
+  const s=await server(t)
+  const create=qq=>{const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:peer,qq},'secret',{accountId:bot,peerId:peer});t.after(()=>api.close());return api}
+  await assert.rejects(create({...groupSettings,privateReplies:false}).sendText(peer,'no',undefined),/私聊回复已关闭/)
+  await assert.rejects(create({...groupSettings,facesEnabled:false}).onebot.sendFace(peer,'14',AbortSignal.timeout(2000),()=>{}),/表情发送已关闭/)
+  const dir=await mkdtemp(join(tmpdir(),'qq-policy-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+  const path=join(dir,'face.png');await writeFile(path,Buffer.from([137,80,78,71,13,10,26,10,0]))
+  await assert.rejects(create({...groupSettings,imagesEnabled:false}).sendAttachment(peer,{path,name:'face.png',mediaType:'image/png',kind:'image'},undefined),/图片与表情包发送已关闭/)
+  await assert.rejects(create(groupSettings).onebot.sendText(peer,'no',AbortSignal.timeout(2000),()=>{throw Error('revoked')}),/revoked/)
+  assert.equal(s.requests.filter(r=>r.action.startsWith('send_')).length,0)
+})
+test('settings reject malformed switches and IDs, deduplicate groups, discard unknown fields',async()=>{
+  const {parseQqSettings,qqSettings}=await import('../lib/channels/qq/settings.js')
+  assert.equal(qqSettings().groupReplies,false);assert.equal(qqSettings().privateReplies,true)
+  assert.deepEqual(parseQqSettings({...groupSettings,groupIds:[group,group],unknown:'x'}),groupSettings)
+  for(const patch of [{groupIds:['x']},{groupIds:Array(101).fill(group)},{groupTrigger:'random'},{privateReplies:'true'}])assert.throws(()=>parseQqSettings({...groupSettings,...patch}))
+})
+test('face catalog uses actual QQ image URLs, replaces ZIP previews with catalog CDN codes and excludes invalid entries',async()=>{
+ const {qqFaceCatalog}=await import('../lib/channels/qq/catalog.js')
+ const faces=qqFaceCatalog({packs:[{pack_name:'经典表情',emojis:[{q_sid:'14',q_des:'/微笑',em_code:'100',url:'https://wa.qq.com/qgif/14.zip'},{q_sid:'14',em_code:'999'},{q_sid:'1',url:'https://gchat.qpic.cn/1.png'},{q_sid:'2',url:'https://evil.example/secret.png'},{q_sid:'3',url:'https://user:secret@gchat.qpic.cn/1.png'},{q_sid:'😀',q_des:'unicode'}]}]})
+ assert.equal(faces.length,4)
+ assert.equal(faces[0].image,'https://qzonestyle.gtimg.cn/qzone/em/e100.gif')
+ assert.equal(faces[1].image,'https://gchat.qpic.cn/1.png')
+ assert.equal(faces[2].image,undefined);assert.equal(faces[3].image,undefined)
+ assert.deepEqual(qqFaceCatalog(null),[])
+})
+test('QQ settings commit restarts only the affected enabled channel and stale edits are rejected',async()=>{
+ const {ChannelManager}=await import('../lib/channels/manager.js')
+ let state={channels:[{id:'qq',platform:'qq',enabled:true,updatedAt:1}]},stops=0,starts=0
+ const store={snapshot:()=>structuredClone(state),update:async fn=>{const draft=structuredClone(state);fn(draft);state=draft}}
+ const manager=new ChannelManager({},store,{}, {},'/tmp')
+ manager.stop=async()=>{stops++};manager.start=async()=>{starts++}
+ await manager.updateQq('qq',groupSettings,1)
+ assert.deepEqual(state.channels[0].qq,groupSettings);assert.equal(stops,1);assert.equal(starts,1)
+ await assert.rejects(manager.updateQq('qq',groupSettings,1),/配置已变化/)
+ assert.equal(stops,1)
+ state.channels[0].enabled=false
+ await manager.updateQq('qq',{...groupSettings,groupReplies:false},state.channels[0].updatedAt)
+ assert.equal(starts,1)
+})
+test('QQ connection validation preserves token, checks identity and rolls credentials back when saving fails',async t=>{
+ const {ChannelManager}=await import('../lib/channels/manager.js')
+ const s=await server(t)
+ const state={channels:[{id:'qq',platform:'qq',enabled:true,accountId:bot,updatedAt:1,direct:{baseUrl:'ws://old:3001',targetId:''}}]}
+ let credential={baseUrl:'ws://old:3001',botToken:'original'},writes=0,starts=0
+ const manager=new ChannelManager({}, {snapshot:()=>structuredClone(state),update:async()=>{throw Error('disk full')}},{read:async()=>({...credential}),write:async(id,value)=>{credential={...value};writes++}}, {},'/tmp')
+ manager.stop=async()=>{};manager.start=async()=>{starts++}
+ await manager.updateQqConnection('qq',{baseUrl:s.url,botToken:'',testOnly:true,expectedUpdatedAt:1})
+ assert.equal(writes,0);assert.equal(s.connections[0].token,'original')
+ await assert.rejects(manager.updateQqConnection('qq',{baseUrl:s.url,botToken:'new',testOnly:false,expectedUpdatedAt:1}),/disk full/)
+ assert.equal(credential.botToken,'original');assert.equal(credential.baseUrl,'ws://old:3001');assert.equal(starts,1)
+})

@@ -11,7 +11,7 @@ import { matrixMessage } from './message.js'
 import {matrixTimeline} from './matrix-timeline.js'
 
 export type DirectPlatform = 'matrix' | 'mattermost' | 'qq'
-export interface DirectConfig { platform: DirectPlatform; baseUrl: string; targetId: string }
+export interface DirectConfig { qq?: import('../qq/settings.js').QqSettings; platform: DirectPlatform; baseUrl: string; targetId: string }
 export interface DirectMessage { id: string; sender: string; text: string; targetId?: string; media?: DirectMedia[]; timestamp?: number }
 export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
 export interface ChannelSender {
@@ -38,6 +38,7 @@ export class DirectTransport implements ChannelSender {
   constructor(readonly config: DirectConfig, private readonly token: string, private readonly expected?: {accountId: string; peerId: string}, private readonly authorize?: () => void, connection?: OneBotConnection) {
     if (config.platform === 'qq') this.qq = new OneBotTransport(config, token, expected, connection)
   }
+  get onebot(): OneBotTransport | undefined { return this.qq }
   forTarget(targetId: string, expected: {accountId: string; peerId: string}, authorize?: () => void): DirectTransport {
     return new DirectTransport({...this.config,targetId},this.token,expected,authorize,this.qq?.connection)
   }

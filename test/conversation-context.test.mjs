@@ -66,3 +66,21 @@ test('automatic history opt-out preserves explicit historical detail lookup and 
   assert.equal((await memory.recallContext('c','s','XK928')).history[0].id,'old')
   assert.match((await memory.searchHistory('c','s','XK928'))[0].assistant,/琥珀橙/)
 })
+
+test('QQ group members get independent contexts; local and private routes still share the primary session',async()=>{
+ const companion=createDefaultCompanion(),state={companions:[companion],channels:[{id:'qq',platform:'qq',companionId:companion.id}],sessions:[]}
+ let merges=0
+ const runtime=Object.create(PartnerAgentRuntime.prototype)
+ Object.assign(runtime,{ctx:{workspaceRegistry:{archivedSessionIds:[]}},defaultCwd:'/tmp/qq-context',store:{snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)},memory:{mergeScopes:async()=>{merges++}}})
+ const group=await runtime.ensureSession(companion,'qq','group:99887766:12345678')
+ const local=await runtime.ensureLocalSessionRecord(companion.id)
+ assert.notEqual(local.sessionId,group.sessionId)
+ const privateRoute=await runtime.ensureSession(companion,'qq','12345678')
+ assert.equal(privateRoute.sessionId,local.sessionId)
+ assert.equal(merges,1)
+ const sameGroup=await runtime.ensureSession(companion,'qq','group:99887766:12345678')
+ assert.equal(sameGroup.sessionId,group.sessionId)
+ const secondMember=await runtime.ensureSession(companion,'qq','group:99887766:22345678')
+ assert.notEqual(secondMember.sessionId,group.sessionId);assert.notEqual(secondMember.sessionId,local.sessionId)
+ assert.equal(merges,1)
+})

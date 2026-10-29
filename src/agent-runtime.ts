@@ -1,3 +1,4 @@
+import { qqGroupRoute } from './channels/qq/settings.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
 import { questionOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
@@ -297,7 +298,7 @@ export class PartnerAgentRuntime {
       // If there was no local conversation, continue the newest existing channel
       // conversation. Do not concatenate unrelated historical transcripts.
       if(!existing) {
-        const previous=state.sessions.filter(item=>item.companionId===companion.id&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds)).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)[0]
+        const previous=state.sessions.filter(item=>!qqGroupRoute(item,state.channels)&&item.companionId===companion.id&&canReuseSession(item,companion.id,this.ctx.workspaceRegistry.archivedSessionIds)).sort((a,b)=>b.lastMessageAt-a.lastMessageAt)[0]
         if(previous){route.sessionId=previous.sessionId;if(previous.cwd)route.cwd=previous.cwd}
       }
       state.sessions = state.sessions.filter(item => !(item.companionId === companion.id && item.kind === 'local'))
@@ -968,6 +969,17 @@ export class PartnerAgentRuntime {
   }
 
   private async ensureSession(companion: Companion, channelId: string, userId: string): Promise<ChannelSession> {
+    if(qqGroupRoute({channelId,userId},this.store.snapshot().channels)) {
+      const existing=this.store.snapshot().sessions.find(r=>r.channelId===channelId&&r.userId===userId&&canReuseSession(r,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))
+      if(existing)return existing
+      const route:ChannelSession={id:`route-${randomUUID()}`,kind:'channel',channelId,userId,companionId:companion.id,sessionId:`session-${randomUUID()}`,cwd:partnerCwd(this.defaultCwd,companion.id),lastMessageAt:Date.now()}
+      await this.store.update(state=>{
+        const concurrent=state.sessions.find(r=>r.channelId===channelId&&r.userId===userId&&canReuseSession(r,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))
+        if(concurrent){Object.assign(route,concurrent);return}
+        state.sessions=state.sessions.filter(r=>!(r.channelId===channelId&&r.userId===userId));state.sessions.push(route)
+      })
+      return route
+    }
     const primary=await this.ensureLocalSessionRecord(companion.id)
     const existing = this.store.snapshot().sessions.find(item => item.channelId === channelId && item.userId === userId)
     if (existing !== undefined && existing.sessionId===primary.sessionId && canReuseSession(existing, companion.id, this.ctx.workspaceRegistry.archivedSessionIds)) return existing

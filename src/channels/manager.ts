@@ -1,3 +1,5 @@
+import { qqFaceCatalog } from './qq/catalog.js'
+import { parseQqSettings, qqPeerLabel, validQqId } from './qq/settings.js'
 import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
@@ -10,7 +12,7 @@ import { PartnerCredentialVault } from '../credentials.js'
 import { PartnerAgentRuntime } from '../agent-runtime.js'
 import { WeixinApi } from './weixin/api.js'
 import { pollWeixin } from './weixin/poll.js'
-import { DirectTransport, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
+import { DirectTransport, directConfig, ChannelHttpError, type ChannelSender, type DirectMessage } from './direct/transport.js'
 import { collectDirectBatch, groupDirectMessages } from './direct/inbound-batch.js'
 import { DirectDispatcher } from './direct/dispatcher.js'
 import {matrixTransientFailure} from './direct/retry-policy.js'
@@ -87,6 +89,84 @@ export class ChannelManager {
 
   attachQuestionAnswerer(agentCtx: Context, route: ChannelSession): () => void {
     return agentCtx.on('user-questions/request', (request, next) => this.askThroughChannel(route, request, next), { prepend: true })
+  }
+
+  private readonly qqEdits = new Set<string>()
+  private async editQq(channelId:string,action:()=>Promise<void>):Promise<void> {
+    if(this.qqEdits.has(channelId))throw Error('QQ 配置正在保存，请稍后重试')
+    this.qqEdits.add(channelId)
+    try {await action()} finally {this.qqEdits.delete(channelId)}
+  }
+  async updateQqConnection(channelId:string,input:{baseUrl:string;botToken?:string;testOnly:boolean;expectedUpdatedAt:number}):Promise<void> {
+    return this.editQq(channelId,()=>this.saveQqConnection(channelId,input))
+  }
+  private async saveQqConnection(channelId:string,input:{baseUrl:string;botToken?:string;testOnly:boolean;expectedUpdatedAt:number}):Promise<void> {
+    const channel=requiredChannel(this.store,channelId)
+    if(channel.platform!=='qq'||!channel.direct)throw Error('不是 QQ 渠道')
+    if(channel.updatedAt!==input.expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
+    const previous=await this.credentials.read(channelId)
+    const config=directConfig({platform:'qq',baseUrl:input.baseUrl,targetId:''})
+    const credential={baseUrl:config.baseUrl,botToken:input.botToken?.trim()||previous.botToken}
+    const probe=new DirectTransport(config,credential.botToken,{accountId:channel.accountId,peerId:''})
+    try { await probe.validate() } finally { probe.close() }
+    if(input.testOnly)return
+    await this.stop(channelId)
+    try {
+      await this.credentials.write(channelId,credential)
+      try { await this.store.update(state=>{
+        const current=state.channels.find(c=>c.id===channelId)
+        if(!current?.direct||current.updatedAt!==input.expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
+        current.direct.baseUrl=config.baseUrl;current.updatedAt=Date.now()
+      }) } catch(error){await this.credentials.write(channelId,previous);throw error}
+    } finally { if(this.store.snapshot().channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
+  }
+
+  async updateQq(channelId:string,value:unknown,expectedUpdatedAt:number):Promise<void> {
+    return this.editQq(channelId,()=>this.saveQqSettings(channelId,value,expectedUpdatedAt))
+  }
+  private async saveQqSettings(channelId:string, value:unknown, expectedUpdatedAt:number):Promise<void> {
+    const settings=parseQqSettings(value),channel=requiredChannel(this.store,channelId)
+    if(channel.platform!=='qq')throw Error('不是 QQ 渠道')
+    if(channel.updatedAt!==expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
+    await this.stop(channelId)
+    try { await this.store.update(state=>{
+      const current=state.channels.find(c=>c.id===channelId)
+      if(!current||current.updatedAt!==expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
+      current.qq=settings;current.updatedAt=Date.now()
+    }) } finally { if(this.store.snapshot().channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
+  }
+
+  async qqDirectory(channelId:string,kind:'groups'|'faces'):Promise<unknown> {
+    const channel=requiredChannel(this.store,channelId)
+    if(channel.platform!=='qq'||!channel.direct)throw Error('不是 QQ 渠道')
+    const credential=await this.credentials.read(channelId)
+    const api=new DirectTransport({platform:'qq',baseUrl:credential.baseUrl,targetId:''},credential.botToken,{accountId:channel.accountId,peerId:''})
+    try {
+      await api.validate()
+      const result=await api.onebot!.connection.call(kind==='groups'?'get_group_list':'fetch_sys_faces',{})
+      if(kind==='groups')return {groups:Array.isArray(result)?result.filter(g=>g&&validQqId(String(g.group_id))).slice(0,1000).map(g=>({id:String(g.group_id),name:String(g.group_name??g.group_id).slice(0,120)})):[]}
+      return {faces:qqFaceCatalog(result)}
+    } finally { api.close() }
+  }
+
+  async sendManualQq(channelId:string,userId:string,input:{text?:string;faceId?:string}):Promise<void> {
+    const channel=requiredChannel(this.store,channelId)
+    if(channel.platform!=='qq'||!channel.enabled)throw Error('QQ 渠道未启用')
+    const guard=()=>{
+      const state=this.store.snapshot(),current=state.channels.find(c=>c.id===channelId)
+      if(!current?.enabled||current.updatedAt!==channel.updatedAt||!state.pairings.some(p=>p.channelId===channelId&&p.userId===userId&&p.status==='approved'))throw Error('渠道设置或接收人授权已变化')
+    }
+    guard()
+    const credential=await this.credentials.read(channelId),sender=this.sender(channel,credential,userId)
+    const signal=AbortSignal.timeout(30000)
+    if(input.faceId) {
+      if(!(sender instanceof DirectTransport)||!sender.onebot)throw Error('QQ 连接未就绪')
+      await sender.onebot.sendFace(userId,input.faceId,signal,guard)
+    } else if(input.text?.trim()) {
+      if(!(sender instanceof DirectTransport)||!sender.onebot)throw Error('QQ 连接未就绪')
+      await sender.onebot.sendText(userId,input.text,signal,guard)
+    }
+    else throw Error('请填写文字或选择表情')
   }
 
   async views(): Promise<ChannelView[]> {
@@ -645,7 +725,7 @@ export class ChannelManager {
   private async directLoop(channel: WeixinChannel, outerSignal: AbortSignal): Promise<void> {
     if (!channel.direct || !channel.platform || channel.platform==='weixin') throw new Error('渠道配置无效')
     const credential = await this.credentials.read(channel.id)
-    const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
+    const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId,...(channel.qq?{qq:channel.qq}:{})},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
     this.directTransports.set(channel.id,api)
     const failure=new AbortController()
     const signal=AbortSignal.any([outerSignal,failure.signal])
@@ -733,7 +813,7 @@ export class ChannelManager {
       const pairingCode=randomBytes(4).toString('hex').toUpperCase()
       await this.store.update(state=>{
         if(state.pairings.filter(p=>p.channelId===channel.id).length>=100)throw new Error('配对请求已达上限，请在面板清理')
-        if(!state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender))state.pairings.push({id:`pairing-${randomBytes(10).toString('hex')}`,channelId:channel.id,userId:event.sender,displayName:event.sender,directTargetId:event.targetId||channel.direct?.targetId||'',pairingCode,status:'pending',createdAt:now,updatedAt:now})
+        if(!state.pairings.some(p=>p.channelId===channel.id&&p.userId===event.sender))state.pairings.push({id:`pairing-${randomBytes(10).toString('hex')}`,channelId:channel.id,userId:event.sender,displayName:channel.platform==='qq'?qqPeerLabel(event.sender):event.sender,directTargetId:event.targetId||channel.direct?.targetId||'',pairingCode,status:'pending',createdAt:now,updatedAt:now})
       })
       await api.sendText(event.sender,`配对码：${pairingCode}\n请在「伙伴 → 渠道 → 配置」核对该码并批准联系人，然后重新发送消息。未批准前不会交给伙伴处理。`,undefined,signal)
     } else if(pairing.status==='approved') {

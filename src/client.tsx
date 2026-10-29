@@ -43,6 +43,7 @@ import { ChannelsPanel } from './ui/channels-panel.js'
 import { useChannelStatus } from './ui/use-channel-status.js'
 import identityCssText from './ui/identity-editor.css'
 import characterCssText from './ui/character-editor.css'
+import qqChannelCssText from './ui/qq-channel-settings.css'
 import formSurfaceCssText from './ui/form-surface.css'
 import interactionThemeCssText from './ui/interaction-theme.css'
 import controlSurfacesCssText from './ui/control-surfaces.css'
@@ -56,7 +57,7 @@ import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns'

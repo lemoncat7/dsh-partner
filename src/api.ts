@@ -454,6 +454,28 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       } finally { adapter.close() }
     }
     const id = segments[1]
+    if(id&&segments[2]==='qq'&&segments.length===4) {
+      if(method==='GET'&&(segments[3]==='groups'||segments[3]==='faces'))return sendJson(res,200,await runtime.channels.qqDirectory(id,segments[3]))
+      if(method==='POST'&&segments[3]==='connection') {
+        mutation(req);const body=await readObject(req)
+        if(typeof body.expectedUpdatedAt!=='number'||typeof body.testOnly!=='boolean')throw httpError(400,'连接参数无效')
+        await runtime.channels.updateQqConnection(id,{baseUrl:text(body.baseUrl,'WS 地址',2000),...(body.botToken?{botToken:text(body.botToken,'WS Token',8192)}:{}),testOnly:body.testOnly,expectedUpdatedAt:body.expectedUpdatedAt})
+        return sendJson(res,200,{ok:true})
+      }
+      if(method==='POST'&&segments[3]==='settings') {
+        mutation(req);const body=await readObject(req)
+        if(typeof body.expectedUpdatedAt!=='number')throw httpError(400,'缺少配置版本，请刷新重试')
+        await runtime.channels.updateQq(id,body.settings,body.expectedUpdatedAt)
+        return sendJson(res,200,{ok:true})
+      }
+      if(method==='POST'&&segments[3]==='send') {
+        mutation(req);const body=await readObject(req),userId=text(body.userId,'接收人',120)
+        if((body.text!==undefined)===(body.faceId!==undefined))throw httpError(400,'每次请选择发送文字或表情')
+        const input=body.faceId!==undefined?{faceId:text(body.faceId,'表情编号',6)}:{text:text(body.text,'消息',3000)}
+        await runtime.channels.sendManualQq(id,userId,input)
+        return sendJson(res,200,{sent:true})
+      }
+    }
     if (id !== undefined && method === 'POST' && segments[2] === 'enabled' && segments.length === 3) {
       mutation(req)
       const body = await readObject(req)

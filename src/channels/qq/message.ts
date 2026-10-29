@@ -1,16 +1,24 @@
+import { qqSettings, validQqId, type QqSettings } from './settings.js'
 import type { DirectMessage } from '../direct/transport.js'
 import type { DirectMedia } from '../direct/media.js'
 
 export function qqId(value: unknown): string | undefined {
   const id = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value : ''
-  return /^[1-9]\d{4,15}$/.test(id) ? id : undefined
+  return validQqId(id) ? id : undefined
 }
 
 /** Never interpret raw CQ text as an instruction to send or fetch a resource. */
-export function oneBotMessage(raw: any, accountId: string, targetId = ''): DirectMessage | undefined {
-  if (!raw || raw.post_type !== 'message' || raw.message_type !== 'private' || raw.sub_type !== 'friend') return
-  const sender = qqId(raw.user_id)
-  if (!sender || sender === accountId || qqId(raw.self_id) !== accountId || targetId && sender !== targetId) return
+export function oneBotMessage(raw: any, accountId: string, targetId = '', settings?: QqSettings): DirectMessage | undefined {
+  const policy=qqSettings(settings)
+  if (!raw || raw.post_type!=='message' || !['private','group'].includes(raw.message_type)) return
+  const realSender=qqId(raw.user_id),groupId=raw.message_type==='group'?qqId(raw.group_id):undefined
+  if (!realSender || realSender===accountId || qqId(raw.self_id)!==accountId) return
+  if (raw.message_type==='private' && (!policy.privateReplies || raw.sub_type!=='friend' || targetId&&targetId!==realSender)) return
+  if (raw.message_type==='group') {
+    if (raw.anonymous || !groupId || !policy.groupReplies || !policy.groupIds.includes(groupId) || targetId&&targetId!==`group:${groupId}`) return
+    if (policy.groupTrigger==='mention' && (!Array.isArray(raw.message) || !raw.message.some((p:any)=>p?.type==='at'&&String(p.data?.qq)===accountId))) return
+  }
+  const sender=groupId?`group:${groupId}:${realSender}`:realSender
   const id = raw.message_id
   if (!['string', 'number'].includes(typeof id) || !String(id) || String(id).length > 128) return
   const text: string[] = [], media: DirectMedia[] = []
@@ -23,5 +31,5 @@ export function oneBotMessage(raw: any, accountId: string, targetId = ''): Direc
       media.push({ source: typeof data.url === 'string' ? data.url : '', ...(typeof data.name === 'string' ? { name: data.name } : {}), ...(typeof data.file_size === 'number' ? { size: data.file_size } : {}) })
     }
   }
-  return { id: `qq:${accountId}:${sender}:${id}`, sender, targetId: sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
+  return { id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }

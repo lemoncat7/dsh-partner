@@ -1,8 +1,9 @@
-import {useState, type ReactNode, type FormEvent} from 'react'
+import {useState, useRef, type ReactNode, type FormEvent} from 'react'
 import {api, type CompanionView, type PartnerSnapshot} from '../client-api.js'
 import {NotificationSettings} from './notification-settings.js'
 import {SectionHeading, ChannelStatus} from './partner-components.js'
-import {errorMessage, WorkspaceDialog} from './workspace-components.js'
+import {errorMessage, WorkspaceDialog, DiscardChangesDialog} from './workspace-components.js'
+import {QqChannelSettings} from './qq-channel-settings.js'
 import {PushChannels} from './push-channels.js'
 
 export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:CompanionView;snapshot:PartnerSnapshot;onChanged():Promise<void>;weixin:ReactNode}):JSX.Element {
@@ -20,6 +21,8 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   const [addingPush,setAddingPush]=useState(false)
   const [fixedPlatform,setFixedPlatform]=useState(false)
   const [configuring,setConfiguring]=useState<string>()
+  const qqEdit=useRef({dirty:false,busy:false})
+  const [discardQq,setDiscardQq]=useState(false)
   const closeAdd=()=>{setAdding(false);setToken('');setPassword('');setMfaToken('')}
   const openAdd=(selected?:'matrix'|'mattermost'|'qq')=>{
     setFixedPlatform(Boolean(selected));setPlatform(selected??'matrix');setName('');setBaseUrl('');setTargetId('');setUsername('');setPassword('');setToken('');setMfaToken('');setAuthMode(selected==='qq'?'token':'password');setFeedback('');setAdding(true)
@@ -64,10 +67,9 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
     {(['qq','matrix','mattermost'] as const).filter(platform=>!channels.some(c=>c.platform===platform)).map(platform=><div className="dsh-partner-channel-row" key={platform}><span><strong>{platform==='qq'?'QQ · SnowLuma':platform==='matrix'?'Matrix':'Mattermost'}</strong><small>尚未连接</small></span><button type="button" aria-label={`配置 ${platform}`} onClick={()=>openAdd(platform)}>配置</button></div>)}
     {channels.filter(c=>c.platform&&c.platform!=='weixin').map(channel=><div key={channel.id} className="dsh-partner-channel-row has-notice-slot">
       <span><strong>{channel.name}</strong><small>{channel.platform==='qq'?'QQ':channel.platform} · {pairings.filter(p=>p.channelId===channel.id&&p.status==='pending').length} 个待授权</small></span><ChannelStatus channel={channel}/><button type="button" aria-label={`配置 ${channel.name}`} onClick={()=>{setFeedback('');setConfiguring(channel.id)}}>配置</button>
-      {configuring===channel.id&&<WorkspaceDialog title={`${channel.name} · 配置`} detail="管理连接状态及联系人访问权限。" close={()=>{if(!busy){setConfiguring(undefined);setDeleting(undefined)}}}>
-      <div className="dsh-partner-channel-detail dsh-partner-channel-manage">
+      {configuring===channel.id&&<WorkspaceDialog title={`${channel.name} · 配置`} detail="管理连接状态及联系人访问权限。" close={()=>{if(busy||qqEdit.current.busy)return;if(channel.platform==='qq'&&qqEdit.current.dirty){setDiscardQq(true);return}setConfiguring(undefined);setDeleting(undefined)}}>
+      {channel.platform==='qq'?<QqChannelSettings editState={qqEdit} channel={channel} pairings={pairings} onChanged={onChanged} onDeleted={()=>setConfiguring(undefined)}/>:<div className="dsh-partner-channel-detail dsh-partner-channel-manage">
       <div className="dsh-partner-channel-connection"><span><small>登录账号</small><strong>{channel.accountId}</strong>{channel.direct?.targetId&&<small>{channel.direct.targetId}</small>}</span><ChannelStatus channel={channel}/></div>
-      {channel.platform==='qq'&&<p>正向 WebSocket · {channel.direct?.baseUrl}。接收好友私聊，断线自动重连；群消息不会触发伙伴。支持文字、图片与表情包，联系人需先批准。</p>}
       {channel.platform==='matrix'&&<p>仅支持未加密的双人会话。加密会话无法读取消息或发送配对码；请新建未开启端到端加密的会话，邀请机器人后发送文字消息。检测到加密会话时会在此提示，不影响其他未加密会话。</p>}
       {!channel.direct?.targetId&&<p>向机器人发私聊消息，在下方核对配对码后批准。请求会自动更新。</p>}
       {channel.lastError&&<p role="alert">{channel.lastError}</p>}
@@ -80,11 +82,12 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       {pairings.filter(p=>p.channelId===channel.id).map(p=><div key={p.id} className="dsh-partner-channel-person"><div><strong>{p.displayName}</strong><small>{p.status==='approved'?'已授权':p.status==='pending'?'等待批准':'已阻止'}</small>{p.status==='pending'&&p.pairingCode&&<span>配对码 <code>{p.pairingCode}</code></span>}</div><button disabled={busy} onClick={()=>void run(async()=>{await api(`/pairings/${p.id}/status`,{method:'POST',body:JSON.stringify({status:p.status==='approved'?'blocked':'approved'})});await onChanged()})}>{p.status==='approved'?'撤销授权':'批准联系人'}</button></div>)}
       </section>
       {feedback&&<p role="status">{feedback}</p>}
-    </div></WorkspaceDialog>}
+    </div>}</WorkspaceDialog>}
       {channel.lastError&&<div className="dsh-partner-channel-inline-notice" role="status" aria-atomic="true"><strong>{channel.runtimeStatus==='running'?'会话提示':'连接提示'}</strong><p>{channel.lastError}</p></div>}
     </div>)}
     </div>
     <section className="dsh-partner-channel-notifications" aria-label="通知设置"><div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>{companion.notificationDelivery?.mode==='selected'?`已指定 ${companion.notificationDelivery.targets.length} 位接收人`:'默认跟随最近渠道与用户'}</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div></section>
+    {discardQq&&<DiscardChangesDialog keepEditing={()=>setDiscardQq(false)} discard={()=>{setDiscardQq(false);setConfiguring(undefined)}}/>}
     {configuring==='delivery'&&<WorkspaceDialog title="通知与交付" detail="选择通知渠道，再选择各渠道的接收人；支持同时投递。" close={()=>setConfiguring(undefined)}><NotificationSettings companion={companion} snapshot={snapshot} onChanged={onChanged}/></WorkspaceDialog>}
   </div>
 }
