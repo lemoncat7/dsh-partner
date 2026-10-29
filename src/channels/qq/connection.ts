@@ -11,6 +11,17 @@ export class OneBotConnection {
   private opening: Promise<void> | undefined
   private readonly pending = new Map<string, { resolve(value: any): void; reject(error: Error): void }>()
   private events: unknown[] = []
+  private readonly messageAuthors=new Map<string,string>()
+  private rememberAuthor(groupId:unknown,messageId:unknown,userId:unknown):void {
+    if(![groupId,messageId,userId].every(value=>['string','number'].includes(typeof value)&&String(value).length<=128))return
+    const key=String(groupId)+':'+String(messageId)
+    this.messageAuthors.delete(key);this.messageAuthors.set(key,String(userId))
+    if(this.messageAuthors.size>512)this.messageAuthors.delete(this.messageAuthors.keys().next().value!)
+  }
+  quotedTarget(groupId:string,messageId:string,accountId:string):'self'|'other'|undefined {
+    const author=this.messageAuthors.get(groupId+':'+messageId)
+    return author===undefined?undefined:author==='$self'||author===accountId?'self':'other'
+  }
   private wake: (() => void) | undefined
   private fault: OneBotError | undefined
   private stopped = false
@@ -69,6 +80,7 @@ export class OneBotConnection {
               this.fault = new OneBotError('QQ 消息积压超过 500 条，请检查处理状态后重新启用渠道', false)
               socket.close(); this.wake?.(); return
             }
+            if(data.message_type==='group')this.rememberAuthor(data.group_id,data.message_id,data.user_id)
             this.events.push({...data, _partnerReceivedAt: Date.now()})
             this.wake?.()
           }
@@ -88,13 +100,15 @@ export class OneBotConnection {
     const echo = randomUUID()
     let abort: () => void = () => {}
     try {
-      return await new Promise((resolve, reject) => {
+      const result=await new Promise<any>((resolve, reject) => {
         abort = () => { this.pending.delete(echo); reject(new OneBotError('QQ 请求已取消或超时；发送结果未知，不会自动重发')) }
         lifetime.addEventListener('abort', abort, { once: true })
         this.pending.set(echo, { resolve, reject })
         try { this.socket!.send(JSON.stringify({ action, params, echo })) }
         catch { this.pending.delete(echo); reject(new OneBotError('QQ 连接不可用，操作未确认')) }
       })
+      if(action==='send_group_msg'&&result?.message_id!==undefined)this.rememberAuthor(params.group_id,result.message_id,'$self')
+      return result
     } finally { lifetime.removeEventListener('abort', abort); this.pending.delete(echo) }
   }
 

@@ -3,12 +3,12 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerOutboundAttachment, PartnerReply } from '../channel-message.js'
 
 export type ChatPart = {type:'emoji';emoji:NativeEmoji} | { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
-export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; originRouteId?: string | null }
+export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; originRouteId?: string | null }
 export function chatReplyFromEvent(event: SessionEvent): ChatReply | undefined {
   if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch') return
   if (!event.data || (event.type === 'tool/result' ? event.data.message?.isError : event.data.isError)) return
   const value = event.data.meta as unknown as ChatReply | undefined
-  if (value?.kind !== 'partner-chat-v1' || !Array.isArray(value.parts) || !value.parts.length || value.parts.length > 8) return
+  if (value?.kind !== 'partner-chat-v1' || !Array.isArray(value.parts) || (!value.parts.length && value.silent!==true) || value.parts.length > 8) return
   if (!value.parts.every(p => p && typeof p === 'object' && (p.type === 'text' ? typeof p.text === 'string' && !!p.text.trim() : p.type==='emoji'?validNativeEmoji(p.emoji):p.type === 'image' && p.attachment?.kind === 'image' && typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//') && typeof p.label === 'string'))) return
   return value
 }

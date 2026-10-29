@@ -1,0 +1,290 @@
+{
+  "examples": 40,
+  "accuracy": 0.9,
+  "positiveRecall": 1.0,
+  "p95Ms": 8.755606599152088,
+  "meanMs": 6.435073586180806,
+  "maxRssMb": 540.77734375,
+  "results": [
+    {
+      "text": "弟弟 弟弟",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.548,
+      "margin": 0.355
+    },
+    {
+      "text": "弟弟人呢？",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.591,
+      "margin": 0.326
+    },
+    {
+      "text": "喂，人还在不在",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.916,
+      "margin": 0.865
+    },
+    {
+      "text": "helo",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.78,
+      "margin": 0.597
+    },
+    {
+      "text": "我又来了",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.487,
+      "margin": 0.138
+    },
+    {
+      "text": "怎么又不回复了",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.562,
+      "margin": 0.423
+    },
+    {
+      "text": "弟弟你怎么不回复",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.569,
+      "margin": 0.259
+    },
+    {
+      "text": "有人在听我说话吗",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.952,
+      "margin": 0.93
+    },
+    {
+      "text": "小家伙冒个泡",
+      "label": "address",
+      "prediction": "engage",
+      "confidence": 0.406,
+      "margin": 0.067
+    },
+    {
+      "text": "Hello, anybody there?",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.989,
+      "margin": 0.984
+    },
+    {
+      "text": "Hey buddy, still around?",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.905,
+      "margin": 0.868
+    },
+    {
+      "text": "もしもし",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.906,
+      "margin": 0.831
+    },
+    {
+      "text": "哇 太棒了",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.492,
+      "margin": 0.221
+    },
+    {
+      "text": "给你看个东西",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.795,
+      "margin": 0.728
+    },
+    {
+      "text": "我今天超开心的",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.745,
+      "margin": 0.645
+    },
+    {
+      "text": "最近有什么新鲜事呀",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.598,
+      "margin": 0.358
+    },
+    {
+      "text": "你终于来了",
+      "label": "engage",
+      "prediction": "address",
+      "confidence": 0.32,
+      "margin": 0.065
+    },
+    {
+      "text": "然后呢",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.4,
+      "margin": 0.062
+    },
+    {
+      "text": "我都没说那个",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.523,
+      "margin": 0.339
+    },
+    {
+      "text": "That is awesome!",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.495,
+      "margin": 0.241
+    },
+    {
+      "text": "I need some advice",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.943,
+      "margin": 0.921
+    },
+    {
+      "text": "Tell me what happened next",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.651,
+      "margin": 0.486
+    },
+    {
+      "text": "え、すごいね",
+      "label": "engage",
+      "prediction": "engage",
+      "confidence": 0.46,
+      "margin": 0.08
+    },
+    {
+      "text": "小王你吃饭了没",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.785,
+      "margin": 0.692
+    },
+    {
+      "text": "小李，我是问你几点来",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.957,
+      "margin": 0.935
+    },
+    {
+      "text": "小张你把那个转给小周",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.437,
+      "margin": 0.139
+    },
+    {
+      "text": "Alice, did you finish the report?",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.462,
+      "margin": 0.186
+    },
+    {
+      "text": "Bob, that question was for you.",
+      "label": "other",
+      "prediction": "engage",
+      "confidence": 0.415,
+      "margin": 0.088
+    },
+    {
+      "text": "好的知道啦",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.814,
+      "margin": 0.707
+    },
+    {
+      "text": "收到啦谢谢",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.598,
+      "margin": 0.402
+    },
+    {
+      "text": "我先走了下次聊",
+      "label": "close",
+      "prediction": "address",
+      "confidence": 0.3,
+      "margin": 0.005
+    },
+    {
+      "text": "请不要继续回复我",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.764,
+      "margin": 0.66
+    },
+    {
+      "text": "Okay, bye for now",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.895,
+      "margin": 0.849
+    },
+    {
+      "text": "Please stop replying",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.64,
+      "margin": 0.412
+    },
+    {
+      "text": "促销通知：满两百减三十",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.972,
+      "margin": 0.957
+    },
+    {
+      "text": "服务日志：数据库连接成功",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.97,
+      "margin": 0.958
+    },
+    {
+      "text": "今日空气质量优",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.794,
+      "margin": 0.706
+    },
+    {
+      "text": "群公告更新：不得发布广告",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.976,
+      "margin": 0.968
+    },
+    {
+      "text": "Automatic alert: backup completed",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.966,
+      "margin": 0.95
+    },
+    {
+      "text": "Daily forecast: rain expected",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.904,
+      "margin": 0.84
+    }
+  ]
+}

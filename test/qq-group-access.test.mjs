@@ -109,8 +109,8 @@ test('two rapid admitted messages are both locally judged while busy, without a 
  f.manager.groupAutonomy=new QqGroupAutonomy({get:()=>{throw Error('no model needed')}},()=>100000)
  const decide=f.manager.groupAutonomy.shouldReply.bind(f.manager.groupAutonomy)
  f.manager.groupAutonomy.shouldReply=async(...args)=>{judged.push(args[1].text);return decide(...args)}
- for(const [id,text] of [['first','朋友，你刚刚在做什么'],['second','好的']])await f.handle({...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}})
- assert.deepEqual(judged,['朋友，你刚刚在做什么','好的'])
+ for(const [id,text] of [['first','朋友，你刚刚在做什么'],['second','不用回复了']])await f.handle({...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}})
+ assert.deepEqual(judged,['朋友，你刚刚在做什么','不用回复了'])
  assert.equal(f.inputs.length,1);assert.equal(f.sent.length,1)
  assert.match(f.manager.groupAutonomy.status('qq').reason,/决定旁听/)
  assert.ok(f.state.recentReceipts.includes('qq:first'));assert.ok(f.state.recentReceipts.includes('qq:second'))
@@ -133,9 +133,10 @@ test('only delivered replies establish continuation; failed sends and revoked ac
   f.manager.groupAutonomy.replied=(...args)=>replied.push(args)
   if(mode==='failed')f.api.sendText=async()=>{throw Error('send failed')}
   if(mode==='revoked')f.agents.reply=async()=>{f.channel.qq.groupReplies=false;return {text:'late',attachments:[]}}
-  if(mode==='silent')f.setReply({text:'',attachments:[]})
+  if(mode==='silent')f.setReply({text:'',attachments:[],chatParts:[]})
   if(mode==='failed'||mode==='revoked')await assert.rejects(f.handle())
   else await f.handle()
   assert.equal(replied.length,mode==='success'?1:0,mode)
+  if(mode==='silent'){assert.deepEqual(f.sent,[]);assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'silent')}
  }
 })

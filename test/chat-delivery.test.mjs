@@ -209,3 +209,25 @@ test('empty optional tool fields do not force a second model attempt; invalid mi
  assert.deepEqual(parseChatInput({messages:[{text:'你好',stickerId:'  '}]}),[{text:'你好'}])
  for(const value of [{text:'',stickerId:''},{text:'你好',stickerId:'qq-face-14'},{text:'你好',unknown:''},{text:'你好',stickerId:3},{text:'你好',stickerId:null},{text:'a'.repeat(6001),stickerId:''}])assert.throws(()=>parseChatInput({messages:[value]}))
 })
+
+test('only a verified autonomous QQ group can conclude silently without a channel message',async()=>{
+ const card={enabled:true,segmentedReplies:true,stickersEnabled:false}
+ const route={id:'r',kind:'channel',sessionId:'s',companionId:'c',channelId:'qq',userId:'group:12345678:22345678',inboundMessageIds:['u']}
+ const state={companions:[{id:'c',characterCard:card}],sessions:[route],channels:[{id:'qq',platform:'qq',qq:{groupReplies:true,groupIds:['12345678'],autonomousGroupIds:['12345678']}}]}
+ const store={snapshot:()=>state,isCompanionRemoving:()=>false}
+ const tool=chatTools('c',store,{}, {},{},'/partner-local/v1').find(t=>t.name==='partner_chat_reply')
+ let concluded=0
+ const exec={signal:new AbortController().signal,agent:{session:{id:'s',snapshotEvents:()=>[start,user]}},concludeTurn:()=>concluded++}
+ const value=await tool.execute({messages:[]},exec)
+ assert.equal(value.silent,true);assert.deepEqual(value.parts,[]);assert.equal(concluded,1)
+ const projected=channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta:value}},end],0)
+ assert.deepEqual(projected.chatParts,[]);assert.equal(projected.text,'')
+ const outbound=await prepareChannelReply(projected,'/tmp');assert.deepEqual(outbound.chatParts,[]);assert.equal(outbound.text,'')
+ for(const mode of ['private','not-whitelisted','unverified']){
+  route.userId=mode==='private'?'22345678':'group:12345678:22345678'
+  route.inboundMessageIds=mode==='unverified'?[]:['u']
+  state.channels[0].qq.autonomousGroupIds=mode==='not-whitelisted'?[]:['12345678']
+  await assert.rejects(tool.execute({messages:[]},exec),/只有自主群聊/)
+ }
+ assert.equal(concluded,1)
+})

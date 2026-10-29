@@ -1,0 +1,162 @@
+[
+  {
+    "text": "弟弟 弟弟",
+    "label": "address"
+  },
+  {
+    "text": "弟弟人呢？",
+    "label": "address"
+  },
+  {
+    "text": "喂，人还在不在",
+    "label": "address"
+  },
+  {
+    "text": "helo",
+    "label": "address"
+  },
+  {
+    "text": "我又来了",
+    "label": "address"
+  },
+  {
+    "text": "怎么又不回复了",
+    "label": "address"
+  },
+  {
+    "text": "弟弟你怎么不回复",
+    "label": "address"
+  },
+  {
+    "text": "有人在听我说话吗",
+    "label": "address"
+  },
+  {
+    "text": "小家伙冒个泡",
+    "label": "address"
+  },
+  {
+    "text": "Hello, anybody there?",
+    "label": "address"
+  },
+  {
+    "text": "Hey buddy, still around?",
+    "label": "address"
+  },
+  {
+    "text": "もしもし",
+    "label": "address"
+  },
+  {
+    "text": "哇 太棒了",
+    "label": "engage"
+  },
+  {
+    "text": "给你看个东西",
+    "label": "engage"
+  },
+  {
+    "text": "我今天超开心的",
+    "label": "engage"
+  },
+  {
+    "text": "最近有什么新鲜事呀",
+    "label": "engage"
+  },
+  {
+    "text": "你终于来了",
+    "label": "engage"
+  },
+  {
+    "text": "然后呢",
+    "label": "engage"
+  },
+  {
+    "text": "我都没说那个",
+    "label": "engage"
+  },
+  {
+    "text": "That is awesome!",
+    "label": "engage"
+  },
+  {
+    "text": "I need some advice",
+    "label": "engage"
+  },
+  {
+    "text": "Tell me what happened next",
+    "label": "engage"
+  },
+  {
+    "text": "え、すごいね",
+    "label": "engage"
+  },
+  {
+    "text": "小王你吃饭了没",
+    "label": "other"
+  },
+  {
+    "text": "小李，我是问你几点来",
+    "label": "other"
+  },
+  {
+    "text": "小张你把那个转给小周",
+    "label": "other"
+  },
+  {
+    "text": "Alice, did you finish the report?",
+    "label": "other"
+  },
+  {
+    "text": "Bob, that question was for you.",
+    "label": "other"
+  },
+  {
+    "text": "好的知道啦",
+    "label": "close"
+  },
+  {
+    "text": "收到啦谢谢",
+    "label": "close"
+  },
+  {
+    "text": "我先走了下次聊",
+    "label": "close"
+  },
+  {
+    "text": "请不要继续回复我",
+    "label": "close"
+  },
+  {
+    "text": "Okay, bye for now",
+    "label": "close"
+  },
+  {
+    "text": "Please stop replying",
+    "label": "close"
+  },
+  {
+    "text": "促销通知：满两百减三十",
+    "label": "background"
+  },
+  {
+    "text": "服务日志：数据库连接成功",
+    "label": "background"
+  },
+  {
+    "text": "今日空气质量优",
+    "label": "background"
+  },
+  {
+    "text": "群公告更新：不得发布广告",
+    "label": "background"
+  },
+  {
+    "text": "Automatic alert: backup completed",
+    "label": "background"
+  },
+  {
+    "text": "Daily forecast: rain expected",
+    "label": "background"
+  }
+]

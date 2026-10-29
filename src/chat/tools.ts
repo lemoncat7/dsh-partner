@@ -1,3 +1,4 @@
+import { qqGroupPeer, qqSettings } from '../channels/qq/settings.js'
 import { isIdleContactNotice } from '../character/idle-contact.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -57,15 +58,12 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       return {content:[{type:'text',text:JSON.stringify(item)},{type:'image',attachment}]}
     },
   },{
-    name:'partner_chat_reply',description:`提交本轮最终聊天回复并结束回合。messages 是按顺序展示/发送的 1–8 条消息，每条只含 text 或 stickerId；默认一条文字就够，只有独立的新内容才追加；开启分段不要求发两条，最多两张库内表情。先完成所有必要工作，再调用本工具；不要同时安排其他工具，所有要说的文字都放在 messages 的 text 条目中，表情放在独立的 stickerId 条目；不要把文字放在工具外、只在 messages 里提交表情。不在调用前后重复相同文字。无需分段的长文/代码可用普通最终回复。适用于直接对话或系统明确发起的闲时联系，不用于内部任务或心跳。表情先调用 partner_stickers 查询当前渠道的库，优先选择结果中的渠道原生表情；找不到贴切的再用默认库，不强行每轮发表情。`,
-    parameters:{type:'object',properties:{messages:{type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{text:{type:'string',maxLength:6000},stickerId:{type:'string'}},additionalProperties:false}}},required:['messages'],additionalProperties:false},
+    name:'partner_chat_reply',description:`提交本轮最终聊天回复并结束回合。自主群聊确实无需接话时可提交 messages:[] 安静结束，不发送旁听提示；明确呼唤和正常接续优先回应。其他场景 messages 是按顺序展示/发送的 1–8 条消息，每条只含 text 或 stickerId；默认一条文字就够，只有独立的新内容才追加；开启分段不要求发两条，最多两张库内表情。先完成所有必要工作，再调用本工具；不要同时安排其他工具，所有要说的文字都放在 messages 的 text 条目中，表情放在独立的 stickerId 条目；不要把文字放在工具外、只在 messages 里提交表情。不在调用前后重复相同文字。无需分段的长文/代码可用普通最终回复。适用于直接对话或系统明确发起的闲时联系，不用于内部任务或心跳。表情先调用 partner_stickers 查询当前渠道的库，优先选择结果中的渠道原生表情；找不到贴切的再用默认库，不强行每轮发表情。`,
+    parameters:{type:'object',properties:{messages:{type:'array',minItems:0,maxItems:8,items:{type:'object',properties:{text:{type:'string',maxLength:6000},stickerId:{type:'string'}},additionalProperties:false}}},required:['messages'],additionalProperties:false},
     output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:(value as unknown as {parts:ChatPart[]}).parts.map(p=>p.type==='text'?p.text:`[表情：${p.type==='emoji'?p.emoji.label:p.label}]`).join('\n\n')}],presentationMeta:(_args,value)=>value},
     presentCall:()=>({card:'generic',title:'回复'}),
     async execute(raw,exec){
       const card=enabled(),agent=exec.agent
-      const input=withChatCompanionText(parseChatInput(raw),agent?.session.snapshotEvents()??[],exec.rootCallId??exec.callId)
-      if(!card.segmentedReplies && input.filter(p=>'text'in p).length>1)throw new Error('分段回复未开启，请使用一条文字')
-      if(!card.segmentedReplies&&!card.stickersEnabled)throw new Error('分段回复和表情包均未开启，请直接回复')
       if(!agent)throw new Error('需要当前伙伴会话')
       if(typeof exec.concludeTurn!=='function')throw new Error('当前 DSH 不支持聊天终结工具，请直接使用普通最终回复')
       const state=store.snapshot(),route=state.sessions.find(s=>s.sessionId===agent.session.id&&s.companionId===owner)
@@ -74,6 +72,18 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       const currentStart=[...events].reverse().find(e=>e.type==='turn/start')?.seq??0
       const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))
       if(!origin||isInternalTaskNotice(origin))throw new Error('内部任务或自动执行不能用聊天回复结束；请按原任务协议交付')
+      const messages=(raw as {messages?:unknown})?.messages
+      if(Array.isArray(messages)&&messages.length===0){
+        const audience=questionOrigin(agent.session.id,events,state.sessions)
+        const channel=state.channels.find(c=>c.id===audience?.channelId)
+        const peer=qqGroupPeer(audience?.userId??'')
+        if(channel?.platform!=='qq'||!peer||!qqSettings(channel.qq).autonomousGroupIds.includes(peer.groupId)||origin.type!=='user/message'||origin.data.source.kind!=='user')throw new Error('只有自主群聊可选择旁听；其他场景需要正常回复')
+        exec.signal.throwIfAborted();exec.concludeTurn()
+        return {kind:'partner-chat-v1',parts:[],silent:true,originRouteId:audience!.id}
+      }
+      const input=withChatCompanionText(parseChatInput(raw),events,exec.rootCallId??exec.callId)
+      if(!card.segmentedReplies && input.filter(p=>'text'in p).length>1)throw new Error('分段回复未开启，请使用一条文字')
+      if(!card.segmentedReplies&&!card.stickersEnabled)throw new Error('分段回复和表情包均未开启，请直接回复')
       const parts:ChatPart[]=[]
       for(const p of input){
         exec.signal.throwIfAborted()

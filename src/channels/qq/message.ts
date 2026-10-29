@@ -17,6 +17,9 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
   const mentioned=Array.isArray(raw.message)&&raw.message.some((p:any)=>p?.type==='at'&&String(p.data?.qq)===accountId)
   const otherMention=Array.isArray(raw.message)&&raw.message.some((p:any)=>p?.type==='at'&&String(p.data?.qq)!==accountId)
   const hasReply=Array.isArray(raw.message)&&raw.message.some((p:any)=>p?.type==='reply')
+  const replyPart=Array.isArray(raw.message)?raw.message.find((p:any)=>p?.type==='reply'):undefined
+  const replyId=replyPart?.data?.id
+  const replyToId=['string','number'].includes(typeof replyId)&&String(replyId).length<=128?String(replyId):undefined
   const autonomous=!!groupId&&policy.autonomousGroupIds.includes(groupId)
   if (raw.message_type==='group') {
     if (raw.anonymous || !groupId || !policy.groupReplies || !policy.groupIds.includes(groupId) || targetId&&targetId!==`group:${groupId}`) return
@@ -35,5 +38,5 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
       media.push({ source: typeof data.url === 'string' ? data.url : '', ...(typeof data.name === 'string' ? { name: data.name } : {}), ...(typeof data.file_size === 'number' ? { size: data.file_size } : {}) })
     }
   }
-  return { ...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous,...(otherMention?{otherMention:true}:{}),...(hasReply?{hasReply:true}:{})}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
+  return { ...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous,...(otherMention?{otherMention:true}:{}),...(hasReply?{hasReply:true}:{}),...(replyToId?{replyToId}:{})}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }

@@ -53,6 +53,10 @@ export class OneBotTransport {
     const identity = await this.validate(signal)
     const events = await this.connection.read(signal, waitMs)
     const messages = events.map(event => oneBotMessage(event, identity.accountId, this.config.targetId, qqSettings(this.config.qq))).filter((event): event is DirectMessage => Boolean(event))
+    for(const message of messages){
+      const group=message.qqGroup
+      if(group?.replyToId){const target=this.connection.quotedTarget(group.groupId,group.replyToId,identity.accountId);if(target)group.replyTo=target}
+    }
     return {cursor: 'onebot-live', messages}
   }
 

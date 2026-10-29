@@ -1,0 +1,19 @@
+services:
+  partner-attention:
+    build: .
+    image: dsh-partner-attention:2.21.3
+    restart: unless-stopped
+    init: true
+    cpus: 1.0
+    mem_limit: 768m
+    memswap_limit: 768m
+    pids_limit: 64
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./model:/model:ro
+    networks: [appnet]
+networks:
+  appnet:
+    external: true

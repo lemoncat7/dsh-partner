@@ -956,6 +956,7 @@ export class ChannelManager {
         // Claim before starting tools. A delivery failure must not execute the same
         // user command twice on reconnect; its result remains in the DSH session.
         const companion=requiredCompanion(this.store,channel.companionId)
+        if(event.qqGroup?.autonomous&&companion.characterCard?.enabled)text=`群聊接话说明：本地判断只决定把消息交给你，不强制回复。明确呼唤和正在与你聊天时自然接续；确实在与别人交流或无需接话时，可调用 partner_chat_reply，messages 传空数组安静结束，不发送旁听说明。\n\n${text}`
         const allowed=()=>{
           const state=this.store.snapshot()
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&channelReplyAllowed(state,channel.id,event.sender,event.targetId||channel.direct?.targetId)
@@ -1002,6 +1003,11 @@ export class ChannelManager {
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!allowed())throw new Error('渠道或联系人授权已撤销，取消回复')
+        if(reply.chatParts?.length===0&&!reply.text.trim()&&!reply.attachments.length){
+          await progress?.completeWithoutReply()
+          if(timing)timing.outcome='silent'
+          return
+        }
         if(reply.chatParts){
           const first=reply.chatParts[0]
           if(progress&&first?.type!=='text')await progress.completeWithoutReply()

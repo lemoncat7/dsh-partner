@@ -1,0 +1,790 @@
+[
+  {
+    "text": "在吗",
+    "label": "address"
+  },
+  {
+    "text": "在不在呀",
+    "label": "address"
+  },
+  {
+    "text": "有人吗",
+    "label": "address"
+  },
+  {
+    "text": "出来聊两句",
+    "label": "address"
+  },
+  {
+    "text": "小伙伴出来啦",
+    "label": "address"
+  },
+  {
+    "text": "搭档你去哪儿了",
+    "label": "address"
+  },
+  {
+    "text": "小朋友在做什么",
+    "label": "address"
+  },
+  {
+    "text": "姐姐理理我嘛",
+    "label": "address"
+  },
+  {
+    "text": "哥哥能听见吗",
+    "label": "address"
+  },
+  {
+    "text": "宝贝过来一下",
+    "label": "address"
+  },
+  {
+    "text": "朋友快来",
+    "label": "address"
+  },
+  {
+    "text": "喂喂听得到不",
+    "label": "address"
+  },
+  {
+    "text": "醒了没呀",
+    "label": "address"
+  },
+  {
+    "text": "怎么还不理我",
+    "label": "address"
+  },
+  {
+    "text": "人跑哪儿去了",
+    "label": "address"
+  },
+  {
+    "text": "呼叫小助手",
+    "label": "address"
+  },
+  {
+    "text": "等你说话呢",
+    "label": "address"
+  },
+  {
+    "text": "能跟我说句话吗",
+    "label": "address"
+  },
+  {
+    "text": "你是不是掉线了",
+    "label": "address"
+  },
+  {
+    "text": "你好呀",
+    "label": "address"
+  },
+  {
+    "text": "嗨你好",
+    "label": "address"
+  },
+  {
+    "text": "晚上好啊",
+    "label": "address"
+  },
+  {
+    "text": "早上好",
+    "label": "address"
+  },
+  {
+    "text": "午安伙伴",
+    "label": "address"
+  },
+  {
+    "text": "hello there",
+    "label": "address"
+  },
+  {
+    "text": "hey are you there",
+    "label": "address"
+  },
+  {
+    "text": "anyone home",
+    "label": "address"
+  },
+  {
+    "text": "wake up buddy",
+    "label": "address"
+  },
+  {
+    "text": "can you hear me",
+    "label": "address"
+  },
+  {
+    "text": "hi friend",
+    "label": "address"
+  },
+  {
+    "text": "where did you go",
+    "label": "address"
+  },
+  {
+    "text": "please talk to me",
+    "label": "address"
+  },
+  {
+    "text": "おはよう",
+    "label": "address"
+  },
+  {
+    "text": "こんにちは",
+    "label": "address"
+  },
+  {
+    "text": "いる？",
+    "label": "address"
+  },
+  {
+    "text": "早安来报个到",
+    "label": "address"
+  },
+  {
+    "text": "我回来啦",
+    "label": "address"
+  },
+  {
+    "text": "我上线啦",
+    "label": "address"
+  },
+  {
+    "text": "找你聊会天",
+    "label": "address"
+  },
+  {
+    "text": "陪我待一会",
+    "label": "address"
+  },
+  {
+    "text": "不要不说话嘛",
+    "label": "address"
+  },
+  {
+    "text": "我叫你呢",
+    "label": "address"
+  },
+  {
+    "text": "有空嘛",
+    "label": "address"
+  },
+  {
+    "text": "亲爱的你在忙吗",
+    "label": "address"
+  },
+  {
+    "text": "哈喽",
+    "label": "address"
+  },
+  {
+    "text": "哈啰",
+    "label": "address"
+  },
+  {
+    "text": "嗨搭档",
+    "label": "address"
+  },
+  {
+    "text": "今天过得好累",
+    "label": "engage"
+  },
+  {
+    "text": "给你讲个好玩的事情",
+    "label": "engage"
+  },
+  {
+    "text": "这首歌真好听",
+    "label": "engage"
+  },
+  {
+    "text": "最近有什么好看的动画",
+    "label": "engage"
+  },
+  {
+    "text": "推荐一部电影吧",
+    "label": "engage"
+  },
+  {
+    "text": "我遇到一件怪事",
+    "label": "engage"
+  },
+  {
+    "text": "我们一起打游戏吧",
+    "label": "engage"
+  },
+  {
+    "text": "给我看看这个",
+    "label": "engage"
+  },
+  {
+    "text": "帮我想个办法",
+    "label": "engage"
+  },
+  {
+    "text": "为什么会发生这种事",
+    "label": "engage"
+  },
+  {
+    "text": "我现在有点难过",
+    "label": "engage"
+  },
+  {
+    "text": "刚刚被老板说了",
+    "label": "engage"
+  },
+  {
+    "text": "有什么办法解决",
+    "label": "engage"
+  },
+  {
+    "text": "我终于完成了",
+    "label": "engage"
+  },
+  {
+    "text": "想跟你分享个好消息",
+    "label": "engage"
+  },
+  {
+    "text": "你觉得怎么样",
+    "label": "engage"
+  },
+  {
+    "text": "今天不想上班了",
+    "label": "engage"
+  },
+  {
+    "text": "这个结果我很满意",
+    "label": "engage"
+  },
+  {
+    "text": "我有一个想法",
+    "label": "engage"
+  },
+  {
+    "text": "你喜欢什么颜色",
+    "label": "engage"
+  },
+  {
+    "text": "夸我一句",
+    "label": "engage"
+  },
+  {
+    "text": "猜猜我买了什么",
+    "label": "engage"
+  },
+  {
+    "text": "你能解释一下吗",
+    "label": "engage"
+  },
+  {
+    "text": "讲个笑话听听",
+    "label": "engage"
+  },
+  {
+    "text": "what do you think",
+    "label": "engage"
+  },
+  {
+    "text": "can you explain this",
+    "label": "engage"
+  },
+  {
+    "text": "I had a rough day",
+    "label": "engage"
+  },
+  {
+    "text": "let us play a game",
+    "label": "engage"
+  },
+  {
+    "text": "I have something to tell you",
+    "label": "engage"
+  },
+  {
+    "text": "recommend a song",
+    "label": "engage"
+  },
+  {
+    "text": "how was your day",
+    "label": "engage"
+  },
+  {
+    "text": "I finally finished it",
+    "label": "engage"
+  },
+  {
+    "text": "could you help me with this",
+    "label": "engage"
+  },
+  {
+    "text": "今日は疲れた",
+    "label": "engage"
+  },
+  {
+    "text": "一緒に遊ぼう",
+    "label": "engage"
+  },
+  {
+    "text": "哎我有点想你了",
+    "label": "engage"
+  },
+  {
+    "text": "你最近在看啥",
+    "label": "engage"
+  },
+  {
+    "text": "我觉得这事不对",
+    "label": "engage"
+  },
+  {
+    "text": "刚才那个我没听懂",
+    "label": "engage"
+  },
+  {
+    "text": "接着说呀",
+    "label": "engage"
+  },
+  {
+    "text": "怎么弄比较好",
+    "label": "engage"
+  },
+  {
+    "text": "我们聊点别的",
+    "label": "engage"
+  },
+  {
+    "text": "这是什么意思",
+    "label": "engage"
+  },
+  {
+    "text": "笑死我了",
+    "label": "engage"
+  },
+  {
+    "text": "给你看看我做的东西",
+    "label": "engage"
+  },
+  {
+    "text": "我不太开心",
+    "label": "engage"
+  },
+  {
+    "text": "小王，你明天值班吗",
+    "label": "other"
+  },
+  {
+    "text": "张经理把报表发给小李",
+    "label": "other"
+  },
+  {
+    "text": "小陈你把文件给小赵一下",
+    "label": "other"
+  },
+  {
+    "text": "李老师请您看一下作业",
+    "label": "other"
+  },
+  {
+    "text": "老张咱俩私聊吧",
+    "label": "other"
+  },
+  {
+    "text": "小刘你回复我一下",
+    "label": "other"
+  },
+  {
+    "text": "阿明你和小红一起去",
+    "label": "other"
+  },
+  {
+    "text": "小林你别忘了带钥匙",
+    "label": "other"
+  },
+  {
+    "text": "小黄你晚上几点到",
+    "label": "other"
+  },
+  {
+    "text": "小刚我在问你呢",
+    "label": "other"
+  },
+  {
+    "text": "小李，这话是跟你说的",
+    "label": "other"
+  },
+  {
+    "text": "小张，你看见我的书了吗",
+    "label": "other"
+  },
+  {
+    "text": "小王你刚才说的对",
+    "label": "other"
+  },
+  {
+    "text": "小陈你能来接我吗",
+    "label": "other"
+  },
+  {
+    "text": "同桌你明天记得叫我",
+    "label": "other"
+  },
+  {
+    "text": "Alex can you send me the file",
+    "label": "other"
+  },
+  {
+    "text": "John I was asking you",
+    "label": "other"
+  },
+  {
+    "text": "Mary please check your email",
+    "label": "other"
+  },
+  {
+    "text": "Sarah let's talk privately",
+    "label": "other"
+  },
+  {
+    "text": "Tom are you coming tomorrow",
+    "label": "other"
+  },
+  {
+    "text": "小周我们两个单聊",
+    "label": "other"
+  },
+  {
+    "text": "小赵你先吃不用等我",
+    "label": "other"
+  },
+  {
+    "text": "张哥你昨天说的地址呢",
+    "label": "other"
+  },
+  {
+    "text": "小刘我回复的是你",
+    "label": "other"
+  },
+  {
+    "text": "Mike please call Anna",
+    "label": "other"
+  },
+  {
+    "text": "老李你帮忙喊一下小吴",
+    "label": "other"
+  },
+  {
+    "text": "班长你把名单发给老师",
+    "label": "other"
+  },
+  {
+    "text": "王老师请给小明批个假",
+    "label": "other"
+  },
+  {
+    "text": "小林，你今天辛苦了",
+    "label": "other"
+  },
+  {
+    "text": "小赵，你终于回来了",
+    "label": "other"
+  },
+  {
+    "text": "好的",
+    "label": "close"
+  },
+  {
+    "text": "嗯",
+    "label": "close"
+  },
+  {
+    "text": "收到",
+    "label": "close"
+  },
+  {
+    "text": "行",
+    "label": "close"
+  },
+  {
+    "text": "知道了",
+    "label": "close"
+  },
+  {
+    "text": "明白了",
+    "label": "close"
+  },
+  {
+    "text": "了解",
+    "label": "close"
+  },
+  {
+    "text": "好吧",
+    "label": "close"
+  },
+  {
+    "text": "嗯嗯",
+    "label": "close"
+  },
+  {
+    "text": "哦",
+    "label": "close"
+  },
+  {
+    "text": "噢",
+    "label": "close"
+  },
+  {
+    "text": "OK",
+    "label": "close"
+  },
+  {
+    "text": "ok thanks",
+    "label": "close"
+  },
+  {
+    "text": "got it",
+    "label": "close"
+  },
+  {
+    "text": "understood",
+    "label": "close"
+  },
+  {
+    "text": "thanks bye",
+    "label": "close"
+  },
+  {
+    "text": "see you later",
+    "label": "close"
+  },
+  {
+    "text": "晚安我要睡了",
+    "label": "close"
+  },
+  {
+    "text": "我先下了",
+    "label": "close"
+  },
+  {
+    "text": "先不聊了",
+    "label": "close"
+  },
+  {
+    "text": "回头再聊",
+    "label": "close"
+  },
+  {
+    "text": "别回复了",
+    "label": "close"
+  },
+  {
+    "text": "不用回",
+    "label": "close"
+  },
+  {
+    "text": "不用回答这句",
+    "label": "close"
+  },
+  {
+    "text": "先让我安静一会",
+    "label": "close"
+  },
+  {
+    "text": "stop talking please",
+    "label": "close"
+  },
+  {
+    "text": "leave me alone for now",
+    "label": "close"
+  },
+  {
+    "text": "no reply needed",
+    "label": "close"
+  },
+  {
+    "text": "bye",
+    "label": "close"
+  },
+  {
+    "text": "再见",
+    "label": "close"
+  },
+  {
+    "text": "嗯好的就这样",
+    "label": "close"
+  },
+  {
+    "text": "收到谢谢",
+    "label": "close"
+  },
+  {
+    "text": "晚点聊吧",
+    "label": "close"
+  },
+  {
+    "text": "到这里就好了",
+    "label": "close"
+  },
+  {
+    "text": "我去忙了",
+    "label": "close"
+  },
+  {
+    "text": "结束这个话题吧",
+    "label": "close"
+  },
+  {
+    "text": "别再接话了",
+    "label": "close"
+  },
+  {
+    "text": "先暂停聊天",
+    "label": "close"
+  },
+  {
+    "text": "好的明天再说",
+    "label": "close"
+  },
+  {
+    "text": "今日新闻摘要：多地气温下降",
+    "label": "background"
+  },
+  {
+    "text": "系统公告：今晚进行版本维护",
+    "label": "background"
+  },
+  {
+    "text": "转发通知：本周六社区停水",
+    "label": "background"
+  },
+  {
+    "text": "广告招租欢迎咨询",
+    "label": "background"
+  },
+  {
+    "text": "本店周年庆全场折扣",
+    "label": "background"
+  },
+  {
+    "text": "今日特价限时抢购",
+    "label": "background"
+  },
+  {
+    "text": "Server started on port 8080",
+    "label": "background"
+  },
+  {
+    "text": "INFO connection established",
+    "label": "background"
+  },
+  {
+    "text": "ERROR connection reset by peer",
+    "label": "background"
+  },
+  {
+    "text": "日志：任务完成耗时两秒",
+    "label": "background"
+  },
+  {
+    "text": "CPU usage 35 percent",
+    "label": "background"
+  },
+  {
+    "text": "群公告：请遵守群规",
+    "label": "background"
+  },
+  {
+    "text": "天气预报：明天多云转晴",
+    "label": "background"
+  },
+  {
+    "text": "股票收盘指数上涨百分之一",
+    "label": "background"
+  },
+  {
+    "text": "每日一句：保持热爱",
+    "label": "background"
+  },
+  {
+    "text": "链接分享：https://example.com/news",
+    "label": "background"
+  },
+  {
+    "text": "meeting notice for all staff",
+    "label": "background"
+  },
+  {
+    "text": "scheduled maintenance tonight",
+    "label": "background"
+  },
+  {
+    "text": "weather forecast sunny tomorrow",
+    "label": "background"
+  },
+  {
+    "text": "Breaking news daily bulletin",
+    "label": "background"
+  },
+  {
+    "text": "促销活动最后一天",
+    "label": "background"
+  },
+  {
+    "text": "自动通知：订单已签收",
+    "label": "background"
+  },
+  {
+    "text": "打卡第十五天",
+    "label": "background"
+  },
+  {
+    "text": "报数：一二三四五",
+    "label": "background"
+  },
+  {
+    "text": "签到成功积分加一",
+    "label": "background"
+  },
+  {
+    "text": "温度二十六度湿度百分之四十",
+    "label": "background"
+  },
+  {
+    "text": "群文件上传通知",
+    "label": "background"
+  },
+  {
+    "text": "班级通知：周一统一交材料",
+    "label": "background"
+  },
+  {
+    "text": "课程表已发布到群公告",
+    "label": "background"
+  },
+  {
+    "text": "今日份打卡",
+    "label": "background"
+  },
+  {
+    "text": "截图来自另一个群",
+    "label": "background"
+  },
+  {
+    "text": "转发一篇文章",
+    "label": "background"
+  },
+  {
+    "text": "自动提醒：任务已经结束",
+    "label": "background"
+  },
+  {
+    "text": "通知：系统服务恢复正常",
+    "label": "background"
+  },
+  {
+    "text": "public service announcement",
+    "label": "background"
+  }
+]

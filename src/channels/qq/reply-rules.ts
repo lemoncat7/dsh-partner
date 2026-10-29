@@ -1,62 +1,55 @@
-import { createHash } from 'node:crypto'
 import type { DirectMessage } from '../direct/transport.js'
+import type { AttentionPrediction } from './attention-classifier.js'
 
-export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[] }
-export interface ReplyScoreContext { name:string; owner:boolean; affection:number; recent?:{at:number;text:string}; now:number; seed:string }
-const normalized=(text:string)=>text.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'').slice(0,160)
-/** Character bigram Dice similarity works without a Chinese tokenizer or model. */
+export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[]; route:'direct'|'continuation'|'semantic'|'fallback'|'other'|'closing' }
+export interface ReplyScoreContext { name:string; owner:boolean; affection:number; recent?:{at:number;text:string}; now:number; seed:string; addresses?:readonly string[]; semantic?:AttentionPrediction }
+const normalized=(text:string)=>text.slice(0,1200).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'').slice(0,160)
 export function topicSimilarity(left:string,right:string):number {
  const grams=(text:string)=>{const chars=Array.from(normalized(text)),out=new Set<string>();for(let i=1;i<chars.length;i++)out.add(chars[i-1]!+chars[i]!);return out}
  const a=grams(left),b=grams(right);if(!a.size||!b.size)return 0
  let common=0;for(const gram of a)if(b.has(gram))common++
  return 2*common/(a.size+b.size)
 }
-/** One edit for longer names only: two-character Chinese names are too ambiguous. */
-function nearName(text:string,name:string):boolean {
- const a=Array.from(normalized(text)),b=Array.from(normalized(name))
- if(b.length<4||b.length>30)return false
- const prefix=a.slice(0,b.length)
- let previous=Array.from({length:b.length+1},(_,i)=>i)
- for(let i=1;i<=prefix.length;i++){
-  const row=[i];for(let j=1;j<=b.length;j++)row[j]=Math.min(row[j-1]!+1,previous[j]!+1,previous[j-1]!+(prefix[i-1]===b[j-1]?0:1))
-  previous=row
- }
- return previous[b.length]!<=1
+export const CONVERSATION_WINDOW_MS=5*60_000
+export function activeConversation(context:ReplyScoreContext):boolean {
+ const age=context.recent?context.now-context.recent.at:Infinity
+ return age>=0&&age<CONVERSATION_WINDOW_MS
+}
+export function conversationEnded(text:string):boolean {
+ return /(?:别再?回复|不要(?:再|继续)?回复|不用(?:再)?回[复答]?|不用回答|先不聊|不聊了|暂停聊天|结束这个话题|让我安静|stop (?:talking|replying)|no reply (?:needed|required)|leave me alone)/iu.test(text)
+}
+function directAddress(text:string,name:string):boolean {
+ if(!name||name.length<2||!text.startsWith(name))return false
+ const tail=text.slice(name.length)
+ return !tail||/^[\s,，:：!！?？、]/u.test(tail)||/^(?:你|人呢|在吗|在不在|出来|来一下|帮我|帮忙|能不能|可以|会不会)/u.test(tail)
+}
+/** Strong routing facts run before semantics. No random draw in a live conversation. */
+export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore|undefined {
+ const text=event.text.trim(),group=event.qqGroup
+ const decide=(reply:boolean,route:ReplyScore['route'],reason:string):ReplyScore=>({reply,route,score:reply?100:0,probability:reply?1:0,reasons:[reason]})
+ if(group?.mentioned)return decide(true,'direct','明确 @ 伙伴')
+ if(group?.replyTo==='self')return decide(true,'direct','引用伙伴已确认发送的消息')
+ if(group?.otherMention||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
+ if(conversationEnded(text))return decide(false,'closing','用户明确结束或暂停接话')
+ if(!group?.hasReply&&directAddress(text,context.name.trim()))return decide(true,'direct','直接叫到角色名字')
+ if(context.owner&&!group?.hasReply&&(context.addresses??[]).some(name=>directAddress(text,name)))return decide(true,'direct','归属账号使用关系称呼呼唤')
+ // A successful delivered reply establishes one speaker's thread; another speaker does not erase it.
+ if(activeConversation(context))return decide(true,'continuation','接续与此人的对话，不逐条抽签')
+ return undefined
 }
 export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore {
- const text=event.text.trim(),group=event.qqGroup,reasons:string[]=[]
- const fixed=(reply:boolean,reason:string):ReplyScore=>({reply,score:reply?100:0,probability:reply?1:0,reasons:[reason]})
- if(group?.mentioned)return fixed(true,'明确 @ 伙伴')
- const name=context.name?.trim(),directedElsewhere=group?.otherMention===true
- if(!directedElsewhere&&!group?.hasReply&&name&&name.length>=2&&text.startsWith(name)){
-  const tail=text.slice(name.length)
-  if(!tail||/^[\s,，:：!！?？、]/u.test(tail)||/^(?:你|在吗|在不在|出来|来一下|帮我|帮忙|能不能|可以|会不会)/u.test(tail))return fixed(true,'直接叫到角色名字')
+ const routed=routeGroupReply(event,context);if(routed)return routed
+ const text=event.text.trim(),semantic=context.semantic
+ const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
+ // Closing acknowledgements only suppress a NEW conversation, never an ongoing exchange.
+ if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','独立确认语，没有正在接续的对话')
+ if(semantic){
+  const score=Math.round(semantic.confidence*100)
+  if(['address','engage'].includes(semantic.label)&&semantic.confidence>=.38)return decide(true,'semantic','本地语义识别为呼唤或交流',score)
+  // An uncertain classification must never become a hard rejection. Guests also get this fallback.
+  if(semantic.confidence>=.72&&semantic.margin>=.35&&['other','close','background'].includes(semantic.label))return decide(false,'semantic',`本地语义明确识别为 ${semantic.label}`,score)
  }
- if(!event.media?.length&&!group?.hasReply&&!directedElsewhere&&/^(?:嗯{1,3}|好|好的|收到|ok)[\s。.!！~～]*$/iu.test(text))return fixed(false,'简短确认，没有新问题')
- let score=8
- const add=(points:number,reason:string)=>{score+=points;reasons.push(`${reason} ${points>=0?'+':''}${points}`)}
- if(context.owner)add(12,'归属账号')
- if(context.owner&&context.affection>0)add(Math.round(Math.min(100,context.affection)*.08),'好感度')
- if(/[?？]|(?:为什么|怎么|咋|是否|是不是|能不能|可以吗|怎么办|谁知道|有人知道|帮忙|请问|在吗|呢[。！!~～\s]*$)/u.test(text))add(18,'问题或求助')
- if(/^(?:你|那你|可是你|但你|所以你)/u.test(text)&&!/[他她它]/u.test(text))add(16,'直接对话措辞')
- // Kinship alone cannot prove identity; only verified owners get this address cue.
- if(context.owner&&/^(?:弟弟|哥哥|姐姐|妹妹|伙伴|小家伙|小朋友)(?:[，,：:\s]|你|呢|在|$)/u.test(text))add(25,'归属账号的称呼')
- if(/^(?:hello|helo|hi|hey|你好|大家好|我来了|我又来了|我回来了)[!！。~～\s]*$/iu.test(text))add(25,'招呼或回来续聊')
- if(/^(?:我都没说|我没说|不是这个|不是那个|不是说|不是这个意思)/u.test(text))add(15,'纠正或补充')
- if(name&&text.includes(name))add(25,'提到角色名')
- else if(name&&nearName(text,name))add(30,'近似角色名')
- const age=context.recent?context.now-context.recent.at:Infinity
- if(age>=0&&age<120000){
-  const weight=1-age/120000
-  add(Math.round(30*weight),'刚才与此人对话')
-  const similarity=topicSimilarity(text,context.recent!.text)
-  if(similarity>=.12)add(Math.round(20*similarity*weight),'话题相似')
- }
- if(event.media?.length)add(8,'附件')
- if(group?.hasReply)add(-12,'引用对象未确认')
- if(directedElsewhere)add(-60,'明确 @ 其他人')
- score=Math.max(0,Math.min(directedElsewhere?29:100,Math.round(score)))
- const probability=score>=65?1:score<30?0:(score-30)/35
- const draw=createHash('sha256').update(context.seed).digest().readUInt32BE(0)/0x100000000
- return {score,probability,reply:draw<probability,reasons}
+ if(event.media?.length)return decide(true,'fallback','附件交给回复模型结合上下文判断')
+ if(text)return decide(true,'fallback',semantic?'语义归属不确定，交给回复模型判断':'本地语义暂不可用，保留消息进入回复流程')
+ return decide(false,'fallback','空消息')
 }

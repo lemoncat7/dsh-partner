@@ -230,3 +230,17 @@ test('independent QQ validation calls overlap while all identity checks remain m
  waiters.get('get_group_list')([{group_id:99887766}]);waiters.get('get_group_member_info')({group_id:99887766,user_id:22345678})
  assert.deepEqual(await validation,{accountId:'12345678',peerId:'group:99887766:22345678'})
 })
+
+test('quoted reply routing uses confirmed same-group message authors, never untrusted quote metadata',async t=>{
+ const s=await server(t,r=>r.action==='send_group_msg'?{message_id:7654321}:undefined)
+ const c=new OneBotConnection(s.url,'secret');t.after(()=>c.close())
+ await c.call('send_group_msg',{group_id:Number(group),message:[]})
+ assert.equal(c.quotedTarget(group,'7654321',bot),'self')
+ assert.equal(c.quotedTarget('11223344','7654321',bot),undefined)
+ s.connections[0].ws.send(JSON.stringify(groupEvent({message_id:333,user_id:Number(peer)})))
+ await c.read(AbortSignal.timeout(2000),200)
+ assert.equal(c.quotedTarget(group,'333',bot),'other')
+ assert.equal(c.quotedTarget(group,'unknown',bot),undefined)
+ const raw=oneBotMessage(groupEvent({message:[{type:'reply',data:{id:333,qq:bot}},{type:'at',data:{qq:bot}}]}),bot,'',groupSettings)
+ assert.equal(raw.qqGroup.replyToId,'333');assert.equal(raw.qqGroup.replyTo,undefined)
+})
