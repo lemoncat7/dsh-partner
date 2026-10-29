@@ -1,3 +1,4 @@
+import { currentQqIdentityRelation, renderQqIdentityRelation } from './channels/qq/identity-binding.js'
 import { qqSettings, qqSessionTarget } from './channels/qq/settings.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
 import { questionOrigin } from './channels/question-origin.js'
@@ -595,6 +596,7 @@ export class PartnerAgentRuntime {
     const companion = this.store.snapshot().companions.find(item => item.id === route.companionId)
     if (companion === undefined) return
     const events = completedTurnEvents(session.snapshotEvents(), event)
+    const identityRelation = currentQqIdentityRelation(session.id, events, this.store.snapshot().sessions, this.store.snapshot().channels ?? [])
     const prompt = events.find(item => item.type === 'user/message' && item.data.source.kind === 'user')
     const replies = events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
     const userText = events.filter(e => e.type === 'user/message' && e.data.source.kind === 'user').map(e => e.type === 'user/message' ? textContent(e.data.content) : '').filter(Boolean).join('\n\n')
@@ -606,6 +608,7 @@ export class PartnerAgentRuntime {
     const created = companion.automation.memory.enabled && this.reflection !== undefined ? await this.reflection.reflect(companion, {
       id: `turn-${createHash('sha256').update(JSON.stringify([session.id, event.time, userText])).digest('hex').slice(0, 32)}`, companionId: companion.id, scopeId: conversationMemoryScope(route, this.store.snapshot().sessions),
       characterEnabled: companion.characterCard?.enabled === true,
+      ...(identityRelation ? {identityRelation} : {}),
       userMessageIds: events.flatMap(e => e.type === 'user/message' && e.data.source.kind === 'user' ? [e.data.id] : []),
       sessionId: session.id, at: event.time, user: userText, assistant: assistantText, concernScopeId: scopeId,
       ...(concernDirective === undefined ? {} : { concernDirective }),
@@ -765,7 +768,11 @@ export class PartnerAgentRuntime {
     const config = this.configurations.forSession(agent.session.id)
     if (!config) return false
     const { companion, route } = config
-    if ((!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id)) {
+    const state = this.store.snapshot()
+    const relationEvents = state.channels?.some(c => c.platform === 'qq' && c.qq?.identityBinding?.enabled && state.sessions.some(r => r.sessionId === agent.session.id && r.channelId === c.id))
+      ? agent.session.snapshotEvents() : undefined
+    const identityRelation = relationEvents ? currentQqIdentityRelation(agent.session.id, relationEvents, state.sessions, state.channels) : undefined
+    if (!identityRelation && (!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id)) {
       this.characterContexts.get(agent.session.id)?.()
       this.characterContexts.delete(agent.session.id)
       this.contextRevisions.delete(agent)
@@ -774,10 +781,10 @@ export class PartnerAgentRuntime {
     const messages = agent.session.deriveMessages()
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? textContent(last.content) : ''
-    const events=agent.session.snapshotEvents()
+    const events=relationEvents ?? agent.session.snapshotEvents()
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
-    const revision = `${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
+    const revision = `${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -792,6 +799,7 @@ export class PartnerAgentRuntime {
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled ? renderProfile(recalled.profile) : '',
       renderConversationTurn(companion.characterCard, consecutiveUserMessages, autonomous),
+      renderQqIdentityRelation(identityRelation),
       renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id)),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()

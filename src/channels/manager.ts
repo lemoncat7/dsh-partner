@@ -914,7 +914,7 @@ export class ChannelManager {
       // Unapproved speakers contribute context, never instructions or pairing-code spam.
       let reply=false
       if(pairing?.status!=='approved')this.groupAutonomy.record(channel.id,event,'发言人尚未授权，仅作为群聊背景')
-      else reply=await this.groupAutonomy.shouldReply(channel.id,event,requiredCompanion(this.store,channel.companionId),signal)
+      else reply=await this.groupAutonomy.shouldReply(channel.id,event,requiredCompanion(this.store,channel.companionId),signal,channel.qq)
       if(!reply){await this.rememberReceipts(receipts);return}
       if(this.agents.isCompanionBusy(channel.companionId))this.groupAutonomy.record(channel.id,event,'决定接话，回复会按顺序处理；后台记忆不阻止判断')
     }

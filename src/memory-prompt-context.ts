@@ -87,6 +87,7 @@ export function compactTurns(turns: ConversationTurn[], charBudget: number): Arr
 function compactTurn(turn: ConversationTurn, userLimit: number, assistantLimit: number): Record<string, unknown> {
   return {
     characterEnabled: turn.characterEnabled === true,
+    ...(turn.identityRelation ? {identityRelation:turn.identityRelation} : {}),
     id: turn.id,
     at: turn.at,
     user: clip(turn.user, userLimit),

@@ -5,6 +5,7 @@ export type MemoryKind = 'profile' | 'preference' | 'task' | 'event' | 'relation
 export type MemoryStatus = 'active' | 'completed' | 'superseded' | 'expired'
 
 export interface ConversationTurn {
+  identityRelation?: import('./channels/qq/identity-binding.js').QqIdentityRelation
   characterEnabled?: boolean
   userMessageIds?: string[]
   /** Transport identity for concern delivery, independent of shared memory. */

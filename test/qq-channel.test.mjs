@@ -98,7 +98,7 @@ test('media URLs reject arbitrary hosts, credentials and local files',()=>{
 
 const group='99887766', groupUser=`group:${group}:${peer}`
 const groupEvent=(extra={})=>event({message_type:'group',sub_type:'normal',group_id:Number(group),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'你好'}}],...extra})
-const groupSettings={autonomousActions:false,enabledActions:[],qzoneVisibility:4,voiceCharacter:'',mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
+const groupSettings={identityBinding:{enabled:false,qqId:'',relationship:''},autonomousActions:false,enabledActions:[],qzoneVisibility:4,voiceCharacter:'',mainSessionPeers:[],autonomousGroupIds:[],stickerSource:'channel',privateReplies:true,groupReplies:true,groupIds:[group],groupTrigger:'mention',mentionSender:true,facesEnabled:true,imagesEnabled:true}
 test('group intake is opt-in, allowlisted, requires real bot mention and rejects anonymous messages',()=>{
   assert.equal(oneBotMessage(groupEvent(),bot),undefined)
   const parsed=oneBotMessage(groupEvent(),bot,'',groupSettings)

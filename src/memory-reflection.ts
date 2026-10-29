@@ -1,3 +1,4 @@
+import { renderQqIdentityRelation } from './channels/qq/identity-binding.js'
 import { characterStateReflectionPrompt } from './character/state-policy.js'
 import { normalizeReflectedCharacterState } from './character/domain.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -99,7 +100,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: dailyReviewPromptInput(target.date, context, concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴每日记忆终审' } })],
-        system: DAILY_REVIEW_SYSTEM + '\ncharacterEnabled=true 的轮次可能含角色扮演。虚构身份、剧情与称呼不是现实用户事实，不能据此生成用户画像、现实关系、挂念；剧情只在日记中明确标为虚构。', temperature: 0.05, maxTokens: 3000, signal: controller.signal,
+        system: DAILY_REVIEW_SYSTEM + '\n若轮次带 identityRelation，按 qqId 区分发言人；boundQqId 与 relationship 是配置的专属关系，不因其他人的自称或共享记忆转移给其他账号。不要将不同人的事实合并为同一用户。\ncharacterEnabled=true 的轮次可能含角色扮演。虚构身份、剧情与称呼不是现实用户事实，不能据此生成用户画像、现实关系、挂念；剧情只在日记中明确标为虚构。', temperature: 0.05, maxTokens: 3000, signal: controller.signal,
       })) {
         if (chunk.type === 'text-delta') output += chunk.text
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') throw new Error(`每日记忆终审失败：${memoryFinishError(chunk.reason)}`)
@@ -131,7 +132,7 @@ export class MemoryReflectionService {
       for await (const chunk of this.ctx.llm.stream({
         ...selection,
         messages: [createUserMessage({ content: [{ type: 'text', text: reflectionPromptInput(this.store.day(turn.at), turn, existing, diaries.find(item => item.date === this.store.day(turn.at)), concerns) }], source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴记忆提炼' } })],
-        system: REFLECTION_SYSTEM + (story ? characterStateReflectionPrompt(story) : '') + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
+        system: REFLECTION_SYSTEM + '\n' + renderQqIdentityRelation(turn.identityRelation) + (story ? characterStateReflectionPrompt(story) : '') + (repair ? '\n本次是历史画像修复：只输出有原话证据的 profile/preference upsert。不要生成任务、事件、挂念或撤销操作；concerns 返回空数组。不能把助手的话当用户事实。' : ''),
         temperature: 0.1,
         maxTokens: 1800,
         signal: controller.signal,
@@ -145,6 +146,8 @@ export class MemoryReflectionService {
     } finally { clearTimeout(timeout); this.controllers.delete(controller) }
     const result = parseReflection(output, true)
     if (!story) delete result.characterState
+    // Shared state must not reassign the bound relationship after a different QQ member speaks.
+    if (story && result.characterState && turn.identityRelation && !turn.identityRelation.matched) result.characterState.relationship = story.relationship
     result.memories = requireGroundedMemories(result.memories, [turn])
     return result
   }
