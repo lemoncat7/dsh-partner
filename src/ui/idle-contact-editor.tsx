@@ -1,3 +1,4 @@
+import {channelReplyAllowed} from '../channels/reply-access.js'
 import { useEffect, useState } from 'react'
 import { loadPartner, type PartnerSnapshot } from '../client-api.js'
 import { DEFAULT_IDLE_CONTACT, type IdleContactPolicy } from '../character/idle-contact.js'
@@ -8,7 +9,7 @@ export function IdleContactEditor({companionId,value,disabled,onChange}:{compani
   const policy=value??DEFAULT_IDLE_CONTACT
   const [snapshot,setSnapshot]=useState<PartnerSnapshot>(),[error,setError]=useState<string>()
   useEffect(()=>{let active=true;void loadPartner().then(s=>{if(active)setSnapshot(s)}).catch(e=>{if(active)setError(errorMessage(e))});return()=>{active=false}},[companionId])
-  const routes=snapshot?.sessions.filter(r=>r.companionId===companionId&&!r.archived&&(r.kind==='local'||(snapshot.channels.some(c=>c.id===r.channelId&&c.enabled)&&snapshot.pairings.some(p=>p.channelId===r.channelId&&p.userId===r.userId&&p.status==='approved'))))??[]
+  const routes=snapshot?.sessions.filter(r=>r.companionId===companionId&&!r.archived&&(r.kind==='local'||(snapshot.channels.some(c=>c.id===r.channelId&&c.enabled)&&channelReplyAllowed(snapshot,r.channelId,r.userId))))??[]
   const patch=(p:Partial<IdleContactPolicy>)=>onChange({...policy,...p})
   return <section className="dsh-partner-character" aria-label="闲时自主活动">
     <header><div><h3>闲时自主活动 <small>可选</small></h3><p>空闲时逐渐增加活动概率，让伙伴自己决定聊天、使用已授权能力，或安静待着。</p></div><div className="dsh-partner-character-toggle"><button type="button" role="switch" className="dsh-partner-switch" aria-label="开启闲时自主活动" aria-checked={policy.enabled} data-on={policy.enabled} disabled={disabled} onClick={()=>patch({enabled:!policy.enabled})}><i aria-hidden="true"/></button><span>{policy.enabled?'已开启':'已关闭'}</span></div></header>

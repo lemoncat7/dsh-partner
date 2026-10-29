@@ -1,3 +1,4 @@
+import {channelReplyAllowed} from '../channels/reply-access.js'
 import { isSleeping } from './sleep.js'
 import type { Companion, PartnerState } from '../domain.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -40,7 +41,7 @@ export function idleContactDay(now:number,timeZone:string):string {
 export function idleContactQuiet(_policy:IdleContactPolicy,_now:number,_timeZone:string):boolean { return false }
 export function idleContactRouteAllowed(state:PartnerState,companion:Companion,routeId:string):boolean {
   const route=state.sessions.find(r=>r.id===routeId&&r.companionId===companion.id)
-  return Boolean(route && (route.kind==='local' || (state.channels.some(c=>c.id===route.channelId&&c.companionId===companion.id&&c.enabled) && state.pairings.some(p=>p.channelId===route.channelId&&p.userId===route.userId&&p.status==='approved'))))
+  return Boolean(route && (route.kind==='local' || (state.channels.some(c=>c.id===route.channelId&&c.companionId===companion.id&&c.enabled) && channelReplyAllowed(state,route.channelId,route.userId))))
 }
 export function lastIdleContactUser(events:readonly SessionEvent[]):{id:string;at:number}|undefined {
   for(let i=events.length-1;i>=0;i--) {

@@ -1,3 +1,4 @@
+import {channelReplyAllowed} from '../reply-access.js'
 import { createHash } from 'node:crypto'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { PartnerStore } from '../../store.js'
@@ -40,7 +41,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         exec.signal.throwIfAborted()
         const now=origin(),current=now.state.channels.find(c=>c.id===channel.id),settings=qqSettings(current?.qq)
         if(store.isCompanionRemoving(owner)||now.route?.id!==route.id||now.messageId!==initial.messageId||!current?.enabled||current.updatedAt!==channel.updatedAt||!settings.replyVoiceEnabled)throw Error('语音回复已关闭，或当前对象/渠道配置已变化')
-        if(!now.state.pairings.some(p=>p.channelId===channel.id&&p.userId===route.userId&&p.status==='approved'&&(!p.directTargetId||p.directTargetId===(group?'group:'+group.groupId:route.userId))))throw Error('当前联系人访问许可已撤回')
+        if(!channelReplyAllowed(now.state,channel.id,route.userId,group?'group:'+group.groupId:route.userId))throw Error('当前联系人访问许可已撤回')
         if(group ? !settings.groupReplies||!settings.groupIds.includes(group.groupId) : !settings.privateReplies)throw Error('当前会话回复已关闭')
         return settings
       }

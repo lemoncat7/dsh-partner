@@ -109,7 +109,7 @@ test('one blocked target does not block siblings and concurrent delivery is dedu
 
 test('QQ group notifications stay in their source group and private recent routing excludes group activity',()=>{
  const privateTarget={channelId:'qq',userId:'12345678'},groupTarget={channelId:'qq',userId:'group:99887766:12345678'}
- const state={companions:[{id:'c',notificationDelivery:{mode:'recent',targets:[]}}],channels:[{id:'qq',companionId:'c',platform:'qq',enabled:true}],pairings:[{...privateTarget,status:'approved',lastInboundAt:1},{...groupTarget,status:'approved',lastInboundAt:99,deliveryTarget:privateTarget}]}
+ const state={companions:[{id:'c',notificationDelivery:{mode:'recent',targets:[]}}],channels:[{id:'qq',companionId:'c',platform:'qq',enabled:true,qq:{groupReplies:true,groupIds:['99887766']}}],pairings:[{...privateTarget,status:'approved',lastInboundAt:1},{...groupTarget,status:'approved',lastInboundAt:99,deliveryTarget:privateTarget}]}
  assert.deepEqual(notificationRoutes(state,'local','local','c'),[privateTarget])
  assert.deepEqual(notificationRoutes(state,privateTarget.channelId,privateTarget.userId),[privateTarget])
  state.companions[0].notificationDelivery={mode:'selected',targets:[privateTarget]}

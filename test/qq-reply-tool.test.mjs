@@ -9,7 +9,7 @@ function fixture(privateChat=false){
  const session=Session.create('voice'),message=createUserMessage({content:[{type:'text',text:'用语音说你好'}],source:{kind:'user'}})
  session.append('user/message',message,{surfaceOp:'append'})
  const route={id:'r',kind:'channel',companionId:'c',sessionId:session.id,channelId:'qq',userId:privateChat?'22345678':'group:99887766:22345678',inboundMessageIds:[message.id]}
- const channel={id:'qq',companionId:'c',platform:'qq',enabled:true,updatedAt:1,qq:qqSettings({replyVoiceEnabled:true,replyVoiceGroupId:'99887766',groupReplies:true,groupIds:['99887766'],voiceCharacter:'test-voice'})}
+ const channel={id:'qq',companionId:'c',platform:'qq',enabled:true,updatedAt:1,qq:qqSettings({replyVoiceEnabled:true,replyVoiceGroupId:'99887766',groupReplies:true,groupIds:['99887766'],autonomousGroupIds:['99887766'],voiceCharacter:'test-voice'})}
  const state={sessions:[route],channels:[channel],pairings:[{channelId:'qq',userId:route.userId,status:'approved'}]}
  const store={snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,update:async fn=>{const next=structuredClone(state);fn(next);Object.assign(state,next)}}
  const requests=[];let conclude=0
@@ -19,7 +19,7 @@ function fixture(privateChat=false){
  return {tool,exec,requests,state,concluded:()=>conclude,store,call}
 }
 test('guest group voice replies only to the current group without enabling private API powers',async()=>{
- const f=fixture();assert.equal(f.state.channels[0].qq.autonomousActions,false)
+ const f=fixture();f.state.pairings=[];assert.equal(f.state.channels[0].qq.autonomousActions,false)
  const result=await f.tool.execute({action:'voice',text:'你好'},f.exec)
  assert.equal(result.status,'confirmed');assert.equal(f.concluded(),1)
  assert.deepEqual(f.requests[0].params,{group_id:99887766,character:'test-voice',text:'你好',chat_type:1})
