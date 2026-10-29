@@ -3,6 +3,7 @@ import { qqFaceCatalog, qqCustomCatalog } from './qq/catalog.js'
 import { parseQqSettings, qqPeerLabel, validQqId } from './qq/settings.js'
 import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
+import { isSilentActivityResult } from '../character/activity-tool.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -385,6 +386,7 @@ export class ChannelManager {
       const events=completedTurnEvents(session.snapshotEvents(),event)
       const notice=events.find(isIdleContactNotice)
       if(notice?.type==='user/message') {
+        if(events.some(isSilentActivityResult))return
         const route=this.store.snapshot().sessions.find(r=>r.sessionId===session.id && r.idleContactState?.messageId===notice.data.id)
         if(!route)return
         const valid=()=>{

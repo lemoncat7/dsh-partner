@@ -131,3 +131,10 @@ test('privileged management can generate another persona while preserving its hu
   assert.equal(f.store.snapshot().companions[0].characterCard, undefined)
   assert.deepEqual(f.store.snapshot().companions[0].identityDraft, original)
 })
+
+test('identity discovery exposes an authoring format and applies generated role without touching the page draft',async t=>{
+ const f=await fixture(t),before=pageIdentity(f.store.snapshot().companions[0]),inspection=await f.inspect()
+ for(const section of ['你是谁','怎么相处','怎么说话','对话参考'])assert.ok(inspection.generationGuide.includes(section))
+ await f.update({characterCard:{enabled:true,roleText:'## 你是谁\n爱观察的同行者。\n\n## 怎么相处\n坦率、不附和。\n\n## 对话参考\n对方：下雨了。\n回应：那今天就赖着。'}})
+ assert.deepEqual(pageIdentity(f.store.snapshot().companions[0]),before)
+})

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {DEFAULT_IDLE_CONTACT,IDLE_CONTACT_NOTICE,normalizeIdleContact,idleContactDue,idleContactDay,idleContactQuiet,lastIdleContactUser} from '../lib/character/idle-contact.js'
+import {DEFAULT_IDLE_CONTACT,IDLE_CONTACT_NOTICE,normalizeIdleContact,idleActivityProbability,idleContactDue,idleContactDay,idleContactQuiet,lastIdleContactUser} from '../lib/character/idle-contact.js'
 import {PartnerAgentRuntime} from '../lib/agent-runtime.js'
 import {ChannelManager} from '../lib/channels/manager.js'
 import {PartnerStore} from '../lib/store.js'
@@ -34,15 +34,15 @@ test('only real user inactivity qualifies; deny recent activity, unauthorized ta
   state.channels[0].companionId='other';assert.equal(idleContactDue(state,companion,user,now,tz),false)
   assert.deepEqual(lastIdleContactUser([{type:'user/message',time:123,data:{id:'real',source:{kind:'user'}}},{type:'user/message',time:456,data:{id:'internal',source:{kind:'plugin:task'}}}]),{id:'real',at:123})
 })
-test('no reply means no repeat even next day; no daily cap and cooldown span routes',()=>{
+test('autonomous decisions can resume without a new reply; no daily cap and cooldown spans routes',()=>{
   const {state,companion,route}=fixture()
   route.idleContactState={userMessageId:user.id,attemptedAt:now-3*3600_000,day:idleContactDay(now,tz),count:1}
-  assert.equal(idleContactDue(state,companion,user,now+86400_000,tz),false)
+  assert.equal(idleContactDue(state,companion,user,now+86400_000,tz),true)
   assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),true)
   state.sessions.push({...route,id:'r2',idleContactState:{...route.idleContactState,count:999}})
   companion.idleContact.dailyLimit=1 // Legacy stored limits no longer restrict sending.
   assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),true)
-  state.sessions.pop();route.idleContactState.attemptedAt=now-60_000
+  state.sessions.pop();route.idleContactState.attemptedAt=now-59_000
   assert.equal(idleContactDue(state,companion,{...user,id:'new'},now,tz),false)
 })
 function runtimeFixture(){
@@ -72,9 +72,10 @@ test('busy conversation and input arriving during durable claim do not start a g
 test('claim survives disk reopening',async t=>{
   const root=await mkdtemp(join(tmpdir(),'partner-idle-'));t.after(()=>rm(root,{recursive:true,force:true}))
   const store=await PartnerStore.open(join(root,'state.json')),f=fixture()
-  await store.update(s=>{s.sessions=[{...f.route,idleContactState:{userMessageId:'u',messageId:'m',attemptedAt:now,day:idleContactDay(now,tz),count:1,timeZone:tz,policyRevision:1}}]})
+  await store.update(s=>{s.sessions=[{...f.route,idleActivityCheck:{at:now,probability:0.5},idleContactState:{userMessageId:'u',messageId:'m',attemptedAt:now,day:idleContactDay(now,tz),count:1,timeZone:tz,policyRevision:1}}]})
   const reopened=await PartnerStore.open(join(root,'state.json'))
   assert.equal(reopened.snapshot().sessions[0].idleContactState.messageId,'m')
+  assert.deepEqual(reopened.snapshot().sessions[0].idleActivityCheck,{at:now,probability:0.5})
 })
 test('existing heartbeat timer checks idle contact even when concerns heartbeat is disabled',async()=>{
   const f=fixture();let calls=0
@@ -175,4 +176,41 @@ test('offline QQ proactive delivery is persisted as unsent before attempting to 
  const saved=f.state.notificationDeliveries[0]
  assert.equal(saved.targets[0].retrySafe,true);assert.deepEqual(saved.targets[0].sentParts,[])
  assert.equal(saved.reply.text,f.record.reply.text)
+})
+
+
+test('minute probability grows linearly, clamps to 100%, and activity resets across routes',()=>{
+ const {state,companion,route}=fixture();companion.idleContact.idleMinutes=60
+ route.lastMessageAt=now;const fresh={id:'fresh',at:now}
+ for(const [minute,chance] of [[0,0],[0.9,0],[1,1/60],[30,0.5],[60,1],[120,1]])assert.equal(idleActivityProbability(state,companion,fresh,now+minute*60000),chance)
+ route.idleContactState={attemptedAt:now+30*60000}
+ assert.equal(idleActivityProbability(state,companion,fresh,now+30*60000),0)
+ state.sessions.push({...route,id:'other',lastMessageAt:now+31*60000})
+ assert.equal(idleActivityProbability(state,companion,fresh,now+32*60000),1/60)
+ companion.sleepPolicy={enabled:true};companion.sleepState={episode:{startedAt:now,wakeAt:now+120*60000}}
+ assert.equal(idleActivityProbability(state,companion,fresh,now+60*60000),0)
+})
+test('misses persist and cannot reroll in the same minute, including after restarting',async t=>{
+ const f=runtimeFixture(),time=Date.now();f.events[0].time=time-60000;f.route.lastMessageAt=time-60000
+ let rolls=0;t.mock.method(Math,'random',()=>{rolls++;return 0.99})
+ await f.runtime.idleContact('c');assert.equal(rolls,1);assert.equal(f.followed.length,0);assert.ok(f.route.idleActivityCheck.at)
+ const restarted=new PartnerAgentRuntime({agents:{get:()=>undefined}},f.store,'/tmp');restarted.ensureAgent=async()=>f.agent;restarted.isArchived=()=>false
+ await restarted.idleContact('c');assert.equal(rolls,1)
+ f.route.idleActivityCheck.at-=60000;t.mock.method(Math,'random',()=>0)
+ await restarted.idleContact('c');assert.equal(f.followed.length,1)
+ assert.match(f.followed[0].content[0].text,/partner_activity_finish/)
+ assert.doesNotMatch(f.followed[0].content[0].text,/只生成这次联系的最终正文/)
+})
+test('a silent autonomous decision never forwards its commentary as a channel message',async()=>{
+ for(const type of ['tool/result','tool/ptc-dispatch']){
+  const f=deliveryFixture();f.events.splice(-1,0,{type,seq:3.5,data:{message:{isError:false},isError:false,meta:{kind:'partner-activity-silent-v1'}}})
+  await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,0)
+ }
+})
+
+test('background memory does not indefinitely starve autonomous activity; foreground work still waits',async()=>{
+ const f=runtimeFixture();f.runtime.reflection={isRunning:()=>true}
+ await f.runtime.idleContact('c');assert.equal(f.followed.length,1)
+ const busy=runtimeFixture();busy.runtime.ctx.agents.get=()=>({status:'running'})
+ await busy.runtime.idleContact('c');assert.equal(busy.followed.length,0)
 })

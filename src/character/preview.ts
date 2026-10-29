@@ -1,3 +1,4 @@
+import { renderConversationTurn } from './conversation-behavior.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createAssistantMessage, createUserMessage, type Message } from '@deepseek-ai/dsh-llm'
@@ -34,7 +35,7 @@ export async function previewCharacter(ctx: Context, companion: Companion, body:
   const started = Date.now()
   try {
     for await (const chunk of ctx.llm.stream({ ...selection,
-      system: `${renderPartnerPersona({ ...companion, characterCard: card }, 'local')}\n${renderCharacterContext(card, history.map(e => e.user + e.assistant).join('\n') + body.message)}\n这是独立试聊：只依据提供的对话回应，没有工具，不执行真实操作，不读取或写入正式记忆，不向任何渠道发送消息；身份里列出的工作能力在本次试聊不可用。`,
+      system: `${renderPartnerPersona({ ...companion, characterCard: card }, 'local')}\n${renderCharacterContext(card, history.map(e => e.user + e.assistant).join('\n') + body.message)}\n${renderConversationTurn(card, 1)}\n这是独立试聊：只依据提供的对话回应，没有工具，不执行真实操作，不读取或写入正式记忆，不向任何渠道发送消息；身份里列出的工作能力在本次试聊不可用。`,
       messages,
       maxTokens: 1200, signal: controller.signal,
     })) {

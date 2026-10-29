@@ -13,7 +13,7 @@ const GROUPS=[
  {id:'other',title:'其他能力',description:'其他伙伴扩展工具'},
 ]
 function category(name:string):string {
- if(/identity|sleep|avatar/.test(name))return 'identity'
+ if(/identity|sleep|avatar|activity/.test(name))return 'identity'
  if(/task_board|requirements|collaborate/.test(name))return 'work'
  if(/schedule/.test(name))return 'automation'
  if(/skill/.test(name))return 'skills'

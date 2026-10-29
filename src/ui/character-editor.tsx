@@ -1,3 +1,4 @@
+import { PERSONA_REQUEST_EXAMPLE } from '../character/identity-guide.js'
 import { StickerLibraryDialog } from './sticker-library.js'
 import { RoleReference } from './role-reference.js'
 import { SettingsSections } from './settings-sections.js'
@@ -37,10 +38,11 @@ export function CharacterEditor({ companion, card, disabled, onChange }: { compa
   // An explicitly empty document remains editable rather than reopening the wizard.
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">
-    <header><div><span className="dsh-partner-character-kicker">ROLE & CONVERSATION</span><h3>角色聊天 <small>可选</small></h3><p>角色决定怎么反应，聊天方式决定怎么接话。工具能力照常可用。</p></div>
+    <header><div><span className="dsh-partner-character-kicker">ROLE & CONVERSATION</span><h3>角色聊天 <small>可选</small></h3><p>告诉伙伴你想要的身份、关系、性格和语气，让 AI 按角色格式生成并应用设定。工具能力照常可用。</p></div>
       <div className="dsh-partner-character-toggle"><button type="button" role="switch" aria-label="启用角色聊天" aria-checked={card?.enabled === true} className="dsh-partner-switch" data-on={card?.enabled === true} disabled={disabled} onClick={() => { if (!hasContent) setWizard(true); else onChange({ ...card!, enabled: !card!.enabled }) }}><i aria-hidden="true" /></button><span aria-hidden="true">{card?.enabled === true ? '已开启' : '已关闭'}</span></div>
     </header>
-    {!hasContent ? <div className="dsh-partner-character-empty"><strong>几条设定，就可以开始聊</strong><p>写下他是谁、怎样相处和说话。示例和背景都是可选的，关闭后继续使用基本身份。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>设置角色</button></div> : <>
+    <details className="dsh-partner-settings-advanced"><summary>怎么让 AI 帮我生成人格？</summary><p className="dsh-partner-character-hint">在与这个伙伴的正式聊天中提出要求即可。AI 会读取当前设定，按“身份 → 相处方式 → 说话习惯 → 避免的表达 → 对话正反例”生成并保存。AI 修改实际生效内容，下面的页面草稿仍保留；当前版本可在“查看当前生效身份”中查看。</p><Field label="通用需求示例" hint="复制到与伙伴的聊天中，将括号里的内容换成你的要求。"><textarea readOnly rows={5} value={PERSONA_REQUEST_EXAMPLE} onFocus={event=>event.currentTarget.select()} /></Field></details>
+    {!hasContent ? <div className="dsh-partner-character-empty"><strong>把你想要的角色告诉 AI</strong><p>推荐先在正式聊天中提出要求，由 AI 生成并应用；也可以在这里手动填写草稿。关闭角色聊天后继续使用基本身份。</p><button type="button" disabled={disabled} onClick={() => setWizard(true)}>手动编写草稿</button></div> : <>
       <p className="dsh-partner-character-status">{card!.enabled ? '已启用 · 保存后下一轮应用新设定，旧对话不会决定新的语气。' : '已关闭 · 内容保留，伙伴继续使用基本身份。'}</p>
       <SettingsSections<typeof section> label="角色聊天分段" value={section} onChange={setSection} sections={[
         {id: 'role', title: '角色设定', content: <fieldset disabled={disabled} className="dsh-partner-character-fields"><RoleFields card={card!} onChange={onChange} /><details className="dsh-partner-settings-advanced"><summary>背景资料 <small>可选 · {card!.lore.length} 条</small></summary><LoreFields card={card!} onChange={onChange} /></details></fieldset>},

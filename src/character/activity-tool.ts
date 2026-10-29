@@ -1,0 +1,35 @@
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { PartnerStore } from '../store.js'
+import { isIdleContactNotice, lastIdleContactUser, idleContactRouteAllowed } from './idle-contact.js'
+
+/** A terminal receipt, never a magic text token that could accidentally be sent to QQ. */
+export function isSilentActivityResult(event: SessionEvent): boolean {
+  if(event.type!=='tool/result'&&event.type!=='tool/ptc-dispatch')return false
+  if(event.type==='tool/result'?event.data.message?.isError:event.data.isError)return false
+  return (event.data.meta as {kind?:string}|undefined)?.kind==='partner-activity-silent-v1'
+}
+export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefinition {
+  return {
+    name:'partner_activity_finish',
+    description:'安静结束系统发起的闲时自主活动。已使用工具完成活动、已经发送语音或不想行动时调用；不发送聊天正文。仅限当前自主活动，不可用来跳过用户消息或工作任务。需要聊天则用正常最终回复或 partner_chat_reply。',
+    parameters:{type:'object',properties:{reason:{type:'string',maxLength:300}},required:['reason'],additionalProperties:false},
+    output:{schema:{type:'object'},render:()=>[{type:'text',text:'本次自主活动已结束，不发送聊天正文。'}],presentationMeta:(_args,value)=>value},
+    presentCall:()=>({card:'generic',title:'自主活动结束'}),
+    async execute(raw,exec){
+      exec.signal.throwIfAborted()
+      const agent=exec.agent,events=agent?.session.snapshotEvents()??[]
+      const start=[...events].reverse().find(e=>e.type==='turn/start')?.seq??-1
+      const inputs=events.filter(e=>e.seq>start&&e.type==='user/message'&&(e.data.source.kind==='user'||!('form' in e.data.source)||!['snapshot','catalog','instructions','recall'].includes(e.data.source.form??'')))
+      const notice=inputs.find(isIdleContactNotice)
+      const state=store.snapshot(),companion=state.companions.find(c=>c.id===owner)
+      const route=state.sessions.find(r=>r.companionId===owner&&r.sessionId===agent?.session.id&&r.id===companion?.idleContact?.routeId)
+      if(!companion?.idleContact?.enabled||!route||store.isCompanionRemoving(owner)||!idleContactRouteAllowed(state,companion,route.id)||notice?.type!=='user/message'||inputs.some(e=>!isIdleContactNotice(e))||route.idleContactState?.messageId!==notice.data.id||lastIdleContactUser(events)?.id!==route.idleContactState.userMessageId)throw Error('只能结束当前系统发起的自主活动，不能忽略用户消息或其他任务')
+      const {reason}=raw as {reason:string}
+      if(typeof reason!=='string'||!reason.trim()||reason.length>300)throw Error('请简要记录活动结果或不行动的原因')
+      if(typeof exec.concludeTurn!=='function')throw Error('当前宿主不支持安静结束活动')
+      exec.concludeTurn()
+      return {kind:'partner-activity-silent-v1',reason:reason.trim(),messageId:notice.data.id}
+    },
+  }
+}

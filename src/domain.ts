@@ -108,6 +108,7 @@ export interface ChannelSession {
   qqSessionTitle?: string
   qqAppliedTitle?: string
   idleContactState?: import('./character/idle-contact.js').IdleContactState
+  idleActivityCheck?: { at: number; probability: number }
   id: string
   /** Local DSH conversation or a channel-backed contact conversation. */
   kind: 'local' | 'channel'

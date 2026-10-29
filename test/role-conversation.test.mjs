@@ -97,3 +97,15 @@ test('segmentation permits multiple messages without encouraging a second reply 
   assert.match(renderConversationTurn({...card,stickersEnabled:false},1),/不查找或提交表情/)
   assert.doesNotMatch(renderConversationTurn({...card,stickersEnabled:false,segmentedReplies:false},1),/partner_chat_reply/)
 })
+
+
+test('tool discovery never changes the full persona or drops dialogue examples',()=>{
+ const companion={...createDefaultCompanion(),characterCard:normalizeCharacterCard({enabled:true,roleText:'## 你是谁\n坦率的同行者。\n\n## 对话参考\n对方：下雨了。\n回应：那今天就赖着。',chatStyle:'接话直接，不机械追问'})}
+ const regular=renderPartnerPersona({...companion,toolDiscovery:false},'conversation')
+ const discovered=renderPartnerPersona({...companion,toolDiscovery:true},'conversation')
+ assert.equal(discovered,regular);assert.ok(discovered.includes(companion.characterCard.roleText));assert.match(discovered,/接话直接/)
+ const turn=renderConversationTurn(companion.characterCard,1)
+ assert.match(turn,/你仍是同一个角色/);assert.match(turn,/不复述自己的错误句子/)
+ const activity=renderConversationTurn(companion.characterCard,1,true)
+ assert.match(activity,/partner_activity_finish/);assert.doesNotMatch(activity,/直接私聊需要可见回复/)
+})

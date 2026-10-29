@@ -21,14 +21,16 @@ export function renderConversationBehavior(card?: CharacterCard): string {
 }
 
 /** Short refresh at each real user turn; no timers, extra LLM calls or synthetic user events. */
-export function renderConversationTurn(card: CharacterCard | undefined, consecutiveUserMessages: number): string {
+export function renderConversationTurn(card: CharacterCard | undefined, consecutiveUserMessages: number, autonomous = false): string {
   if (!card?.enabled) return ''
   return [
-    '【本轮聊天提醒】',
+    autonomous ? '【本轮自主活动提醒】不是用户新消息，可安静结束，不要求聊天。' : '【本轮聊天提醒】',
     consecutiveUserMessages > 1 ? `对方连续发了 ${consecutiveUserMessages} 条消息，请结合起来理解，不逐条机械答复。` : '结合眼前发言和仍在继续的话题回应。',
     renderChatDeliveryGuidance(card),
     renderTurnRoleAnchor(card),
-    '使用当前角色的反应方式，历史里的客服腔不必延续；说完有内容的话即可，不自动补建议、选项或追问。若有实际任务，继续使用全部已授权工具完成；纯闲聊不套用工作汇报。直接私聊需要可见回复。',
+    '使用当前角色的反应方式，历史里的客服腔不必延续；说完有内容的话即可，不自动补建议、选项或追问。若有实际任务，继续使用全部已授权工具完成；纯闲聊不套用工作汇报。',
+    '查工具、改资料或处理故障后，你仍是同一个角色。给出实际结果或必要限制就够，不自动加认错开场、责任声明、能力声明或自我点评；用户要求详细分析、正式文档时再展开。对方说你像 AI，是在表达不喜欢这句说话方式：直接接住当下的话，不复述自己的错误句子，不写“我刚才太像……，我应该说……”的整改报告。',
+    autonomous ? '这轮可调用 partner_activity_finish 安静结束；聊天、语音或其他活动按实际需要选择，工具已表达完毕就不再重复汇报。' : '直接私聊需要可见回复。',
   ].join('\n')
 }
 

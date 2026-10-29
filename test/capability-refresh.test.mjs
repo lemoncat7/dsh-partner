@@ -240,6 +240,7 @@ test('cancellation cleans new effects and does not mark the failed turn prepared
 test('role chat preserves the registered tool set across enable, edit and disable', async t => {
   const { step, store, registered, agent, sections, contexts } = await fixture(t)
   agent.session.deriveMessages = () => []
+  agent.session.snapshotEvents = () => []
   await step(1)
   const tools = [...registered.keys()].sort()
   await store.update(state => { state.companions[0].characterCard = { schemaVersion:1,enabled:true,roleText:'坦率的同行者',identity:'',motivation:'',voice:'',relationship:'',greeting:'',length:'short',narration:false,examples:[],lore:[] } })

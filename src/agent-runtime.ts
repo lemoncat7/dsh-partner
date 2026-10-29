@@ -19,7 +19,7 @@ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { IDLE_CONTACT_NOTICE, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
+import { IDLE_CONTACT_NOTICE, IDLE_ACTIVITY_PROMPT, isIdleContactNotice, idleActivityProbability, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -194,25 +194,30 @@ export class PartnerAgentRuntime {
   /** Use the existing timer and real conversation; never impersonate user input. */
   async idleContact(companionId: string, timeZone = 'Asia/Shanghai'): Promise<void> {
     const key = `companion:${companionId}`
-    if (this.closed || this.isCompanionBusy(companionId) || this.queues.has(key) || this.taskQueues.has(key) || this.heartbeatQueues.has(key) || this.steeringQueues.has(key) || this.store.isCompanionRemoving(companionId)) return
+    if (this.closed || this.companionActivity(companionId).some(a=>a.kind!=='memory'&&a.kind!=='observation') || this.queues.has(key) || this.taskQueues.has(key) || this.heartbeatQueues.has(key) || this.steeringQueues.has(key) || this.store.isCompanionRemoving(companionId)) return
     const state = this.store.snapshot(), companion = state.companions.find(c => c.id === companionId)
     let route = state.sessions.find(r => r.id === companion?.idleContact?.routeId && r.companionId === companionId)
     if (!companion?.idleContact?.enabled || !route || this.isArchived(route)) return
     const channel=state.channels.find(c=>c.id===route!.channelId)
     if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(route.userId))?'main':'separate'))route=await this.ensureSession(companion,route.channelId,route.userId)
     const agent = await this.ensureAgent(companion, route)
-    if (agent.status !== 'idle' || this.isCompanionBusy(companionId) || this.queues.has(key) || this.taskQueues.has(key)) return
+    if (agent.status !== 'idle' || this.companionActivity(companionId).some(a=>a.kind!=='memory'&&a.kind!=='observation') || this.queues.has(key) || this.taskQueues.has(key)) return
     const user = lastIdleContactUser(agent.session.snapshotEvents())
+    const completed=[...agent.session.snapshotEvents()].reverse().find(e=>e.type==='turn/end')
+    if(user&&completed)user.at=Math.max(user.at,completed.time)
     if (!idleContactDue(this.store.snapshot(), companion, user, Date.now(), timeZone)) return
     const stableSeq = agent.session.seq
     const message = createUserMessage({ content: [{type:'text',text:
-      '这是已开启的闲时主动联系，不是用户新发言。沿用当前角色和真实聊天记录，自然主动说一句，有具体话题才展开；不固定问候、不凑两段、不说“检测到你空闲”、不催促或内疚施压，不假装已做过事情。不要重复回答上轮问题。只生成这次联系的最终正文，不调用渠道发送工具、不设置下一次提醒；系统会将最终正文发送到指定会话。其他工具权限保持原样。'
+      IDLE_ACTIVITY_PROMPT
     }], source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE} })
     let claimed = false
     await this.store.update(draft => {
       const current=draft.companions.find(c=>c.id===companionId), target=draft.sessions.find(r=>r.id===route.id)
       const now=Date.now()
       if(!current || current.updatedAt!==companion.updatedAt || !target || target.sessionId!==route.sessionId || !idleContactDue(draft,current,user,now,timeZone))return
+      const probability=idleActivityProbability(draft,current,user,now)
+      target.idleActivityCheck={at:now,probability}
+      if(Math.random()>=probability)return
       const day=idleContactDay(now,timeZone)
       target.idleContactState={userMessageId:user!.id,messageId:message.id,attemptedAt:now,day,count:(target.idleContactState?.day===day?target.idleContactState.count:0)+1,timeZone,policyRevision:current.updatedAt}
       claimed=true
@@ -769,7 +774,10 @@ export class PartnerAgentRuntime {
     const messages = agent.session.deriveMessages()
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? textContent(last.content) : ''
-    const revision = `${config.revision}:${last?.id ?? ''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
+    const events=agent.session.snapshotEvents()
+    const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
+    const autonomous=Boolean(origin&&isIdleContactNotice(origin))
+    const revision = `${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -783,7 +791,7 @@ export class PartnerAgentRuntime {
     const text = [renderCharacterContext(companion.characterCard, messages.slice(-6).filter(m => m.role === 'user' || m.role === 'assistant').map(m => textContent(m.content)).join('\n').slice(-12000), story),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled ? renderProfile(recalled.profile) : '',
-      renderConversationTurn(companion.characterCard, consecutiveUserMessages),
+      renderConversationTurn(companion.characterCard, consecutiveUserMessages, autonomous),
       renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id)),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()

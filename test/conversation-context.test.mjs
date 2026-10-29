@@ -144,3 +144,16 @@ test('session naming updates generated group names but preserves a manual title'
  await runtime.nameQqSession(agent,await runtime.ensureSession(companion,'qq',route.userId,'群聊 · 再次改名'))
  assert.equal(titles.length,2)
 })
+
+
+test('autonomous notice refreshes context even without a new user message, then normal chat restores reply guidance',async()=>{
+ const f=fixture(),signal=new AbortController().signal
+ f.input('你好');await f.runtime.prepareConversationContext(f.agent,signal)
+ f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'自主活动'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}),{surfaceOp:'append'})
+ assert.equal(await f.runtime.prepareConversationContext(f.agent,signal),true)
+ assert.match(f.contexts.values().next().value.text,/partner_activity_finish/)
+ f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'继续任务'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴执行看板任务'}}),{surfaceOp:'append'})
+ await f.runtime.prepareConversationContext(f.agent,signal);assert.doesNotMatch(f.contexts.values().next().value.text,/partner_activity_finish/)
+ f.input('在吗');await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.doesNotMatch(f.contexts.values().next().value.text,/partner_activity_finish/)
+})

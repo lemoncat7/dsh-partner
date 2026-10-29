@@ -101,7 +101,7 @@ export class HeartbeatScheduler {
     if (this.closed || !companion.idleContact?.enabled || this.running.has(companion.id)) return
     this.running.add(companion.id)
     void this.agents.idleContact(companion.id, this.timeZone)
-      .catch(error => this.ctx.logger.warn(`闲时联系未完成：${message(error)}`))
+      .catch(error => this.ctx.logger.warn(`自主活动未完成：${message(error)}`))
       .finally(() => this.running.delete(companion.id))
   }
 

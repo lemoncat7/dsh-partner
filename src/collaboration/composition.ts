@@ -1,3 +1,4 @@
+import { idleActivityFinishTool } from '../character/activity-tool.js'
 import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
 import { SLEEP_PROMPT } from '../character/sleep.js'
 import { identityTool, IDENTITY_PROMPT } from '../companions/identity-tool.js'
@@ -75,6 +76,7 @@ export class PartnerAgentComposition {
     try {
       if (this.sleepToolFactory) add(this.sleepToolFactory(companion.id))
       add(identityTool(companion.id, this.store))
+      add(idleActivityFinishTool(companion.id, this.store))
       for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
       if (this.attachmentToolFactory) add(this.attachmentToolFactory(companion.id))
       for (const tool of this.chatToolFactory?.(companion.id) ?? []) add(tool)
