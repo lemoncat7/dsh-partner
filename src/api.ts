@@ -51,6 +51,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  sleep?: import('./character/sleep-service.js').SleepService
   stickers?: StickerLibrary
   push?: PushService
   concernExecution?: import('./concern-execution.js').ConcernExecutionDispatcher
@@ -200,6 +201,17 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       requiredCompanion(runtime.store, id)
       return sendJson(res, 200, { items: await runtime.memory.renewalStatus(id), status: runtime.dailyReview.renewalStatus(id) })
     }
+    if (id && segments[2] === 'sleep' && segments.length === 3) {
+      const c = requiredCompanion(runtime.store, id)
+      if (method === 'GET') return sendJson(res, 200, { state: c.sleepState ?? {} })
+      if (method === 'POST') {
+        mutation(req)
+        if (!runtime.sleep) throw httpError(503, '睡眠服务未就绪')
+        if ((await readObject(req)).action !== 'wake') throw httpError(400, '睡眠操作无效')
+        await runtime.sleep.wake(id, '用户唤醒')
+        return sendJson(res, 200, { ok: true })
+      }
+    }
     if (id && method === 'PUT' && segments[2] === 'identity' && segments.length === 3) {
       mutation(req)
       const body = await readObject(req)
@@ -216,7 +228,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, identityDraft: pageIdentity(previous), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, identityDraft: pageIdentity(previous), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         if (next.idleContact?.enabled && !idleContactRouteAllowed(state, next, next.idleContact.routeId)) throw httpError(400, '请选择本伙伴可用的会话；渠道联系人须已授权')
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })

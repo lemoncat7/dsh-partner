@@ -1,4 +1,5 @@
-import { isIdleContactNotice, idleContactRouteAllowed, idleContactQuiet, lastIdleContactUser } from '../character/idle-contact.js'
+import { isSleeping } from '../character/sleep.js'
+import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
@@ -271,7 +272,7 @@ export class ChannelManager {
         const valid=()=>{
           const state=this.store.snapshot(), companion=state.companions.find(c=>c.id===route.companionId)
           const current=state.sessions.find(r=>r.id===route.id), claim=current?.idleContactState
-          return Boolean(companion?.idleContact?.enabled && companion.idleContact.routeId===route.id && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !idleContactQuiet(companion.idleContact,Date.now(),claim.timeZone) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
+          return Boolean(companion?.idleContact?.enabled && companion.idleContact.routeId===route.id && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !isSleeping(companion) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
         }
         if(route.kind==='channel' && valid()) {
           const parts=channelReplyPartsAfter(events,0,true)

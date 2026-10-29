@@ -81,3 +81,11 @@
 #dsh-partner-identity-editor .dsh-partner-form-actions > button[type="button"] { color: var(--partner-text); background: var(--partner-control); }
 
 .dsh-partner-quiet-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 20px 0 16px; padding-top: 16px; border-top: 1px solid var(--partner-border); }
+
+.dsh-partner-sleep-dream-option, .dsh-partner-sleep-status { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 0; border-top: 1px solid var(--partner-border); }
+.dsh-partner-sleep-dream-option h4, .dsh-partner-sleep-status h4 { margin: 6px 0; }
+.dsh-partner-sleep-status { align-items: start; }
+.dsh-partner-sleep-status > button { flex: none; }
+.dsh-partner-dream { padding: 14px; }
+.dsh-partner-dream p { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .dsh-partner-sleep-status { flex-wrap: wrap; } }

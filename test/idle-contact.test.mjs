@@ -17,12 +17,12 @@ function fixture(){
   const state={companions:[companion],sessions:[route],channels:[{id:'ch',companionId:'c',enabled:true}],pairings:[{channelId:'ch',userId:'peer',status:'approved'}],heartbeatStates:[],recentReceipts:[]}
   return {companion,route,state}
 }
-test('defaults opt out, strict input and cross-midnight quiet hours',()=>{
+test('defaults opt out, strict input and legacy quiet hours no longer apply',()=>{
   assert.equal(DEFAULT_IDLE_CONTACT.enabled,false)
-  for(const bad of [{...DEFAULT_IDLE_CONTACT,enabled:true},{...DEFAULT_IDLE_CONTACT,idleMinutes:0},{...DEFAULT_IDLE_CONTACT,quietEnabled:20}])assert.throws(()=>normalizeIdleContact(bad))
-  assert.equal(idleContactQuiet(DEFAULT_IDLE_CONTACT,Date.parse('2026-10-28T16:00:00Z'),tz),true)
+  for(const bad of [{...DEFAULT_IDLE_CONTACT,enabled:true},{...DEFAULT_IDLE_CONTACT,idleMinutes:0}])assert.throws(()=>normalizeIdleContact(bad))
+  assert.equal(idleContactQuiet(DEFAULT_IDLE_CONTACT,Date.parse('2026-10-28T16:00:00Z'),tz),false)
   assert.equal(idleContactQuiet(DEFAULT_IDLE_CONTACT,Date.parse('2026-10-28T01:00:00Z'),tz),false)
-  assert.equal(idleContactQuiet({...DEFAULT_IDLE_CONTACT,quietStartHour:9,quietEndHour:17},now,tz),true)
+  assert.equal(idleContactQuiet({...DEFAULT_IDLE_CONTACT,quietStartHour:9,quietEndHour:17},now,tz),false)
   assert.equal(idleContactQuiet({...DEFAULT_IDLE_CONTACT,quietStartHour:9,quietEndHour:9},now,tz),false)
 })
 test('only real user inactivity qualifies; deny recent activity, unauthorized targets and foreign owners',()=>{
@@ -112,23 +112,14 @@ test('idle contact never starves concern continuations when both features are en
   await scheduler.tick();await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['work','idle']);await scheduler.close()
 })
 
-test('explicit quiet switch defaults on for legacy settings and disabling preserves hours',()=>{
-  const legacy={...DEFAULT_IDLE_CONTACT}; delete legacy.quietEnabled
-  assert.equal(normalizeIdleContact(legacy).quietEnabled,true)
-  const off=normalizeIdleContact({...legacy,quietEnabled:false})
-  assert.equal(off.quietStartHour,23);assert.equal(off.quietEndHour,9)
-  const midnight=Date.parse('2026-10-28T16:00:00Z')
-  assert.equal(idleContactQuiet(legacy,midnight,tz),true)
-  assert.equal(idleContactQuiet(off,midnight,tz),false)
-  assert.equal(normalizeIdleContact({...legacy,dailyLimit:1}).dailyLimit,undefined)
-})
 
-test('quiet switch controls actual channel delivery, independently of old daily counts',async()=>{
+test('legacy quiet hours are discarded; sleep controls actual channel delivery without daily caps',async()=>{
+  assert.equal(normalizeIdleContact({...DEFAULT_IDLE_CONTACT,quietEnabled:true,quietStartHour:23,quietEndHour:9}).quietEnabled,undefined)
   const f=deliveryFixture()
-  const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour:'2-digit',hourCycle:'h23'}).format(Date.now()))
-  Object.assign(f.companion.idleContact,{quietEnabled:true,quietStartHour:hour,quietEndHour:(hour+1)%24,dailyLimit:1})
+  f.companion.sleepPolicy={enabled:true,dreamsEnabled:true}
+  f.companion.sleepState={episode:{id:'sleep',startedAt:Date.now(),wakeAt:Date.now()+60000,routeId:'r',dream:'skipped'}}
   f.route.idleContactState.count=999
   await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,0)
-  f.companion.idleContact.quietEnabled=false
+  f.companion.sleepState.episode.wokeAt=Date.now()
   await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,1)
 })

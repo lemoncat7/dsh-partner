@@ -1,3 +1,5 @@
+import { SleepEditor } from './sleep-editor.js'
+import { sleepPolicy } from '../character/sleep.js'
 import { IdleContactEditor } from './idle-contact-editor.js'
 import { SettingsSections } from './settings-sections.js'
 import { CharacterEditor } from './character-editor.js'
@@ -22,7 +24,7 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
   const [form, setForm] = useState(() => pageIdentity(companion))
   const revision = useRef(companion.updatedAt)
   const [operation, setOperation] = useState<'save'>()
-  const [section, setSection] = useState<'identity' | 'character' | 'idle'>('identity')
+  const [section, setSection] = useState<'identity' | 'character' | 'idle' | 'sleep'>('identity')
   const dirty = useRef(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string>()
@@ -38,7 +40,7 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
     locked.current = true; setOperation('save'); setError(undefined)
     let committed = false
     try {
-      await api(`/companions/${encodeURIComponent(companion.id)}/identity`, { method: 'PUT', body: JSON.stringify({ expectedAt: revision.current, identity: { ...form, characterCard: form.characterCard ?? null, idleContact: form.idleContact ?? null } }) })
+      await api(`/companions/${encodeURIComponent(companion.id)}/identity`, { method: 'PUT', body: JSON.stringify({ expectedAt: revision.current, identity: { ...form, characterCard: form.characterCard ?? null, idleContact: form.idleContact ?? null, sleepPolicy: form.sleepPolicy ?? null } }) })
       committed = true
       dirty.current = false
       await onChanged()
@@ -61,7 +63,7 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
     <div className="dsh-partner-fields two"><Field label="名字"><input disabled={busy} required maxLength={60} value={form.name} onChange={event => edit({ ...form, name: event.target.value })} /></Field><Field label="角色"><input disabled={busy} required maxLength={120} value={form.role} onChange={event => edit({ ...form, role: event.target.value })} /></Field></div>
     <Field label="一句话定位" hint="用于名册识别，不会替代完整行为准则。"><textarea disabled={busy} rows={2} maxLength={500} value={form.description} onChange={event => edit({ ...form, description: event.target.value })} /></Field>
     <Field label="长期行为准则" hint="建议写职责、表达方式与边界；渠道、工具和授权由系统单独控制。"><textarea disabled={busy} rows={9} maxLength={12000} value={form.instructions} onChange={event => edit({ ...form, instructions: event.target.value })} /></Field>
-    </>}, {id: 'character', title: '角色聊天', detail: form.characterCard?.enabled ? '已启用 · 设定与试聊' : '可选 · 设定与试聊', content: <CharacterEditor companion={companion} {...(form.characterCard ? {card:form.characterCard} : {})} disabled={busy} onChange={characterCard => edit({...form,characterCard})} />}, {id: 'idle', title: '闲时主动联系', detail: form.idleContact?.enabled ? '已开启 · 空闲时来聊聊' : '可选 · 不打扰地联系', content: <IdleContactEditor companionId={companion.id} value={form.idleContact} disabled={busy} onChange={idleContact => edit({...form,idleContact})} />}]} />
+    </>}, {id: 'character', title: '角色聊天', detail: form.characterCard?.enabled ? '已启用 · 设定与试聊' : '可选 · 设定与试聊', content: <CharacterEditor companion={companion} {...(form.characterCard ? {card:form.characterCard} : {})} disabled={busy} onChange={characterCard => edit({...form,characterCard})} />}, {id: 'idle', title: '闲时主动联系', detail: form.idleContact?.enabled ? '已开启 · 空闲时来聊聊' : '可选 · 不打扰地联系', content: <IdleContactEditor companionId={companion.id} value={form.idleContact} disabled={busy} onChange={idleContact => edit({...form,idleContact})} />}, {id: 'sleep', title: '睡眠与做梦', detail: '自主休息 · 梦境与感受', content: <SleepEditor companion={companion} value={sleepPolicy(form)} disabled={busy} active={section === 'sleep'} onChange={sleepPolicy => edit({...form,sleepPolicy})} />}]} />
     {error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
     <div className="dsh-partner-form-actions"><button type="button" disabled={busy} onClick={() => { setForm(pageIdentity(companion)); revision.current = companion.updatedAt; dirty.current = false; setError(undefined); setSaved(false) }}>重新载入已保存草稿</button><span role="status">{saved && <><IconCheckOutline14 size={14} />草稿已保存并应用，下一轮将使用新身份</>}</span><button disabled={busy}>{operation === 'save' ? '正在保存…' : '保存身份'}</button></div>
     </section>
@@ -77,6 +79,7 @@ function EffectiveIdentity({ companion }: { companion: CompanionView }): JSX.Ele
     <h4>角色聊天 · {card?.enabled ? '已开启' : '已关闭'}</h4>
     {card && <><p>{roleTextForCard(card) || '尚未编写人格卡'}</p><h4>聊天方式</h4><p>{card.chatStyle || '未额外指定'}<br />回复长度：{{short:'简短',balanced:'适中',rich:'丰富'}[card.length]} · 旁白：{card.narration ? '开启' : '关闭'} · 分段：{card.segmentedReplies ? '开启' : '关闭'} · 表情：{card.stickersEnabled ? '开启' : '关闭'}</p>
     {card.lore.map(item => <div key={item.id}><h4>{item.title || '背景资料'} · {item.enabled ? '启用' : '停用'}</h4><p>关键词：{item.keywords.join('、')}<br />{item.content}</p></div>)}</>}
-    <h4>闲时主动联系 · {idle.enabled ? '已开启' : '已关闭'}</h4><p>空闲 {idle.idleMinutes} 分钟后联系，不限制每天次数。<br />免打扰：{idle.quietEnabled === false ? '关闭' : `${String(idle.quietStartHour).padStart(2,'0')}:00–${String(idle.quietEndHour).padStart(2,'0')}:00`}</p>
+    <h4>闲时主动联系 · {idle.enabled ? '已开启' : '已关闭'}</h4><p>空闲 {idle.idleMinutes} 分钟后联系，不限制每天次数。</p>
+    <h4>自主睡眠 · {sleepPolicy(companion).enabled ? '已开启' : '已关闭'}</h4><p>做梦：{sleepPolicy(companion).dreamsEnabled ? '允许' : '关闭'}，不设固定时段。</p>
   </div>
 }

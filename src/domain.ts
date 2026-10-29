@@ -1,3 +1,4 @@
+import { normalizeSleepPolicy } from './character/sleep.js'
 import { normalizeIdleContact } from './character/idle-contact.js'
 import { normalizeCharacterCard, type CharacterCard } from './character/domain.js'
 import type { CompanionSkillBinding, PartnerSkill, SkillMarketSource } from './skills/domain.js'
@@ -12,6 +13,8 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  sleepPolicy?: import('./character/sleep.js').SleepPolicy
+  sleepState?: import('./character/sleep.js').SleepState
   identityDraft?: import('./companions/identity.js').CompanionIdentity
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
@@ -148,6 +151,7 @@ export interface CompanionAccessGrant {
 }
 
 export interface CompanionDraft {
+  sleepPolicy?: import('./character/sleep.js').SleepPolicy
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: CharacterCard
   name: string
@@ -228,6 +232,7 @@ export function normalizeCompanionDraft(value: unknown): CompanionDraft {
     ? input.capabilities.map(item => text(item, 'capability', 32)).filter(isCompanionCapability)
     : []
   const draft: CompanionDraft = {
+    ...(input.sleepPolicy === undefined ? {} : { sleepPolicy: normalizeSleepPolicy(input.sleepPolicy) }),
     ...(input.idleContact === undefined ? {} : { idleContact: normalizeIdleContact(input.idleContact) }),
     ...(input.characterCard === undefined ? {} : { characterCard: normalizeCharacterCard(input.characterCard) }),
     name: text(input.name, 'name', 60),

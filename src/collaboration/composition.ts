@@ -1,3 +1,4 @@
+import { SLEEP_PROMPT } from '../character/sleep.js'
 import { identityTool, IDENTITY_PROMPT } from '../companions/identity-tool.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
@@ -31,6 +32,8 @@ const MAX_INLINE_SKILL_CHARS = 32_000
 export class PartnerAgentComposition {
   private mcp?: McpService
   setMcpService(service: McpService): void { this.mcp = service }
+  private sleepToolFactory?: (companionId: string) => ToolDefinition
+  setSleepToolFactory(factory: (companionId: string) => ToolDefinition): void { this.sleepToolFactory = factory }
   private chatToolFactory?: (companionId: string) => ToolDefinition[]
   setChatToolFactory(factory: (companionId: string) => ToolDefinition[]): void { this.chatToolFactory = factory }
   private avatarToolFactory?: (companionId: string) => ToolDefinition
@@ -64,6 +67,7 @@ export class PartnerAgentComposition {
       } }))
     }
     try {
+      if (this.sleepToolFactory) disposers.push(ctx.tools.register(this.sleepToolFactory(companion.id)))
       disposers.push(ctx.tools.register(identityTool(companion.id, this.store)))
       for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
       if (this.attachmentToolFactory) disposers.push(ctx.tools.register(this.attachmentToolFactory(companion.id)))
@@ -86,6 +90,7 @@ export class PartnerAgentComposition {
         text: [
         '以下是工作能力与执行流程，适用于用户的实际任务、已接受任务的续接及自动化执行。所有已授权工具始终可用；普通闲聊、玩笑、告别和情绪表达无需创建需求、看板或协作，不把聊天改写成工作计划或验收汇报。需要核实事实时仍正常使用工具。',
         IDENTITY_PROMPT,
+        this.sleepToolFactory ? SLEEP_PROMPT : '',
         renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
         '持续关注不是待办清单：用户让你修复、生成、部署、调研时先完成工作，不因为工作尚未完成就新增关注。已有关注由你自主用 partner_concerns list/update/resolve/archive/restore 维护，无需用户另行语义授权；根据实际进展调整 priority 并说明 reason，不因沉默机械降温。尊重用户置顶/停止；明确交代的关注仅在解决或到期后归档。修改或恢复应复用原条目，永久删除只在页面操作。',
         companion.capabilities.includes('schedules') ? '定时计划须有明确生命周期。当前工作已完成、不再需要时取消并删除对应临时计划；不得清理用户仍要求的周期交付。为看板创建临时计划时填写 boardTaskId，任务完成或删除后系统自动清理。外部任务等待仍用 defer，不要用周期 create 轮询。续接最终答复未送达、看板尚未消费回执时不要手动删除计划。' : '',

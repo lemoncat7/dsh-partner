@@ -1,3 +1,4 @@
+import { sleepPolicy as resolvedSleepPolicy, type SleepPolicy } from '../character/sleep.js'
 import { normalizeCompanionDraft, type Companion, type PartnerState } from '../domain.js'
 import { emptyCharacterCard, type CharacterCard } from '../character/domain.js'
 import { DEFAULT_IDLE_CONTACT, idleContactRouteAllowed, type IdleContactPolicy } from '../character/idle-contact.js'
@@ -11,11 +12,12 @@ export interface CompanionIdentity {
   instructions: string
   characterCard?: CharacterCard
   idleContact?: IdleContactPolicy
+  sleepPolicy?: SleepPolicy
 }
-export const IDENTITY_FIELDS = ['name', 'role', 'description', 'instructions', 'characterCard', 'idleContact'] as const
+export const IDENTITY_FIELDS = ['name', 'role', 'description', 'instructions', 'characterCard', 'idleContact', 'sleepPolicy'] as const
 export function effectiveIdentity(value: CompanionIdentity): CompanionIdentity {
-  const { name, role, description, instructions, characterCard, idleContact } = value
-  return structuredClone({ name, role, description, instructions, ...(characterCard ? { characterCard } : {}), ...(idleContact ? { idleContact } : {}) })
+  const { name, role, description, instructions, characterCard, idleContact, sleepPolicy } = value
+  return structuredClone({ name, role, description, instructions, ...(characterCard ? { characterCard } : {}), ...(idleContact ? { idleContact } : {}), ...(sleepPolicy ? { sleepPolicy } : {}) })
 }
 export function pageIdentity(value: CompanionIdentity & { identityDraft?: CompanionIdentity }): CompanionIdentity {
   return effectiveIdentity(value.identityDraft ?? value)
@@ -29,9 +31,9 @@ export function patchIdentity(previous: CompanionIdentity, raw: unknown): Compan
   if (!Object.keys(patch).length) throw new Error('请至少填写一项身份内容')
   for (const key of Object.keys(patch)) if (!(IDENTITY_FIELDS as readonly string[]).includes(key)) throw new Error(`身份不支持修改 ${key}`)
   const next = { ...effectiveIdentity(previous), ...patch }
-  for (const key of ['characterCard', 'idleContact'] as const) {
+  for (const key of ['characterCard', 'idleContact', 'sleepPolicy'] as const) {
     if (patch[key] === null) delete next[key]
-    else if (patch[key] !== undefined) next[key] = { ...(previous[key] ?? (key === 'characterCard' ? emptyCharacterCard() : DEFAULT_IDLE_CONTACT)), ...record(patch[key], key) } as never
+    else if (patch[key] !== undefined) next[key] = { ...(previous[key] ?? (key === 'characterCard' ? emptyCharacterCard() : key === 'idleContact' ? DEFAULT_IDLE_CONTACT : resolvedSleepPolicy(previous))), ...record(patch[key], key) } as never
   }
   return effectiveIdentity(normalizeCompanionDraft(next))
 }

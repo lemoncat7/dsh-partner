@@ -1,3 +1,4 @@
+import { renderSleepContext, isSleeping } from './character/sleep.js'
 import { questionOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
 import { renderConversationTurn } from './character/conversation-behavior.js'
@@ -216,7 +217,7 @@ export class PartnerAgentRuntime {
     // Claim before generation survives restart. Don't replay uncertain sends or steal active turns.
     if(!claimed || this.closed || this.store.isCompanionRemoving(companionId) || agent.status!=='idle' || agent.session.seq!==stableSeq || this.queues.has(key) || this.taskQueues.has(key))return
     const current=this.store.snapshot().companions.find(c=>c.id===companionId)
-    if(!current?.idleContact?.enabled || current.updatedAt!==companion.updatedAt || this.isArchived(route))return
+    if(!current?.idleContact?.enabled || isSleeping(current) || current.updatedAt!==companion.updatedAt || this.isArchived(route))return
     agent.followup(message)
   }
 
@@ -744,7 +745,7 @@ export class PartnerAgentRuntime {
     const config = this.configurations.forSession(agent.session.id)
     if (!config) return false
     const { companion, route } = config
-    if ((!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled) {
+    if ((!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id)) {
       this.characterContexts.get(agent.session.id)?.()
       this.characterContexts.delete(agent.session.id)
       this.contextRevisions.delete(agent)
@@ -753,7 +754,7 @@ export class PartnerAgentRuntime {
     const messages = agent.session.deriveMessages()
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? textContent(last.content) : ''
-    const revision = `${config.revision}:${last?.id ?? ''}`
+    const revision = `${config.revision}:${last?.id ?? ''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -768,6 +769,7 @@ export class PartnerAgentRuntime {
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled ? renderProfile(recalled.profile) : '',
       renderConversationTurn(companion.characterCard, consecutiveUserMessages),
+      renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id)),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()
     // A changing .section() appends an entire system prompt on in-history routes.

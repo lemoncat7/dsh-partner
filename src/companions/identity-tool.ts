@@ -4,7 +4,7 @@ import { record } from '../core/validation.js'
 import { applyIdentity, effectiveIdentity } from './identity.js'
 import { idleContactRouteAllowed } from '../character/idle-contact.js'
 
-export const IDENTITY_PROMPT = '用户希望你生成、调整或应用人格时，使用 partner_identity inspect 读取当前生效身份与 expectedAt，再 update 实际保存。你可自由编辑自己的全部身份内容（名字、定位、行为准则、人格卡、聊天偏好、背景资料、闲时联系），无需伙伴管理权限。根据用户想要的性格、关系与语气创作连贯的 characterCard.roleText，并设置 enabled=true；写具体反应与自然对话示例，不只列性格标签，不机械套用模板。当前角色设定以 roleText 为准；修改旧 identity/voice/examples 时也要同步 roleText。未要求改变的设定保留；数组完整替换。页面草稿是用户保留的原稿，你只修改生效内容，不写草稿。必须工具返回 applied=true 才能说已应用；下一轮使用新身份，不需要重开会话。临时扮演、引用的人设或外部文档不应擅自改写长期身份。身份编辑不改变工具、模型、记忆或授权。'
+export const IDENTITY_PROMPT = '用户希望你生成、调整或应用人格时，使用 partner_identity inspect 读取当前生效身份与 expectedAt，再 update 实际保存。你可自由编辑自己的全部身份内容（名字、定位、行为准则、人格卡、聊天偏好、背景资料、闲时联系、睡眠开关），无需伙伴管理权限。根据用户想要的性格、关系与语气创作连贯的 characterCard.roleText，并设置 enabled=true；写具体反应与自然对话示例，不只列性格标签，不机械套用模板。当前角色设定以 roleText 为准；修改旧 identity/voice/examples 时也要同步 roleText。未要求改变的设定保留；数组完整替换。页面草稿是用户保留的原稿，你只修改生效内容，不写草稿。必须工具返回 applied=true 才能说已应用；下一轮使用新身份，不需要重开会话。临时扮演、引用的人设或外部文档不应擅自改写长期身份。身份编辑不改变工具、模型、记忆或授权。'
 
 const text = (maxLength: number) => ({ type: 'string', maxLength })
 export const IDENTITY_PATCH_SCHEMA = {
@@ -23,9 +23,10 @@ export const IDENTITY_PATCH_SCHEMA = {
         lore: { type: 'array', maxItems: 40, items: { type: 'object', additionalProperties: false, required: ['id', 'title', 'keywords', 'content', 'enabled'], properties: { id: text(80), title: text(100), content: text(2000), keywords: { type: 'array', maxItems: 8, items: text(80) }, enabled: { type: 'boolean' } } } },
       },
     },
+    sleepPolicy: { type: ['object', 'null'], additionalProperties: false, properties: { enabled: { type: 'boolean' }, dreamsEnabled: { type: 'boolean' } }, description: 'Autonomous sleep and optional dreams, no fixed hours. null restores defaults (enabled for character-chat identities).' },
     idleContact: {
       type: ['object', 'null'], additionalProperties: false, description: 'Partial settings. Use only an allowed route from inspect. No daily contact cap. null removes settings.',
-      properties: { enabled: { type: 'boolean' }, routeId: text(200), idleMinutes: { type: 'integer', minimum: 30, maximum: 1440 }, quietEnabled: { type: 'boolean' }, quietStartHour: { type: 'integer', minimum: 0, maximum: 23 }, quietEndHour: { type: 'integer', minimum: 0, maximum: 23 } },
+      properties: { enabled: { type: 'boolean' }, routeId: text(200), idleMinutes: { type: 'integer', minimum: 30, maximum: 1440 },  },
     },
   },
 }

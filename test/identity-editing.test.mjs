@@ -36,16 +36,16 @@ test('AI generates and revises a complete effective persona, preserving legacy h
     enabled: true, roleText: '嘴硬心软，先接话再解释。偶尔吐槽，难过时认真听。', chatStyle: '自然短句', segmentedReplies: true, stickersEnabled: true,
     length: 'short', narration: false, examples: [{ user: '回来了', assistant: '这么晚。给你留了点吃的。' }],
     lore: [{ id: 'home', title: '住处', keywords: ['家'], content: '虚构的温暖小屋', enabled: true }],
-  }, idleContact: { enabled: true, routeId: 'local', quietEnabled: false } })
+  }, idleContact: { enabled: true, routeId: 'local' }, sleepPolicy: {enabled:true,dreamsEnabled:true} })
   assert.equal(result.applied, true)
   assert.equal(result.humanDraftPreserved, true)
   let current = f.store.snapshot().companions[0]
   assert.deepEqual(pageIdentity(current), original)
   assert.equal(current.characterCard.enabled, true)
-  assert.equal(current.idleContact.quietEnabled, false)
+  assert.equal(current.sleepPolicy.enabled, true)
   assert.equal(current.idleContact.dailyLimit, undefined)
   assert.notEqual(index.forSession('session').revision, revision)
-  await f.update({ characterCard: { chatStyle: '偶尔调侃', lore: [] }, idleContact: { quietEnabled: true } })
+  await f.update({ characterCard: { chatStyle: '偶尔调侃', lore: [] }, sleepPolicy: { dreamsEnabled: false } })
   current = f.store.snapshot().companions[0]
   assert.equal(current.characterCard.roleText, result.identity.characterCard.roleText)
   assert.equal(current.characterCard.stickersEnabled, true)

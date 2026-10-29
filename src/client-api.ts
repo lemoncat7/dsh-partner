@@ -8,6 +8,8 @@ export interface AutomationView {
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
 }
 export interface CompanionView {
+  sleepPolicy?: import('./character/sleep.js').SleepPolicy
+  sleepState?: import('./character/sleep.js').SleepState
   identityDraft?: import('./companions/identity.js').CompanionIdentity
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
   characterCard?: import('./character/domain.js').CharacterCard

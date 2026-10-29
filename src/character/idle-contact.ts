@@ -1,3 +1,4 @@
+import { isSleeping } from './sleep.js'
 import type { Companion, PartnerState } from '../domain.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
@@ -5,9 +6,6 @@ export interface IdleContactPolicy {
   enabled: boolean
   routeId: string
   idleMinutes: number
-  quietEnabled?: boolean
-  quietStartHour: number
-  quietEndHour: number
 }
 export interface IdleContactState {
   timeZone: string
@@ -18,7 +16,7 @@ export interface IdleContactState {
   day: string
   count: number
 }
-export const DEFAULT_IDLE_CONTACT: IdleContactPolicy = { enabled: false, routeId: '', idleMinutes: 120, quietEnabled: true, quietStartHour: 23, quietEndHour: 9 }
+export const DEFAULT_IDLE_CONTACT: IdleContactPolicy = { enabled: false, routeId: '', idleMinutes: 120 }
 export const IDLE_CONTACT_NOTICE = '伙伴闲时主动联系'
 export function normalizeIdleContact(value: unknown): IdleContactPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('闲时联系配置无效')
@@ -27,9 +25,7 @@ export function normalizeIdleContact(value: unknown): IdleContactPolicy {
   const result = {...DEFAULT_IDLE_CONTACT, enabled:v.enabled}
   if (typeof v.routeId !== 'string' || v.routeId.length > 200) throw new Error('请选择联系会话')
   result.routeId = v.routeId
-  if (v.quietEnabled !== undefined && typeof v.quietEnabled !== 'boolean') throw new Error('请选择是否开启免打扰')
-  result.quietEnabled = v.quietEnabled !== false
-  for (const [key,min,max] of [['idleMinutes',30,1440],['quietStartHour',0,23],['quietEndHour',0,23]] as const) {
+  for (const [key,min,max] of [['idleMinutes',30,1440]] as const) {
     const number = v[key] ?? result[key]
     if (typeof number !== 'number' || !Number.isInteger(number) || number < min || number > max) throw new Error(`${key} 须为 ${min}–${max} 的整数`)
     result[key] = number
@@ -40,12 +36,8 @@ export function normalizeIdleContact(value: unknown): IdleContactPolicy {
 export function idleContactDay(now:number,timeZone:string):string {
   return new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).format(now)
 }
-export function idleContactQuiet(policy:IdleContactPolicy,now:number,timeZone:string):boolean {
-  if (policy.quietEnabled === false) return false
-  const hour = Number(new Intl.DateTimeFormat('en-GB',{timeZone,hour:'2-digit',hourCycle:'h23'}).format(now))
-  const {quietStartHour:start,quietEndHour:end}=policy
-  return start === end ? false : start < end ? hour >= start && hour < end : hour >= start || hour < end
-}
+/** Legacy exported helper: fixed quiet hours were replaced by autonomous sleep. */
+export function idleContactQuiet(_policy:IdleContactPolicy,_now:number,_timeZone:string):boolean { return false }
 export function idleContactRouteAllowed(state:PartnerState,companion:Companion,routeId:string):boolean {
   const route=state.sessions.find(r=>r.id===routeId&&r.companionId===companion.id)
   return Boolean(route && (route.kind==='local' || (state.channels.some(c=>c.id===route.channelId&&c.companionId===companion.id&&c.enabled) && state.pairings.some(p=>p.channelId===route.channelId&&p.userId===route.userId&&p.status==='approved'))))
@@ -59,7 +51,7 @@ export function lastIdleContactUser(events:readonly SessionEvent[]):{id:string;a
 }
 export function idleContactDue(state:PartnerState,companion:Companion,user:{id:string;at:number}|undefined,now:number,timeZone:string):boolean {
   const policy=companion.idleContact
-  if(!policy?.enabled||!user||!idleContactRouteAllowed(state,companion,policy.routeId)||idleContactQuiet(policy,now,timeZone))return false
+  if(!policy?.enabled||!user||!idleContactRouteAllowed(state,companion,policy.routeId)||isSleeping(companion,now))return false
   const route=state.sessions.find(r=>r.id===policy.routeId)!
   const previous=route.idleContactState
   if(previous?.userMessageId===user.id)return false // Never nag again until a real new user message.
