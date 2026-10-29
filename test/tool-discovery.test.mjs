@@ -79,3 +79,14 @@ test('discovery setting is validated and participates in next-turn composition r
  const index=new SessionConfigurationIndex({snapshot:()=>state,subscribe:()=>()=>{}})
  const before=index.forSession('s').revision;c.toolDiscovery=true;assert.notEqual(index.forSession('s').revision,before);index.close()
 })
+
+test('chat reply with provider-generated empty sticker field concludes through the real tool runtime',async t=>{
+ const f=fixture(t)
+ f.companion.characterCard={enabled:true,segmentedReplies:true,stickersEnabled:true}
+ f.agent.session.snapshotEvents=()=>[{seq:1,type:'turn/start',data:{}},{seq:2,type:'user/message',data:{source:{kind:'user'},content:[{type:'text',text:'你好'}]}}]
+ const tool=chatTools('c',f.store,{}, {},{},'/partner-local/v1')[1]
+ t.after(f.scope.ctx.tools.register(tool))
+ const result=await f.invoke('partner_chat_reply',{messages:[{text:'好吧，被你抓到了。',stickerId:''}]})
+ assert.equal(result.isError,false);assert.equal(result.concludesTurn,true)
+ assert.deepEqual(result.meta.parts,[{type:'text',text:'好吧，被你抓到了。'}])
+})

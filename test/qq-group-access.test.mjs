@@ -4,6 +4,7 @@ import {channelReplyAllowed,directReplyTarget} from '../lib/channels/reply-acces
 import {ChannelManager} from '../lib/channels/manager.js'
 import {DirectTransport} from '../lib/channels/direct/transport.js'
 import {notificationRoutes} from '../lib/channels/notification-route.js'
+import {QqGroupAutonomy} from '../lib/channels/qq/autonomy.js'
 import {qqSettings} from '../lib/channels/qq/settings.js'
 import {qqIdentityRelation} from '../lib/channels/qq/identity-binding.js'
 
@@ -99,4 +100,18 @@ test('private approval never grants non-whitelisted group access and whitelist r
  f.channel.qq.autonomousGroupIds=['99887766'];assert.equal(channelReplyAllowed(f.state,'qq',f.peer),true)
  f.channel.qq.autonomousGroupIds=[];assert.equal(channelReplyAllowed(f.state,'qq',f.peer),false)
  f.state.pairings.push({channelId:'qq',userId:f.peer,status:'approved',directTargetId:f.target});assert.equal(channelReplyAllowed(f.state,'qq',f.peer),true)
+})
+
+test('two rapid admitted messages are both judged even while the companion is busy; silence is a model choice',async()=>{
+ const f=fixture(),judged=[]
+ Object.assign(f.state.companions[0],{name:'朋友',role:'朋友',instructions:'自然聊天'})
+ f.agents.isCompanionBusy=()=>true
+ f.manager.groupAutonomy=new QqGroupAutonomy({get:()=>({currentSelection:()=>({})}),llm:{async *stream(req){
+  judged.push(JSON.stringify(req.messages));yield {type:'text-delta',text:JSON.stringify({reply:judged.length===1})};yield {type:'finish',reason:{kind:'stop'}}
+ }}},()=>100000)
+ for(const [id,text] of [['first','刚刚在做什么'],['second','是不是']])await f.handle({...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}})
+ assert.equal(judged.length,2);assert.match(judged[0],/刚刚在做什么/);assert.match(judged[1],/是不是/)
+ assert.equal(f.inputs.length,1);assert.equal(f.sent.length,1)
+ assert.match(f.manager.groupAutonomy.status('qq').reason,/决定旁听/)
+ assert.ok(f.state.recentReceipts.includes('qq:first'));assert.ok(f.state.recentReceipts.includes('qq:second'))
 })

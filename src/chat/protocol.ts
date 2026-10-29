@@ -24,7 +24,11 @@ export function parseChatInput(raw: unknown): Array<{text:string} | {stickerId:s
   const parts = input.messages.map(value => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('每条消息只能是文字或一个表情 ID')
     const v = value as Record<string,unknown>
-    if (Object.keys(v).length !== 1) throw new Error('文字和表情要分成两条消息')
+    // Providers may emit both optional fields, with an empty string for the unused one.
+    // Ignore only empty known string fields; never discard unknown or malformed payloads.
+    if (Object.keys(v).some(key=>key!=='text'&&key!=='stickerId')) throw new Error('每条消息只能是文字或一个表情 ID')
+    const fields=Object.keys(v).filter(key=>!(typeof v[key]==='string'&&!(v[key] as string).trim()))
+    if (fields.length !== 1) throw new Error('文字和表情要分成两条消息')
     if (typeof v.text === 'string' && v.text.trim() && v.text.length <= 6000) { total += v.text.length; return {text:v.text.trim()} }
     if (typeof v.stickerId === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(v.stickerId)) { images++; return {stickerId:v.stickerId} }
     throw new Error('文字不能为空或超过 6000 字；表情必须使用库内 ID')

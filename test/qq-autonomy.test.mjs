@@ -3,15 +3,22 @@ import assert from 'node:assert/strict'
 import {QqGroupAutonomy} from '../lib/channels/qq/autonomy.js'
 const event={text:'小明你怎么看？',qqGroup:{groupId:'12345678',userId:'22345678',senderName:'朋友',autonomous:true,mentioned:false}}
 const companion={name:'小明',role:'朋友',instructions:'自然聊天'}
-test('group autonomy can remain silent, never calls tools, and applies a bounded pause between decisions',async()=>{
- let now=100000,decision=false,calls=0
- const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({provider:'p',model:'m'})}),llm:{async *stream(req){calls++;assert.equal(req.tools,undefined);yield {type:'text-delta',text:JSON.stringify({reply:decision})};yield {type:'finish',reason:{kind:'stop'}}}}},()=>now)
- gate.observe('c',event)
- assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),false)
- decision=true;assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),false);assert.equal(calls,1)
- now+=16000;assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),true)
- now+=16000;assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),false);assert.equal(calls,2)
+test('every rapid group message reaches the model, which independently chooses silence or a reply',async()=>{
+ let decision=false,calls=0
+ const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({provider:'p',model:'m'})}),llm:{async *stream(req){calls++;assert.equal(req.tools,undefined);yield {type:'text-delta',text:JSON.stringify({reply:decision})};yield {type:'finish',reason:{kind:'stop'}}}}},()=>100000)
+ for(const next of [false,true,true,false]){
+  decision=next;gate.observe('c',{...event,text:'message-'+calls})
+  assert.equal(await gate.shouldReply('c',event,companion,AbortSignal.timeout(1000)),next)
+ }
+ assert.equal(calls,4)
  assert.equal(await gate.shouldReply('c',{...event,qqGroup:{...event.qqGroup,mentioned:true}},companion,AbortSignal.timeout(1000)),true)
+ assert.equal(calls,4,'mentions go straight to the conversation model')
+})
+test('a message without cached history still enters judgment',async()=>{
+ let calls=0
+ const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({})}),llm:{async *stream(req){calls++;assert.match(JSON.stringify(req.messages),/小明你怎么看/);yield {type:'text-delta',text:'{"reply":true}'};yield {type:'finish',reason:{kind:'stop'}}}}})
+ assert.equal(await gate.shouldReply('c',event,companion,new AbortController().signal),true)
+ assert.equal(calls,1)
 })
 test('malformed or incomplete decisions fail silent and observations stay bounded',async()=>{
  const gate=new QqGroupAutonomy({get:()=>({currentSelection:()=>({})}),llm:{async *stream(){yield {type:'text-delta',text:'{"reply":true}'}}}},()=>100000)

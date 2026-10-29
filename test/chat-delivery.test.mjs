@@ -203,3 +203,9 @@ test('QQ origin selects native emoji without dropping text or creating a default
  assert.match(projected.text,/当然记得你/);assert.equal(projected.chatParts[1].emoji.id,'14')
  assert.equal(nativeChatBlocks(outcome)[0].text,'当然记得你')
 })
+
+test('empty optional tool fields do not force a second model attempt; invalid mixed payloads stay rejected',()=>{
+ assert.deepEqual(parseChatInput({messages:[{text:'好吧，被你抓到了。 ',stickerId:''},{text:'',stickerId:'qq-face-14'}]}),[{text:'好吧，被你抓到了。'},{stickerId:'qq-face-14'}])
+ assert.deepEqual(parseChatInput({messages:[{text:'你好',stickerId:'  '}]}),[{text:'你好'}])
+ for(const value of [{text:'',stickerId:''},{text:'你好',stickerId:'qq-face-14'},{text:'你好',unknown:''},{text:'你好',stickerId:3},{text:'你好',stickerId:null},{text:'a'.repeat(6001),stickerId:''}])assert.throws(()=>parseChatInput({messages:[value]}))
+})
