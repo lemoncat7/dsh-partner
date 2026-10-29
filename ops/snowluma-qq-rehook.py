@@ -45,7 +45,7 @@ def main():
             pending = threading.Timer(20, reattach, args=(body.get("pid", ""),))
             pending.daemon = True
             pending.start()
-        sys.stdout.write("RESULT\n2\nOK")
+        sys.stdout.write("RESULT 2\nOK")
         sys.stdout.flush()
 
 
