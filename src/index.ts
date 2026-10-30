@@ -157,7 +157,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     composer.setMcpService(mcp)
     executor.setMcpTools(id => mcp.definitions(id))
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
-    const sleep = new SleepService(ctx, store, memory, { busy: id => agents.isCompanionBusy(id), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
+    const sleep = new SleepService(ctx, store, memory, { busy: id => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation'), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
+    agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     scheduler.continuations.configure({
@@ -231,7 +232,6 @@ export function apply(context: Context, config: PartnerConfig): void {
     // Recovery can finish immediately; wire result delivery before claiming work.
     await collaboration.start()
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
-      if (event.type === 'user/message' && event.data.source.kind === 'user') void sleep.onUserMessage(session.id, event.time).catch(() => ctx.logger.warn('伙伴唤醒状态尚未保存'))
       notices.observeSession(session, event)
       try { pushObserver.observeSession(session, event) } catch { ctx.logger.warn('dsh-partner: 推送事件处理失败') }
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))

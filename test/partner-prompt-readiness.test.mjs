@@ -254,3 +254,27 @@ test('rejected or replaced pre-step inputs do not retain owner permissions',asyn
  await assert.rejects(f.step([owner],3,async()=>{throw Error('cancelled')}),/cancelled/)
  assert.match((await f.prompt()).text,/账号未归属/)
 })
+
+test('accepted private input updates sleep before first prompt, rejected input and later tool steps cannot count twice',async t=>{
+ const {SleepService}=await import('../lib/character/sleep-service.js')
+ const {createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await pendingInputFixture(t),id=f.store.snapshot().companions[0].id
+ let now=Date.now()
+ const sleep=new SleepService({logger:{warn(){}}},f.store,{}, {now:()=>now,random:()=>.9,busy:()=>false,archived:()=>false})
+ f.runtime.setSleepService(sleep);t.after(()=>sleep.close())
+ await f.store.update(s=>{const c=s.companions[0];c.sleepState={fatigue:{value:60,at:now}};c.sleepPolicy={enabled:true,dreamsEnabled:false}})
+ await sleep.sleep(id,'owner',120,'困了',false)
+ const message=()=>createUserMessage({content:[{type:'text',text:'在吗'}],source:{kind:'user'}})
+ const first=message();await f.store.update(s=>s.sessions.find(r=>r.id==='owner').inboundMessageIds.push(first.id))
+ await f.step([first],1,async()=>({kind:'reject'}));assert.equal(f.store.snapshot().companions[0].sleepState.reception,undefined)
+ await f.step([first],1);assert.match((await f.prompt()).text,/仍未清醒/)
+ f.agent.session.append('user/message',first,{surfaceOp:'append'})
+ await f.step([first],1);assert.equal(f.store.snapshot().companions[0].sleepState.reception.calls,1)
+ for(let turn=2;turn<=3;turn++){
+  now+=11_000;const next=message();await f.store.update(s=>s.sessions.find(r=>r.id==='owner').inboundMessageIds.push(next.id))
+  await f.step([next],turn);const text=(await f.prompt()).text
+  assert.match(text,turn===3?/本轮刚被叫醒/:/仍未清醒/)
+  f.agent.session.append('user/message',next,{surfaceOp:'append'})
+ }
+ assert.ok(f.store.snapshot().companions[0].sleepState.fatigue.value>59)
+})

@@ -7,6 +7,8 @@ import { affectionEnabled, awardAffection, renderAffection } from './character/a
 import { affectionTurnEligible, currentAffectionAudience } from './character/affection-context.js'
 import { currentQqIdentityRelation, renderQqIdentityRelation } from './channels/qq/identity-binding.js'
 import { qqSettings, qqSessionTarget } from './channels/qq/settings.js'
+import { fatigueValue } from './character/fatigue.js'
+import type { SleepService } from './character/sleep-service.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
 import { questionOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
@@ -200,6 +202,7 @@ export class PartnerAgentRuntime {
             this.contextRevisions.delete(agent)
           } else if (decision.kind === 'enter') {
             this.admittedInputs.set(agent, decision.messages)
+            await this.sleepService?.acceptInput(agent.session.id, decision.messages)
             await this.prepareConversationContext(agent, signal)
           }
           return decision
@@ -224,6 +227,9 @@ export class PartnerAgentRuntime {
       })
       : () => {}
   }
+
+  private sleepService: SleepService | undefined
+  setSleepService(service: SleepService): void { this.sleepService = service }
 
   setQuestionAnswerer(answerer: PartnerQuestionAnswerer): void {
     this.questionAnswerer = answerer
@@ -917,7 +923,7 @@ export class PartnerAgentRuntime {
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
     const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
     const access = resolveToolAccess({agent, state, events})
-    const revision = `${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
+    const revision = `${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -937,7 +943,7 @@ export class PartnerAgentRuntime {
       recalled && relationshipAllowed ? renderProfile(recalled.profile) : '',
       renderConversationTurn(companion.characterCard, consecutiveUserMessages, autonomous),
       renderQqIdentityRelation(identityRelation, autonomous && access.sendTools && !access.allowedTools),
-      renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id)),
+      renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id), autonomous ? undefined : last?.id),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()
     // A changing .section() appends an entire system prompt on in-history routes.

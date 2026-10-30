@@ -1,3 +1,4 @@
+import { fatigueValue } from './character/fatigue.js'
 import { applyIdentity } from './companions/identity.js'
 import { affectionEnabled, affectionProgress } from './character/affection.js'
 import { StickerLibrary } from './chat/stickers.js'
@@ -205,7 +206,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id && segments[2] === 'sleep' && segments.length === 3) {
       const c = requiredCompanion(runtime.store, id)
-      if (method === 'GET') return sendJson(res, 200, { state: c.sleepState ?? {} })
+      if (method === 'GET') return sendJson(res, 200, { state: c.sleepState ?? {}, fatigue: fatigueValue(c), serverNow: Date.now() })
       if (method === 'POST') {
         mutation(req)
         if (!runtime.sleep) throw httpError(503, '睡眠服务未就绪')

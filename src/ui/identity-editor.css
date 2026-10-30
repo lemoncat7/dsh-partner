@@ -89,3 +89,11 @@
 .dsh-partner-dream { padding: 14px; }
 .dsh-partner-dream p { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .dsh-partner-sleep-status { flex-wrap: wrap; } }
+
+.dsh-partner-fatigue { padding: 18px 0 12px; border-top: 1px solid var(--partner-border); }
+.dsh-partner-fatigue-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; color: var(--partner-text); }
+.dsh-partner-fatigue-line strong { margin-left: 8px; font-variant-numeric: tabular-nums; }
+.dsh-partner-fatigue-line small { color: var(--partner-muted); }
+.dsh-partner-fatigue-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--partner-control); }
+.dsh-partner-fatigue-track > span { display: block; height: 100%; background: var(--partner-accent); border-radius: inherit; transform-origin: left; }
+.dsh-partner-fatigue .dsh-partner-character-hint { margin-bottom: 0; }

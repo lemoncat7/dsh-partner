@@ -164,3 +164,18 @@ test('old human drafts cannot shadow or resurrect the current AI-generated ident
  assert.equal(f.store.snapshot().companions[0].identityDraft,undefined)
  assert.equal(pageIdentity(f.store.snapshot().companions[0]).name,'最新AI版本')
 })
+
+
+test('persona authoring receives the same complete built-in reference through self and management inspection', async t => {
+ const {PERSONA_REFERENCE}=await import('../lib/character/identity-guide.js')
+ const {ROLE_REFERENCE_TEXT}=await import('../lib/character/role-reference-data.js')
+ const f=await fixture(t), snapshot=f.store.snapshot(), info=await f.inspect()
+ assert.equal(info.reference.text,ROLE_REFERENCE_TEXT)
+ assert.match(info.reference.text,/## 十、你的样子/)
+ assert.match(info.reference.source,/github.com\/Derpyu520\/qq-bridge\/blob\//)
+ assert.match(info.generationGuide,/reference.text/)
+ assert.match(info.reference.usage,/不是当前角色/)
+ const management=new CompanionManagementService(f.store,{isBusy:()=>false,catalog:async()=>({}),reload:async()=>{}})
+ assert.deepEqual(management.inspect('manager',f.id).reference,PERSONA_REFERENCE)
+ assert.deepEqual(f.store.snapshot(),snapshot,'reference reads do not apply the sample persona')
+})

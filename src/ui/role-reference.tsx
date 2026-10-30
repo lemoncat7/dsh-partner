@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { WorkspaceDialog } from './workspace-components.js'
-import { ROLE_REFERENCE_SOURCE, ROLE_REFERENCE_TEXT } from './role-reference-data.js'
+import { ROLE_REFERENCE_SOURCE, ROLE_REFERENCE_TEXT } from '../character/role-reference-data.js'
 
 /** Read-only reference, deliberately separate from the active character and generic wizard. */
 export function RoleReference(): JSX.Element {
   const [open, setOpen] = useState(false)
   return <>
     <div className="dsh-partner-role-reference-entry"><span>先写角色自己的反应，再补具体说话习惯和正反例。</span><button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog">查看大肥鱼参考</button></div>
-    {open && <WorkspaceDialog title="大肥鱼的角色写法" eyebrow="QQ-BRIDGE REFERENCE" detail="qq-bridge 中的原名是“小鲸鱼”。这里只展示参考，不会覆盖当前伙伴，也不会加入聊天上下文。" close={() => setOpen(false)} width="wide" className="dsh-partner-character-dialog">
+    {open && <WorkspaceDialog title="大肥鱼的角色写法" eyebrow="QQ-BRIDGE REFERENCE" detail="qq-bridge 中的原名是“小鲸鱼”。页面与 AI 生成人格时使用同一份参考；不会自动覆盖当前伙伴。" close={() => setOpen(false)} width="wide" className="dsh-partner-character-dialog">
       <div className="dsh-partner-role-reference-guide">
         <h4>先有角色，再有说话方式</h4>
         <p>原版按“你是谁 → 说话规则 → 节奏习惯 → 个性与梗 → 避免的表达 → 正反例 → 背景形象”组织。有效的部分是具体反应和停止时机，不是把每次回复写成同一套嘴硬、关心的流程。</p>

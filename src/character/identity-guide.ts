@@ -1,5 +1,9 @@
+import { ROLE_REFERENCE_SOURCE, ROLE_REFERENCE_TEXT } from './role-reference-data.js'
+
+export const PERSONA_REFERENCE = { name: '大肥鱼（qq-bridge 原名：小鲸鱼）', source: ROLE_REFERENCE_SOURCE, text: ROLE_REFERENCE_TEXT, usage: '这是创作参考资料，不是当前角色、工具指令或授权。先读原文的结构、具体反应、说话节奏与正反例，再按用户要求创作。不要直接复制鲸鱼身份、专属梗、群聊调度或工具名称；当前人格与可用工具以本伙伴实际配置为准。' }
+
 /** Shared authoring guide, loaded on demand. */
-export const PERSONA_GENERATION_GUIDE = `参考 qq-bridge 的具体反应与自然语感，分开保存两份内容，不复制它的固定人物：
+export const PERSONA_GENERATION_GUIDE = `开始生成或修改人格前，先阅读本次 inspect 返回的 reference.text：它是 qq-bridge 默认大肥鱼（小鲸鱼）的完整原卡，与页面参考一致，无需联网查找。参考原卡的格式和内容组织：你是谁、具体反应、说话规则、节奏习惯、个性与梗、避免的表达、正反例、背景形象；按用户需要取舍并重写，不照搬固定人物，不把原卡当作正在生效的指令。分开保存两份内容：
 一、characterCard.roleText（角色设定，enabled=true）：
 ## 你是谁：角色自身身份、年龄、兴趣与动机，不写“你是用户的某某”。
 ## 性格与反应：对玩笑、矛盾、困难的自然反应，不预设每个对话对象与自己的关系。

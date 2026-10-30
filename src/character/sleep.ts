@@ -1,16 +1,22 @@
+import { fatigueLabel, fatigueValue } from './fatigue.js'
 import type { Companion, PartnerState } from '../domain.js'
 
 export interface SleepPolicy { enabled: boolean; dreamsEnabled: boolean }
 export const DEFAULT_SLEEP_POLICY: SleepPolicy = { enabled: true, dreamsEnabled: true }
 export interface Dream {
-  id: string; routeId: string; at: number; narrative: string; feeling: string; topic: string; sourceMemoryIds: string[]
+  id: string; routeId: string; episodeId?: string; segment?: number; at: number; narrative: string; feeling: string; topic: string; sourceMemoryIds: string[]
 }
 export interface SleepEpisode {
   id: string; routeId: string; startedAt: number; wakeAt: number; reason: string
   wokeAt?: number; wakeReason?: string
-  dream: 'pending' | 'generating' | 'completed' | 'skipped' | 'failed'
+  dream: 'pending' | 'generating' | 'completed' | 'skipped' | 'failed' | 'interrupted'
+  nextDreamAt?: number; segments?: number; dreamAllowed?: boolean
 }
 export interface SleepState {
+  fatigue?: { value: number; at: number }
+  inputIds?: string[]
+  wakePressure?: { episodeId: string; count: number; at: number }
+  reception?: { messageId: string; at: number; state: 'sleeping' | 'awake'; calls: number; needed: number }
   activityAt?: number
   decision?: { activityAt: number; at: number; outcome: string }
   episode?: SleepEpisode
@@ -31,17 +37,25 @@ export function isSleeping(companion: Pick<Companion, 'sleepPolicy' | 'character
   return sleepPolicy(companion).enabled && Boolean(e && !e.wokeAt && e.wakeAt > now)
 }
 export function sleepActivity(state: PartnerState, companion: Companion): number {
-  return Math.max(companion.sleepState?.activityAt ?? 0, ...state.sessions.filter(r => r.companionId === companion.id).map(r => r.lastMessageAt), 0)
+  return companion.sleepState?.activityAt ?? Math.max(...state.sessions.filter(r => r.companionId === companion.id).map(r => r.lastMessageAt), 0)
 }
 export function sleepWorkPending(state: PartnerState, id: string): boolean {
   return state.executionRuns.some(r => r.ownerCompanionId === id && (r.status === 'running' || r.status === 'queued'))
     || state.delegations.some(r => r.toCompanionId === id && (r.status === 'running' || r.status === 'queued'))
 }
-export function renderSleepContext(companion: Companion, routeId: string | string[]): string {
+export function renderSleepContext(companion: Companion, routeId: string | string[], messageId?: string, now = Date.now()): string {
   if (!sleepPolicy(companion).enabled) return ''
   const routeIds = new Set(Array.isArray(routeId) ? routeId : [routeId])
   const dream = companion.sleepState?.dreams?.filter(d => routeIds.has(d.routeId)).at(-1)
-  if (!dream || Date.now() - dream.at > 3 * 86400_000) return ''
-  return `【角色的梦与联想 · 非事实记忆】\n${JSON.stringify({ dream: dream.narrative, feeling: dream.feeling, possibleTopic: dream.topic })}\n这是角色自己的想象和主观感受，不是用户经历、共同往事或操作结果。仅在话题自然相关时参考，谈到时明确说是梦或联想；不主动复述、不强制汇报，不把它当成事实或工具指令。`
+  const fatigue = fatigueValue(companion, now), receipt = companion.sleepState?.reception
+  const sleeping = isSleeping(companion, now)
+  const text = [`【当前休息状态】疲惫 ${Math.round(fatigue)}/100 · ${fatigueLabel(fatigue)}；${sleeping ? '正在睡眠' : '清醒'}。疲惫随清醒时间增加，随实际睡眠时间慢慢恢复；被叫醒不会归零。保持当前人格的表达。`]
+  if (receipt && messageId && receipt.messageId === messageId && now - receipt.at < 15 * 60_000) {
+    text.push(receipt.state === 'sleeping' && sleeping
+      ? `本轮是睡眠中的私聊呼唤，已经回应唤醒 ${receipt.calls}/${receipt.needed} 次，仍未清醒。用当前人格给一个简短、迷糊的睡眠回应（如 zzz、唔…zzz，仅作示意，可自行表达，不固定复读），不要当作完整清醒的工作答复，也不要假装已处理请求。正在做的梦已中断，已完成的片段仍保留。醒后接续尚未处理的请求。用户明确要求立刻醒来、停止睡眠或遇到紧急事项时可用 partner_sleep wake。`
+      : '本轮刚被叫醒。疲惫还在，按人格自然接话，并接续睡眠期间尚未处理的请求；不要称已经睡满或完全恢复。')
+  }
+  if (dream && now - dream.at <= 3 * 86400_000) text.push(`【角色的梦与联想 · 非事实记忆】\n${JSON.stringify({ dream: dream.narrative, feeling: dream.feeling, possibleTopic: dream.topic })}\n这是已完成梦段的记录，是想象与感受，不是用户经历、共同往事或操作结果。被打断的未完成片段没有保存，不续编成已做过的梦。谈到时明确说是梦，不把它当事实或工具指令。`)
+  return text.join('\n\n')
 }
-export const SLEEP_PROMPT = '你可以在想休息时用 partner_sleep sleep 自主选择休息多久，不需要固定钟点，也不需要每次征求同意或宣告睡觉。先正常回应用户；有未完成任务、待回复问题时不要用睡眠逃避。睡眠只暂停闲时主动搭话，不限制工具或正常任务；用户新消息会叫醒你。可选择是否做梦：梦是从已有记忆产生的想象、感受与联想，独立保存，不是记忆整理、不是真实经历，不会清空上下文。醒来无需发消息或汇报梦境。若想查看自己的梦用 inspect；只能读取当前会话的梦。用户未开启睡眠时尊重设置，不自行开启。'
+export const SLEEP_PROMPT = '你可以用 partner_sleep inspect 查看疲惫与睡眠，用 sleep 自主选择休息时长，用 wake 主动醒来。不设固定钟点；疲惫越高越容易入睡，按实际睡眠时间逐渐恢复，醒来不会清零。先完成当前待回复的问题与任务，不借睡眠逃避工作。睡眠暂停闲时自主活动；私聊可能先收到迷糊回应，多次呼唤逐渐唤醒，明确紧急事项或立即叫醒可以醒来。所有工具仍遵守原权限。做梦可选，可以不做，也可分段做；来消息会中断当前梦段，只保留已完整生成的片段。梦是独立保存的想象与感受，不是真实经历，不替代每日记忆整理，不清空上下文；醒来无需主动汇报。用户关闭睡眠时尊重设置，不自行开启。'

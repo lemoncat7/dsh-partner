@@ -120,3 +120,17 @@ test('partner entry routes knowledge and SSH envelopes without bypassing operati
  assert.equal((await f.call('ssh',{action:'call',tool:'ssh_exec',arguments:{}})).value.dispatch.isError,true)
  assert.equal(calls.length,before)
 })
+
+test('persona reference is discoverable and fully delivered through the two permanent tool entries',async t=>{
+ const {identityTool}=await import('../lib/companions/identity-tool.js')
+ const {ROLE_REFERENCE_TEXT}=await import('../lib/character/role-reference-data.js')
+ const f=fixture(t);Object.assign(f.companion,createDefaultCompanion(),{id:'c'})
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:identityTool('c',f.store),allowed:()=>true}]))
+ const found=await f.invoke('partner_tools',{action:'list',query:'大肥鱼'})
+ assert.equal(found.value.tools[0].name,'partner_identity')
+ const before=names(f),result=await f.call('partner_identity',{action:'inspect'})
+ assert.equal(result.isError,false);assert.equal(result.value.dispatch.isError,false)
+ const data=JSON.parse(result.content.filter(c=>c.type==='text').map(c=>c.text).join(''))
+ assert.equal(data.reference.text,ROLE_REFERENCE_TEXT);assert.match(data.reference.text,/## 十、你的样子/)
+ assert.deepEqual(names(f),before,'reference is on demand, not another permanent tool')
+})
