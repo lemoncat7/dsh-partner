@@ -47,8 +47,8 @@ test('role and chat preferences survive companion serialization without reducing
   const prompt = renderPartnerPersona(saved, 'conversation')
   assert.match(prompt, /工具与工作能力保持完整/)
   assert.match(prompt, /玩笑直接接/)
-  for (const surface of ['heartbeat','ephemeral']) assert.doesNotMatch(renderPartnerPersona(saved, surface), /自然聊天行为|本轮聊天提醒/)
-  assert.doesNotMatch(renderPartnerPersona({...saved,characterCard:{...saved.characterCard,enabled:false}}), /自然聊天行为|坦率的同行者/)
+  for (const surface of ['heartbeat','ephemeral']) assert.doesNotMatch(renderPartnerPersona(saved, surface), /角色表达|本轮聊天提醒/)
+  assert.doesNotMatch(renderPartnerPersona({...saved,characterCard:{...saved.characterCard,enabled:false}}), /角色表达|坦率的同行者/)
 })
 
 test('turn guidance works without a memory service, combines consecutive messages and updates in place', async () => {
@@ -86,7 +86,7 @@ test('chat behavior never asks for a transport tool or synthetic wait', () => {
 test('segmentation permits multiple messages without encouraging a second reply at each turn', () => {
   const card=normalizeCharacterCard({enabled:true,roleText:'坦率的同行者',length:'short',segmentedReplies:true,stickersEnabled:true})
   const behavior=renderConversationBehavior(card),turn=renderConversationTurn(card,1)
-  assert.match(behavior,/普通闲聊通常只发一句短话/)
+  assert.match(behavior,/篇幅偏好：简短/)
   for(const prompt of [behavior,turn]) {
     assert.match(prompt,/分段回复已开启/)
     assert.match(prompt,/允许分段，不是要求多发/)
@@ -108,7 +108,15 @@ test('tool discovery never changes the full persona or drops dialogue examples',
  const discovered=renderPartnerPersona({...companion,toolDiscovery:true},'conversation')
  assert.equal(discovered,regular);assert.ok(discovered.includes(companion.characterCard.roleText));assert.match(discovered,/接话直接/)
  const turn=renderConversationTurn(companion.characterCard,1)
- assert.match(turn,/你仍是同一个角色/);assert.match(turn,/不复述自己的错误句子/)
+ assert.match(turn,/你仍是同一个角色/);assert.match(turn,/人格说明/)
  const activity=renderConversationTurn(companion.characterCard,1,true)
  assert.match(activity,/partner_activity_finish/);assert.doesNotMatch(activity,/直接私聊需要可见回复/)
+})
+
+for(const length of ['short','natural','rich'])test(`persona instructions retain expression control for ${length} replies including work`,()=>{
+ const card=normalizeCharacterCard({enabled:true,roleText:'处理工作也保持简短口语，问起细节再解释。',chatStyle:'按自己的设定说话。',length})
+ const text=renderConversationBehavior(card)+'\n'+renderConversationTurn(card,1)
+ assert.match(text,/具体角色说明和本轮用户要求优先/)
+ assert.match(text,/处理工作也保持简短口语/)
+ assert.doesNotMatch(text,/不受闲聊字数限制|工作交付按需要展开|3–20|仅用于日常对话/)
 })

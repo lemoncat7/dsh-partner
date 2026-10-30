@@ -28,7 +28,7 @@ import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-mod
 import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { IDLE_CONTACT_NOTICE, idleActivityPrompt, isIdleContactNotice, idleActivityProbability, idleContactDue, idleContactDay, idleContactRouteAllowed, lastIdleContactUser } from './character/idle-contact.js'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -179,7 +179,7 @@ export class PartnerAgentRuntime {
           if (this.autonomousAssemblyContexts.has(context)) return assembly
           const configuration=this.configurations.forSession(context.agent!.session.id)
           if(configuration?.companion.toolDiscovery)return {...assembly,tools:assembly.tools.filter(tool=>PARTNER_TOOL_ENTRIES.some(name=>name===tool.name))}
-          const access = resolveToolAccess({agent:context.agent!, state:this.store.snapshot()})
+          const access = resolveToolAccess({agent:context.agent!, state:this.store.snapshot(), ...(this.admittedInputs.get(context.agent!)?.length ? {events:this.inputEvents(context.agent!)} : {})})
           return { ...assembly, tools: !access.sendTools ? [] : access.allowedTools ? assembly.tools.filter(tool => access.allowedTools!.includes(tool.name)) : assembly.tools }
         }
         if (this.rebuildingAssemblies.has(context)) return enforce(await next())
@@ -191,14 +191,29 @@ export class PartnerAgentRuntime {
         finally { this.rebuildingAssemblies.delete(context) }
       }) : () => {}
     this.disposeConfigurationListener = typeof this.ctx.on === 'function'
-      ? this.ctx.on('agent/pre-step', async ({ agent, turn, signal }, next) => {
-        await this.prepareAgentTurn(agent, turn, signal)
-        return next()
+      ? this.ctx.on('agent/pre-step', async ({ agent, turn, signal, messages }, next) => {
+        try {
+          await this.prepareAgentTurn(agent, turn, signal, messages)
+          const decision = await next()
+          if (decision.kind === 'reject') {
+            this.admittedInputs.delete(agent)
+            this.contextRevisions.delete(agent)
+          } else if (decision.kind === 'enter') {
+            this.admittedInputs.set(agent, decision.messages)
+            await this.prepareConversationContext(agent, signal)
+          }
+          return decision
+        } catch (error) {
+          this.admittedInputs.delete(agent)
+          this.contextRevisions.delete(agent)
+          throw error
+        }
       }) : () => {}
     this.disposeAgentListener = typeof this.ctx.on === 'function'
       ? this.ctx.on('agent/disposed', ({ agent }) => {
         this.replyPresentations.get(agent)?.(); this.replyPresentations.delete(agent)
         this.preparedTurns.delete(agent)
+        this.admittedInputs.delete(agent)
         this.characterContexts.get(agent.session.id)?.()
         this.characterContexts.delete(agent.session.id)
         this.contextRevisions.delete(agent)
@@ -659,6 +674,10 @@ export class PartnerAgentRuntime {
   }
 
   async observeSessionEvent(session: Session, event: SessionEvent): Promise<void> {
+    if (event.type === 'turn/end') {
+      const agent = this.ctx?.agents?.get(session.id)
+      if (agent) this.admittedInputs?.delete(agent)
+    }
     if (event.type === 'user/message' && event.data.source.kind === 'user') {
       const owner = this.store.snapshot().sessions.find(r=>r.sessionId===session.id)?.companionId
       if (owner) {
@@ -819,10 +838,10 @@ export class PartnerAgentRuntime {
   }
 
   /** Awaited by the host before prompt/tool assembly, never from a running tool. */
-  async prepareAgentTurn(agent: Agent, turn: number, signal: AbortSignal): Promise<void> {
+  async prepareAgentTurn(agent: Agent, turn: number, signal: AbortSignal, messages: readonly UserMessage[] = []): Promise<void> {
     if (this.closed) throw new Error('伙伴运行时已关闭')
-    if (this.preparedTurns.get(agent) === turn) return
-    await this.prepareAgentAssembly(agent, signal)
+    this.admittedInputs.set(agent, messages)
+    if (this.preparedTurns.get(agent) !== turn) await this.prepareAgentAssembly(agent, signal)
     await this.prepareConversationContext(agent, signal)
     this.preparedTurns.set(agent, turn)
   }
@@ -836,7 +855,7 @@ export class PartnerAgentRuntime {
     if (!configuration) return false
     if (this.store.isCompanionRemoving(configuration.companion.id)) throw new Error('伙伴正在删除，不能启动新轮次')
     signal.throwIfAborted()
-    const access = resolveToolAccess({agent, state:this.store.snapshot()})
+    const access = resolveToolAccess({agent, state:this.store.snapshot(), ...(this.admittedInputs.get(agent)?.length ? {events:this.inputEvents(agent)} : {})})
     let presentationChanged = false
     const stableNative=configuration.companion.toolDiscovery||!!access.allowedTools
     if (stableNative && !this.replyPresentations.has(agent) && typeof agent.ctx.tools?.presentAs === 'function') {
@@ -862,13 +881,25 @@ export class PartnerAgentRuntime {
 
   private readonly replyPresentations = new Map<Agent, () => void>()
   private readonly contextRevisions = new WeakMap<Agent, string>()
+  private readonly admittedInputs = new WeakMap<Agent, readonly UserMessage[]>()
+
+  /** Projection only: the host commits admitted input after prompt preparation. */
+  private inputEvents(agent: Agent): readonly SessionEvent[] {
+    const events = agent.session.snapshotEvents()
+    const pending = this.admittedInputs?.get(agent) ?? []
+    if (!pending.length) return events
+    const committed = new Set(events.flatMap(e => e.type === 'user/message' ? [e.data.id] : []))
+    return [...events, ...pending.filter(m => !committed.has(m.id)).map((data, index) => ({
+      type: 'user/message' as const, data, seq: (agent.session.seq + index + 1) as SessionEvent['seq'], time: Date.now(), surfaceOp: 'append' as const,
+    }))]
+  }
   private async prepareConversationContext(agent: Agent, signal: AbortSignal): Promise<boolean> {
     const config = this.configurations.forSession(agent.session.id)
     if (!config) return false
     const { companion, route } = config
     const state = this.store.snapshot()
     const relationEvents = state.channels?.some(c => c.platform === 'qq' && state.sessions.some(r => r.sessionId === agent.session.id && r.channelId === c.id))
-      ? agent.session.snapshotEvents() : undefined
+      ? this.inputEvents(agent) : undefined
     const identityRelation = relationEvents ? currentQqIdentityRelation(agent.session.id, relationEvents, state.sessions, state.channels) : undefined
     if (!identityRelation && !relationshipTextForIdentity(companion) && (!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id)) {
       this.characterContexts.get(agent.session.id)?.()
@@ -876,14 +907,17 @@ export class PartnerAgentRuntime {
       this.contextRevisions.delete(agent)
       return false
     }
-    const messages = agent.session.deriveMessages()
+    const committedMessages = agent.session.deriveMessages()
+    const committedIds = new Set(committedMessages.map(m => m.id))
+    const messages = [...committedMessages, ...(this.admittedInputs?.get(agent) ?? []).filter(m => !committedIds.has(m.id))]
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? textContent(last.content) : ''
-    const events=relationEvents ?? agent.session.snapshotEvents()
+    const events=relationEvents ?? this.inputEvents(agent)
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
     const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
-    const revision = `${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
+    const access = resolveToolAccess({agent, state, events})
+    const revision = `${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -895,7 +929,6 @@ export class PartnerAgentRuntime {
     }
     signal.throwIfAborted()
     const relationshipAllowed = !identityRelation || identityRelation.matched
-    const access = resolveToolAccess({agent, state})
     const text = [access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音能力为 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
       renderAffection(companion,affectionAudience),
@@ -903,7 +936,7 @@ export class PartnerAgentRuntime {
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
       recalled && relationshipAllowed ? renderProfile(recalled.profile) : '',
       renderConversationTurn(companion.characterCard, consecutiveUserMessages, autonomous),
-      renderQqIdentityRelation(identityRelation),
+      renderQqIdentityRelation(identityRelation, autonomous && access.sendTools && !access.allowedTools),
       renderSleepContext(companion, this.store.snapshot().sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id)),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()

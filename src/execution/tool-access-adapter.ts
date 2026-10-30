@@ -1,5 +1,6 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerState } from '../domain.js'
 import { qqToolAccessAdapter } from '../channels/qq/authority.js'
 
@@ -13,6 +14,8 @@ export interface ToolAccessDecision {
 export interface ToolAccessContext {
   agent: Pick<Agent, 'session'>
   state: Pick<PartnerState, 'sessions' | 'channels'>
+  /** Host-admitted input during prompt preparation only; dispatch uses persisted events. */
+  events?: readonly SessionEvent[]
 }
 export interface ToolAccessAdapter {
   resolve(context: ToolAccessContext): ToolAccessDecision | undefined
