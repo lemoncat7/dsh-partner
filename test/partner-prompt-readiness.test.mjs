@@ -283,7 +283,7 @@ test('accepted private input updates sleep before first prompt, rejected input a
 test('persona authoring receives shared templates in first prompt only for relevant authorized user requests',async t=>{
  const {createUserMessage}=await import('@deepseek-ai/dsh-llm')
  const f=await pendingInputFixture(t)
- for(const [who,text,wanted] of [['owner','帮我生成角色设定',true],['owner','按参考模板写一下基本身份',true],['owner','把语气调温柔一点',false],['guest','查看大肥鱼参考模板',false],['owner','你好',false]]){
+ for(const [who,text,wanted] of [['owner','帮我生成角色设定',true],['owner','按参考模板写一下基本身份',true],['owner','你现在应该能 看点模版了吧，我需要你参考模版生成',true],['owner','你能看到参考模板吗？',true],['owner','给我看看参考模版的原文',true],['owner','不用参考模板，按现在的设定微调',false],['owner','把语气调温柔一点',false],['guest','查看大肥鱼参考模板',false],['owner','你好',false]]){
   const m=createUserMessage({content:[{type:'text',text}],source:{kind:'user'}})
   await f.store.update(s=>s.sessions.find(r=>r.id===who).inboundMessageIds.push(m.id));await f.step([m])
   const prompt=(await f.prompt()).text

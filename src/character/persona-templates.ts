@@ -18,10 +18,15 @@ export const PERSONA_TEMPLATES = {
 } as const
 
 export function personaReferenceRequested(text: string): boolean {
-  const subject = /角色设定|人设|人格|基本身份|关系设定/
+  const query = text.normalize('NFKC').replace(/\s+/g, '')
+  // Honor an explicit opt-out, including when a persona is being generated.
+  if (/(?:不用|无需|不要|不需要|不必|别)(?:再|去|先|按|按照|使用|读取|加载|看|提供)*(?:参考|模[板版])/.test(query)) return false
+  const subject = /角色设定|角色卡|人设|人格|基本身份|身份设定|关系设定/
   const create = /生成|创建|编写|设计|写一(?:个|份|套)|设定一个/
   const reference = /参考|模[板版]|格式|原文|写法/
-  return (subject.test(text) && (create.test(text) || reference.test(text)))
-    || (/大肥鱼|小鲸鱼|qq[- ]?bridge/i.test(text) && reference.test(text))
-    || /^\s*(?:看看|看下|用|按|给我|展示|查看)?\s*参考模[板版][。！!？?\s]*$/.test(text)
+  return (subject.test(query) && (create.test(query) || reference.test(query)))
+    || (/大肥鱼|小鲸鱼|qq-?bridge/i.test(query) && reference.test(query))
+    // Users naturally mention the reference inside a sentence without repeating
+    // "persona". Anchoring the whole message silently missed these requests.
+    || /参考模[板版]/.test(query)
 }

@@ -8,7 +8,7 @@ export interface DiscoverableTool {tool:ToolDefinition;allowed:()=>boolean}
 export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access'] as const
 const GROUPS=[
  {id:'chat',title:'聊天回复',description:'文字、表情与语音'},
- {id:'identity',title:'身份与生活',description:'角色设定、睡眠和头像'},
+ {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、睡眠和头像'},
  {id:'work',title:'任务与协作',description:'需求、任务看板和伙伴协作'},
  {id:'automation',title:'定时与续接',description:'定时计划、长任务等待与恢复'},
  {id:'skills',title:'技能',description:'查询、加载和运行已启用 Skill'},
@@ -28,7 +28,8 @@ function category(name:string):string {
  if(/mcp/.test(name))return 'mcp'
  return 'other'
 }
-export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
+const PERSONA_REFERENCE_CALL = JSON.stringify({action:'call',name:'partner_identity',argumentsJson:JSON.stringify({action:'reference'})})
+export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
 
 /** Stable model-facing entries; original definitions remain registered in scope
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
@@ -77,7 +78,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
    parameters:{type:'object',properties:{},additionalProperties:false},output:{schema:{type:'object'},render},presentCall:()=>({card:'generic',title:'当前渠道能力'}),
    async execute(_raw,exec){guard(exec);const access=resolveToolAccess({agent:exec.agent!,state:store.snapshot()});return {scope:access.allowedTools?'chat-only':'authorized',tools:available(exec).map(visible),...(access.denialReason?{notice:access.denialReason}:{})}}
   }))
-  disposers.push(runtime.register({name:'partner_tools',description:'统一查询、调用已授权工具。list 按 category/query 返回概要，describe（或兼容 load）返回完整参数；call 使用 name 和 argumentsJson（原工具参数的 JSON 字符串）执行，仍走原权限、审批和取消流程。切换账号不增删顶层工具。可直接 call partner_chat_reply，argumentsJson 为 {"messages":[{"text":"回复内容"}]}；表情先查询 partner_stickers。无需工具时直接最终回答。',
+  disposers.push(runtime.register({name:'partner_tools',description:'统一查询、调用已授权工具。list 按 category/query 返回概要，describe（或兼容 load）返回完整参数；call 使用 name 和 argumentsJson（原工具参数的 JSON 字符串）执行，仍走原权限、审批和取消流程。切换账号不增删顶层工具。人格参考模板直接调用：'+PERSONA_REFERENCE_CALL+'。聊天调用 partner_chat_reply，原工具参数为 {"messages":[{"text":"回复内容"}]}，须序列化到 argumentsJson；表情先查询 partner_stickers。无需工具时直接最终回答。',
    parameters:{type:'object',properties:{action:{type:'string',enum:['list','describe','load','unload','call']},category:{type:'string'},query:{type:'string',maxLength:80},name:{type:'string'},offset:{type:'integer',minimum:0},argumentsJson:{type:'string',maxLength:200000}},required:['action'],additionalProperties:false},
    output:{schema:{type:'object'},render},presentCall:()=>({card:'generic',title:'伙伴能力'}),
    async execute(raw,exec){

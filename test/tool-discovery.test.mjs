@@ -126,8 +126,16 @@ test('persona reference is discoverable and fully delivered through the two perm
  const {ROLE_REFERENCE_TEXT}=await import('../lib/character/role-reference-data.js')
  const f=fixture(t);Object.assign(f.companion,createDefaultCompanion(),{id:'c'})
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:identityTool('c',f.store),allowed:()=>true}]))
- const found=await f.invoke('partner_tools',{action:'list',query:'大肥鱼'})
- assert.equal(found.value.tools[0].name,'partner_identity')
+ for(const query of ['大肥鱼','参考模板','角色设定','关系设定']) {
+  const found=await f.invoke('partner_tools',{action:'list',query})
+  assert.equal(found.value.tools[0].name,'partner_identity',query)
+ }
+ const entry=f.root.tools.get('partner_tools',f.agent)
+ const example=JSON.parse(entry.description.match(/人格参考模板直接调用：(\{.*?\})。/)[1])
+ assert.equal(typeof example.argumentsJson,'string')
+ assert.deepEqual(JSON.parse(example.argumentsJson),{action:'reference'})
+ const direct=await f.invoke('partner_tools',example)
+ assert.equal(direct.isError,false);assert.equal(direct.value.dispatch.isError,false)
  const before=names(f),result=await f.call('partner_identity',{action:'reference'})
  assert.equal(result.isError,false);assert.equal(result.value.dispatch.isError,false)
  const data=JSON.parse(result.content.filter(c=>c.type==='text').map(c=>c.text).join(''))
