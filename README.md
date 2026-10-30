@@ -39,6 +39,7 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 - [Bark 单向通知](docs/bark-notifications.md)
 - [持续关注检查与执行流程](docs/concern-workflow.md)
 - [MCP 服务](docs/mcp.md)
+- [知识库与 SSH 统一工具入口兼容](docs/tool-entry-compatibility.md)
 - [存储迁移](docs/storage-migration.md)
 - [任务生命周期与交付](docs/lifecycle-recovery.md)
 - [架构与隐私边界](docs/architecture.md)
