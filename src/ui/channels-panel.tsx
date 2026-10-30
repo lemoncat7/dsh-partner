@@ -1,3 +1,4 @@
+import {QqConnectionGuide} from './qq-connection-guide.js'
 import {useState, useRef, type ReactNode, type FormEvent} from 'react'
 import {api, type CompanionView, type PartnerSnapshot} from '../client-api.js'
 import {NotificationSettings} from './notification-settings.js'
@@ -45,6 +46,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
     {adding&&<WorkspaceDialog title={fixedPlatform?`${platform==='qq'?'QQ · SnowLuma':platform==='matrix'?'Matrix':'Mattermost'} 配置`:'添加渠道'} detail={platform==='qq'?'正向 WebSocket 同时收发消息，无需 HTTP API。先在 SnowLuma 登录 QQ，再填写连接信息。':platform==='matrix'?'仅未加密的双人会话可获取配对码。请新建未开启端到端加密的会话，邀请机器人后发送文字消息。':'先登录，再向机器人发私聊消息，核对配对码后授权。'} close={()=>{if(!busy)closeAdd()}}>
       <form className="dsh-partner-feature-form dsh-partner-channel-form" aria-busy={busy} onSubmit={(event:FormEvent)=>{event.preventDefault();void configure(true)}}>
         {!fixedPlatform&&<FormField label="平台"><select autoFocus disabled={busy} value={platform} onChange={e=>{if(e.target.value==='bark'){closeAdd();setAddingPush(true);return}setPlatform(e.target.value as typeof platform);setAuthMode(e.target.value==='qq'?'token':'password');setPassword('');setToken('');setMfaToken('');setTargetId('');setFeedback('')}}><option value="qq">QQ · SnowLuma / OneBot v11</option><option value="matrix">Matrix</option><option value="mattermost">Mattermost</option><option value="bark">Bark · 单向通知</option></select></FormField>}
+        {platform==='qq'&&<QqConnectionGuide />}
         <FormField label="渠道名称"><input autoFocus={fixedPlatform} disabled={busy} maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder={`例如：我的 ${platform==='qq'?'QQ · SnowLuma':platform==='matrix'?'Matrix':'Mattermost'}`} /></FormField>
         <FormField label={platform==='qq'?'正向 WebSocket 地址':'服务器地址'} hint={platform==='qq'?'同在 appnet 时填写 ws://snowluma:3001。选择 SnowLuma 的 Universal WebSocket 服务；不要填写 HTTP API 地址。':''}><input disabled={busy} required type="url" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder={platform==='qq'?'ws://snowluma:3001':'https://chat.example.com'} /></FormField>
         <details><summary>高级配置（可选）</summary><FormField label={platform==='qq'?'固定联系人 QQ 号':platform==='matrix'?'固定房间 ID':'固定 DM 会话 ID'} hint="留空则自动发现私聊，通过配对授权。填写后仅监听指定会话。"><input disabled={busy} value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder={platform==='qq'?'可留空，自动发现好友私聊':platform==='matrix'?'!room:example.com':'DM channel ID'} /></FormField></details>

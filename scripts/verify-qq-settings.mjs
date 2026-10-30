@@ -33,6 +33,8 @@ try {
     const dialog=page.getByRole('dialog')
     const noOverflow=async()=>assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true)
     await noOverflow()
+    assert.equal(await dialog.getByRole('link',{name:'部署文档',exact:true}).getAttribute('href'),'https://snowluma.github.io/zh/docs/guide/deploy')
+    await dialog.getByText('也可以让 AI 参照文档，协助部署 SnowLuma 并配置 QQ 渠道。',{exact:true}).waitFor()
     assert.equal(await dialog.getByLabel('WS Access Token',{exact:false}).count(),0)
     await page.screenshot({path:`/tmp/partner-qq-settings-home-${width}-${dark?'dark':'light'}.png`})
     await dialog.getByRole('button',{name:/群聊回复.*选择群组/}).click()

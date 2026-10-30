@@ -1,3 +1,4 @@
+import {QqConnectionGuide} from './qq-connection-guide.js'
 import {QqVoiceReplySettings} from './qq-voice-reply-settings.js'
 import {QqIdentityBindingEditor} from './qq-identity-binding.js'
 import {QqCapabilitySettings} from './qq-capability-settings.js'
@@ -35,13 +36,14 @@ export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editStat
   {page!=='home'&&<nav className="dsh-partner-qq-breadcrumb" aria-label="QQ 设置导航"><button type="button" disabled={busy} onClick={()=>go((page==='groups'||page==='autonomy')?'group':'home')}>‹ {(page==='groups'||page==='autonomy')?'群聊回复':'QQ 设置'}</button><span aria-hidden="true">/</span><strong>{titles[page]}</strong></nav>}
   {page==='home'?<>
    <div className="dsh-partner-qq-account"><div><small>QQ 账号</small><strong>{channel.accountId}</strong><span>SnowLuma · 正向 WebSocket</span></div><ChannelStatus channel={channel}/></div>
+   <QqConnectionGuide />
    <div className="dsh-partner-qq-section-label">连接</div>{entry('connection','管理服务器、凭据与连接状态')}
    <div className="dsh-partner-qq-section-label">聊天回复 · 群白名单与账号审批</div>{entry('private','好友私聊与配对授权',policy.privateReplies?'开启':'关闭')}{entry('group','选择群组，设置何时回复',policy.groupReplies?`${policy.groupIds.length} 个群`:'关闭')}{entry('sessions','独立聊天，按需接入主会话',`${policy.mainSessionPeers.length} 个共用`)}{entry('media','QQ 原生表情、收藏与默认库')}{entry('voice','仅向当前聊天对象发送语音',policy.replyVoiceEnabled?'开启':'关闭')}
    <div className="dsh-partner-qq-section-label">私有能力 · 归属账号与系统自主执行</div>{entry('capabilities','QQ 空间、资料、群管理与文件操作',policy.autonomousActions?`${policy.enabledActions.length} 项开启`:'关闭')}
    <div className="dsh-partner-qq-section-label">管理与操作</div>{entry('access','归属账号、关系与能力范围',`${owned.filter(p=>p.status==='pending').length} 待批准`)}{entry('send','选择已授权接收人，发送文字或表情')}
   </>:page==='voice'?<QqVoiceReplySettings channel={channel} policy={policy} change={change} busy={busy}/>:page==='capabilities'?<QqCapabilitySettings channel={channel} policy={policy} change={change} busy={busy}/>:page==='connection'?<div className="dsh-partner-qq-pane">
-   <p className="dsh-partner-qq-hint">WS 同时收发消息，无需 HTTP API。修改连接时会核对 QQ 账号，保留已有授权。</p>
-   <Field label="WebSocket 地址"><input value={url} onChange={e=>setUrl(e.target.value)} disabled={busy} placeholder="ws://snowluma:3001" /></Field>
+   <QqConnectionGuide /><p className="dsh-partner-qq-hint">修改连接时会核对 QQ 账号，保留已有授权。</p>
+   <Field label="正向 WebSocket 地址"><input value={url} onChange={e=>setUrl(e.target.value)} disabled={busy} placeholder="ws://snowluma:3001" /></Field>
    <Field label="WS Access Token" hint="留空保留已保存令牌；不会显示原令牌。"><input type="password" autoComplete="new-password" value={token} onChange={e=>setToken(e.target.value)} disabled={busy}/></Field>
    <div className="dsh-partner-qq-actions"><button disabled={busy||!url} onClick={()=>void run(async()=>{await post('connection',{baseUrl:url,botToken:token,testOnly:true,expectedUpdatedAt:channel.updatedAt})},'连接测试通过')}>测试连接</button><button className="is-primary" disabled={busy||!url} onClick={()=>void run(async()=>{await post('connection',{baseUrl:url,botToken:token,testOnly:false,expectedUpdatedAt:channel.updatedAt});setToken('');await onChanged()},'连接已保存')}>保存连接</button></div>
    <div className="dsh-partner-qq-divider"/><div className="dsh-partner-qq-actions"><button disabled={busy} onClick={()=>void run(async()=>{await api(`/channels/${channel.id}/enabled`,{method:'POST',body:JSON.stringify({enabled:!channel.enabled})});await onChanged()})}>{channel.enabled?'停用渠道':'启用渠道'}</button>{channel.enabled&&<button disabled={busy} onClick={()=>void run(async()=>{await api(`/channels/${channel.id}/enabled`,{method:'POST',body:JSON.stringify({enabled:true})});await onChanged()})}>重新连接</button>}</div>

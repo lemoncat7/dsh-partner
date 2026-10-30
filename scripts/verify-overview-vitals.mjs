@@ -39,7 +39,7 @@ try{
   await page.getByRole('button',{name:'身份',exact:true}).click()
   await page.getByText('基本身份参考模板',{exact:true}).click();await page.getByText('名字：小岚',{exact:false}).waitFor()
   await page.getByRole('tab',{name:'关系设定',exact:false}).click();await page.getByText('关系设定参考模板',{exact:true}).click();await page.getByText('## 我们的关系',{exact:false}).waitFor()
-  await page.getByRole('tab',{name:'角色聊天',exact:false}).click();await page.getByText('角色设定参考模板',{exact:true}).click();await page.getByText('# 角色卡：小岚',{exact:false}).waitFor()
+  await page.getByRole('tab',{name:'角色聊天',exact:false}).click();assert.equal(await page.getByRole('progressbar',{name:'测试伙伴的好感度'}).count(),0);assert.equal(await page.getByRole('switch',{name:'启用好感度累计与主动加成'}).count(),0);const readsBefore=reads;await page.clock.fastForward(30001);assert.equal(reads,readsBefore);await page.getByText('角色设定参考模板',{exact:true}).click();await page.getByText('# 角色卡：小岚',{exact:false}).waitFor()
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false)
   assert.deepEqual(errors,[]);console.log(JSON.stringify({dark,width,reads,deletes,passed:true}));await page.close()
  }

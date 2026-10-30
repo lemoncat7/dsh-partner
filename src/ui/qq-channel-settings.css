@@ -85,3 +85,10 @@
 .dsh-partner-qq-identity-binding { display: grid; gap: 16px; min-width: 0; }
 
 .dsh-partner-qq-identity-binding textarea { width:100%; min-width:0; box-sizing:border-box; resize:vertical; padding:10px 12px; font:inherit; color:inherit; background:var(--partner-card-surface); border:1px solid var(--partner-border); border-radius:8px; }
+
+.dsh-partner-qq-guide { display: grid; gap: 6px; padding: 14px 16px; margin: 0; border: 1px solid var(--partner-border); border-radius: 12px; background: var(--partner-interaction-well); color: var(--partner-text-secondary); font-size: 12px; line-height: 1.7; min-width: 0; overflow-wrap: anywhere; }
+.dsh-partner-qq-guide > strong { color: var(--partner-text); font-size: 13px; }
+.dsh-partner-qq-guide > p { margin: 0; }
+.dsh-partner-qq-guide a { color: var(--partner-accent-strong); text-decoration: underline; text-underline-offset: 3px; padding-inline: 3px; }
+.dsh-partner-qq-guide a:focus-visible { outline: 2px solid var(--partner-accent-strong); outline-offset: 3px; border-radius: 2px; }
+.dsh-partner-qq-guide code { font-size: inherit; overflow-wrap: anywhere; }
