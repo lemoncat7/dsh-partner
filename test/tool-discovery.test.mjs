@@ -128,7 +128,7 @@ test('persona reference is discoverable and fully delivered through the two perm
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:identityTool('c',f.store),allowed:()=>true}]))
  const found=await f.invoke('partner_tools',{action:'list',query:'大肥鱼'})
  assert.equal(found.value.tools[0].name,'partner_identity')
- const before=names(f),result=await f.call('partner_identity',{action:'inspect'})
+ const before=names(f),result=await f.call('partner_identity',{action:'reference'})
  assert.equal(result.isError,false);assert.equal(result.value.dispatch.isError,false)
  const data=JSON.parse(result.content.filter(c=>c.type==='text').map(c=>c.text).join(''))
  assert.equal(data.reference.text,ROLE_REFERENCE_TEXT);assert.match(data.reference.text,/## 十、你的样子/)

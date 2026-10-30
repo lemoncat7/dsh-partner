@@ -97,3 +97,7 @@
 .dsh-partner-fatigue-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--partner-control); }
 .dsh-partner-fatigue-track > span { display: block; height: 100%; background: var(--partner-accent); border-radius: inherit; transform-origin: left; }
 .dsh-partner-fatigue .dsh-partner-character-hint { margin-bottom: 0; }
+
+.dsh-partner-persona-template { margin-bottom: 16px; }
+.dsh-partner-persona-template pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.7; color: var(--partner-text); }
+.dsh-partner-persona-template > small { display: block; color: var(--partner-muted); line-height: 1.6; }

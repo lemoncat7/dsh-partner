@@ -1,4 +1,4 @@
-import { PERSONA_GENERATION_GUIDE, PERSONA_REFERENCE } from '../character/identity-guide.js'
+import { personaReferenceBundle } from '../character/identity-guide.js'
 import { patchIdentity, effectiveIdentity } from './identity.js'
 import { idleContactRouteAllowed } from '../character/idle-contact.js'
 import { createHash } from 'node:crypto'
@@ -53,9 +53,9 @@ export class CompanionManagementService {
     }
   }
 
-  inspect(actorId: string, reference: string) {
+  inspect(actorId: string, reference: string, includeReferences = false) {
     const state = this.store.snapshot()
-    return { ...managementView(this.target(actorId, reference, state), state), generationGuide: PERSONA_GENERATION_GUIDE, reference: PERSONA_REFERENCE }
+    return { ...managementView(this.target(actorId, reference, state), state), ...(includeReferences ? personaReferenceBundle() : {}) }
   }
 
   async update(actorId: string, reference: string, expectedRevision: string, raw: unknown, signal?: AbortSignal) {

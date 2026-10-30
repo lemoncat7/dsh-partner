@@ -278,3 +278,22 @@ test('accepted private input updates sleep before first prompt, rejected input a
  }
  assert.ok(f.store.snapshot().companions[0].sleepState.fatigue.value>59)
 })
+
+
+test('persona authoring receives shared templates in first prompt only for relevant authorized user requests',async t=>{
+ const {createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await pendingInputFixture(t)
+ for(const [who,text,wanted] of [['owner','帮我生成角色设定',true],['owner','按参考模板写一下基本身份',true],['owner','把语气调温柔一点',false],['guest','查看大肥鱼参考模板',false],['owner','你好',false]]){
+  const m=createUserMessage({content:[{type:'text',text}],source:{kind:'user'}})
+  await f.store.update(s=>s.sessions.find(r=>r.id===who).inboundMessageIds.push(m.id));await f.step([m])
+  const prompt=(await f.prompt()).text
+  if(wanted){assert.match(prompt,/本轮人格创作参考/);assert.match(prompt,/## 十、你的样子/);assert.match(prompt,/基本身份/);assert.match(prompt,/关系设定/)}
+  else assert.doesNotMatch(prompt,/本轮人格创作参考|## 十、你的样子/)
+  f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ }
+ const m=createUserMessage({content:[{type:'text',text:'查看大肥鱼参考模板'}],source:{kind:'user'}})
+ await f.store.update(s=>s.sessions.find(r=>r.id==='owner').inboundMessageIds.push(m.id));await f.step([m]);f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ const idle=createUserMessage({content:[{type:'text',text:'自主优化人格'}],source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}})
+ await f.store.update(s=>{s.sessions.find(r=>r.id==='owner').idleContactState={messageId:idle.id}})
+ await f.step([idle]);assert.doesNotMatch((await f.prompt()).text,/本轮人格创作参考|## 十、你的样子/)
+})

@@ -1,3 +1,4 @@
+import { CompanionVitals } from './ui/companion-vitals.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -260,6 +261,8 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
       <span><small>工作台</small><h2>{online ? `${companion.name} 正在渠道待命` : `${companion.name} 已准备就绪`}</h2></span>
       <p>{online ? '消息、授权与上下文边界都在这里汇总。' : '伙伴身份、会话与能力已经准备完成。'}</p>
     </header>
+
+    <CompanionVitals key={companion.id} companion={companion} />
 
     <section className={`dsh-partner-home-channel${online ? ' is-online' : ''}`}>
       <div className="dsh-partner-home-route" aria-hidden="true">

@@ -1,3 +1,4 @@
+import { PersonaTemplate } from './persona-template.js'
 import { relationshipTextForIdentity } from '../character/relationship-adapter.js'
 import { SleepEditor } from './sleep-editor.js'
 import { sleepPolicy } from '../character/sleep.js'
@@ -53,11 +54,13 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
     {dirty.current && companion.updatedAt !== revision.current && <p role="status" className="dsh-partner-character-hint">设定已被 AI 或其他页面更新。你的未保存编辑仍在，保存会进行版本校验；请先载入最新设定再修改，避免覆盖新内容。</p>}
     <section className="dsh-partner-identity-card" aria-label="身份配置">
     <SettingsSections<typeof section> label="身份设置分段" value={section} onChange={setSection} sections={[{id: 'identity', title: '基本身份', detail: '名字、定位与行为准则', content: <>
+    <PersonaTemplate section="basic" />
     <div className="dsh-partner-fields two"><Field label="名字"><input disabled={busy} required maxLength={60} value={form.name} onChange={event => edit({ ...form, name: event.target.value })} /></Field><Field label="角色"><input disabled={busy} required maxLength={120} value={form.role} onChange={event => edit({ ...form, role: event.target.value })} /></Field></div>
     <Field label="一句话定位" hint="用于名册识别，不会替代完整行为准则。"><textarea disabled={busy} rows={2} maxLength={500} value={form.description} onChange={event => edit({ ...form, description: event.target.value })} /></Field>
     <Field label="长期行为准则" hint="写角色通用的职责、表达与边界。与用户的身份关系、专属称呼请放到“关系设定”。"><textarea disabled={busy} rows={9} maxLength={12000} value={form.instructions} onChange={event => edit({ ...form, instructions: event.target.value })} /></Field>
     </>}, {id: 'character', title: '角色聊天', detail: form.characterCard?.enabled ? '已启用 · 设定与试聊' : '可选 · 设定与试聊', content: <CharacterEditor active={section === 'character'} relationshipText={relationshipTextForIdentity(form)} companion={companion} {...(form.characterCard ? {card:form.characterCard} : {})} disabled={busy} onChange={characterCard => edit({...form,characterCard})} />}, {id: 'relationship', title: '关系设定', detail: '称呼与相处 · 按渠道应用', content: <>
       <p className="dsh-partner-character-hint">角色设定写“我是谁”，这里写“我们是什么关系”。普通会话会合并使用；QQ 仅在发送者匹配任一归属账号时附加这份关系，群聊与私聊通用。其他人根据角色性格与实际交往相处。</p>
+      <PersonaTemplate section="relationship" />
       <Field label="关系设定" hint="写关系身份、专属称呼和相处习惯，也可附关系示例。留空表示不预设关系。"><textarea disabled={busy} rows={12} maxLength={12000} value={relationshipTextForIdentity(form)} onChange={event => edit({...form, relationshipText:event.target.value})} /></Field>
       <details className="dsh-partner-settings-advanced"><summary>通用示例与编辑说明</summary><p>我们是互相尊重的老朋友，称呼对方的名字。熟悉时可以开玩笑，认真讨论时直说意见，不编造共同往事。</p><p>可以让 AI 分别生成角色与关系。AI 与页面编辑同一份生效内容；保存后下一轮使用新设定。旧版角色或基本身份中混写的专属关系，需要移到这里；系统不会猜测删改旧文本。QQ 账号只需在渠道的访问权限中填写。</p></details>
     </>}, {id: 'idle', title: '闲时自主活动', detail: form.idleContact?.enabled ? '已开启 · 按概率自主行动' : '可选 · 聊天或使用能力', content: <IdleContactEditor companionId={companion.id} value={form.idleContact} disabled={busy} onChange={idleContact => edit({...form,idleContact})} />}, {id: 'sleep', title: '睡眠与做梦', detail: '自主休息 · 梦境与感受', content: <SleepEditor companion={companion} value={sleepPolicy(form)} disabled={busy} active={section === 'sleep'} onChange={sleepPolicy => edit({...form,sleepPolicy})} />}]} />

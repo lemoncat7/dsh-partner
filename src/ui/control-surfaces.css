@@ -88,3 +88,14 @@
   .dsh-partner-workspace .dsh-partner-memory-settings .dsh-partner-automation-fields.is-memory-model { grid-template-columns: minmax(0, 1fr); }
   .dsh-partner-workspace .dsh-partner-memory-settings .is-memory-model > .dsh-partner-field:first-child { max-width: none; }
 }
+
+/* Explicit styling also applies outside form/collection button selectors. */
+.dsh-partner-workspace .dsh-partner-delete-trigger {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 38px; padding: 8px 12px; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-control);
+  background: var(--partner-control); color: var(--partner-danger); font: 500 13px/1.4 var(--partner-font-family); cursor: pointer; box-shadow: none;
+}
+.dsh-partner-workspace .dsh-partner-delete-trigger:not(:disabled):hover { background: color-mix(in srgb, var(--partner-danger) 8%, var(--partner-control)); border-color: color-mix(in srgb, var(--partner-danger) 35%, var(--partner-border)); }
+.dsh-partner-workspace .dsh-partner-delete-trigger:disabled { opacity: .45; cursor: not-allowed; }
+.dsh-partner-workspace .dsh-partner-delete-trigger:focus-visible { outline: 2px solid var(--partner-accent); outline-offset: 3px; }
+@media (max-width: 640px) { .dsh-partner-workspace .dsh-partner-delete-trigger { min-height: 44px; } }

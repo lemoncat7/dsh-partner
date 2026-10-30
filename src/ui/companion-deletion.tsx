@@ -27,9 +27,9 @@ export function CompanionDeletion({ companion, count, channelCount, onRemoved }:
     } finally { locked.current = false; if (alive.current) setBusy(false) }
   }
   return <div className="dsh-partner-overview-delete">
-    <button type="button" className="is-danger" disabled={busy || removed || count <= 1} title={count <= 1 ? '至少保留一个伙伴' : undefined} onClick={() => { setError(''); setOpen(true) }}><IconTrashOutlineRegular size={16} />删除伙伴</button>
+    <button type="button" className="dsh-partner-delete-trigger is-danger" disabled={busy || removed || count <= 1} title={count <= 1 ? '至少保留一个伙伴' : undefined} onClick={() => { setError(''); setOpen(true) }}><IconTrashOutlineRegular size={16} />删除伙伴</button>
     {!open && error && <p className="dsh-partner-inline-error" role="alert">{error}</p>}
-    {open && <WorkspaceDialog title={`删除「${companion.name}」？`} detail="此操作不可撤销，只删除当前确认的伙伴。" close={() => { if (!locked.current) setOpen(false) }}>
+    {open && <WorkspaceDialog confirmation eyebrow="" title={`删除「${companion.name}」？`} detail="此操作不可撤销，只删除当前确认的伙伴。" close={() => { if (!locked.current) setOpen(false) }}>
       <p>将清理身份、记忆、持续关注、能力绑定、定时任务及专属目录中的全部文件。</p>
       <p>{channelCount ? `已绑定 ${channelCount} 个渠道。确认后会自动停止并删除这些渠道、登录凭据和联系人授权，无需先手动解绑。` : '该伙伴没有绑定渠道。'}</p>
       <p>DSH 原会话日志由宿主管理，不在此次删除范围。正在执行的任务及共享或异常目录仍会拦截删除。</p>

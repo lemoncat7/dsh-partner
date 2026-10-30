@@ -1,3 +1,4 @@
+import { personaReferenceRequested, renderPersonaReference } from './character/identity-guide.js'
 import { activityPolicyCurrent, postReplyAllowed, postReplyCurrent, postReplyProbability, POST_REPLY_PROMPT } from './character/post-reply.js'
 import {PARTNER_TOOL_ENTRIES} from './collaboration/tool-discovery.js'
 import {setReplyTiming} from './channels/qq/latency.js'
@@ -907,17 +908,17 @@ export class PartnerAgentRuntime {
     const relationEvents = state.channels?.some(c => c.platform === 'qq' && state.sessions.some(r => r.sessionId === agent.session.id && r.channelId === c.id))
       ? this.inputEvents(agent) : undefined
     const identityRelation = relationEvents ? currentQqIdentityRelation(agent.session.id, relationEvents, state.sessions, state.channels) : undefined
-    if (!identityRelation && !relationshipTextForIdentity(companion) && (!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id)) {
+    const committedMessages = agent.session.deriveMessages?.() ?? []
+    const committedIds = new Set(committedMessages.map(m => m.id))
+    const messages = [...committedMessages, ...(this.admittedInputs?.get(agent) ?? []).filter(m => !committedIds.has(m.id))]
+    const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
+    const query = last && last.role === 'user' ? textContent(last.content) : ''
+    if (!identityRelation && !relationshipTextForIdentity(companion) && (!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id) && !personaReferenceRequested(query)) {
       this.characterContexts.get(agent.session.id)?.()
       this.characterContexts.delete(agent.session.id)
       this.contextRevisions.delete(agent)
       return false
     }
-    const committedMessages = agent.session.deriveMessages()
-    const committedIds = new Set(committedMessages.map(m => m.id))
-    const messages = [...committedMessages, ...(this.admittedInputs?.get(agent) ?? []).filter(m => !committedIds.has(m.id))]
-    const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
-    const query = last && last.role === 'user' ? textContent(last.content) : ''
     const events=relationEvents ?? this.inputEvents(agent)
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
@@ -935,7 +936,7 @@ export class PartnerAgentRuntime {
     }
     signal.throwIfAborted()
     const relationshipAllowed = !identityRelation || identityRelation.matched
-    const text = [access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音能力为 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
+    const text = [origin?.type === 'user/message' && origin.data.source.kind === 'user' && access.sendTools && (!access.allowedTools || access.allowedTools.includes('partner_identity')) && personaReferenceRequested(query) ? renderPersonaReference() : '', access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音能力为 partner_qq_reply；不能代办操作，不承诺使用私有能力。' : '',
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
       renderAffection(companion,affectionAudience),
       renderCharacterContext(companion.characterCard, messages.slice(-6).filter(m => m.role === 'user' || m.role === 'assistant').map(m => textContent(m.content)).join('\n').slice(-12000), relationshipAllowed ? story : undefined),

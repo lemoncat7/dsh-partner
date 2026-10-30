@@ -1,3 +1,4 @@
+import { PersonaTemplate } from './persona-template.js'
 import { useState } from 'react'
 import { WorkspaceDialog } from './workspace-components.js'
 import { ROLE_REFERENCE_SOURCE, ROLE_REFERENCE_TEXT } from '../character/role-reference-data.js'
@@ -6,6 +7,7 @@ import { ROLE_REFERENCE_SOURCE, ROLE_REFERENCE_TEXT } from '../character/role-re
 export function RoleReference(): JSX.Element {
   const [open, setOpen] = useState(false)
   return <>
+    <PersonaTemplate section="character" />
     <div className="dsh-partner-role-reference-entry"><span>先写角色自己的反应，再补具体说话习惯和正反例。</span><button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog">查看大肥鱼参考</button></div>
     {open && <WorkspaceDialog title="大肥鱼的角色写法" eyebrow="QQ-BRIDGE REFERENCE" detail="qq-bridge 中的原名是“小鲸鱼”。页面与 AI 生成人格时使用同一份参考；不会自动覆盖当前伙伴。" close={() => setOpen(false)} width="wide" className="dsh-partner-character-dialog">
       <div className="dsh-partner-role-reference-guide">

@@ -133,7 +133,7 @@ test('privileged management updates the same identity displayed by the page', as
 })
 
 test('identity discovery guides separate role and relationship authoring, visible on the page',async t=>{
- const f=await fixture(t),before=pageIdentity(f.store.snapshot().companions[0]),inspection=await f.inspect()
+ const f=await fixture(t),before=pageIdentity(f.store.snapshot().companions[0]),inspection=await f.call({action:'inspect',includeReferences:true})
  for(const section of ['你是谁','称呼与相处','怎么说话','正反例'])assert.ok(inspection.generationGuide.includes(section))
  await f.update({characterCard:{enabled:true,roleText:'## 你是谁\n爱观察的同行者。\n\n## 怎么相处\n坦率、不附和。\n\n## 对话参考\n对方：下雨了。\n回应：那今天就赖着。'}})
  assert.match(pageIdentity(f.store.snapshot().companions[0]).characterCard.roleText,/爱观察的同行者/)
@@ -169,13 +169,29 @@ test('old human drafts cannot shadow or resurrect the current AI-generated ident
 test('persona authoring receives the same complete built-in reference through self and management inspection', async t => {
  const {PERSONA_REFERENCE}=await import('../lib/character/identity-guide.js')
  const {ROLE_REFERENCE_TEXT}=await import('../lib/character/role-reference-data.js')
- const f=await fixture(t), snapshot=f.store.snapshot(), info=await f.inspect()
+ const f=await fixture(t), snapshot=f.store.snapshot(), info=await f.call({action:'inspect',includeReferences:true})
  assert.equal(info.reference.text,ROLE_REFERENCE_TEXT)
  assert.match(info.reference.text,/## 十、你的样子/)
  assert.match(info.reference.source,/github.com\/Derpyu520\/qq-bridge\/blob\//)
  assert.match(info.generationGuide,/reference.text/)
  assert.match(info.reference.usage,/不是当前角色/)
  const management=new CompanionManagementService(f.store,{isBusy:()=>false,catalog:async()=>({}),reload:async()=>{}})
- assert.deepEqual(management.inspect('manager',f.id).reference,PERSONA_REFERENCE)
+ assert.deepEqual(management.inspect('manager',f.id,true).reference,PERSONA_REFERENCE)
  assert.deepEqual(f.store.snapshot(),snapshot,'reference reads do not apply the sample persona')
+})
+
+
+test('ordinary inspection and autonomous edits omit authoring references; explicit reference returns all three templates',async t=>{
+ const f=await fixture(t),before=f.store.snapshot(),plain=await f.inspect()
+ assert.equal(plain.reference,undefined);assert.equal(plain.templates,undefined)
+ const ref=await f.call({action:'reference'})
+ assert.deepEqual(Object.keys(ref.templates),['basic','character','relationship'])
+ assert.deepEqual(ref.templates.basic.fields,['name','role','description','instructions'])
+ assert.deepEqual(ref.templates.character.fields,['characterCard.enabled','characterCard.roleText'])
+ assert.deepEqual(ref.templates.relationship.fields,['relationshipText'])
+ assert.match(ref.reference.source,/Derpyu520\/qq-bridge/)
+ assert.doesNotMatch(JSON.stringify(ref.templates),/莫殇|CETACEA_LOLI|SMART LAZY/)
+ assert.deepEqual(f.store.snapshot(),before)
+ await f.update({description:'自主优化后的通用定位'})
+ assert.equal((await f.inspect()).identity.description,'自主优化后的通用定位')
 })
