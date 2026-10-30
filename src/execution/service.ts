@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { knowledgeToolAccess } from './knowledge-tool-access.js'
+import { restrictExecutionTools } from './operation-tool-access.js'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import type { AgentPresetRegistry as AgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -116,7 +116,7 @@ export class EphemeralExecutionService {
           if (request.systemInstruction) agentCtx.systemPrompt.section({ name: 'partner-ephemeral-task', order: -8, text: request.systemInstruction })
           agentCtx.tools.presentAs('native')
           for (const tool of this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
-          if (request.allowedTools !== undefined) restrictTools(agentCtx as ExecutionContext, agent, request.allowedTools)
+          if (request.allowedTools !== undefined) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.allowedTools)
         },
       })
       this.active.set(sessionId, handle)
@@ -172,15 +172,6 @@ export class EphemeralExecutionService {
 
 export class ExecutionFailedError extends Error {
   constructor(readonly run: ExecutionRun) { super(run.error ?? 'Temporary execution failed') }
-}
-
-function restrictTools(ctx: ExecutionContext, agent: Agent, requested: string[]): void {
-  const visible = ctx.tools.schemas(agent).map(tool => tool.name).filter(name => name !== 'run_code')
-  const policy = knowledgeToolAccess(requested, visible)
-  const allowed = policy.allowed
-  ctx.tools.guard(exec => policy.denial(exec.name, exec.arguments))
-  if (allowed.length > 0) ctx.tools.restrict({ allow: allowed })
-  else if (visible.length > 0) ctx.tools.restrict({ deny: visible })
 }
 
 function executionSummary(kind: ExecutionKind): string {

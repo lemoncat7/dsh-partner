@@ -7,6 +7,7 @@ import {Session} from '@deepseek-ai/dsh-session'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
 import {installToolDiscovery,PARTNER_TOOL_ENTRIES} from '../lib/collaboration/tool-discovery.js'
 import {installToolAccessGuard} from '../lib/execution/tool-access-adapter.js'
+import {restrictExecutionTools} from '../lib/execution/operation-tool-access.js'
 import {chatTools} from '../lib/chat/tools.js'
 import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 import {createDefaultCompanion,normalizeCompanionDraft} from '../lib/domain.js'
@@ -94,4 +95,28 @@ test('discovery setting remains validated and participates in next-turn composit
  const c={...createDefaultCompanion(),toolDiscovery:false},state={companions:[c],sessions:[{sessionId:'s',companionId:c.id}],skillBindings:[],companionAccessGrants:[],skills:[]}
  const index=new SessionConfigurationIndex({snapshot:()=>state,subscribe:()=>()=>{}})
  const before=index.forSession('s').revision;c.toolDiscovery=true;assert.notEqual(index.forSession('s').revision,before);index.close()
+})
+
+test('partner entry routes knowledge and SSH envelopes without bypassing operation allowlists',async t=>{
+ const f=fixture(t),calls=[]
+ for(const name of ['knowledge','ssh'])f.root.tools.register({name,description:name,
+  parameters:{type:'object',properties:{action:{type:'string'},tool:{type:'string'},arguments:{type:'object',additionalProperties:true}},required:['action'],additionalProperties:false},
+  output:{schema:{type:'string'},render:(_args,value)=>[{type:'text',text:value}]},
+  execute:async(args,exec)=>{assert.equal(exec.agent,f.agent);calls.push({name,args});return 'ok'},
+ })
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[]))
+ restrictExecutionTools(f.scope.ctx,f.agent,['partner_tools','knowledge_read','ssh_exec'])
+ for(const [name,tool] of [['knowledge','knowledge_read'],['ssh','ssh_exec']]) {
+  assert.equal((await f.call(name,{action:'list'})).value.dispatch.isError,false)
+  assert.equal((await f.call(name,{action:'describe',tool})).value.dispatch.isError,false)
+  assert.equal((await f.call(name,{action:'call',tool,arguments:{id:'fixture'}})).value.dispatch.isError,false)
+ }
+ const before=calls.length
+ for(const [name,tool] of [['knowledge','knowledge_note_update'],['ssh','ssh_forward_start']])assert.equal((await f.call(name,{action:'call',tool,arguments:{}})).value.dispatch.isError,true)
+ assert.equal((await f.call('ssh_exec',{})).isError,true,'old operation is not a top-level catalogue entry')
+ assert.equal(calls.length,before)
+ assert.deepEqual(calls.at(-1).args,{action:'call',tool:'ssh_exec',arguments:{id:'fixture'}})
+ f.scope.ctx.tools.guard(exec=>exec.name==='ssh'?'host approval required':undefined)
+ assert.equal((await f.call('ssh',{action:'call',tool:'ssh_exec',arguments:{}})).value.dispatch.isError,true)
+ assert.equal(calls.length,before)
 })

@@ -36,6 +36,9 @@ export function renderToolProtocol(): string {
     '`run_code` 的程序只返回完成当前任务所需的精简结果。需要顺序依赖时逐个 `await`，互不依赖的只读调用才可并行。',
     '若工具结果提示 “only `run_code` is callable directly”，立即在同一轮改用 `run_code` 重试。只有规范重试也失败时，才说明真正的失败原因。',
     '若当前请求原生暴露了目标工具，则可以直接调用；不要臆造未出现在顶层清单或生成 SDK 中的工具。',
+    '知识库与 SSH/FTP/SFTP 优先使用当前提供的统一入口 knowledge、ssh：action=list 查询操作，action=describe 且 tool=操作名读取参数，再以 action=call、tool=操作名、arguments={...} 执行。旧指令中的 knowledge_*、ssh_* 和 SSH 文件传输 file_* 是入口内的操作名，不是另行暴露的顶层工具；只有旧版确实提供同名工具时才直接调用。',
+    '若通过 partner_tools 调用这些入口，name 必须是 knowledge 或 ssh，argumentsJson 是该入口完整参数的 JSON 字符串；不要把 ssh_exec 或 knowledge_read 当作 partner_tools 的 name。若使用 run_code，则调用 tools.knowledge(...) 或 tools.ssh(...)，不能猜测旧操作对应的 SDK 函数。',
+    'Skill 的 allowed-tools 若只列出旧操作名，统一入口也只能 describe/call 这些操作。list 返回目录不等于获得目录中其他操作的权限；主机挂载、临时授权、文件权限、知识库范围与笔记确认仍由原插件校验。',
     ATTACHMENT_PROTOCOL,
   ].join('\n')
 }

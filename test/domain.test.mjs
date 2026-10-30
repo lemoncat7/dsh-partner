@@ -214,6 +214,11 @@ test('instructs code-mode companions to route SDK tools through run_code', () =>
   assert.match(protocol, /only `run_code` is callable directly/)
   assert.match(protocol, /await tools\.web_search/)
   assert.match(protocol, /立即在同一轮改用 `run_code` 重试/)
+  assert.match(protocol, /统一入口 knowledge、ssh/)
+  assert.match(protocol, /tools\.knowledge/)
+  assert.match(protocol, /tools\.ssh/)
+  assert.match(protocol, /name 必须是 knowledge 或 ssh/)
+  assert.match(protocol, /allowed-tools 若只列出旧操作名/)
 })
 
 test('renders relation evidence and guards conflicting memories from silent merging', () => {
