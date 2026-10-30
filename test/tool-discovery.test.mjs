@@ -43,7 +43,7 @@ test('fixed entries describe and invoke original tools without registry churn; h
 })
 test('QQ adapter lists only authorized abilities, changes identity without changing tools, and denies stale/nested calls',async t=>{
  const f=fixture(t);let calls=0
- const defs=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>definition(name,async()=>{calls++;return {ok:true}}))
+ const defs=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply','partner_memory_recall'].map(name=>definition(name,async()=>{calls++;return {ok:true}}))
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,defs.map(tool=>({tool,allowed:()=>true}))))
  t.after(f.scope.ctx.tools.register(definition('host_private')))
  t.after(installToolAccessGuard(f.root.tools,()=>f.state))
@@ -53,7 +53,7 @@ test('QQ adapter lists only authorized abilities, changes identity without chang
  const before=f.root.tools.schemas(f.agent)
  send('owner');let access=await f.invoke('partner_channel_access');assert.ok(access.value.tools.some(t=>t.name==='partner_identity'));assert.ok(access.value.tools.some(t=>t.name==='host_private'))
  assert.equal((await f.call('partner_identity')).value.dispatch.isError,false)
- send('guest');access=await f.invoke('partner_channel_access');assert.deepEqual(access.value.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ send('guest');access=await f.invoke('partner_channel_access');assert.deepEqual(access.value.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
  assert.equal((await f.call('partner_identity')).isError,true);assert.equal((await f.invoke('partner_identity')).isError,true)
  assert.equal((await f.invoke('partner_tools',{action:'describe',name:'host_private'})).isError,true)
  assert.equal((await f.call('partner_chat_reply')).value.dispatch.isError,false)
@@ -175,4 +175,13 @@ test('image discovery never invents unavailable tools or exposes them to QQ chat
  f.state.sessions.push({id:'guest',kind:'channel',channelId:'qq',userId:'22345678',companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[message.id]})
  assert.deepEqual((await f.invoke('partner_tools',{action:'list',query:'生图'})).value.tools,[])
  assert.equal((await f.call('generate_image')).isError,true)
+})
+
+test('missing tools are distinguished from revoked permissions',async t=>{
+ const f=fixture(t)
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('revoked'),allowed:()=>false}]))
+ const missing=await f.call('partner_chat_progress')
+ assert.equal(missing.isError,true);assert.match(JSON.stringify(missing.content),/未注册或已结束/)
+ const revoked=await f.call('revoked')
+ assert.equal(revoked.isError,true);assert.match(JSON.stringify(revoked.content),/当前渠道未授权/)
 })

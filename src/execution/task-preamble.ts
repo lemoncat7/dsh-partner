@@ -4,7 +4,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
-const conversational = new Set(['partner_tools','partner_channel_access','partner_chat_progress','partner_chat_reply','partner_stickers','partner_qq_reply','partner_activity_finish','partner_identity','partner_memory_recall','partner_sleep'])
+const conversational = new Set(['partner_tools','partner_channel_access','partner_chat_progress','partner_chat_reply','partner_stickers','partner_qq_reply','partner_activity_finish','partner_identity','partner_sleep'])
 export function needsTaskPreamble(name:string,args:unknown):boolean {
   if(conversational.has(name))return false
   const action=args && typeof args==='object' ? (args as {action?:unknown}).action : undefined
@@ -45,7 +45,7 @@ export class TaskPreambleGate {
         if(text){try{await this.acknowledge(text);pending=this.sent.get(id)}catch{return '前置回应未确认送达，本次工作尚未执行。不要宣称已开始或重试未知发送；请向用户说明当前情况。'}}
       }
     }
-    if(!pending)return '本次工作尚未执行：先调用 partner_chat_progress，text 用当前人格自然回应接下此事；等待成功后再调用本工具。统一入口使用 partner_tools action=call、name=partner_chat_progress、argumentsJson={"text":"由你按当前人格生成的回应"} 的 JSON 字符串。这个回复不会结束回合；不要用 partner_chat_reply 代替。'
+    if(!pending)return '本次工作尚未执行：先调用 partner_chat_progress，text 按当前人格自然接话，说明接下来准备做的具体事情；等待成功后再调用本工具。统一入口使用 partner_tools action=call、name=partner_chat_progress、argumentsJson={"text":"按当前人格说明接下来准备做什么"} 的 JSON 字符串。这个回复不会结束回合；不要用 partner_chat_reply 代替。'
     try{await pending}catch{return '前置回应发送失败或结果未知，本次工作尚未执行；不要重复发送或宣称已开始。'}
     if(!this.active() || inputId(this.events())!==id)return '用户消息已变化，旧任务未开始；先处理新输入。'
   }
@@ -56,7 +56,7 @@ export function installTaskPreamble(agent:Agent,send:(text:string)=>Promise<void
   const gate=new TaskPreambleGate(()=>agent.session.snapshotEvents(),send,active)
   const unregister=tools.register({
     name:'partner_chat_progress',
-    description:'私聊任务开始前先按当前人格回应一句。立即发送 text，确认投递后返回，不结束回合；随后继续实际调查、生图或执行，最后再正常答复。一轮只发送一次，不能用于自主活动或内部任务。不虚构已经完成。',
+    description:'私聊任务开始前按当前人格自然接话，用一两句说明接下来准备做的具体事情（例如核实什么或生成什么），保留角色称呼、语气与当前对话习惯；不只说俏皮话，也不写客服式进度播报。立即发送 text，确认投递后返回，不结束回合；随后继续实际调查、生图或执行，最后再正常答复。一轮只发送一次，不能用于自主活动或内部任务。计划使用将要做的语气，不把尚未调用的工具说成已执行或已完成；没有真实权限拒绝结果时不要声称账号无权限。',
     parameters:{type:'object',properties:{text:{type:'string',minLength:1,maxLength:1200}},required:['text'],additionalProperties:false},
     output:{schema:{type:'object'},render:()=>[{type:'text',text:'前置回应已送达；继续执行任务，完成后再给出最终回复。'}]},
     presentCall:()=>({card:'generic',title:'任务前置回应'}),

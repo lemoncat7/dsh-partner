@@ -5,9 +5,10 @@ import type {PartnerStore} from '../store.js'
 import {resolveToolAccess} from '../execution/tool-access-adapter.js'
 
 export interface DiscoverableTool {tool:ToolDefinition;allowed:()=>boolean}
-export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access'] as const
+export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access','partner_memory_recall'] as const
 const GROUPS=[
  {id:'chat',title:'聊天回复',description:'文字、表情与语音'},
+ {id:'memory',title:'回忆',description:'长期记忆与历史对话检索'},
  {id:'media',title:'图片创作',description:'生图、画图、图生图与图片编辑'},
  {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、睡眠和头像'},
  {id:'work',title:'任务与协作',description:'需求、任务看板和伙伴协作'},
@@ -23,6 +24,7 @@ function toolSearchMatches(tool:ToolDefinition,query:string):boolean {
  return `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query) || tool.name==='generate_image' && IMAGE_ALIASES.some(alias=>alias.includes(query)||query.includes(alias))
 }
 function category(name:string):string {
+ if(name==='partner_memory_recall')return 'memory'
  if(name==='generate_image')return 'media'
  if(['partner_chat_reply','partner_chat_progress','partner_stickers','partner_qq_reply'].includes(name))return 'chat'
  if(/identity|sleep|avatar|activity/.test(name))return 'identity'
@@ -35,7 +37,7 @@ function category(name:string):string {
  return 'other'
 }
 const PERSONA_REFERENCE_CALL = JSON.stringify({action:'call',name:'partner_identity',argumentsJson:JSON.stringify({action:'reference'})})
-export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。用户明确要求生成或编辑图片时，先查询 media 分类或 query=image；若 generate_image 可用，describe 后通过本入口 call 实际生成，依据返回文件交付，不以口头承诺、提示词或虚构图片代替工具执行。顶层没有 generate_image 不表示没有生图能力；只有查询当前授权目录后才能说明能力是否缺失。回应和结果说明保持当前人格。私聊耗时任务先 call partner_chat_progress，argumentsJson 为 {"text":"按当前人格生成的一句自然回应"} 的 JSON 字符串；成功后再工作，此工具不结束回合。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
+export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。partner_memory_recall 是直接公开的基础回忆工具，也可通过统一入口调用，无需先加载；所有聊天账号可用，按真实会话检索。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。用户明确要求生成或编辑图片时，先查询 media 分类或 query=image；若 generate_image 可用，describe 后通过本入口 call 实际生成，依据返回文件交付，不以口头承诺、提示词或虚构图片代替工具执行。顶层没有 generate_image 不表示没有生图能力；只有查询当前授权目录后才能说明能力是否缺失。回应和结果说明保持当前人格。私聊耗时任务先 call partner_chat_progress，argumentsJson 为 {"text":"按当前人格自然回应，并说明接下来准备做的具体事情"} 的 JSON 字符串；成功后再工作，此工具不结束回合。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
 
 /** Stable model-facing entries; original definitions remain registered in scope
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
@@ -63,9 +65,12 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
   const result=value as {dispatch?:ToolExecutionResult}
   return result.dispatch?result.dispatch.content:[{type:'text' as const,text:JSON.stringify(value)}]
  }
+ const unavailable=(name:string|undefined,exec:ToolRunContext)=>new Error(!name||!runtime.get(name,exec.agent)
+  ? '工具在当前执行上下文中未注册或已结束，请重新查询目录。这不表示账号没有权限，不要据此要求用户更换账号或授权。'
+  : '当前渠道未授权此能力或能力已撤回，请查询 partner_channel_access 核实当前能力。')
  const invoke=async(name:string,args:unknown,exec:ToolRunContext)=>{
   guard(exec)
-  if(!available(exec).some(tool=>tool.name===name))throw Error('当前账号无权使用此能力或能力已撤回')
+  if(!available(exec).some(tool=>tool.name===name))throw unavailable(name,exec)
   const subCallId=ToolCallId(`${exec.callId}:capability`),rootCallId=exec.rootCallId??exec.callId
   const log={rootCallId,parentCallId:exec.callId,subCallId,name,arguments:JSON.stringify(args)}
   exec.agent!.session.append('tool/ptc-dispatch-start',log)
@@ -80,7 +85,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
  }
  try {
   for(const entry of entries)disposers.push(runtime.register({...entry.tool,execute:async(args,exec)=>{if(!entry.allowed())throw Error('能力已撤回');return entry.tool.execute(args,exec)}}))
-  disposers.push(runtime.register({name:'partner_channel_access',description:'查询真实渠道与当前发言账号的能力权限。默认适配器沿用已有授权；QQ 普通成员只提供回复、表情、语音，归属账号与可信自主任务可使用已授权能力。不接受自报账号，不改变权限。返回的能力通过 partner_tools 调用。',
+  disposers.push(runtime.register({name:'partner_channel_access',description:'查询真实渠道与当前发言账号的能力权限。默认适配器沿用已有授权；QQ 普通成员提供回复、表情、语音与本会话回忆，归属账号与可信自主任务可使用已授权能力。不接受自报账号，不改变权限。返回的能力通过 partner_tools 调用。',
    parameters:{type:'object',properties:{},additionalProperties:false},output:{schema:{type:'object'},render},presentCall:()=>({card:'generic',title:'当前渠道能力'}),
    async execute(_raw,exec){guard(exec);const access=resolveToolAccess({agent:exec.agent!,state:store.snapshot()});return {scope:access.allowedTools?'chat-only':'authorized',tools:available(exec).map(visible),...(access.denialReason?{notice:access.denialReason}:{})}}
   }))
@@ -100,7 +105,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
      return {tools:found.slice(offset,offset+12).map(visible),total:found.length,nextOffset:offset+12<found.length?offset+12:null}
     }
     const tool=all.find(t=>t.name===args.name)
-    if(!tool)throw Error('工具不存在或当前账号未获授权，请重新查询目录')
+    if(!tool)throw unavailable(args.name,exec)
     if(args.action==='call'){
      if(typeof args.argumentsJson!=='string'||args.argumentsJson.length>200000)throw Error('请用 argumentsJson 提交工具参数 JSON')
      let parameters:unknown

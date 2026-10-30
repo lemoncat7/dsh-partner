@@ -44,7 +44,7 @@ test('real provider snapshot before pre-step includes restored tools and identit
     return ctx.systemPrompt.tools(() => ({ schemas: ['partner_schedule', 'mcp__generation_get'].map(name => ({ name, parameters: { type: 'object' } })) }))
   } })
   const assembly = await f.assemble()
-  assert.deepEqual(assembly.tools.map(t => t.name), ['mcp__generation_get', 'partner_schedule'])
+  assert.deepEqual(assembly.tools.map(t => t.name), ['mcp__generation_get', 'partner_memory_recall', 'partner_schedule'])
   assert.ok(assembly.sections.some(s => s.name === 'partner-identity'))
   assert.equal(compositions, 1)
   await f.runtime.prepareAgentTurn(f.agent, 1, new AbortController().signal)
@@ -89,7 +89,7 @@ test('parallel first assemblies serialize composition', async t => {
   } })
   const results = await Promise.all([f.assemble(), f.assemble()])
   assert.equal(calls, 1)
-  for (const result of results) assert.equal(result.tools[0].name, 'partner_schedule')
+  for (const result of results) assert.ok(result.tools.some(t=>t.name==='partner_schedule'))
 })
 
 test('runtime never delivers a wake when the required MCP is missing', async t => {
@@ -123,10 +123,10 @@ test('QQ guest assembly exposes reply tools only and owner/local restores existi
   for(const [id,userId] of [['owner','12345678'],['guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId,lastMessageAt:1,inboundMessageIds:[]})
  })
  const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'请执行'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});if(id)await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
- assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
- assert.equal((await send('owner')).tools.length,6)
- assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
- assert.equal((await send()).tools.length,6)
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
+ assert.equal((await send('owner')).tools.length,7)
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
+ assert.equal((await send()).tools.length,7)
 })
 
 for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} deployment and restore presentation for owners`,async t=>{
@@ -143,17 +143,17 @@ for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} 
  })
  const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
  const guest=await send('guest')
- assert.deepEqual(guest.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.deepEqual(guest.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
  assert.equal(f.root.tools.modeFor(f.agent),'native')
  assert.ok(!guest.sections.some(s=>s.text.includes('partner_identity')),'private tool SDK must not leak')
  assert.equal((await f.root.tools.execute({agent:f.agent,name:'partner_chat_reply',callId:'reply',arguments:{},signal:new AbortController().signal})).isError,false)
  const owner=await send('owner')
  assert.equal(f.root.tools.modeFor(f.agent),mode)
  assert.ok(owner.tools.some(t=>t.name===(mode==='ptc'?'run_code':'partner_identity')))
- assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_qq_reply','partner_stickers'])
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
 })
 
-for(const mode of ['native','ptc'])test(`two-entry assembly remains identical across QQ owner and guest under ${mode}`,async t=>{
+for(const mode of ['native','ptc'])test(`public recall and gateway assembly remain identical across QQ owner and guest under ${mode}`,async t=>{
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
  const {installToolDiscovery}=await import('../lib/collaboration/tool-discovery.js')
  let compositions=0,store
@@ -167,7 +167,7 @@ for(const mode of ['native','ptc'])test(`two-entry assembly remains identical ac
  let first
  for(const id of ['owner','guest','owner','guest']){
   const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
-  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),['partner_channel_access','partner_tools']);assert.equal(f.root.tools.modeFor(f.agent),'native')
+  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),['partner_channel_access','partner_memory_recall','partner_tools']);assert.equal(f.root.tools.modeFor(f.agent),'native')
   if(first)assert.deepEqual(a.tools,first);else first=a.tools
  }
  assert.equal(compositions,1)
@@ -221,7 +221,7 @@ test('same-turn guest steering drops owner context before append; binding revoca
   await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(message.id))
   await f.step([message],1)
   const {text,assembly}=await f.prompt()
-  if(id==='guest'){assert.doesNotMatch(text,/OWNER_RELATION/);assert.match(text,/账号未归属/);assert.deepEqual(assembly.tools.map(t=>t.name),['partner_chat_reply'])}
+  if(id==='guest'){assert.doesNotMatch(text,/OWNER_RELATION/);assert.match(text,/账号未归属/);assert.deepEqual(assembly.tools.map(t=>t.name),['partner_chat_reply','partner_memory_recall'])}
   else {assert.match(text,/OWNER_RELATION/);assert.doesNotMatch(text,/账号未归属/)}
   f.agent.session.append('user/message',message,{surfaceOp:'append'})
  }
@@ -296,4 +296,20 @@ test('persona authoring receives shared templates in first prompt only for relev
  const idle=createUserMessage({content:[{type:'text',text:'自主优化人格'}],source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}})
  await f.store.update(s=>{s.sessions.find(r=>r.id==='owner').idleContactState={messageId:idle.id}})
  await f.step([idle]);assert.doesNotMatch((await f.prompt()).text,/本轮人格创作参考|## 十、你的样子/)
+})
+
+test('public recall is visible and callable by QQ guests without learning or a memory service',async t=>{
+ const {createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await pendingInputFixture(t)
+ for(const [id,text] of [['owner','blue-secret owner'],['guest','blue-secret guest']]){
+  const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text}]})
+  await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
+  f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ }
+ const assembly=await f.assemble();assert.ok(assembly.tools.some(t=>t.name==='partner_memory_recall'))
+ const result=await f.root.tools.execute({agent:f.agent,name:'partner_memory_recall',arguments:{query:'blue-secret'},callId:'recall',signal:new AbortController().signal})
+ assert.equal(result.isError,false)
+ const value=JSON.parse(result.value)
+ assert.deepEqual(value.memories,[]);assert.deepEqual(value.history,[])
+ assert.equal(value.conversation.length,1);assert.equal(value.conversation[0].user,'blue-secret guest')
 })

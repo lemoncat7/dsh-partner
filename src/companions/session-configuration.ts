@@ -29,6 +29,7 @@ export class SessionConfigurationIndex {
     const mcpBindings = this.state.mcpBindings?.filter(item => item.companionId === id) ?? []
     const revision = JSON.stringify([
       { id, name, role, description, instructions, relationshipText, characterCard, capabilities, sleepPolicy, toolDiscovery },
+      companion.automation?.memory,
       mcpBindings, (this.state.mcpServers ?? []).filter(server => mcpBindings.some(binding => binding.serverId === server.id)).map(server => ({ id: server.id, revision: server.revision, enabled: server.enabled })),
       bindings, this.state.skills.filter(skill => bindings.some(binding => binding.skillId === skill.id)),
       grants, grants.map(grant => this.companions.get(grant.toCompanionId)).map(target => target && ({

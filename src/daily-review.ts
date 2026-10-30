@@ -33,6 +33,7 @@ export class DailyReviewScheduler {
     if (this.running.has(companionId)) return { reviewed: 0, failed: 0, reason: '每日终审正在执行' }
     const companion = this.store.snapshot().companions.find(item => item.id === companionId)
     if (!companion) throw new Error('伙伴不存在')
+    if(renewal && companion.automation.memory.rollingContextEnabled)return {reviewed:0,failed:0,reason:'滚动对话窗口已开启，暂停每日整段焕新'}
     if (!renewal && !force && (!companion.automation.memory.enabled || !companion.automation.memory.dailyReviewEnabled)) return { reviewed: 0, failed: 0, reason: '每日整理与焕新未启用' }
     this.running.add(companionId)
     const job = this.run(companion, force, renewal)
@@ -58,7 +59,7 @@ export class DailyReviewScheduler {
       }
       const hour = settings.contextRenewalHour ?? 4
       const crossedSchedule = localDay(now, this.timeZone) !== localDay(this.startedAt, this.timeZone) || zonedHour(this.startedAt, this.timeZone) < hour
-      if (settings.contextRenewalEnabled === false || zonedHour(now, this.timeZone) < hour || !crossedSchedule) continue
+      if (settings.rollingContextEnabled || settings.contextRenewalEnabled === false || zonedHour(now, this.timeZone) < hour || !crossedSchedule) continue
       const completed = await this.memory.renewalStatus(companion.id)
       const sessions = this.store.snapshot().sessions.filter(r => r.companionId === companion.id)
       if (sessions.length && sessions.every(r => completed.some(c => c.sessionId === r.sessionId && String(c.day) >= localDay(now, this.timeZone)))) continue

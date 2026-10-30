@@ -46,7 +46,7 @@ test('normalizes companions, capabilities and optional model routes', () => {
 
 test('new companion defaults keep memory, review, heartbeat and capabilities disabled', () => {
   assert.deepEqual(DEFAULT_AUTOMATION, {
-    memory: { contextRenewalEnabled: true, contextRenewalHour: 4, enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
+    memory: { rollingContextEnabled: false, rollingContextTurns: 20, rollingContextMaxChars: 48000, contextRenewalEnabled: true, contextRenewalHour: 4, enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
     heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 },
   })
   const companion = createDefaultCompanion(42)
@@ -138,7 +138,7 @@ test('recomposes one recovered partner agent exactly once and releases its scope
     await store.update(state => state.sessions.push(route))
     const agentCtx = scope.ctx.extend({
       agent: carrier,
-      tools: {},
+      tools: {register:()=>()=>{}},
       systemPrompt: {
         section(value) {
           assert.equal(sections.has(value.name), false)
@@ -498,7 +498,7 @@ test('validates bounded memory and heartbeat settings without legacy focus runti
     memory: { enabled: true, retentionDays: 0, dailyReviewEnabled: true, dailyReviewHour: 2 },
     heartbeat: { enabled: true, intervalMinutes: 180, quietStartHour: 22, quietEndHour: 8, dailyLimit: 2 },
   }
-  assert.deepEqual(normalizeAutomation(input), {...input,memory:{...input.memory,contextRenewalEnabled:true,contextRenewalHour:4}})
+  assert.deepEqual(normalizeAutomation(input), {...input,memory:{...input.memory,contextRenewalEnabled:true,contextRenewalHour:4,rollingContextEnabled:false,rollingContextTurns:20,rollingContextMaxChars:48000}})
   assert.throws(() => normalizeAutomation({
     memory: { enabled: true, retentionDays: 1 },
     heartbeat: { enabled: true, intervalMinutes: 10, quietStartHour: 22, quietEndHour: 8, dailyLimit: 99 },

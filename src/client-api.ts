@@ -4,7 +4,7 @@ export const PARTNER_API = '/partner-local/v1'
 export type { CompanionCapability as Capability } from './capabilities.js'
 import type { CompanionCapability as Capability } from './capabilities.js'
 export interface AutomationView {
-  memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; contextRenewalEnabled?: boolean; contextRenewalHour?: number; dailyReviewEnabled: boolean; dailyReviewHour: number }
+  memory: { enabled: boolean; retentionDays: number; provider?: string; model?: string; rollingContextEnabled?: boolean; rollingContextTurns?: number; rollingContextMaxChars?: number; contextRenewalEnabled?: boolean; contextRenewalHour?: number; dailyReviewEnabled: boolean; dailyReviewHour: number }
   heartbeat: { enabled: boolean; intervalMinutes: number; quietStartHour: number; quietEndHour: number; dailyLimit: number }
 }
 export interface CompanionView {

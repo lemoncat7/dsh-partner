@@ -42,6 +42,9 @@ export interface CompanionAutomation {
     retentionDays: number
     provider?: string
     model?: string
+    rollingContextEnabled?: boolean
+    rollingContextTurns?: number
+    rollingContextMaxChars?: number
     contextRenewalEnabled?: boolean
     contextRenewalHour?: number
     dailyReviewEnabled: boolean
@@ -182,7 +185,7 @@ export interface CompanionDraft {
 }
 
 export const DEFAULT_AUTOMATION: CompanionAutomation = {
-  memory: { contextRenewalHour: 4, contextRenewalEnabled: true, enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
+  memory: { rollingContextEnabled: false, rollingContextTurns: 20, rollingContextMaxChars: 48000, contextRenewalHour: 4, contextRenewalEnabled: true, enabled: false, retentionDays: 0, dailyReviewEnabled: false, dailyReviewHour: 2 },
   heartbeat: { enabled: false, intervalMinutes: 360, quietStartHour: 22, quietEndHour: 8, dailyLimit: 0 },
 }
 
@@ -194,6 +197,9 @@ export function normalizeAutomation(value: unknown): CompanionAutomation {
     memory: {
       enabled: boolean(memory.enabled, 'memory.enabled'),
       retentionDays: retentionDays(memory.retentionDays),
+      rollingContextEnabled: boolean(memory.rollingContextEnabled ?? false, 'memory.rollingContextEnabled'),
+      rollingContextTurns: integer(memory.rollingContextTurns ?? 20, 'memory.rollingContextTurns', 2, 100),
+      rollingContextMaxChars: integer(memory.rollingContextMaxChars ?? 48000, 'memory.rollingContextMaxChars', 4000, 200000),
       contextRenewalHour: integer(memory.contextRenewalHour ?? 4, 'memory.contextRenewalHour', 0, 23),
       contextRenewalEnabled: boolean(memory.contextRenewalEnabled ?? true, 'memory.contextRenewalEnabled'),
       dailyReviewEnabled: boolean(memory.dailyReviewEnabled ?? true, 'memory.dailyReviewEnabled'),
