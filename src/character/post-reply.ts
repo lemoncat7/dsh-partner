@@ -16,10 +16,10 @@ export interface PostReplyOpportunity {
   status: 'pending' | 'missed' | 'claimed' | 'cancelled'
 }
 export function postReplyProbability(companion: Companion): number {
-  return affectionEnabled(companion) ? 0.05 + 0.4 * (affectionProgress(companion.affection).score / 100) ** 2 : 0
+  return affectionEnabled(companion) ? 0.05 + 0.4 * (affectionProgress(companion.affection).score / 100) ** 2 : 0.05
 }
 export function postReplyAllowed(state: PartnerState, companion: Companion, route: ChannelSession, now = Date.now()): boolean {
-  if (!companion.idleContact?.enabled || !affectionEnabled(companion) || route.companionId !== companion.id || isSleeping(companion, now) || !idleContactRouteAllowed(state, companion, route.id)) return false
+  if (!companion.idleContact?.enabled || route.companionId !== companion.id || isSleeping(companion, now) || !idleContactRouteAllowed(state, companion, route.id)) return false
   const channel = state.channels.find(c => c.id === route.channelId && c.companionId === companion.id)
   return (route.kind === 'local' || !!channel) && affectionAudienceAllowed({route, ...(channel ? {channel} : {})})
 }

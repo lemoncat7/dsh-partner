@@ -35,8 +35,9 @@ test('non-QQ channel routes reuse local primary session, with different companio
  assert.notEqual(other.sessionId,local.sessionId)
  assert.equal((await runtime.ensureLocalSessionRecord('c')).sessionId,local.sessionId)
 })
-test('channel replies serialize across all contacts of the same companion',async()=>{
- const runtime=Object.create(PartnerAgentRuntime.prototype);runtime.queues=new Map();runtime.store={snapshot:()=>({sessions:[]})}
+test('contacts sharing the actual main session still serialize',async()=>{
+ const runtime=new PartnerAgentRuntime({}, {snapshot:()=>({sessions:[],companions:[],channels:[]}),subscribe:()=>()=>{}}, '/tmp')
+ runtime.ensureSession=async()=>({sessionId:'shared-main'})
  let active=0,max=0
  runtime.drive=async()=>{active++;max=Math.max(max,active);await new Promise(r=>setTimeout(r,10));active--;return {text:'ok',attachments:[]}}
  await Promise.all([runtime.reply({id:'c'},'matrix','a',{}),runtime.reply({id:'c'},'wechat','b',{})])

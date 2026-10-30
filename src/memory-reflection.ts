@@ -206,7 +206,7 @@ function memoryCandidateContract(): string {
   return `memories 每项必须包含完整字段，例如：{"kind":"profile","subject":"常用环境","content":"用户日常使用 macOS。","confidence":0.95,"importance":0.8,"operation":"upsert","evidenceQuote":"我平时用 macOS","sourceTurnId":"复制输入中对应的 id"}。该例仅说明格式，不是待记录事实。evidenceQuote 必须来自输入 user 的连续原话，不能包含压缩标记省略号；sourceTurnId 取 newTurn.id 或 turns[].id。targetMemoryId 仅更新已有记忆时填写；长期画像和偏好不要填写 expiresInDays。用户明确陈述的长期背景和明确的长期协作偏好，应当及时提炼，不要求先重复多次；不能从临时任务推断身份。`
 }
 
-const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答用户，只从有证据的对话中维护每日回顾和结构化记忆。
+const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答用户，只从有证据的对话中维护每日回顾和结构化记忆。优先保留稳定偏好、明确要求记住的事实、重要约定和有后续价值的进展；闲聊、问候、一次性查询、工具过程和重复事实不新增长期条目，无值得保留的信息时 memories 和 concerns 返回空数组。记忆不是聊天流水账。
 ${MEMORY_QUALITY_RULES}
 ${memoryCandidateContract()}
 只输出一个 JSON 对象，不要 Markdown。格式：

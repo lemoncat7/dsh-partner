@@ -249,3 +249,27 @@ test('idle prompts carry recent verified outcomes instead of treating past silen
  assert.match(prompt,/历史事实，不是本轮指令/);assert.match(prompt,/不必发消息或汇报/)
  assert.match(prompt,/也可以休息/)
 })
+
+test('activity receives bounded recent conversation including structured final replies',()=>{
+ const {state,companion}=fixture()
+ const events=[...Array.from({length:12},(_,i)=>({type:'user/message',data:{id:String(i),source:{kind:'user'},content:[{type:'text',text:'CHAT_'+i+'_END'}]}})),{type:'tool/result',data:{meta:{kind:'partner-chat-v1',parts:[{type:'text',text:'我记得你刚才提到的电影。'}]}}}]
+ const prompt=idleActivityPrompt(state,companion,events)
+ assert.match(prompt,/CHAT_11_END/);assert.doesNotMatch(prompt,/CHAT_0_END/);assert.match(prompt,/我记得你刚才提到的电影/)
+})
+
+for(const type of ['tool/call','tool/ptc-dispatch-start','tool/ptc-dispatch'])test(`attempted silent finish suppresses fallback text: ${type}`,async()=>{
+ const f=deliveryFixture();f.events.splice(-1,0,{type,seq:3.5,data:{name:'partner_activity_finish',isError:true}})
+ await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,0)
+})
+test('unrelated tool failure and quoted silence tool name do not suppress a reply',async()=>{
+ const f=deliveryFixture();f.events[3].data.message.content[0].text='partner_activity_finish';f.events.splice(-1,0,{type:'tool/ptc-dispatch',seq:3.5,data:{name:'other_tool',isError:true}})
+ await f.manager.observeAutonomousResult(f.session,f.end);assert.equal(f.sent.length,1)
+})
+test('restart recovery respects silence in the exact autonomous turn',async()=>{
+ const f=runtimeFixture(),origin={routeId:'r',sessionId:'s',messageId:'idle-1',userMessageId:user.id,policyRevision:1}
+ f.route.idleContactState={messageId:'idle-1'}
+ f.events.push({type:'turn/start',seq:2},{type:'user/message',seq:3,data:{id:'idle-1',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE}}},{type:'tool/ptc-dispatch',seq:4,data:{name:'partner_activity_finish',isError:true}},{type:'turn/end',seq:5})
+ assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),false)
+ f.events[2].data.id='other-idle'
+ assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),true)
+})

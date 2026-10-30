@@ -1,3 +1,4 @@
+import { AuthoredProgress } from './authored-progress.js'
 import { activityPolicyCurrent } from '../character/post-reply.js'
 import {channelReplyAllowed,directReplyTarget} from './reply-access.js'
 import { QqLatencyHistory,getReplyTiming } from './qq/latency.js'
@@ -6,7 +7,7 @@ import { qqFaceCatalog, qqCustomCatalog } from './qq/catalog.js'
 import { parseQqSettings, qqSettings, qqGroupPeer, qqPeerLabel, validQqId } from './qq/settings.js'
 import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
-import { isSilentActivityResult } from '../character/activity-tool.js'
+import { isActivitySilenceRequested } from '../character/activity-tool.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -401,7 +402,7 @@ export class ChannelManager {
       }
       const notice=events.find(isIdleContactNotice)
       if(notice?.type==='user/message') {
-        if(events.some(isSilentActivityResult))return
+        if(events.some(isActivitySilenceRequested))return
         const route=this.store.snapshot().sessions.find(r=>r.sessionId===session.id && r.idleContactState?.messageId===notice.data.id)
         if(!route)return
         const valid=()=>{
@@ -669,7 +670,9 @@ export class ChannelManager {
       await this.rememberReceipt(receipt)
       return
     }
-    const reply = await this.agents.reply(companion, channel.id, userId, { text: inboundText, attachments })
+    const authored = new AuthoredProgress(text => api.sendText(userId, text, this.contextTokens.get(tokenKey), signal),
+      () => channelReplyAllowed(this.store.snapshot(), channel.id, userId) && this.store.snapshot().channels.some(c => c.id === channel.id && c.enabled && c.companionId === companion.id), signal)
+    const reply = await this.agents.reply(companion, channel.id, userId, { text: inboundText, attachments }, authored.update).finally(() => authored.finish())
     if(reply.chatParts){
       // Claim the input before delivery so recovery never executes its tools again.
       await this.rememberReceipt(receipt)
@@ -870,7 +873,7 @@ export class ChannelManager {
               const validated=Date.now()
               try { await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode) }
               finally { if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'dispatch',queueMs:message.receivedAt===undefined?undefined:started-message.receivedAt,validateMs:validated-started,totalMs:Date.now()-(message.receivedAt??started)})}`) }
-            },channel.platform==='qq'?(message.targetId||message.sender):'')
+            },message.targetId||message.sender)
           }
           catch { throw new DirectDeliveryError() }
         }
@@ -978,6 +981,7 @@ export class ChannelManager {
         }
         const progressTransport=api.progress?.(event.sender)
         const progress=progressTransport?new ReplyProgressController(progressTransport,allowed,signal):undefined
+        const authored=!event.qqGroup?new AuthoredProgress(text=>api.sendText(event.sender,text,undefined,signal),allowed,signal):undefined
         const progressKey=JSON.stringify([channel.id,event.targetId||api.config?.targetId||'',event.sender])
         try {
         const attachments:PartnerInboundAttachment[]=[]
@@ -1010,9 +1014,9 @@ export class ChannelManager {
         progress?.start()
         if(progress)this.directReplyProgress.set(progressKey,progress)
         const agentStarted=Date.now()
-        const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},progress?.update)
+        const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},progress ? Object.assign(progress.update,{...(authored?{acknowledge:authored.update.acknowledge!}:{})}) : authored?.update)
         prepared()
-        const reply=await pendingReply
+        const reply=await pendingReply.finally(()=>authored?.finish())
         const replyReady=Date.now()
         if(timing){timing.agentMs=replyReady-agentStarted;const detail=getReplyTiming(reply);if(detail)timing.agent=detail}
         signal.throwIfAborted()

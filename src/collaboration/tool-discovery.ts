@@ -8,6 +8,7 @@ export interface DiscoverableTool {tool:ToolDefinition;allowed:()=>boolean}
 export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access'] as const
 const GROUPS=[
  {id:'chat',title:'聊天回复',description:'文字、表情与语音'},
+ {id:'media',title:'图片创作',description:'生图、画图、图生图与图片编辑'},
  {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、睡眠和头像'},
  {id:'work',title:'任务与协作',description:'需求、任务看板和伙伴协作'},
  {id:'automation',title:'定时与续接',description:'定时计划、长任务等待与恢复'},
@@ -17,8 +18,13 @@ const GROUPS=[
  {id:'mcp',title:'外部 MCP',description:'已授权的外部服务工具'},
  {id:'other',title:'其他能力',description:'宿主和其他已授权扩展工具'},
 ]
+const IMAGE_ALIASES=['生图','画图','绘图','生成图片','图片生成','图生图','改图','编辑图片','图片编辑','画一张','画张','绘制','图片','image generation','image editing']
+function toolSearchMatches(tool:ToolDefinition,query:string):boolean {
+ return `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query) || tool.name==='generate_image' && IMAGE_ALIASES.some(alias=>alias.includes(query)||query.includes(alias))
+}
 function category(name:string):string {
- if(['partner_chat_reply','partner_stickers','partner_qq_reply'].includes(name))return 'chat'
+ if(name==='generate_image')return 'media'
+ if(['partner_chat_reply','partner_chat_progress','partner_stickers','partner_qq_reply'].includes(name))return 'chat'
  if(/identity|sleep|avatar|activity/.test(name))return 'identity'
  if(/task_board|requirements|collaborate/.test(name))return 'work'
  if(/schedule/.test(name))return 'automation'
@@ -29,7 +35,7 @@ function category(name:string):string {
  return 'other'
 }
 const PERSONA_REFERENCE_CALL = JSON.stringify({action:'call',name:'partner_identity',argumentsJson:JSON.stringify({action:'reference'})})
-export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
+export const TOOL_DISCOVERY_PROMPT='伙伴工具统一由两个固定入口提供：partner_channel_access 根据真实渠道及当前发言账号返回已授权能力，partner_tools 查询和调用能力。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。用户明确要求生成或编辑图片时，先查询 media 分类或 query=image；若 generate_image 可用，describe 后通过本入口 call 实际生成，依据返回文件交付，不以口头承诺、提示词或虚构图片代替工具执行。顶层没有 generate_image 不表示没有生图能力；只有查询当前授权目录后才能说明能力是否缺失。回应和结果说明保持当前人格。私聊耗时任务先 call partner_chat_progress，argumentsJson 为 {"text":"按当前人格生成的一句自然回应"} 的 JSON 字符串；成功后再工作，此工具不结束回合。常用聊天可直接 call partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。普通正文仍可直接最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
 
 /** Stable model-facing entries; original definitions remain registered in scope
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
@@ -52,7 +58,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
   }
   return [...tools.values()].filter(tool=>!['partner_tools','partner_channel_access','run_code'].includes(tool.name)&&access.sendTools&&(!access.allowedTools||access.allowedTools.includes(tool.name)))
  }
- const visible=(tool:ToolDefinition)=>({name:tool.name,category:category(tool.name),summary:tool.description.slice(0,160)})
+ const visible=(tool:ToolDefinition)=>({name:tool.name,category:category(tool.name),summary:(tool.name==='generate_image'?'生图、画图、图生图、图片编辑。'+tool.description:tool.description).slice(0,160)})
  const render=(_args:unknown,value:unknown)=>{
   const result=value as {dispatch?:ToolExecutionResult}
   return result.dispatch?result.dispatch.content:[{type:'text' as const,text:JSON.stringify(value)}]
@@ -90,7 +96,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
      if(args.category&&!GROUPS.some(g=>g.id===args.category))throw Error('分类不存在，请先查询分类')
      if(!Number.isSafeInteger(offset)||offset<0||query.length>80)throw Error('查询参数无效')
      if(!args.category&&!query)return {categories:GROUPS.map(g=>({...g,count:all.filter(t=>category(t.name)===g.id).length})).filter(g=>g.count),next:'按 category 或 query 查询；call 通过本入口执行'}
-     const found=all.filter(t=>(!args.category||category(t.name)===args.category)&&(!query||`${t.name} ${t.description}`.toLocaleLowerCase().includes(query)))
+     const found=all.filter(t=>(!args.category||category(t.name)===args.category)&&(!query||toolSearchMatches(t,query)))
      return {tools:found.slice(offset,offset+12).map(visible),total:found.length,nextOffset:offset+12<found.length?offset+12:null}
     }
     const tool=all.find(t=>t.name===args.name)

@@ -14,11 +14,12 @@ export class AsyncSemaphore {
   private async acquire(): Promise<void> {
     if (this.active < this.limit) { this.active += 1; return }
     await new Promise<void>(resolve => this.waiting.push(resolve))
-    this.active += 1
+    // The releasing owner transfers its reserved slot to this waiter.
   }
 
   private release(): void {
-    this.active -= 1
-    this.waiting.shift()?.()
+    const next = this.waiting.shift()
+    if (next) next()
+    else this.active -= 1
   }
 }

@@ -131,3 +131,17 @@ test('QQ hands a complete text/media event to the agent without waiting for anot
   await f.manager.directLoop(f.channel,f.controller.signal)
   assert.ok(f.state.recentReceipts.includes('c:event'))
 })
+
+test('private tool preamble is delivered before final result without a progress transport',async()=>{
+ const f=fixture('queue'),sent=[],sending=deferred(),started=deferred()
+ const api={config:{targetId:'room'},sendText:async(_peer,text)=>{sent.push(text);if(text==='我去查查看。'){started.resolve();await sending.promise}},sendAttachment:async()=>{}}
+ f.agents.reply=async(_c,_channel,_peer,_input,progress)=>{
+   progress({kind:'text',text:'我去查查看。'})
+   await started.promise
+   return {text:'查到了，是这个原因。',attachments:[]}
+ }
+ const work=f.manager.handleDirect(f.channel,api,{id:'request',sender:'peer',targetId:'room',text:'帮我调查'},f.controller.signal)
+ await started.promise;await tick();assert.deepEqual(sent,['我去查查看。'])
+ sending.resolve();await work
+ assert.deepEqual(sent,['我去查查看。','查到了，是这个原因。'])
+})

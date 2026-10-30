@@ -4,6 +4,8 @@
 
 [![npm](https://img.shields.io/npm/v/%40lemoncat7%2Fdsh-partner)](https://www.npmjs.com/package/@lemoncat7/dsh-partner)
 
+本次发布：[2.21.13 更新说明](docs/releases/2.21.13.md)，包含 [2.21.12 会话与自主活动改进](docs/releases/2.21.12.md)。
+
 ## 功能
 
 - 伙伴身份、Agent Preset、模型与能力管理；可选人格卡、创建引导、角色记忆与独立试聊。
@@ -17,7 +19,7 @@
 
 ## 安装
 
-适配 DeepSeek Harness **0.2.1-rc.2**（宿主仍为 RC），需要 Node.js **^22.19.0 或 >=24.0.0**。其他宿主版本请先查阅[兼容说明](docs/dsh-021-compatibility.md)和对应版本的发布说明。
+当前插件版本 **2.21.13**，最低支持 DeepSeek Harness **0.2.1-rc.2**，已在 **0.2.1-rc.5** 部署验证（宿主仍为 RC），需要 Node.js **^22.19.0 或 >=24.0.0**。其他宿主版本请先查阅[兼容说明](docs/dsh-021-compatibility.md)和对应版本的发布说明。
 
 ```bash
 dsh plugin --profile web add @lemoncat7/dsh-partner@latest

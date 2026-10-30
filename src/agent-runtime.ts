@@ -1,3 +1,7 @@
+import { isActivitySilenceRequested } from './character/activity-tool.js'
+import { installTaskPreamble } from './execution/task-preamble.js'
+import { AsyncSemaphore } from './core/semaphore.js'
+import { automaticMemoryAllowed } from './memory-admission.js'
 import { personaReferenceRequested, renderPersonaReference } from './character/identity-guide.js'
 import { activityPolicyCurrent, postReplyAllowed, postReplyCurrent, postReplyProbability, POST_REPLY_PROMPT } from './character/post-reply.js'
 import {PARTNER_TOOL_ENTRIES} from './collaboration/tool-discovery.js'
@@ -140,6 +144,7 @@ export class PartnerAgentRuntime {
   private readonly latestPostReplyInput = new Map<string,string>()
   private readonly handles = new Map<string, AgentHandle>()
   private readonly queues = new Map<string, Promise<void>>()
+  private readonly replySlots = new AsyncSemaphore(6)
   private readonly heartbeatQueues = new Map<string, Promise<HeartbeatExecution>>()
   private readonly taskQueues = new Map<string, Promise<void>>()
   private readonly steeringQueues = new Map<string, Promise<void>>()
@@ -237,8 +242,8 @@ export class PartnerAgentRuntime {
   }
 
   /** Cancel pending/claimed continuations as soon as another real input is admitted. */
-  async cancelPostReply(companionId: string, keepUserMessageId?: string): Promise<void> {
-    const needsCancel = (r: ChannelSession) => r.companionId === companionId && r.postReplyOpportunity
+  async cancelPostReply(companionId: string, keepUserMessageId?: string, sessionId?: string): Promise<void> {
+    const needsCancel = (r: ChannelSession) => r.companionId === companionId && (!sessionId || r.sessionId === sessionId) && r.postReplyOpportunity
       && ['pending', 'claimed'].includes(r.postReplyOpportunity.status) && r.postReplyOpportunity.userMessageId !== keepUserMessageId
     if (!this.store.snapshot().sessions.some(needsCancel)) return
     await this.store.update(state => { for (const route of state.sessions) if (needsCancel(route)) route.postReplyOpportunity!.status = 'cancelled' })
@@ -258,17 +263,17 @@ export class PartnerAgentRuntime {
     const state = this.store.snapshot(), route = state.sessions.find(r => r.id === source.routeId && r.sessionId === source.sessionId)
     const companion = state.companions.find(c => c.id === route?.companionId)
     if (!route || !companion || !postReplyAllowed(state, companion, route) || this.closed || this.isArchived(route) || this.store.isCompanionRemoving(companion.id)) return
-    const key = `companion:${companion.id}`
+    const key = route.sessionId
     if (this.queues.has(key) || this.steeringQueues.has(key)) return
     const agent = await this.ensureAgent(companion, route)
-    if (agent.status !== 'idle' || (this.latestPostReplyInput.has(companion.id) && this.latestPostReplyInput.get(companion.id)!==source.userMessageId) || lastIdleContactUser(agent.session.snapshotEvents())?.id !== source.userMessageId) return
+    if (agent.status !== 'idle' || (this.latestPostReplyInput.has(route.sessionId) && this.latestPostReplyInput.get(route.sessionId)!==source.userMessageId) || lastIdleContactUser(agent.session.snapshotEvents())?.id !== source.userMessageId) return
     await this.store.update(draft => {
       const current = draft.companions.find(c => c.id === companion.id), target = draft.sessions.find(r => r.id === route.id)
       if (!current || !target || target.sessionId !== source.sessionId || !postReplyAllowed(draft, current, target)
         || target.postReplyOpportunity?.userMessageId === source.userMessageId || agent.status !== 'idle'
-        || this.queues.has(key) || this.steeringQueues.has(key) || (this.latestPostReplyInput.has(companion.id) && this.latestPostReplyInput.get(companion.id)!==source.userMessageId) || lastIdleContactUser(agent.session.snapshotEvents())?.id !== source.userMessageId) return
-      // At most one pending continuation per companion; different owner accounts share it.
-      for (const other of draft.sessions) if (other.companionId === companion.id && other.postReplyOpportunity?.status === 'pending') other.postReplyOpportunity.status = 'cancelled'
+        || this.queues.has(key) || this.steeringQueues.has(key) || (this.latestPostReplyInput.has(route.sessionId) && this.latestPostReplyInput.get(route.sessionId)!==source.userMessageId) || lastIdleContactUser(agent.session.snapshotEvents())?.id !== source.userMessageId) return
+      // Shared history has one opportunity; unrelated conversations remain independent.
+      for (const other of draft.sessions) if (other.sessionId === route.sessionId && other.postReplyOpportunity?.status === 'pending') other.postReplyOpportunity.status = 'cancelled'
       const now = Date.now(), probability = postReplyProbability(current)
       target.postReplyOpportunity = {userMessageId: source.userMessageId, sessionId: source.sessionId, policyRevision: current.updatedAt,
         deliveredAt: now, dueAt: now + 20_000 + Math.floor(Math.random() * 70_000), expiresAt: now + 180_000,
@@ -279,26 +284,27 @@ export class PartnerAgentRuntime {
   /** Use the existing timer and real conversation; never impersonate user input. */
   async idleContact(companionId: string, timeZone = 'Asia/Shanghai'): Promise<void> {
     const key = `companion:${companionId}`
-    if (this.closed || this.companionActivity(companionId).some(a=>a.kind!=='memory'&&a.kind!=='observation') || this.queues.has(key) || this.taskQueues.has(key) || this.heartbeatQueues.has(key) || this.steeringQueues.has(key) || this.store.isCompanionRemoving(companionId)) return
+    if (this.closed || this.taskQueues.has(key) || this.heartbeatQueues.has(key) || this.store.isCompanionRemoving(companionId)) return
     const state = this.store.snapshot(), companion = state.companions.find(c => c.id === companionId)
-    const pendingRoute = state.sessions.find(r => r.companionId === companionId && r.postReplyOpportunity?.status === 'pending')
+    const activity = this.companionActivity(companionId)
+    const pendingRoute = state.sessions.filter(r => r.companionId === companionId && r.postReplyOpportunity?.status === 'pending' && !this.queues.has(r.sessionId) && !this.steeringQueues.has(r.sessionId) && !activity.some(a=>a.sessionId===r.sessionId)).sort((a,b)=>a.postReplyOpportunity!.dueAt-b.postReplyOpportunity!.dueAt)[0]
     let route = pendingRoute ?? state.sessions.find(r => r.id === companion?.idleContact?.routeId && r.companionId === companionId)
     const continuation = !!pendingRoute
     if (pendingRoute && companion) {
       const pending = pendingRoute.postReplyOpportunity!
-      if (!postReplyCurrent(state, companion, pendingRoute) || Date.now() > pending.expiresAt) { await this.cancelPostReply(companionId); return }
+      if (!postReplyCurrent(state, companion, pendingRoute) || Date.now() > pending.expiresAt) { await this.cancelPostReply(companionId, undefined, route?.sessionId); return }
       if (Date.now() < pending.dueAt) return
     }
     if (!companion?.idleContact?.enabled || !route || this.isArchived(route)) return
     const channel=state.channels.find(c=>c.id===route!.channelId)
     if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(route.userId))?'main':'separate'))route=await this.ensureSession(companion,route.channelId,route.userId)
     const agent = await this.ensureAgent(companion, route)
-    if (agent.status !== 'idle' || this.companionActivity(companionId).some(a=>a.kind!=='memory'&&a.kind!=='observation') || this.queues.has(key) || this.taskQueues.has(key)) return
+    if (agent.status !== 'idle' || this.companionActivity(companionId).some(a=>a.sessionId===route.sessionId) || this.queues.has(route.sessionId) || this.steeringQueues.has(route.sessionId) || this.taskQueues.has(key)) return
     const user = lastIdleContactUser(agent.session.snapshotEvents())
     const completed=[...agent.session.snapshotEvents()].reverse().find(e=>e.type==='turn/end')
     if(user&&completed)user.at=Math.max(user.at,completed.time)
     if (continuation) {
-      if (user?.id !== route.postReplyOpportunity?.userMessageId) { await this.cancelPostReply(companionId); return }
+      if (user?.id !== route.postReplyOpportunity?.userMessageId) { await this.cancelPostReply(companionId, undefined, route?.sessionId); return }
     } else if (!idleContactDue(this.store.snapshot(), companion, user, Date.now(), timeZone)) return
     const stableSeq = agent.session.seq
     const message = createUserMessage({ content: [{type:'text',text:
@@ -318,7 +324,7 @@ export class PartnerAgentRuntime {
       claimed=true
     })
     // Claim before generation survives restart. Don't replay uncertain sends or steal active turns.
-    if(!claimed || this.closed || this.store.isCompanionRemoving(companionId) || agent.status!=='idle' || agent.session.seq!==stableSeq || this.queues.has(key) || this.taskQueues.has(key))return
+    if(!claimed || this.closed || this.store.isCompanionRemoving(companionId) || agent.status!=='idle' || agent.session.seq!==stableSeq || this.queues.has(route.sessionId) || this.taskQueues.has(key))return
     const currentState=this.store.snapshot(),current=currentState.companions.find(c=>c.id===companionId),currentRoute=currentState.sessions.find(r=>r.id===route.id)
     if(!current || !currentRoute || !activityPolicyCurrent(currentState,current,currentRoute) || isSleeping(current) || current.updatedAt!==companion.updatedAt || this.isArchived(route))return
     agent.followup(message)
@@ -331,24 +337,33 @@ export class PartnerAgentRuntime {
     const channel=state.channels.find(c=>c.id===route.channelId)
     if(channel?.platform==='qq'&&route.qqSessionMode!==(qqSettings(channel.qq).mainSessionPeers.includes(qqSessionTarget(route.userId))?'main':'separate'))return false
     const agent=await this.ensureAgent(companion,route)
-    return lastIdleContactUser(agent.session.snapshotEvents())?.id===origin.userMessageId
+    const events=agent.session.snapshotEvents()
+    const noticeIndex=events.findIndex(e=>e.type==='user/message' && e.data.id===origin.messageId)
+    if(noticeIndex>=0){
+      const tail=events.slice(noticeIndex+1)
+      const boundary=tail.findIndex(e=>e.type==='turn/start'||e.type==='turn/end'||e.type==='user/message'&&e.data.source.kind==='user')
+      if(tail.slice(0,boundary<0?tail.length:boundary).some(isActivitySilenceRequested))return false
+    }
+    return lastIdleContactUser(events)?.id===origin.userMessageId
   }
 
   async reply(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress): Promise<PartnerReply> {
-    const key = `companion:${companion.id}`
-    await this.cancelPostReply(companion.id)
+    const route = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
+    const key = route.sessionId
+    await this.cancelPostReply(companion.id, undefined, route.sessionId)
     const queuedAt=Date.now()
     const previous = this.queues.get(key) ?? Promise.resolve()
     let output: PartnerReply = { text: '', attachments: [] }
     reportProgress(progress,'queued')
-    const current = previous.catch(() => {}).then(async () => { output = await this.drive(companion, channelId, userId, message, progress,queuedAt) })
+    const current = previous.catch(() => {}).then(async () => { output = await this.replySlots.use(() => this.drive(companion, channelId, userId, message, progress,queuedAt,route)) })
     this.queues.set(key, current)
     try { await current; return output } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
   }
 
   async steer(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<boolean> {
-    await this.cancelPostReply(companion.id)
-    const key = `companion:${companion.id}`
+    const route = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
+    const key = route.sessionId
+    await this.cancelPostReply(companion.id, undefined, route.sessionId)
     const previous = this.steeringQueues.get(key) ?? Promise.resolve()
     let accepted = false
     const current = previous.catch(() => {}).then(async () => { accepted = await this.deliverSteering(companion, channelId, userId, message) })
@@ -669,12 +684,12 @@ export class PartnerAgentRuntime {
 
   private async runHeartbeatWhenIdle(key: string, companion: Companion, route: ChannelSession, concerns: PartnerConcern[]): Promise<HeartbeatExecution> {
     for (;;) {
-      await this.queues.get(key)?.catch(() => {})
+      await this.queues.get(route.sessionId)?.catch(() => {})
       const conversation = await this.ensureAgent(companion, route)
       if (conversation.status !== 'idle') await conversation.whenIdle()
       const stableSeq = conversation.session.seq
       await delay(2_000)
-      if (this.queues.has(key)) continue
+      if (this.queues.has(route.sessionId)) continue
       if (conversation.status !== 'idle' || conversation.session.seq !== stableSeq) continue
       return this.driveScopedHeartbeat(conversation, companion, concerns)
     }
@@ -688,8 +703,8 @@ export class PartnerAgentRuntime {
     if (event.type === 'user/message' && event.data.source.kind === 'user') {
       const owner = this.store.snapshot().sessions.find(r=>r.sessionId===session.id)?.companionId
       if (owner) {
-        this.latestPostReplyInput.set(owner,event.data.id)
-        await this.cancelPostReply(owner,event.data.id)
+        this.latestPostReplyInput.set(session.id,event.data.id)
+        await this.cancelPostReply(owner,event.data.id,session.id)
       }
       return
     }
@@ -718,7 +733,7 @@ export class PartnerAgentRuntime {
     if (!userText || !assistantText) return
     const scopeId = memoryScope(route.channelId, route.userId)
     const concernDirective = identityRelation && !identityRelation.matched ? undefined : await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)
-    const created = companion.automation.memory.enabled && this.reflection !== undefined ? await this.reflection.reflect(companion, {
+    const created = companion.automation.memory.enabled && automaticMemoryAllowed(session.id, events, this.store.snapshot().sessions) && this.reflection !== undefined ? await this.reflection.reflect(companion, {
       id: `turn-${createHash('sha256').update(JSON.stringify([session.id, event.time, userText])).digest('hex').slice(0, 32)}`, companionId: companion.id, scopeId: conversationMemoryScope(route, this.store.snapshot().sessions),
       characterEnabled: companion.characterCard?.enabled === true,
       ...(identityRelation ? {identityRelation} : {}),
@@ -960,7 +975,7 @@ export class PartnerAgentRuntime {
     if (!this.memory || this.isCompanionBusy(companionId)) return
     const companion = this.configurations.companion(companionId)
     if (!companion?.automation.memory.enabled) return
-    const routes = [...new Map(this.store.snapshot().sessions.filter(r => r.companionId === companionId).map(r => [r.sessionId, r])).values()]
+    const routes = this.store.snapshot().sessions.filter(r => r.companionId === companionId && r.kind === 'local')
     for (const route of routes) {
       if (this.isArchived(route)) continue
       const agent = await this.ensureAgent(companion, route)
@@ -979,6 +994,7 @@ export class PartnerAgentRuntime {
           if (next.role === 'assistant') replies.push(textContent(next.content))
         }
         const original = agent.session.snapshotEvents().find(e => e.type === 'user/message' && e.data.id === item.id)
+        if (!original || !automaticMemoryAllowed(route.sessionId, [original], this.store.snapshot().sessions)) continue
         await this.memory.enqueue({id:'renewal-' + createHash('sha256').update(route.sessionId + ':' + item.id).digest('hex').slice(0,32),
           companionId, scopeId:scope, sessionId:route.sessionId, at:original?.time ?? Date.now(), userMessageIds:[item.id],
           user:textContent(item.content), assistant:replies.join('\n\n') || '（本条消息没有已完成的回复，仅整理用户原话，不推测处理结果。）',
@@ -988,14 +1004,14 @@ export class PartnerAgentRuntime {
   }
 
   async renewReviewedContexts(companionId: string, day: string): Promise<number> {
-    if (!this.memory || this.isCompanionBusy(companionId) || this.queues.has(`companion:${companionId}`)) return 0
+    if (!this.memory || this.isCompanionBusy(companionId) || this.store.snapshot().sessions.some(r=>r.companionId===companionId && this.queues.has(r.sessionId))) return 0
     const companion = this.configurations.companion(companionId)
     if (!companion || companion.automation.memory.contextRenewalEnabled === false) return 0
-    const learning = companion.automation.memory.enabled
     let renewed = 0
     const routes = [...new Map(this.store.snapshot().sessions.filter(r => r.companionId === companionId).map(r => [r.sessionId, r])).values()]
     for (const route of routes) {
       if (this.ctx.workspaceRegistry.archivedSessionIds.includes(route.sessionId as SessionId)) continue
+      const learning = companion.automation.memory.enabled && this.store.snapshot().sessions.some(r=>r.kind==='local' && r.sessionId===route.sessionId && r.companionId===companionId)
       const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
       const agent = await this.ensureAgent(companion, route)
       if (agent.session.surface.nodes.length <= 1) { await this.memory.markRenewed(companionId, route.sessionId, day, 0); renewed += 1; continue }
@@ -1006,7 +1022,7 @@ export class PartnerAgentRuntime {
       const removed = await renewContext(agent, day, checkpoint, async () => {
         if (!await this.memory!.renewalReady(companionId, scope, route.sessionId, day, learning)) return false
         if (!learning) return true
-        return this.memory!.coversContext(companionId, scope, agent.session.deriveMessages().filter(m => m.role === 'user' && m.source.kind === 'user').map(m => ({ id: m.id, text: textContent(m.content) })))
+        return this.memory!.coversContext(companionId, scope, agent.session.deriveMessages().filter(m => m.role === 'user' && m.source.kind === 'user' && automaticMemoryAllowed(route.sessionId, agent.session.snapshotEvents().filter(e=>e.type==='user/message' && e.data.id===m.id), this.store.snapshot().sessions)).map(m => ({ id: m.id, text: textContent(m.content) })))
       }, session => this.ctx.sessions.flush(session), learning)
       if (removed > 0 || agent.session.deriveMessages().some(m => m.role === 'user' && m.source.kind === 'plugin:@lemoncat7/dsh-partner' && m.source.form === 'notice' && m.source.summary === `上下文焕新 ${day}`)) {
         await this.memory.markRenewed(companionId, route.sessionId, day, removed)
@@ -1088,11 +1104,12 @@ export class PartnerAgentRuntime {
     this.restoredCompositions.delete(sessionId)
   }
 
-  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress,queuedAt=Date.now()): Promise<PartnerReply> {
+  private async drive(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage, progress?:ReplyProgress,queuedAt=Date.now(), preparedRoute?:ChannelSession): Promise<PartnerReply> {
     reportProgress(progress,'working')
     const enteredAt=Date.now()
     let submittedAt=enteredAt, modelEndedAt=enteredAt,lastTurnEnd:number|undefined
-    const session = await this.ensureSession(companion, channelId, userId, message.sessionTitle)
+    const session = preparedRoute ?? await this.ensureSession(companion, channelId, userId, message.sessionTitle)
+    if (!this.store.snapshot().sessions.some(r=>r.id===session.id && r.sessionId===session.sessionId)) throw new Error('会话配置已变化，请重新发送消息')
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
     const inbound = await this.persistInbound(session, message)
@@ -1108,10 +1125,11 @@ export class PartnerAgentRuntime {
       if(current.id!==agent.session.id||event.seq<startSeq)return
       if(event.type==='turn/end')lastTurnEnd=event.time
       if(event.type==='turn/start'||event.type==='turn/end'||(isInternalTaskNotice(event)&&!isRequirementDeliveryReceipt(event)))directProgress=false
-      if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=true
+      if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=questionOrigin(agent.session.id,agent.session.snapshotEvents(),this.store.snapshot().sessions)?.id===session.id
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
       if(directProgress){const activity=replyActivity(event);if(activity)reportProgress(progress,activity)}
     })
+    const detachPreamble=progress?.acknowledge ? installTaskPreamble(agent,progress.acknowledge,()=>questionOrigin(agent.session.id,agent.session.snapshotEvents(),this.store.snapshot().sessions)?.id===session.id) : undefined
     try {
       const userMessage = createUserMessage({
         content: inbound.content,
@@ -1123,7 +1141,7 @@ export class PartnerAgentRuntime {
       agent.followup(userMessage)
       await agent.whenIdle()
       modelEndedAt=Date.now()
-    } finally { detach() }
+    } finally { detachPreamble?.(); detach() }
     const response = channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
     const stateStarted=Date.now()
     await this.store.update(state => {
@@ -1187,7 +1205,7 @@ export class PartnerAgentRuntime {
     if(!isQq&&existing?.sessionId===primary.sessionId&&canReuseSession(existing,companion.id,this.ctx.workspaceRegistry.archivedSessionIds))return existing
     const sharedScope=conversationMemoryScope(primary,[primary])
     const sources=isQq?snapshot.sessions.filter(r=>r.channelId===channelId&&r.companionId===companion.id&&qqSessionTarget(r.userId)===target&&r.memoryScopeId!==sharedScope).map(r=>memoryScope(r.channelId,r.userId)):[]
-    if(existing?.memoryScopeId!==sharedScope||sources.length)await this.memory?.mergeScopes(companion.id,sharedScope,[...new Set([...sources,memoryScope(channelId,userId)])],recoverLeases)
+    if((!isQq || !target.startsWith('group:') && qqSettings(channel?.qq).mainSessionPeers.includes(target)) && (existing?.memoryScopeId!==sharedScope||sources.length))await this.memory?.mergeScopes(companion.id,sharedScope,[...new Set([...sources,memoryScope(channelId,userId)])],recoverLeases)
     let result:ChannelSession
     await this.store.update(state=>{
       const currentChannel=state.channels.find(c=>c.id===channelId)

@@ -2,7 +2,7 @@ import type {SessionEvent} from '@deepseek-ai/dsh-session'
 
 export type ReplyStage = 'queued' | 'working' | 'tools' | 'composing'
 export type ReplyActivity = {kind:'text';text:string} | {kind:'tool-start';id:string;name:string} | {kind:'tool-end';id:string;failed:boolean}
-export type ReplyProgress = (stage:ReplyStage | ReplyActivity)=>void
+export type ReplyProgress = ((stage:ReplyStage | ReplyActivity)=>void) & {acknowledge?:(text:string)=>Promise<void>}
 
 /** Deliberately expose only fixed labels, never tool names, arguments or reasoning. */
 export function replyStage(event:SessionEvent):ReplyStage|undefined {
@@ -17,6 +17,13 @@ export function replyActivity(event:SessionEvent):ReplyActivity|undefined {
     return {kind:'tool-end',id:result.toolCallId,failed:!!event.data.error||!!result.isError}
   }
   if(event.type==='assistant/message'&&!event.data.interrupted&&event.data.message.content.some(block=>block.type==='tool-call')){
+    // Terminal chat tools own their text; forwarding it here would deliver twice.
+    if(event.data.message.content.some(block=>{
+      if(block.type!=='tool-call')return false
+      if(block.name==='partner_chat_reply')return true
+      if(block.name!=='partner_tools')return false
+      try{return JSON.parse(block.arguments).name==='partner_chat_reply'}catch{return false}
+    }))return undefined
     const text=event.data.message.content.filter(block=>block.type==='text').map(block=>block.text).join('\n').trim()
     if(text)return {kind:'text',text}
   }

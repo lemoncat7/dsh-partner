@@ -142,3 +142,37 @@ test('persona reference is discoverable and fully delivered through the two perm
  assert.equal(data.reference.text,ROLE_REFERENCE_TEXT);assert.match(data.reference.text,/## 十、你的样子/)
  assert.deepEqual(names(f),before,'reference is on demand, not another permanent tool')
 })
+
+test('Chinese image requests discover English-only host image tools and execute through the gateway',async t=>{
+ const f=fixture(t);let calls=0
+ const image={...definition('generate_image',async()=>{calls++;return {files:[{path:'/workspace/generated/result.png'}]}}),description:'Generate or edit images using the configured image service.'}
+ t.after(f.scope.ctx.tools.register(image))
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[]))
+ for(const query of ['生图','画图','生成图片','图生图','改图','帮我画一张图','image']){
+  const result=await f.invoke('partner_tools',{action:'list',query})
+  assert.equal(result.isError,false);assert.deepEqual(result.value.tools.map(t=>t.name),['generate_image'])
+ }
+ const categories=await f.invoke('partner_tools',{action:'list'})
+ assert.equal(categories.value.categories.find(c=>c.id==='media').count,1)
+ const listed=await f.invoke('partner_tools',{action:'list',category:'media'})
+ assert.match(listed.value.tools[0].summary,/生图/)
+ const described=await f.invoke('partner_tools',{action:'describe',name:'generate_image'})
+ assert.deepEqual(described.value.parameters,image.parameters)
+ const generated=await f.call('generate_image',{text:'a cat'})
+ assert.equal(generated.value.dispatch.isError,false);assert.equal(calls,1)
+ f.scope.ctx.tools.guard(e=>e.name==='generate_image'?'image permission revoked':undefined)
+ assert.equal((await f.call('generate_image',{text:'a cat'})).value.dispatch.isError,true);assert.equal(calls,1)
+})
+
+test('image discovery never invents unavailable tools or exposes them to QQ chat-only identities',async t=>{
+ const f=fixture(t)
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[]))
+ assert.deepEqual((await f.invoke('partner_tools',{action:'list',query:'生图'})).value.tools,[])
+ t.after(f.scope.ctx.tools.register({...definition('generate_image'),description:'Generate images'}))
+ f.state.channels=[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
+ const message=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'帮我生图'}]})
+ f.agent.session.append('user/message',message,{surfaceOp:'append'})
+ f.state.sessions.push({id:'guest',kind:'channel',channelId:'qq',userId:'22345678',companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[message.id]})
+ assert.deepEqual((await f.invoke('partner_tools',{action:'list',query:'生图'})).value.tools,[])
+ assert.equal((await f.call('generate_image')).isError,true)
+})

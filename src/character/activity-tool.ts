@@ -10,6 +10,12 @@ export function isSilentActivityResult(event: SessionEvent): boolean {
   if(event.type==='tool/result'?event.data.message?.isError:event.data.isError)return false
   return (event.data.meta as {kind?:string}|undefined)?.kind==='partner-activity-silent-v1'
 }
+/** A model's explicit silence choice remains silent even if finishing fails.
+ * Read execution events only; quoted text and failed unrelated tools do not count. */
+export function isActivitySilenceRequested(event:SessionEvent):boolean {
+  if(isSilentActivityResult(event))return true
+  return (event.type==='tool/call'||event.type==='tool/ptc-dispatch-start'||event.type==='tool/ptc-dispatch') && event.data.name==='partner_activity_finish'
+}
 export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefinition {
   return {
     name:'partner_activity_finish',
@@ -21,7 +27,7 @@ export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefi
       exec.signal.throwIfAborted()
       const agent=exec.agent,events=agent?.session.snapshotEvents()??[]
       const start=[...events].reverse().find(e=>e.type==='turn/start')?.seq??-1
-      const inputs=events.filter(e=>e.seq>start&&e.type==='user/message'&&(e.data.source.kind==='user'||!('form' in e.data.source)||!['snapshot','catalog','instructions','recall'].includes(e.data.source.form??'')))
+      const inputs=events.filter(e=>e.seq>start&&e.type==='user/message'&&String(e.data.source.kind)!=='compact-checkpoint'&&(e.data.source.kind==='user'||!('form' in e.data.source)||!['snapshot','catalog','instructions','recall'].includes(e.data.source.form??'')))
       const notice=inputs.find(isIdleContactNotice)
       const state=store.snapshot(),companion=state.companions.find(c=>c.id===owner)
       const route=state.sessions.find(r=>r.companionId===owner&&r.sessionId===agent?.session.id&&notice?.type==='user/message'&&r.idleContactState?.messageId===notice.data.id)

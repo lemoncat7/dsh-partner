@@ -21,13 +21,14 @@ test('local classifier bounds text, validates output and never follows a redirec
  mode='redirect';assert.equal(await classify('hello',signal()),undefined)
  assert.equal(await classify('retry',signal()),undefined);assert.equal(calls,2,'failures open circuit instead of repeatedly stalling messages')
 })
-test('service timeout, invalid classification and concurrent requests fall back without blocking the group',async t=>{
- let finish
- const classify=await fixture(t,(req,res)=>{finish=()=>res.end(JSON.stringify({label:'unknown',confidence:2,margin:-1}))})
- const pending=classify('first',signal())
- while(!finish)await new Promise(r=>setTimeout(r,5))
- assert.equal(await classify('second',signal()),undefined)
- finish();assert.equal(await pending,undefined)
+test('four classifications run independently; overflow falls back without waiting',async t=>{
+ const responses=[]
+ const classify=await fixture(t,(_req,res)=>responses.push(res))
+ const pending=Array.from({length:4},(_,i)=>classify('group '+i,signal()))
+ while(responses.length<4)await new Promise(r=>setTimeout(r,5))
+ assert.equal(await classify('overflow',signal()),undefined)
+ for(const res of responses)res.end(JSON.stringify({label:'engage',confidence:.8,margin:.6}))
+ assert.equal((await Promise.all(pending)).filter(Boolean).length,4)
 })
 test('aborted classification is not converted into a decision to reply',async t=>{
  let entered

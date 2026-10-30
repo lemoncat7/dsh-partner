@@ -28,3 +28,10 @@ for(const change of ['user','task','revoked','stale','foreign'])test('cannot sup
  if(change==='foreign')f.state.sessions[0].companionId='other'
  const result=await f.invoke();assert.equal(result.isError,true);assert.notEqual(result.concludesTurn,true)
 })
+
+test('host compaction checkpoint does not prevent silent completion',async t=>{
+ const f=fixture(t);f.events.splice(2,0,{type:'user/message',seq:1.5,data:{id:'compact',source:{kind:'compact-checkpoint'}}})
+ const result=await f.invoke();assert.equal(result.isError,false);assert.equal(result.concludesTurn,true)
+ f.events.push({type:'user/message',seq:4,data:{id:'real-new-input',source:{kind:'user'}}})
+ assert.equal((await f.invoke()).isError,true)
+})

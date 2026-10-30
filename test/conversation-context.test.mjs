@@ -87,7 +87,7 @@ test('QQ defaults to one session per contact/group while sharing companion memor
  const other=await runtime.ensureSession(companion,'qq','group:88776655:12345678')
  assert.notEqual(other.sessionId,group.sessionId)
  for(const route of [group,privateRoute,secondMember,other])assert.equal(route.memoryScopeId,'@local:owner:'+companion.id)
- assert.equal(calls.length,4)
+ assert.equal(calls.length,0,'independent sessions never migrate their archives into main memory')
 })
 
 test('selected main-session peers share only after selection and resume separate history on deselection',async()=>{
@@ -107,7 +107,7 @@ test('selected main-session peers share only after selection and resume separate
  assert.equal(state.sessions.find(r=>r.id===member.id).sessionId,group.sessionId)
 })
 
-test('upgrade keeps old separate group history and merges all member memories before sharing',async()=>{
+test('upgrade keeps old separate group history without importing group archives into main memory',async()=>{
  const f=routingFixture(),{companion,state,runtime,calls}=f
  const local={id:'local',kind:'local',companionId:companion.id,channelId:'@local',userId:'owner',sessionId:'session-main',lastMessageAt:1}
  const group={id:'group-route',kind:'channel',companionId:companion.id,channelId:'qq',userId:'group:99887766:12345678',sessionId:'session-old-group',lastMessageAt:3}
@@ -116,7 +116,7 @@ test('upgrade keeps old separate group history and merges all member memories be
  const route=state.sessions.find(r=>r.id===group.id)
  assert.equal(route.sessionId,group.sessionId);assert.equal(route.id,group.id)
  assert.equal(state.sessions.find(r=>r.id==='member').sessionId,group.sessionId)
- assert.deepEqual(calls,[[companion.id,'@local:owner',['qq:'+group.userId,'qq:group:99887766:22345678'],true]])
+ assert.deepEqual(calls,[])
 })
 
 test('local main never adopts a QQ group context; archived separate sessions are replaced',async()=>{

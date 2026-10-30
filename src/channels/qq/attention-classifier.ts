@@ -8,7 +8,7 @@ const labels:readonly string[]=['address','engage','other','close','background']
 
 /** Optional local CPU service. Configuration belongs to the host, never chat or identity text. */
 export function localAttentionClassifier():AttentionClassifier {
- let endpoint:Promise<string|undefined>|undefined,busy=false,retryAt=0
+ let endpoint:Promise<string|undefined>|undefined,active=0,retryAt=0
  const configured=async()=>{
   let value=process.env.DSH_PARTNER_ATTENTION_URL
   if(!value&&process.env.DSH_HOME){
@@ -19,10 +19,10 @@ export function localAttentionClassifier():AttentionClassifier {
  }
  return async(text,signal)=>{
   signal.throwIfAborted()
-  if(!text.trim()||busy||Date.now()<retryAt)return undefined
+  if(!text.trim()||active>=4||Date.now()<retryAt)return undefined
   const url=await(endpoint??=configured());if(!url)return undefined
-  signal.throwIfAborted();if(busy)return undefined
-  busy=true
+  signal.throwIfAborted();if(active>=4)return undefined
+  active++
   try{
    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(1200)])})
    if(!response.ok)throw Error('classification unavailable')
@@ -30,6 +30,6 @@ export function localAttentionClassifier():AttentionClassifier {
    const value=JSON.parse(raw)
    if(!labels.includes(value.label)||![value.confidence,value.margin].every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1))throw Error('invalid classification')
    return {label:value.label,confidence:value.confidence,margin:value.margin}
-  }catch(error){signal.throwIfAborted();retryAt=Date.now()+30000;return undefined}finally{busy=false}
+  }catch(error){signal.throwIfAborted();retryAt=Date.now()+30000;return undefined}finally{active--}
  }
 }

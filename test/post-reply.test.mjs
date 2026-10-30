@@ -28,10 +28,10 @@ async function hit(f) {
 }
 function ready(f){f.route.postReplyOpportunity.dueAt=Date.now()-1}
 
-test('probability increases with affection, capped at 45%; disabling affection opts out',()=>{
+test('probability increases with affection, capped at 45%; disabling affection retains a baseline',()=>{
   const {companion}=fixture()
   for(const [score,expected] of [[0,.05],[20,.066],[60,.194],[100,.45],[1000,.45]]){companion.affection.score=score;assert.ok(Math.abs(postReplyProbability(companion)-expected)<1e-9)}
-  companion.characterCard.affectionEnabled=false;assert.equal(postReplyProbability(companion),0)
+  companion.characterCard.affectionEnabled=false;assert.equal(postReplyProbability(companion),.05)
 })
 test('one durable draw after delivered reply; duplicate receipts cannot reroll a miss',async()=>{
   const f=fixture(), random=Math.random;Math.random=()=>.99
@@ -47,7 +47,7 @@ test('delayed continuation uses original route instead of configured idle destin
   assert.equal(f.route.postReplyOpportunity.status,'claimed');await f.runtime.idleContact('c');assert.equal(f.followed.length,1)
   assert.equal(activityPolicyCurrent(f.state,f.companion,f.route),true)
 })
-for(const scenario of ['new input','sleep','unbound','disabled','affection off','expired','settings changed','session changed','revoked'])test(`pending continuation cancels for ${scenario}`,async()=>{
+for(const scenario of ['new input','sleep','unbound','disabled','expired','settings changed','session changed','revoked'])test(`pending continuation cancels for ${scenario}`,async()=>{
   const f=fixture();await hit(f);ready(f)
   if(scenario==='new input')f.events.push({type:'user/message',seq:2,time:Date.now(),data:{id:'u2',source:{kind:'user'}}})
   if(scenario==='sleep')f.companion.sleepState={episode:{wakeAt:Date.now()+60000}}
@@ -99,14 +99,22 @@ test('opportunity and consumed state survive store reopen',async t=>{
   await store.update(s=>{s.sessions=[f.route]})
   const reopened=await PartnerStore.open(join(root,'state.json'));assert.deepEqual(reopened.snapshot().sessions[0].postReplyOpportunity,f.route.postReplyOpportunity)
 })
-test('a newer input on another session prevents an old channel delivery from arming',async()=>{
+test('a newer input on another session does not suppress this session opportunity',async()=>{
   const f=fixture();f.state.sessions.push({...f.route,id:'r2',sessionId:'s2'})
   await f.runtime.observeSessionEvent({id:'s2'},{type:'user/message',data:{id:'newer',source:{kind:'user'}}})
-  await hit(f);assert.equal(f.route.postReplyOpportunity,undefined)
+  await hit(f);assert.equal(f.route.postReplyOpportunity.status,'pending')
 })
-test('browser input cancels claimed work from another session immediately',async()=>{
+test('browser input leaves claimed work on an independent session intact',async()=>{
   const f=fixture();await hit(f);ready(f);await f.runtime.idleContact('c')
-  f.state.sessions.push({...f.route,id:'local',kind:'local',sessionId:'local-s'})
+  f.state.sessions.push({...f.route,id:'local',kind:'local',sessionId:'local-s',postReplyOpportunity:undefined})
   await f.runtime.observeSessionEvent({id:'local-s'},{type:'user/message',data:{id:'browser',source:{kind:'user'}}})
-  assert.equal(f.route.postReplyOpportunity.status,'cancelled')
+  assert.equal(f.route.postReplyOpportunity.status,'claimed')
+})
+
+test('affection disabled still permits a continuation',async()=>{const f=fixture();f.companion.characterCard.affectionEnabled=false;await hit(f);assert.equal(f.route.postReplyOpportunity.probability,.05);ready(f);await f.runtime.idleContact('c');assert.equal(f.followed.length,1)})
+
+test('new input on the same session cancels a claimed opportunity',async()=>{
+ const f=fixture();await hit(f);ready(f);await f.runtime.idleContact('c')
+ await f.runtime.observeSessionEvent({id:'s'},{type:'user/message',data:{id:'new',source:{kind:'user'}}})
+ assert.equal(f.route.postReplyOpportunity.status,'cancelled')
 })
