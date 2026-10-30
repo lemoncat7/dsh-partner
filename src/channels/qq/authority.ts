@@ -1,3 +1,4 @@
+import { activityPolicyCurrent } from '../../character/post-reply.js'
 import type { ToolAccessAdapter } from '../../execution/tool-access-adapter.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PartnerState } from '../../domain.js'
@@ -15,7 +16,7 @@ export function markAutonomousAgent(agent: object): () => void {
 export const QQ_CHAT_ONLY_REASON = '当前 QQ 账号未归属此伙伴，仅允许当前会话的文字、表情与语音回复；不能使用私有能力、修改设定或触发自主任务。'
 
 /** Re-evaluate at dispatch, so stale schemas and saved revocations cannot authorize work. */
-export function qqChatOnly(agent: Pick<Agent, 'session'>, state: Pick<PartnerState, 'sessions' | 'channels'>): boolean {
+export function qqChatOnly(agent: Pick<Agent, 'session'>, state: Pick<PartnerState, 'sessions' | 'channels'> & Partial<Pick<PartnerState, 'companions' | 'pairings'>>): boolean {
   if (autonomousAgents.has(agent)) return false
   const routes = state.sessions.filter(r => r.sessionId === agent.session.id)
   if (!state.channels?.some(c => c.platform === 'qq' && routes.some(r => r.channelId === c.id))) return false
@@ -26,7 +27,12 @@ export function qqChatOnly(agent: Pick<Agent, 'session'>, state: Pick<PartnerSta
     // Only trusted plugin notices can run autonomous work. A group observation
     // remains an ordinary user's message even when the bot chooses to answer.
     if (isInternalTaskNotice(event)) return false
-    if (isIdleContactNotice(event)) return !routes.some(r => r.idleContactState?.messageId === event.data.id)
+    if (isIdleContactNotice(event)) return !routes.some(r => {
+      if (r.idleContactState?.messageId !== event.data.id) return false
+      if (r.idleContactState.kind !== 'post-reply') return true
+      const companion = state.companions?.find(c=>c.id===r.companionId)
+      return !!companion && activityPolicyCurrent(state as PartnerState,companion,r)
+    })
     if (event.data.source.kind === 'user') break
   }
   const relation = currentQqIdentityRelation(agent.session.id, events, state.sessions, state.channels)

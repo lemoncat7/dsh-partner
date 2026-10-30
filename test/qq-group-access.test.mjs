@@ -140,3 +140,15 @@ test('only delivered replies establish continuation; failed sends and revoked ac
   if(mode==='silent'){assert.deepEqual(f.sent,[]);assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'silent')}
  }
 })
+
+test('post-reply opportunities arm only after all reply parts succeed, never on silence or failure',async()=>{
+ for(const outcome of ['success','failure','silent']){
+  const f=fixture(),armed=[]
+  f.agents.replyDelivered=async source=>{armed.push(source);assert.ok(f.sent.length)}
+  const source={routeId:'r',sessionId:'s',userMessageId:'user'}
+  f.setReply(outcome==='silent'?{text:'',attachments:[],chatParts:[],postReplySource:source}:{text:'你好',attachments:[],postReplySource:source})
+  if(outcome==='failure')f.api.sendText=async()=>{throw Error('send failed')}
+  if(outcome==='failure')await assert.rejects(f.handle());else await f.handle()
+  assert.equal(armed.length,outcome==='success'?1:0)
+ }
+})

@@ -13,6 +13,7 @@ export interface IdleContactPolicy {
   idleMinutes: number
 }
 export interface IdleContactState {
+  kind?: 'post-reply'
   timeZone: string
   policyRevision: number
   userMessageId: string

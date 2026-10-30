@@ -22,6 +22,8 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  /** Internal provenance, armed only after confirmed channel delivery. */
+  postReplySource?: { routeId: string; sessionId: string; userMessageId: string }
   idleContactOrigin?: {routeId:string;sessionId:string;messageId:string;userMessageId:string;policyRevision:number}
   chatParts?: import('./chat/protocol.js').ChatPart[]
   chatOriginRouteId?: string | null

@@ -1,3 +1,4 @@
+import { activityPolicyCurrent } from './post-reply.js'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerStore } from '../store.js'
@@ -23,8 +24,8 @@ export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefi
       const inputs=events.filter(e=>e.seq>start&&e.type==='user/message'&&(e.data.source.kind==='user'||!('form' in e.data.source)||!['snapshot','catalog','instructions','recall'].includes(e.data.source.form??'')))
       const notice=inputs.find(isIdleContactNotice)
       const state=store.snapshot(),companion=state.companions.find(c=>c.id===owner)
-      const route=state.sessions.find(r=>r.companionId===owner&&r.sessionId===agent?.session.id&&r.id===companion?.idleContact?.routeId)
-      if(!companion?.idleContact?.enabled||!route||store.isCompanionRemoving(owner)||!idleContactRouteAllowed(state,companion,route.id)||notice?.type!=='user/message'||inputs.some(e=>!isIdleContactNotice(e))||route.idleContactState?.messageId!==notice.data.id||lastIdleContactUser(events)?.id!==route.idleContactState.userMessageId)throw Error('只能结束当前系统发起的自主活动，不能忽略用户消息或其他任务')
+      const route=state.sessions.find(r=>r.companionId===owner&&r.sessionId===agent?.session.id&&notice?.type==='user/message'&&r.idleContactState?.messageId===notice.data.id)
+      if(!companion||!route||!activityPolicyCurrent(state,companion,route)||store.isCompanionRemoving(owner)||!idleContactRouteAllowed(state,companion,route.id)||notice?.type!=='user/message'||inputs.some(e=>!isIdleContactNotice(e))||route.idleContactState?.messageId!==notice.data.id||lastIdleContactUser(events)?.id!==route.idleContactState.userMessageId)throw Error('只能结束当前系统发起的自主活动，不能忽略用户消息或其他任务')
       const {reason}=raw as {reason:string}
       if(typeof reason!=='string'||!reason.trim()||reason.length>300)throw Error('请简要记录活动结果或不行动的原因')
       if(typeof exec.concludeTurn!=='function')throw Error('当前宿主不支持安静结束活动')

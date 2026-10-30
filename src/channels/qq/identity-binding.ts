@@ -46,7 +46,7 @@ export function currentQqIdentityRelation(sessionId: string, events: readonly Se
       const target = peers.find(r => r.idleContactState?.messageId === event.data.id)
       const channel = channels.find(c => c.id === target?.channelId && c.platform === 'qq')
       // A group activity addresses the group, not whichever member created its route.
-      return channel ? qqIdentityRelation(channel.qq, target?.userId.startsWith('group:') ? undefined : target?.userId) : undefined
+      return channel ? qqIdentityRelation(channel.qq, target?.userId.startsWith('group:') && target.idleContactState?.kind !== 'post-reply' ? undefined : target?.userId) : undefined
     }
     if (event.data.source.kind !== 'user') continue
     const origin = peers.find(r => r.kind === 'channel' && r.inboundMessageIds?.includes(event.data.id))

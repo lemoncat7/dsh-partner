@@ -15,7 +15,7 @@ export function affectionForInput(state: PartnerState, owner: string, sessionId:
   if(!route)return false
   const channel=state.channels?.find(c=>c.id===route.channelId&&c.companionId===owner)
   if(route.kind==='channel'&&!channel)return false
-  return affectionAudienceAllowed({route,...(channel?{channel}:{}),autonomous})
+  return affectionAudienceAllowed({route,...(channel?{channel}:{}),autonomous:autonomous&&route.idleContactState?.kind!=='post-reply'})
 }
 export function currentAffectionAudience(state: PartnerState, owner: string, sessionId: string, events: readonly SessionEvent[]): boolean {
   for(let i=events.length-1;i>=0;i--){const e=events[i]!;if(e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))return affectionForInput(state,owner,sessionId,e)}

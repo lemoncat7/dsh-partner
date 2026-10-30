@@ -1,3 +1,4 @@
+import { activityPolicyCurrent } from '../character/post-reply.js'
 import {channelReplyAllowed,directReplyTarget} from './reply-access.js'
 import { QqLatencyHistory,getReplyTiming } from './qq/latency.js'
 import { QqGroupAutonomy } from './qq/autonomy.js'
@@ -38,7 +39,7 @@ import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
 import type { BoardRequirement } from '../requirements/domain.js'
 import { requirementCanReportStage, requirementProgressKey } from '../requirements/progress.js'
-import { channelReplyPartsAfter, isAutonomousDeliveryTurn } from './delivery-policy.js'
+import { channelReplyPartsAfter, isAutonomousDeliveryTurn, isInternalTaskNotice } from './delivery-policy.js'
 import { continuationFinalReply } from '../scheduler/final-reply.js'
 import { savedContinuationRoute } from '../scheduler/channel-origin.js'
 import { prepareChannelReply } from './outbound-media.js'
@@ -388,6 +389,16 @@ export class ChannelManager {
     // Idle greetings have an explicit route; don't broadcast through notification preferences.
     if (event.type === 'turn/end' && event.data.reason.kind === 'completed') {
       const events=completedTurnEvents(session.snapshotEvents(),event)
+      const inputs=events.filter(e=>e.type==='user/message'&&e.data.source.kind==='user')
+      const lastInput=inputs.at(-1)
+      if(lastInput?.type==='user/message' && !events.some(isInternalTaskNotice) && !events.some(isIdleContactNotice)) {
+        const state=this.store.snapshot(), routes=state.sessions.filter(r=>r.sessionId===session.id)
+        const local=routes.find(r=>r.kind==='local')
+        const parts=channelReplyPartsAfter(events,0,true)
+        if(local && (parts.text||parts.chatParts?.length) && !inputs.some(e=>e.type==='user/message'&&routes.some(r=>r.kind==='channel'&&r.inboundMessageIds?.includes(e.data.id)))) {
+          void this.agents.localReplyDisplayed({routeId:local.id,sessionId:session.id,userMessageId:lastInput.data.id}).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
+        }
+      }
       const notice=events.find(isIdleContactNotice)
       if(notice?.type==='user/message') {
         if(events.some(isSilentActivityResult))return
@@ -396,7 +407,7 @@ export class ChannelManager {
         const valid=()=>{
           const state=this.store.snapshot(), companion=state.companions.find(c=>c.id===route.companionId)
           const current=state.sessions.find(r=>r.id===route.id), claim=current?.idleContactState
-          return Boolean(companion?.idleContact?.enabled && companion.idleContact.routeId===route.id && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !isSleeping(companion) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
+          return Boolean(companion && current && activityPolicyCurrent(state,companion,current) && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !isSleeping(companion) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
         }
         if(route.kind==='channel' && valid()) {
           const parts=channelReplyPartsAfter(events,0,true)
@@ -502,7 +513,7 @@ export class ChannelManager {
       if(reply.idleContactOrigin){
         if(!await this.agents.idleContactDeliveryCurrent(reply.idleContactOrigin))throw Error('主动联系会话已变化，取消旧消息投递')
         const state=this.store.snapshot(),origin=reply.idleContactOrigin,companion=state.companions.find(c=>c.id===channel.companionId),route=state.sessions.find(r=>r.id===origin.routeId)
-        if(!companion?.idleContact?.enabled||companion.idleContact.routeId!==origin.routeId||companion.updatedAt!==origin.policyRevision||isSleeping(companion)||route?.sessionId!==origin.sessionId||route.idleContactState?.messageId!==origin.messageId||route.lastMessageAt>(route.idleContactState?.attemptedAt??0))throw Error('主动联系设置或会话已变化，取消旧消息投递')
+        if(!companion||!route||!activityPolicyCurrent(state,companion,route)||companion.updatedAt!==origin.policyRevision||isSleeping(companion)||route?.sessionId!==origin.sessionId||route.idleContactState?.messageId!==origin.messageId||route.lastMessageAt>(route.idleContactState?.attemptedAt??0))throw Error('主动联系设置或会话已变化，取消旧消息投递')
       }
       const current = requiredChannel(this.store, channelId)
       if (!current.enabled || current.companionId !== channel.companionId) throw new Error('通知渠道已停用或授权已变更')
@@ -663,16 +674,20 @@ export class ChannelManager {
       // Claim the input before delivery so recovery never executes its tools again.
       await this.rememberReceipt(receipt)
       await this.sendChatReply(channel,userId,receipt,reply)
+      if(reply.postReplySource)await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
       return
     }
     await api.sendText(userId, reply.text, this.contextTokens.get(tokenKey), signal)
+    let fullyDelivered=true
     for (const attachment of reply.attachments) {
       try { await api.sendAttachment(userId, attachment, this.contextTokens.get(tokenKey), signal) }
       catch (error) {
+        fullyDelivered=false
         this.ctx.logger.warn(`dsh-partner: WeChat outbound attachment ${attachment.path} failed: ${error instanceof Error ? error.message : String(error)}`)
         await api.sendText(userId, `附件「${attachment.name}」发送失败，未完成交付。可以稍后要求重新发送该附件，无需重新生成。`, this.contextTokens.get(tokenKey), signal)
       }
     }
+    if(fullyDelivered && reply.postReplySource && (reply.text.trim()||reply.attachments.length))await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
     await this.rememberReceipt(receipt)
   }
 
@@ -1021,6 +1036,7 @@ export class ChannelManager {
           await api.sendAttachment(event.sender,attachment,undefined,signal,allowed)
         }
         }
+        if(reply.postReplySource && (reply.text.trim() || reply.attachments.length || reply.chatParts?.length)) await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
         if(event.qqGroup&&(reply.text.trim()||reply.attachments.length||reply.chatParts?.length))this.groupAutonomy.replied(channel.id,event,reply.text)
         if(timing){timing.sendMs=Date.now()-replyReady;timing.outcome='replied'}
         if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'reply',agentMs:replyReady-agentStarted,sendMs:Date.now()-replyReady})}`)
