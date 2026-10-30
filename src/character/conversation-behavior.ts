@@ -51,7 +51,10 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
 
 /** Compact reminder; the complete role remains in the stable identity section. */
 export function renderTurnRoleAnchor(card: CharacterCard): string {
-  const opening = roleTextForCard(card).split(/\n\s*\n/)[0]?.trim() ?? ''
+  // Markdown cards often start with a title-only paragraph. Carry actual role
+  // content into the turn, rather than repeatedly reminding only of its name.
+  const opening = roleTextForCard(card).split(/\n\s*\n/)
+    .map(block => block.trim()).find(block => block.split('\n').some(line => line.trim() && !/^\s*#{1,6}\s/.test(line))) ?? ''
   return [
     '【当前角色提醒】完整角色说明持续生效，包括处理任务时；本段仅提醒，不替代完整设定。',
     opening.length <= 2000 ? opening : '沿用系统中的当前角色设定。',

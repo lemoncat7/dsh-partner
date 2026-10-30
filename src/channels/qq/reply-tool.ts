@@ -68,16 +68,18 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         if(!previous)log.push({id:receiptId,action:'reply_voice',at:Date.now(),status:'pending'})
       })
       if(previous){if(previous==='confirmed')exec.concludeTurn();return {status:previous,resent:false}}
+      let sendAttempted=false
       try {
         guard()
         let result:any
-        if(group)result=await call(channel.id,'send_group_ai_record',{group_id:Number(group.groupId),character,text:args.text!.trim(),chat_type:1},signal,()=>{guard()})
+        if(group){sendAttempted=true;result=await call(channel.id,'send_group_ai_record',{group_id:Number(group.groupId),character,text:args.text!.trim(),chat_type:1},signal,()=>{guard()})}
         else {
           const generated=await call(channel.id,'get_ai_record',{group_id:Number(sourceGroup),character,text:args.text!.trim(),chat_type:1},signal,()=>{guard()})
           if(typeof generated!=='string')throw Error('未取得生成语音')
           // Only a trusted QQ-generated media URL, never a caller supplied file/URL.
           const url=qqMediaUrl(generated).href
           guard()
+          sendAttempted=true
           result=await call(channel.id,'send_private_msg',{user_id:Number(route.userId),message:[{type:'record',data:{file:url}}]},signal,()=>{guard()})
         }
         if(!result||!['string','number'].includes(typeof result.message_id)||!String(result.message_id)||Number(result.message_id)===0)throw Error('QQ 未确认语音发送')
@@ -85,8 +87,14 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         exec.concludeTurn()
         return {status:'confirmed',spokenText:args.text!.trim(),messageId:String(result.message_id)}
       } catch {
-        await store.update(state=>{const receipt=state.channels.find(c=>c.id===channel.id)?.qqActivity?.find(r=>r.id===receiptId);if(receipt&&receipt.status!=='confirmed')receipt.status='unknown'})
-        throw Error('语音未确认发送，请查看 QQ 实际结果；不要自动重复发送。')
+        await store.update(state=>{
+          const current=state.channels.find(c=>c.id===channel.id),receipt=current?.qqActivity?.find(r=>r.id===receiptId)
+          if(receipt&&receipt.status!=='confirmed'){
+            if(sendAttempted)receipt.status='unknown'
+            else current!.qqActivity=current!.qqActivity!.filter(r=>r.id!==receiptId)
+          }
+        })
+        throw Error(sendAttempted?'语音未确认发送，请查看 QQ 实际结果；不要自动重复发送。':'语音合成或地址校验失败，尚未发送消息。私聊支持文字转语音；请核对音色与音色来源群，不能据此判断私聊不支持语音。')
       }
     },
   }

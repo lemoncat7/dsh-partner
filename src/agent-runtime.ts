@@ -302,7 +302,7 @@ export class PartnerAgentRuntime {
     } else if (!idleContactDue(this.store.snapshot(), companion, user, Date.now(), timeZone)) return
     const stableSeq = agent.session.seq
     const message = createUserMessage({ content: [{type:'text',text:
-      idleActivityPrompt(this.store.snapshot(),companion) + (continuation ? '\n' + POST_REPLY_PROMPT : '')
+      idleActivityPrompt(this.store.snapshot(),companion,agent.session.snapshotEvents()) + (continuation ? '\n' + POST_REPLY_PROMPT : '')
     }], source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE} })
     let claimed = false
     await this.store.update(draft => {

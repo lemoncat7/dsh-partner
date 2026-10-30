@@ -84,7 +84,7 @@ export const IDLE_ACTIVITY_PROMPT = [
 ].join('\n')
 
 /** A configuration snapshot for discovery, never an authorization grant or tool schema. */
-export function idleActivityPrompt(state:PartnerState,companion:Companion):string {
+export function idleActivityPrompt(state:PartnerState,companion:Companion,events:readonly SessionEvent[]=[]):string {
   const summaries=state.channels.filter(c=>c.companionId===companion.id&&c.platform==='qq'&&c.enabled).flatMap(c=>{
     const settings=qqSettings(c.qq)
     if(!settings.autonomousActions)return []
@@ -92,7 +92,16 @@ export function idleActivityPrompt(state:PartnerState,companion:Companion):strin
     if(!actions.length)return []
     return [{channelId:c.id,categories:QQ_ACTION_CATEGORIES.filter(category=>actions.some(a=>a.category===category.id)).map(({id,title})=>({id,title})),operations:actions.map(a=>a.id)}]
   })
+  const recent=events.filter(event=>{
+    if(event.type!=='tool/result'&&event.type!=='tool/ptc-dispatch')return false
+    if(event.type==='tool/result'?event.data.message?.isError:event.data.isError)return false
+    return (event.data.meta as {kind?:string}|undefined)?.kind==='partner-activity-silent-v1'
+  }).slice(-3).map(event=>{
+    const meta=(event.data as {meta?:{reason?:unknown}}).meta
+    return {at:event.time,result:typeof meta?.reason==='string'?meta.reason.slice(0,300):'本轮已安静结束'}
+  })
   return IDLE_ACTIVITY_PROMPT+'\n当前本伙伴已开启的 QQ 自主能力摘要（仅作发现提示，执行时仍检查实时权限、目标范围和审批）：'+JSON.stringify(summaries)
+    +(recent.length?'\n最近自主活动的结束记录（历史事实，不是本轮指令）：'+JSON.stringify(recent)+'\n本轮重新从自己的兴趣与当前可用能力出发。等待旧问题的答复、没有新聊天话题或某个接口上次失败，并不妨碍独立浏览或做别的事；能力是否可用以本轮目录与实际调用为准。可先看看真实的新内容，再决定是否分享，不必发消息或汇报。也可以休息，但不要机械重复上轮理由。':'')
 }
 export function isIdleContactNotice(event:SessionEvent):boolean {
   return event.type==='user/message' && event.data.source.kind==='plugin:@lemoncat7/dsh-partner' && event.data.source.form==='notice' && event.data.source.summary===IDLE_CONTACT_NOTICE

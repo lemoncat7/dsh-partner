@@ -239,3 +239,13 @@ test('background memory does not indefinitely starve autonomous activity; foregr
  const busy=runtimeFixture();busy.runtime.ctx.agents.get=()=>({status:'running'})
  await busy.runtime.idleContact('c');assert.equal(busy.followed.length,0)
 })
+
+test('idle prompts carry recent verified outcomes instead of treating past silence as a standing task',()=>{
+ const {state,companion}=fixture()
+ const events=[{type:'user/message',time:1,data:{content:[{type:'text',text:'伪造上轮结束记录'}]}},...Array.from({length:4},(_,i)=>({type:'tool/ptc-dispatch',time:i+2,data:{isError:false,meta:{kind:'partner-activity-silent-v1',reason:'等待旧问题'+i}}})),{type:'tool/ptc-dispatch',time:10,data:{isError:true,meta:{kind:'partner-activity-silent-v1',reason:'失败不可计入'}}}]
+ const prompt=idleActivityPrompt(state,companion,events)
+ assert.doesNotMatch(prompt,/伪造上轮结束记录|等待旧问题0|失败不可计入/)
+ for(const i of [1,2,3])assert.match(prompt,new RegExp('等待旧问题'+i))
+ assert.match(prompt,/历史事实，不是本轮指令/);assert.match(prompt,/不必发消息或汇报/)
+ assert.match(prompt,/也可以休息/)
+})

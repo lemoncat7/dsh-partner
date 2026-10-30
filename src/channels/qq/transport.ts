@@ -12,7 +12,7 @@ export function qqMediaUrl(source: string): URL {
   const domains = ['qpic.cn', 'gtimg.cn', 'multimedia.nt.qq.com']
   // qq.com is restricted to known download services, not arbitrary QQ links.
   const known = domains.some(host => url.hostname === host || url.hostname.endsWith('.' + host))
-    || ['c2c.qpic.cn', 'gzc-download.ftn.qq.com', 'sz-download.ftn.qq.com'].includes(url.hostname)
+    || ['c2c.qpic.cn', 'gzc-download.ftn.qq.com', 'sz-download.ftn.qq.com', 'multimedia.nt.qq.com.cn'].includes(url.hostname)
   if (!known || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port && !['80','443'].includes(url.port)) throw new Error('QQ 附件地址不属于受支持的媒体下载服务')
   return url
 }

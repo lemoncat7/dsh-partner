@@ -39,9 +39,23 @@ test('chat voice revocation, unknown origins and off-switch fail before any API 
   const f=fixture();edit(f);await assert.rejects(f.tool.execute({action:'voice',text:'x'},f.exec));assert.equal(f.requests.length,0)
  }
 })
-test('generation cannot substitute local files or arbitrary external URLs; no duplicate send on uncertain results',async()=>{
+test('generation failure cannot substitute local files and is not reported as an uncertain send',async()=>{
  const f=fixture(true),tool=qqReplyTool('c',f.store,async(...args)=>{if(args[1]==='get_ai_record')return 'file:///etc/passwd';return f.call(...args)})
  await assert.rejects(tool.execute({action:'voice',text:'x'},f.exec))
- assert.equal(f.requests.length,0);assert.equal(f.state.channels[0].qqActivity[0].status,'unknown')
- const retry=await tool.execute({action:'voice',text:'x'},f.exec);assert.equal(retry.resent,false)
+ assert.equal(f.requests.length,0);assert.equal(f.state.channels[0].qqActivity.length,0)
+ await assert.rejects(tool.execute({action:'voice',text:'x'},f.exec),/尚未发送消息/)
+})
+
+test('SnowLuma current QQ media domain can be delivered privately; uncertain sends are never repeated',async()=>{
+ const f=fixture(true);let sends=0
+ const tool=qqReplyTool('c',f.store,async(...args)=>{
+  args[4]()
+  if(args[1]==='get_ai_record')return 'https://multimedia.nt.qq.com.cn/download?voice=test'
+  if(args[1]==='send_private_msg'){sends++;assert.equal(args[2].message[0].data.file,'https://multimedia.nt.qq.com.cn/download?voice=test');throw Error('connection lost')}
+  return f.call(...args)
+ })
+ await assert.rejects(tool.execute({action:'voice',text:'x'},f.exec),/未确认发送/)
+ assert.equal(f.state.channels[0].qqActivity[0].status,'unknown')
+ const retry=await tool.execute({action:'voice',text:'x'},f.exec)
+ assert.equal(retry.resent,false);assert.equal(sends,1)
 })

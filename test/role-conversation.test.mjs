@@ -120,3 +120,8 @@ for(const length of ['short','natural','rich'])test(`persona instructions retain
  assert.match(text,/处理工作也保持简短口语/)
  assert.doesNotMatch(text,/不受闲聊字数限制|工作交付按需要展开|3–20|仅用于日常对话/)
 })
+
+test('Markdown role title does not displace the actual personality in per-turn reminders',()=>{
+ const card=normalizeCharacterCard({enabled:true,roleText:'# 角色卡：小岚\n\n## 一、你是谁\n直率好胜，喜欢冒险，遇到玩笑会接梗。\n\n## 说话方式\n按眼前话题自然接话。'})
+ for(const autonomous of [false,true])assert.match(renderConversationTurn(card,1,autonomous),/直率好胜，喜欢冒险，遇到玩笑会接梗/)
+})

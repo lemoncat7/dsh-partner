@@ -93,6 +93,8 @@ test('API failure is not delivery; cancellation stops idle receive',async t=>{
 })
 test('media URLs reject arbitrary hosts, credentials and local files',()=>{
   assert.equal(qqMediaUrl('https://multimedia.nt.qq.com/x').hostname,'multimedia.nt.qq.com')
+  assert.equal(qqMediaUrl('https://multimedia.nt.qq.com.cn/x').hostname,'multimedia.nt.qq.com.cn')
+  for(const url of ['https://multimedia.nt.qq.com.cn.evil.example/x','https://evil.qq.com.cn/x'])assert.throws(()=>qqMediaUrl(url))
   for(const url of ['file:///etc/passwd','http://127.0.0.1:5099/x','https://gchat.qpic.cn.evil.example/x','https://u:p@gchat.qpic.cn/x','https://qq.com/x'])assert.throws(()=>qqMediaUrl(url))
 })
 
