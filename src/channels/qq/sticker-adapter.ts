@@ -17,8 +17,9 @@ export function qqStickerAdapter(channel:WeixinChannel,fallback:StickerAdapter,c
   async list(owner,query,signal) {
    signal.throwIfAborted()
    const faces=(await native()).map(f=>({f,score:score(f,query)})).filter(e=>!query.trim()||e.score>0).sort((a,b)=>b.score-a.score).slice(0,48).map(e=>item(e.f))
-   const defaults=policy.imagesEnabled?await fallback.list(owner,query,signal):[]
-   return [...faces,...defaults.slice(0,24)]
+   // Channel mode never fills a failed QQ search with unrelated built-in images.
+   if(enabled)return faces
+   return policy.imagesEnabled?(await fallback.list(owner,query,signal)).slice(0,24):[]
   },
   async resolve(owner,id,signal) {
    signal.throwIfAborted()
@@ -28,13 +29,9 @@ export function qqStickerAdapter(channel:WeixinChannel,fallback:StickerAdapter,c
     if(!face)throw Error('QQ 表情目录已变化或不可用，请重新查询表情库')
     return resolve(face)
    }
+   if(enabled)throw Error('当前使用 QQ 表情库，请查询 partner_stickers 并选择 qq-custom- 或 qq-face- ID；没有合适表情可只发文字，不使用内置表情替代')
    const original=await fallback.resolve(owner,id,signal)
-   // Prefer native equivalents for familiar built-ins; preserve custom authored images.
-   if(enabled&&id.startsWith('builtin-')) {
-    const query=[original.item.name,...original.item.tags].join(' ')
-    const match=(await native()).map(f=>({f,score:score(f,query)})).filter(e=>e.score>0).sort((a,b)=>b.score-a.score)[0]
-    if(match)return resolve(match.f)
-   }
+   // An explicit sticker ID must identify the same image in preview and delivery.
    if(!policy.imagesEnabled)throw Error('QQ 图片与表情包发送已关闭')
    return original
   }

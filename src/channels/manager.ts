@@ -1,3 +1,4 @@
+import {resolveQqQuote,quotedMessageText} from './qq/quote.js'
 import { AuthoredProgress } from './authored-progress.js'
 import { activityPolicyCurrent } from '../character/post-reply.js'
 import {channelReplyAllowed,directReplyTarget} from './reply-access.js'
@@ -9,7 +10,7 @@ import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
 import { isActivitySilenceRequested } from '../character/activity-tool.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
-import { replyDeliveryParts } from '../chat/protocol.js'
+import { replyDeliveryParts, segmentIdleChatReply } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
 import type { ChannelSession, ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
@@ -155,7 +156,7 @@ export class ChannelManager {
       const result=await api.onebot!.connection.call(kind==='groups'?'get_group_list':kind==='friends'?'get_friend_list':'fetch_sys_faces',{})
       if(kind==='friends')return {friends:Array.isArray(result)?result.filter(g=>g&&validQqId(String(g.user_id))).slice(0,2000).map(g=>({id:String(g.user_id),name:String(g.remark||g.nickname||g.user_id).slice(0,120)})):[]}
       if(kind==='groups')return {groups:Array.isArray(result)?result.filter(g=>g&&validQqId(String(g.group_id))).slice(0,1000).map(g=>({id:String(g.group_id),name:String(g.group_name??g.group_id).slice(0,120)})):[]}
-      const custom=await api.onebot!.connection.call('fetch_custom_face_detail',{count:100}).catch(()=>[])
+      const custom=await api.onebot!.connection.call('fetch_custom_face_detail',{count:200}).catch(()=>[])
       return {faces:[...qqCustomCatalog(custom),...qqFaceCatalog(result)]}
     } finally { api.close() }
   }
@@ -413,7 +414,8 @@ export class ChannelManager {
         if(route.kind==='channel' && valid()) {
           const parts=channelReplyPartsAfter(events,0,true)
           if(parts.text||parts.chatParts?.length) {
-            const reply=await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId))
+            const card=this.store.snapshot().companions.find(c=>c.id===route.companionId)?.characterCard
+            const reply=segmentIdleChatReply(await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId)),Boolean(card?.enabled && card.segmentedReplies))
             const claim=route.idleContactState!,state=this.store.snapshot(),channel=state.channels.find(c=>c.id===route.channelId)!
             reply.idleContactOrigin={routeId:route.id,sessionId:session.id,messageId:notice.data.id,userMessageId:claim.userMessageId,policyRevision:claim.policyRevision!}
             if(channel.direct)reply.directSource={routeId:route.id,sessionId:route.sessionId,accountId:channel.accountId,baseUrl:channel.direct.baseUrl,targetId:directReplyTarget(state,route.channelId,route.userId)}
@@ -934,15 +936,25 @@ export class ChannelManager {
     event=events[0]!
     if(events.some(item=>item.sender!==event.sender||(item.targetId??api.config?.targetId)!==(event.targetId??api.config?.targetId)))throw new Error('不能合并不同联系人的附件消息')
     const receipts=events.map(item=>`${channel.id}:${item.id}`)
-    const rawText=events.map(item=>item.text).filter(Boolean).join('\n\n')
-    let text=event.qqGroup?`[QQ 群 ${event.qqGroup.groupId} · 发言人 ${event.qqGroup.senderName}（${event.qqGroup.userId}）${event.qqGroup.autonomous&&!event.qqGroup.mentioned?' · 自主接话':''}]\n${rawText}`:rawText
-    const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id && p.userId===event.sender)
     const groupAccess=channel.platform==='qq'&&!!event.qqGroup&&channelReplyAllowed(this.store.snapshot(),channel.id,event.sender,event.targetId)
     const activeChannel=this.store.snapshot().channels.find(c=>c.id===channel.id&&c.enabled&&c.accountId===channel.accountId&&c.companionId===channel.companionId)
     const policy=qqSettings(activeChannel?.qq),peer=qqGroupPeer(event.sender)
     if(channel.platform==='qq'&&(!activeChannel||(event.qqGroup?(!peer||peer.groupId!==event.qqGroup.groupId||!policy.groupReplies||!policy.groupIds.includes(peer.groupId)||pairing?.status==='blocked'):!policy.privateReplies))){await this.rememberReceipts(receipts);return}
+    if(channel.platform==='qq'&&(groupAccess||pairing?.status==='approved')&&api.onebot){
+      // Resolve inside this conversation's worker; other sessions continue polling and replying.
+      const cache=new Map<number,Promise<unknown>>()
+      await Promise.all(events.map(item=>resolveQqQuote(item,channel.accountId,(id,readSignal)=>{
+        let result=cache.get(id)
+        if(!result){result=api.onebot!.connection.call('get_msg',{message_id:id},readSignal);cache.set(id,result)}
+        return result
+      },signal)))
+    }
+    const rawText=events.map(quotedMessageText).filter(Boolean).join('\n\n')
+    let text=event.qqGroup?`[QQ 群 ${event.qqGroup.groupId} · 发言人 ${event.qqGroup.senderName}（${event.qqGroup.userId}）${event.qqGroup.autonomous&&!event.qqGroup.mentioned?' · 自主接话':''}]\n${rawText}`:rawText
+    const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     for(const item of events)this.groupAutonomy.observe(channel.id,item)
+    if(event.qqGroup && isSleeping(requiredCompanion(this.store,channel.companionId)) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self'){this.groupAutonomy.record(channel.id,event,'伙伴正在睡眠，暂停群聊自主接话');await this.rememberReceipts(receipts);return}
     if(event.qqGroup?.autonomous&&!event.qqGroup.mentioned) {
       // Recheck current access: a queued event may outlive whitelist removal.
       if(!groupAccess){this.groupAutonomy.record(channel.id,event,'发言账号尚未审批，本条不接话');await this.rememberReceipts(receipts);return}
@@ -999,6 +1011,16 @@ export class ChannelManager {
           await api.sendText(event.sender,'附件接收失败，未交给伙伴执行。请确认附件可下载、单条消息不超过 8 个附件且总大小不超过 64 MB，再重新发送。加密附件暂不支持。',undefined,signal)
           return
         }
+        for(const item of events)if(item.qqQuote?.media.length){
+          for(const media of item.qqQuote.media){
+            if(attachments.length>=8){text+='\n[引用附件过多，剩余部分未加载]';break}
+            try{
+              const remaining=PARTNER_MEDIA_MAX_BYTES-attachments.reduce((sum,a)=>sum+a.data.byteLength,0)
+              const received=await api.receiveAttachments({...item,media:[media]},signal,allowed,remaining)
+              attachments.push(...received)
+            }catch(error){if(signal.aborted||!allowed())throw error;text+='\n[引用附件读取失败；原消息文字仍保留，可请对方重发原图或文件]'}
+          }
+        }
         if(!allowed())throw new Error('渠道或联系人授权已撤销')
         const sessionTitle=channel.platform==='qq'?await this.qqSessionName(channel,api,event,signal):undefined
         const settleProgress=mode==='steer'?this.directReplyProgress.get(progressKey)?.prepareInput():undefined
@@ -1024,7 +1046,12 @@ export class ChannelManager {
         if(!allowed())throw new Error('渠道或联系人授权已撤销，取消回复')
         if(reply.chatParts?.length===0&&!reply.text.trim()&&!reply.attachments.length){
           await progress?.completeWithoutReply()
-          if(timing)timing.outcome='silent'
+          if(reply.alreadyDelivered){
+            await this.rememberReceipts(receipts)
+            if(reply.postReplySource)await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
+            if(event.qqGroup)this.groupAutonomy.replied(channel.id,event,'[语音回复]')
+          }
+          if(timing)timing.outcome=reply.alreadyDelivered?'replied':'silent'
           return
         }
         if(reply.chatParts){

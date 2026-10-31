@@ -50,7 +50,7 @@ test('running an inline planning Skill never forks away from companion board too
   assert.ok(tools.has('partner_task_board'))
 })
 
-test('planning upgrade preserves bindings, refreshes next-turn configuration and injects the installed policy once', async t => {
+test('planning upgrade preserves bindings, refreshes next-turn configuration and exposes metadata and loads the installed policy on demand', async t => {
   const { store, board, skills, service } = await fixture(t)
   await skills.initialize()
   const previous = await skills.repository.install({
@@ -84,7 +84,7 @@ test('planning upgrade preserves bindings, refreshes next-turn configuration and
     const sections = []
     const dispose = await composer.compose({ tools: { register: () => () => {} }, systemPrompt: { section: section => { sections.push(section); return () => {} } } }, companion)
     const occurrences = sections.map(section => section.text).join('\n').split(loaded.body).length - 1
-    assert.equal(occurrences, companion.id === 'companion-default' ? 1 : 0)
+    assert.equal(occurrences, 0)
     dispose()
   }
 })
@@ -110,8 +110,8 @@ test('tool guidance connects requests, specialists and the planning Skill withou
     },
     systemPrompt: { section(value) { sections.push(value); return () => {} } },
   }, store.snapshot().companions[0])
-  assert.deepEqual([...tools.keys()].sort(), ['partner_activity_finish', 'partner_collaborate', 'partner_identity', 'partner_requirements', 'partner_skill', 'partner_task_board'])
-  for (const name of [...tools.keys()].filter(name => !['partner_identity', 'partner_activity_finish'].includes(name))) assert.match(tools.get(name).description, /enabled task-planning Skill/)
+  assert.deepEqual([...tools.keys()].sort(), ['partner_activity_finish', 'partner_collaborate', 'partner_identity', 'partner_requirements', 'partner_skill', 'partner_task_board', 'partner_work_execute', 'partner_workflow'])
+  for (const name of [...tools.keys()].filter(name => !['partner_identity', 'partner_activity_finish', 'partner_work_execute', 'partner_workflow'].includes(name))) assert.match(tools.get(name).description, /enabled task-planning Skill/)
   assert.match(tools.get('partner_task_board').description, /no explicit @ or board request/)
   assert.match(tools.get('partner_collaborate').description, /do not duplicate already-assigned work/)
   assert.equal(sections.some(section => section.name.includes('preflight')), false)
@@ -178,7 +178,7 @@ test('assigned create tool submits automatically, reports the Skill protocol, an
   const composition=new PartnerAgentComposition(store,skills,board,service,{},{},{})
   await composition.compose({tools:{register:tool=>{tools.push(tool);return()=>{}}},systemPrompt:{section:section=>{sections.push(section);return()=>{}}}},store.snapshot().companions[0])
   assert.match(sections.map(s=>s.text).join('\n'),/主动应用/)
-  assert.match(sections.map(s=>s.text).join('\n'),/无需用户再要求|不需要再询问/)
+  assert.match(sections.map(s=>s.text).join('\n'),/无需用户补充触发词/)
   const tool=tools.find(t=>t.name==='partner_task_board'),exec={agent:{session:{id:'creator-session'}}}
   const requirement=JSON.parse(await tools.find(t=>t.name==='partner_requirements').execute({action:'create',title:'分阶段交付'},exec))
   const planned=JSON.parse(await tool.execute({action:'create',requirementId:requirement.id,title:'先规划',assignee:'companion-default',autoRun:false},exec))

@@ -82,7 +82,7 @@ export async function extractOutboundAttachments(text: string, cwd: string): Pro
 
 /** Channel projection only; never rewrites the conversation or guesses virtual paths. */
 export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string): Promise<PartnerReply> {
-  if(parts.chatParts?.length===0&&!parts.text.trim())return {text:'',attachments:[],chatParts:[],...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})}
+  if(parts.chatParts?.length===0&&!parts.text.trim())return {text:'',attachments:[],chatParts:[],...(parts.alreadyDelivered?{alreadyDelivered:true}:{}),...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})}
   // A Markdown mention is not delivery intent. Only the explicit tool sends
   // conversational attachments; backend requirement reports have their own flow.
   let missingSandbox = false

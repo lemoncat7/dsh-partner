@@ -152,3 +152,23 @@ test('post-reply opportunities arm only after all reply parts succeed, never on 
   assert.equal(armed.length,outcome==='success'?1:0)
  }
 })
+
+test('approved QQ quotes carry text and image into the agent; failed quote downloads keep current input',async()=>{
+ for(const fail of [false,true]){
+  const f=fixture();f.event.qqReplyId='-123';f.event.text='这个人你认识吗';const calls=[]
+  f.api.onebot={connection:{call:async(name,params)=>{calls.push(name);return name==='get_msg'?{message_id:-123,message_type:'group',group_id:99887766,sender:{user_id:22345678,nickname:'朋友'},message:[{type:'text',data:{text:'引用文字'}},{type:'image',data:{url:'https://gchat.qpic.cn/a'}}]}:{group_name:'测试'}}}}
+  f.api.receiveAttachments=async()=>{if(fail)throw Error('expired');return [{name:'quote.png',mediaType:'image/png',data:Buffer.from('image')}]}
+  await f.handle();assert.equal(f.inputs.length,1);assert.match(f.inputs[0][3].text,/引用文字/);assert.match(f.inputs[0][3].text,/这个人你认识吗/)
+  assert.equal(f.inputs[0][3].attachments.length,fail?0:1);if(fail)assert.match(f.inputs[0][3].text,/引用附件读取失败/)
+  assert.equal(calls.filter(n=>n==='get_msg').length,1)
+ }
+ const blocked=fixture();blocked.event.qqReplyId='-123';blocked.state.pairings=[{channelId:'qq',userId:blocked.peer,status:'blocked'}];blocked.api.onebot={connection:{call:()=>assert.fail('unauthorized quote fetch')}};await blocked.handle();assert.equal(blocked.inputs.length,0)
+})
+
+test('voice already delivered by tool needs no extra message and counts as a successful reply',async()=>{
+ const f=fixture(),source={routeId:'r',sessionId:'s',userMessageId:'u'},armed=[]
+ f.agents.replyDelivered=async value=>armed.push(value)
+ f.setReply({text:'',attachments:[],chatParts:[],alreadyDelivered:true,postReplySource:source})
+ await f.handle()
+ assert.deepEqual(f.sent,[]);assert.deepEqual(armed,[source]);assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'replied')
+})

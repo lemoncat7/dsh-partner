@@ -59,3 +59,40 @@ test('SnowLuma current QQ media domain can be delivered privately; uncertain sen
  const retry=await tool.execute({action:'voice',text:'x'},f.exec)
  assert.equal(retry.resent,false);assert.equal(sends,1)
 })
+
+test('confirmed voice projects as delivered, including unified dispatch and duplicate receipt, never empty-text fallback',async()=>{
+ const {channelReplyPartsAfter}=await import('../lib/channels/delivery-policy.js')
+ const {prepareChannelReply}=await import('../lib/channels/outbound-media.js')
+ const {completedActivityDidWork}=await import('../lib/character/post-reply.js')
+ for(const type of ['tool/result','tool/ptc-dispatch']){
+  const f=fixture(),args={action:'voice',text:'你好'}
+  const value=await f.tool.execute(args,f.exec),meta=f.tool.output.presentationMeta(args,value)
+  const start={type:'turn/start',seq:1,data:{turn:1}},user={type:'user/message',seq:2,data:{id:'u',source:{kind:'user'}}}
+  const result={type,seq:3,data:type==='tool/result'?{message:{isError:false,content:[]},meta}:{name:'partner_qq_reply',arguments:JSON.stringify(args),isError:false,meta}}
+  const events=[start,user,result,{type:'turn/end',seq:4,data:{reason:{kind:'completed'}}}]
+  const reply=await prepareChannelReply(channelReplyPartsAfter(events,0),'/tmp')
+  assert.equal(reply.alreadyDelivered,true);assert.equal(reply.text,'');assert.deepEqual(reply.chatParts,[]);assert.equal(reply.chatOriginRouteId,'r')
+  const {nativeChatBlocks}=await import('../lib/chat/conversation.js');assert.match(nativeChatBlocks(meta)[0].text,/语音已发送.*你好/)
+  assert.equal(completedActivityDidWork(events),true)
+  const duplicate=await f.tool.execute(args,f.exec);assert.equal(f.tool.output.presentationMeta(args,duplicate).delivered,true);assert.equal(f.requests.length,1)
+  assert.equal(f.tool.output.presentationMeta({action:'voices'},{voices:[]}),null)
+  assert.equal(f.tool.output.presentationMeta(args,{status:'unknown',originRouteId:'r'}),null)
+  result.data.meta=undefined
+  assert.match((await prepareChannelReply(channelReplyPartsAfter(events,0),'/tmp')).text,/未生成/)
+ }
+})
+
+test('real unified voice call persists delivery metadata for channel projection',async t=>{
+ const {Context}=await import('@deepseek-ai/cordis'),{ToolRuntime}=await import('@deepseek-ai/dsh-tools'),{createScope}=await import('@deepseek-ai/dsh-scope')
+ const {installToolDiscovery}=await import('../lib/collaboration/tool-discovery.js')
+ const {channelReplyPartsAfter}=await import('../lib/channels/delivery-policy.js')
+ const {prepareChannelReply}=await import('../lib/channels/outbound-media.js')
+ const f=fixture(),root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
+ f.state.companions=[{id:'c',toolDiscovery:true}]
+ const agent=f.exec.agent;agent.options={};const scope=createScope(root,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())
+ t.after(scope.ctx.tools.register(f.tool));t.after(installToolDiscovery(scope.ctx.tools,'c',f.store,[]))
+ const result=await root.tools.execute({name:'partner_tools',arguments:{action:'call',name:'partner_qq_reply',argumentsJson:JSON.stringify({action:'voice',text:'你好'})},agent,signal:new AbortController().signal,callId:'unified-voice'})
+ assert.equal(result.isError,false);assert.equal(result.concludesTurn,true);assert.equal(f.requests.length,1)
+ const projected=await prepareChannelReply(channelReplyPartsAfter(agent.session.snapshotEvents(),-1),'/tmp')
+ assert.equal(projected.alreadyDelivered,true);assert.equal(projected.text,'');assert.deepEqual(projected.chatParts,[])
+})

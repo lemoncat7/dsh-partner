@@ -12,11 +12,15 @@ import type { QqActionCall } from './actions.js'
 export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCall): ToolDefinition {
   return {
     name: 'partner_qq_reply',
-    description: '向当前 QQ 聊天对象回复语音。voices 查询当前可用音色；voice 把 text 转成语音并发送，成功后结束回合，不重复发文字。无需填写接收人；不能读取本地文件、转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
+    description: '向当前 QQ 聊天对象回复语音，属于公开聊天能力，不需要归属账号或私有能力总开关。按人格与场景可自行选择语音，不必等用户点名索要。voices 查询当前可用音色；voice 把 text 转成语音并发送，成功后结束回合，不重复发文字。无需填写接收人；不能读取本地文件、转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
     parameters: { type:'object', additionalProperties:false, required:['action'], properties:{
       action:{type:'string',enum:['voices','voice']}, text:{type:'string',minLength:1,maxLength:2000}, character:{type:'string',minLength:1,maxLength:200},
     }},
-    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},
+    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}],
+    presentationMeta:(_args,value)=>{
+      const result=value as {status?:string;originRouteId?:string;spokenText?:string}
+      return result.status==='confirmed'&&result.originRouteId?{kind:'partner-chat-v1',parts:[],delivered:true,originRouteId:result.originRouteId,...(result.spokenText?{spokenText:result.spokenText}:{})}:null
+    }},
     presentCall:()=>({card:'generic',title:'QQ 语音回复'}),
     async execute(raw, exec) {
       const args=raw as {action:string;text?:string;character?:string}
@@ -67,7 +71,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         previous=log.find(r=>r.id===receiptId)?.status
         if(!previous)log.push({id:receiptId,action:'reply_voice',at:Date.now(),status:'pending'})
       })
-      if(previous){if(previous==='confirmed')exec.concludeTurn();return {status:previous,resent:false}}
+      if(previous){if(previous==='confirmed')exec.concludeTurn();return {status:previous,resent:false,originRouteId:route.id}}
       let sendAttempted=false
       try {
         guard()
@@ -85,7 +89,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         if(!result||!['string','number'].includes(typeof result.message_id)||!String(result.message_id)||Number(result.message_id)===0)throw Error('QQ 未确认语音发送')
         await store.update(state=>{const receipt=state.channels.find(c=>c.id===channel.id)?.qqActivity?.find(r=>r.id===receiptId);if(receipt)receipt.status='confirmed'})
         exec.concludeTurn()
-        return {status:'confirmed',spokenText:args.text!.trim(),messageId:String(result.message_id)}
+        return {status:'confirmed',originRouteId:route.id,spokenText:args.text!.trim(),messageId:String(result.message_id)}
       } catch {
         await store.update(state=>{
           const current=state.channels.find(c=>c.id===channel.id),receipt=current?.qqActivity?.find(r=>r.id===receiptId)

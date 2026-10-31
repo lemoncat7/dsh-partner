@@ -2,7 +2,7 @@ import type { Companion } from '../domain.js'
 import { sleepPolicy } from './sleep.js'
 
 export const FATIGUE_AWAKE_PER_HOUR = 5
-export const FATIGUE_SLEEP_PER_HOUR = 15
+export const FATIGUE_SLEEP_PER_HOUR = 35
 export const INITIAL_FATIGUE = 30
 const HOUR = 3_600_000
 const clamp = (n: number) => Math.max(0, Math.min(100, n))

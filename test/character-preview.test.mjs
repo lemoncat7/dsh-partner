@@ -78,13 +78,13 @@ test('optional counterexamples survive validation without changing old cards or 
   assert.equal(normalized.examples[0].avoid, withContrast.examples[0].avoid)
   for (const surface of ['local', 'conversation']) {
     const text = renderCharacterCore(normalized, surface)
-    assert.doesNotMatch(text, /角色表达/)
-    assert.match(renderPartnerPersona({...createDefaultCompanion(),characterCard:normalized}, surface), /角色表达/)
+    assert.doesNotMatch(text, /用户配置的表达选项/)
+    assert.doesNotMatch(renderPartnerPersona({...createDefaultCompanion(),characterCard:normalized}, surface), /用户配置的表达选项/)
     assert.ok(text.includes('避免的回复（反例，不要模仿）：'+withContrast.examples[0].avoid))
   }
   for (const surface of ['heartbeat', 'ephemeral']) {
     const text = renderCharacterCore(normalized, surface)
-    assert.doesNotMatch(text, /角色表达|避免的回复|您好，请问/)
+    assert.doesNotMatch(text, /用户配置的表达选项|避免的回复|您好，请问/)
     assert.match(text, /严格遵守 JSON、工具和交付协议/)
   }
   assert.equal(renderCharacterCore({...normalized,enabled:false}), '')

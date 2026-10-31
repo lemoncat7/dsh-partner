@@ -28,10 +28,10 @@ async function hit(f) {
 }
 function ready(f){f.route.postReplyOpportunity.dueAt=Date.now()-1}
 
-test('probability increases with affection, capped at 45%; disabling affection retains a baseline',()=>{
+test('probability increases with affection, capped at 80%; disabling affection retains a baseline',()=>{
   const {companion}=fixture()
-  for(const [score,expected] of [[0,.05],[20,.066],[60,.194],[100,.45],[1000,.45]]){companion.affection.score=score;assert.ok(Math.abs(postReplyProbability(companion)-expected)<1e-9)}
-  companion.characterCard.affectionEnabled=false;assert.equal(postReplyProbability(companion),.05)
+  for(const [score,expected] of [[0,.45],[20,.52],[60,.66],[100,.8],[1000,.8]]){companion.affection.score=score;assert.ok(Math.abs(postReplyProbability(companion)-expected)<1e-9)}
+  companion.characterCard.affectionEnabled=false;assert.equal(postReplyProbability(companion),.45)
 })
 test('one durable draw after delivered reply; duplicate receipts cannot reroll a miss',async()=>{
   const f=fixture(), random=Math.random;Math.random=()=>.99
@@ -111,10 +111,65 @@ test('browser input leaves claimed work on an independent session intact',async(
   assert.equal(f.route.postReplyOpportunity.status,'claimed')
 })
 
-test('affection disabled still permits a continuation',async()=>{const f=fixture();f.companion.characterCard.affectionEnabled=false;await hit(f);assert.equal(f.route.postReplyOpportunity.probability,.05);ready(f);await f.runtime.idleContact('c');assert.equal(f.followed.length,1)})
+test('affection disabled still permits a continuation',async()=>{const f=fixture();f.companion.characterCard.affectionEnabled=false;await hit(f);assert.equal(f.route.postReplyOpportunity.probability,.45);ready(f);await f.runtime.idleContact('c');assert.equal(f.followed.length,1)})
 
 test('new input on the same session cancels a claimed opportunity',async()=>{
  const f=fixture();await hit(f);ready(f);await f.runtime.idleContact('c')
  await f.runtime.observeSessionEvent({id:'s'},{type:'user/message',data:{id:'new',source:{kind:'user'}}})
  assert.equal(f.route.postReplyOpportunity.status,'cancelled')
+})
+
+async function completed(f,work=true){
+ await hit(f);ready(f);await f.runtime.idleContact('c')
+ f.events.push({type:'turn/start',seq:2,time:Date.now()-30000,data:{turn:1}},{type:'user/message',seq:3,time:Date.now()-30000,data:f.followed[0]})
+ if(work)f.events.push({type:'tool/ptc-dispatch',seq:4,time:Date.now()-20000,data:{name:'partner_qq',arguments:JSON.stringify({action:'call',operation:'fetch_custom_face_detail'}),isError:false}})
+ f.events.push({type:'tool/ptc-dispatch',seq:5,time:Date.now()-20000,data:{name:'partner_activity_finish',isError:false,meta:{kind:'partner-activity-silent-v1'}}},{type:'turn/end',seq:6,time:Date.now()-20000,data:{turn:1,reason:{kind:'completed'}}})
+ f.agent.session.seq=6
+}
+async function chain(f){const random=Math.random;Math.random=()=>0;try{await f.runtime.continueCompletedActivity('c')}finally{Math.random=random}}
+test('completed silent activity with actual work gets one persisted decayed draw',async()=>{
+ const f=fixture();await completed(f);await chain(f)
+ assert.equal(f.route.postReplyOpportunity.depth,1);assert.equal(f.route.postReplyOpportunity.probability,.4)
+ assert.equal(f.route.postReplyOpportunity.status,'pending');const saved=structuredClone(f.route.postReplyOpportunity)
+ await chain(f);assert.deepEqual(f.route.postReplyOpportunity,saved)
+ ready(f);await f.runtime.idleContact('c');assert.equal(f.followed.length,2);assert.equal(f.route.idleContactState.depth,1)
+})
+test('rest-only activity stops; completed chain is capped and misses never reroll',async()=>{
+ const f=fixture();await completed(f,false);await chain(f);assert.equal(f.route.postReplyOpportunity.status,'claimed');assert.equal(f.route.idleContactState.continuationChecked,true)
+ const g=fixture();await completed(g);g.route.idleContactState.depth=4;await chain(g);assert.equal(g.route.postReplyOpportunity.probability,0);assert.equal(g.route.postReplyOpportunity.status,'missed')
+ const h=fixture();await completed(h);const random=Math.random;Math.random=()=>.99;try{await h.runtime.continueCompletedActivity('c')}finally{Math.random=random}
+ assert.equal(h.route.postReplyOpportunity.status,'missed');await chain(h);assert.equal(h.route.postReplyOpportunity.status,'missed')
+})
+test('new input, unsettled delivery and interrupted turns cannot start another action',async()=>{
+ for(const scenario of ['new','delivery','interrupted','sleep','revoked']){
+  const f=fixture();await completed(f)
+  if(scenario==='new')f.events.push({type:'user/message',seq:7,data:{id:'u2',source:{kind:'user'}}})
+  if(scenario==='delivery')f.state.notificationDeliveries=[{reply:{idleContactOrigin:{messageId:f.followed[0].id}}}]
+  if(scenario==='interrupted')f.events.at(-1).data.reason.kind='interrupted'
+  if(scenario==='sleep')f.companion.sleepState={episode:{wakeAt:Date.now()+60000}}
+  if(scenario==='revoked')f.channel.qq.identityBinding.qqIds=[]
+  await chain(f);assert.notEqual(f.route.postReplyOpportunity.status,'pending',scenario)
+ }
+})
+
+test('sleep permits only claimed activity cleanup; new input and revocation still deny it',async()=>{
+ const {qqToolAccessAdapter}=await import('../lib/channels/qq/authority.js')
+ const {idleActivityFinishTool}=await import('../lib/character/activity-tool.js')
+ const f=fixture();await hit(f);ready(f);await f.runtime.idleContact('c')
+ f.events.push({type:'turn/start',seq:2},{type:'user/message',seq:3,data:f.followed[0]})
+ f.companion.sleepState={episode:{wakeAt:Date.now()+60000}}
+ const access=()=>qqToolAccessAdapter.resolve({agent:f.agent,state:f.state,events:f.events})
+ assert.equal(qqChatOnly(f.agent,f.state),true)
+ assert.ok(access().allowedTools.includes('partner_activity_finish'))
+ assert.ok(!access().allowedTools.includes('partner_sleep'))
+ let ended=false
+ const tool=idleActivityFinishTool('c',f.store)
+ const exec={agent:f.agent,signal:new AbortController().signal,concludeTurn:()=>ended=true}
+ await tool.execute({reason:'安静休息'},exec);assert.equal(ended,true)
+ f.channel.qq.identityBinding.qqIds=[]
+ assert.ok(!access().allowedTools.includes('partner_activity_finish'))
+ await assert.rejects(tool.execute({reason:'休息'},exec),/不能忽略/)
+ f.channel.qq.identityBinding.qqIds=['834426963']
+ f.events.push({type:'user/message',seq:4,data:{id:'new',source:{kind:'user'}}})
+ await assert.rejects(tool.execute({reason:'休息'},exec),/不能忽略/)
 })

@@ -29,13 +29,13 @@ const near=(a,b)=>assert.ok(Math.abs(a-b)<.001,`${a} ≈ ${b}`)
 
 test('fatigue integrates awake time, partial sleep and offline natural wake without instant reset',async t=>{
  const f=await fixture(t);await f.seed(30);f.advance(HOUR);near(fatigueValue(f.c(),f.now()),35)
- await f.service.sleep(f.id,'r',60,'小睡',false);f.advance(10*MIN);near(fatigueValue(f.c(),f.now()),32.5)
- await f.service.wake(f.id);near(fatigueValue(f.c(),f.now()),32.5)
- f.advance(HOUR);near(fatigueValue(f.c(),f.now()),37.5)
- await f.service.sleep(f.id,'r',60,'再睡',false);f.advance(2*HOUR);near(fatigueValue(f.c(),f.now()),27.5)
- await f.service.tick();assert.equal(f.sleeping(),false);near(fatigueValue(f.c(),f.now()),27.5)
+ await f.service.sleep(f.id,'r',60,'小睡',false);f.advance(10*MIN);near(fatigueValue(f.c(),f.now()),29.166667)
+ await f.service.wake(f.id);near(fatigueValue(f.c(),f.now()),29.166667)
+ f.advance(HOUR);near(fatigueValue(f.c(),f.now()),34.166667)
+ await f.service.sleep(f.id,'r',60,'再睡',false);f.advance(2*HOUR);near(fatigueValue(f.c(),f.now()),5)
+ await f.service.tick();assert.equal(f.sleeping(),false);near(fatigueValue(f.c(),f.now()),5)
  assert.equal(f.c().sleepState.episode.wakeReason,'自然醒来')
- const reopened=(await PartnerStore.open(f.path)).snapshot().companions[0];near(fatigueValue(reopened,f.now()),27.5)
+ const reopened=(await PartnerStore.open(f.path)).snapshot().companions[0];near(fatigueValue(reopened,f.now()),5)
 })
 test('fatigue caps, elapsed minutes do not lose time, disabled freezes and clock rollback does not increase rest',()=>{
  const c={sleepPolicy:{enabled:true,dreamsEnabled:false},sleepState:{fatigue:{value:30,at:HOUR}}}
@@ -76,7 +76,7 @@ test('private calls wake gradually, deduplicate retries and bursts, and preserve
  assert.equal(f.c().sleepState.reception.calls,1);assert.equal(f.c().sleepState.reception.needed,4)
  await f.service.onUserMessage('s',f.now(),'a');await f.service.onUserMessage('s',f.now(),'burst');assert.equal(f.c().sleepState.reception.calls,1)
  for(const id of ['b','c','d']){f.advance(11_000);await f.service.onUserMessage('s',f.now(),id)}
- assert.equal(f.sleeping(),false);assert.ok(fatigueValue(f.c(),f.now())>87)
+ assert.equal(f.sleeping(),false);assert.ok(fatigueValue(f.c(),f.now())>83)
  assert.match(renderSleepContext(f.c(),'r','d',f.now()),/本轮刚被叫醒/)
  assert.doesNotMatch(renderSleepContext(f.c(),'r','unrelated',f.now()),/本轮刚被叫醒/)
 })
@@ -176,4 +176,20 @@ test('disabling sleep preserves completed records and stops sleep; partial dream
  await f.store.update(s=>{delete s.companions[0].sleepPolicy;delete s.companions[0].characterCard});const before=f.c()
  await f.store.update(s=>applyIdentity(s,s.companions[0],{sleepPolicy:{dreamsEnabled:false}},before.updatedAt,'ai'))
  assert.deepEqual(f.c().sleepPolicy,{enabled:false,dreamsEnabled:false})
+})
+
+test('tool sleep excludes its own session but refuses another active conversation; wake is shared',async t=>{
+ const f=await fixture(t),busy=new Set(['s','group-session'])
+ f.ports.busy=(_id,except)=>[...busy].some(id=>id!==except)
+ await f.store.update(s=>s.sessions.push({...s.sessions[0],id:'group-route',sessionId:'group-session',userId:'group:123:456'}))
+ const exec={signal:new AbortController().signal,agent:{session:{id:'s'}}}
+ await assert.rejects(f.service.tool(f.id).execute({action:'sleep',minutes:60,reason:'困了',dream:false},exec),/其他会话/)
+ assert.equal(f.sleeping(),false)
+ busy.delete('group-session')
+ await f.service.tool(f.id).execute({action:'sleep',minutes:60,reason:'困了',dream:false},exec)
+ assert.equal(f.sleeping(),true)
+ assert.match(renderSleepContext(f.c(),'group-route',undefined,f.now()),/不要正常热聊/)
+ await f.service.onUserMessage('group-session',f.now(),'urgent',false,true)
+ assert.equal(f.sleeping(),false)
+ assert.match(renderSleepContext(f.c(),'r',undefined,f.now()),/清醒/)
 })

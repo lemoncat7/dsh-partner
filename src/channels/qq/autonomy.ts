@@ -1,3 +1,4 @@
+import { isSleeping } from '../../character/sleep.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Companion } from '../../domain.js'
 import type { DirectMessage } from '../direct/transport.js'
@@ -50,6 +51,7 @@ export class QqGroupAutonomy {
  }
  async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,settings?:Partial<QqSettings>):Promise<boolean> {
   signal.throwIfAborted()
+  if(event.qqGroup && isSleeping(companion,this.now()) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self')return this.record(channelId,event,'伙伴正在睡眠，暂停群聊自主接话')
   if(!event.qqGroup?.autonomous)return true
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId)
   const owner=qqIdentityRelation(settings,event.sender)?.matched===true

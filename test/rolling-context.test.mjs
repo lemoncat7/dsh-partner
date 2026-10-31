@@ -128,3 +128,43 @@ test('input origins survive native persistence validation without entering model
  assert.throws(()=>validateStoredEvents({id:s.id,version:4},broken),/unknown to this harness/)
 })
 
+
+const autonomous=(s,n,body='activity-'+n)=>{
+ s.append('turn/start',{turn:n})
+ s.append('user/message',createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'},content:[{type:'text',text:body}]}),{surfaceOp:'append'})
+ assistant(s,'activity-result-'+n)
+ s.append('turn/end',{turn:n,reason:{kind:'completed'}})
+}
+test('autonomous-only conversation rolls complete turns without touching stored history',()=>{
+ const s=fixture();for(let i=1;i<=26;i++)autonomous(s,i)
+ const before=s.snapshotEvents();assert.ok(rollConversationContext(s,settings)>0)
+ assert.doesNotMatch(text(s),/activity-1"|activity-result-24"/)
+ assert.match(text(s),/activity-25/);assert.match(text(s),/activity-result-26/)
+ assert.match(text(s),/protected persona/);assert.deepEqual(s.snapshotEvents().slice(0,before.length),before)
+ assert.equal(text(Session.create('activity-replay',s.snapshotEvents())),text(s))
+ const seq=s.seq;assert.equal(rollConversationContext(s,settings),0);assert.equal(s.seq,seq)
+})
+test('autonomous activity cannot accumulate unbounded behind the last human question',()=>{
+ const s=fixture();round(s,1,'last-human-question');for(let i=2;i<=26;i++)autonomous(s,i,'activity-'+i+'x'.repeat(2000))
+ rollConversationContext(s,{...settings,rollingContextTurns:20,rollingContextMaxChars:6000})
+ assert.doesNotMatch(text(s),/activity-2x|activity-3x|last-human-question/)
+ assert.match(text(s),/activity-26x/);assert.ok(text(s).length<9000)
+ assert.equal(recallConversationHistory(s.snapshotEvents(),[],s.id,undefined,'last-human-question')[0].user,'last-human-question')
+})
+test('current autonomous tool loop is protected as one complete turn',()=>{
+ const s=fixture();for(let i=1;i<=4;i++)autonomous(s,i,'completed-'+i+'x'.repeat(3000))
+ s.append('turn/start',{turn:5});s.append('user/message',createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'},content:[{type:'text',text:'current-autonomy'}]}),{surfaceOp:'append'})
+ s.append('assistant/message',{turn:5,step:1,stream:[],message:createAssistantMessage({source:{provider:'p',model:'m'},content:[{type:'tool-call',id:'activity-tool',name:'test',arguments:'{}'}]})},{surfaceOp:'append'})
+ s.append('tool/result',{message:createToolResultMessage({callId:'activity-tool',isError:false,content:[{type:'text',text:'large-active-result'.repeat(2000)}]})},{surfaceOp:'append'})
+ rollConversationContext(s,{...settings,rollingContextMaxChars:4000})
+ assert.doesNotMatch(text(s),/completed-/);assert.match(text(s),/current-autonomy/);assert.match(text(s),/large-active-result/)
+ assert.equal(s.deriveMessages().filter(m=>m.role==='tool').length,1)
+ assert.equal(s.deriveMessages().filter(m=>m.role==='assistant').flatMap(m=>m.content).filter(b=>b.type==='tool-call').length,1)
+})
+test('unrelated plugin notices do not masquerade as autonomous conversation turns',()=>{
+ const s=fixture();round(s,1,'keep-human')
+ for(let i=0;i<10;i++){
+ s.append('turn/start',{turn:i+2});s.append('user/message',createUserMessage({source:{kind:'plugin:other',plugin:'other',form:'notice',summary:'伙伴闲时主动联系'},content:[{type:'text',text:'foreign-'+i}]}),{surfaceOp:'append'});s.append('turn/end',{turn:i+2,reason:{kind:'completed'}})
+ }
+ assert.equal(rollConversationContext(s,settings),0);assert.match(text(s),/keep-human/)
+})

@@ -8,7 +8,7 @@ import {NotificationDelivery} from '../lib/channels/notification-delivery.js'
 import {ChannelManager} from '../lib/channels/manager.js'
 import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 import {prepareChannelReply} from '../lib/channels/outbound-media.js'
-import {parseChatInput,replyDeliveryParts,withChatCompanionText} from '../lib/chat/protocol.js'
+import {segmentChatInput,segmentIdleChatReply,parseChatInput,replyDeliveryParts,withChatCompanionText} from '../lib/chat/protocol.js'
 import {StickerLibrary,stickerMediaType} from '../lib/chat/stickers.js'
 import {AttachmentDeliveryService} from '../lib/attachments/service.js'
 import {chatTools} from '../lib/chat/tools.js'
@@ -230,4 +230,42 @@ test('only a verified autonomous QQ group can conclude silently without a channe
   await assert.rejects(tool.execute({messages:[]},exec),/只有自主群聊/)
  }
  assert.equal(concluded,1)
+})
+
+test('idle fallback preserves explicit parts, structured content and long form',()=>{
+ const plain={text:'想到个事\n\n有点好笑',attachments:[]}
+ assert.equal(segmentIdleChatReply(plain,false),plain)
+ for(const text of ['只有一句','```js\na()\n\nb()\n```','说明\n\n- 项目','标题\n\n> 引用','表格\n\na | b','长'.repeat(601)+'\n\n结束','长'.repeat(201)+'\n\n结束',Array(9).fill('段').join('\n\n')]){
+  const reply={text,attachments:[]};assert.equal(segmentIdleChatReply(reply,true),reply)
+ }
+ for(const extra of [{chatParts:[{type:'text',text:plain.text}]},{chatParts:[]},{attachments:[image.attachment]}]){
+  const reply={...plain,...extra};assert.equal(segmentIdleChatReply(reply,true),reply)
+ }
+ assert.deepEqual(replyDeliveryParts(segmentIdleChatReply(plain,true)),[{type:'text',text:'想到个事'},{type:'text',text:'有点好笑'}])
+})
+
+test('single text chat tool normalizes latest real reply before metadata and delivery',async()=>{
+ const card={enabled:true,segmentedReplies:true,stickersEnabled:true}
+ const state={companions:[{id:'a',characterCard:card}],sessions:[{sessionId:'s',companionId:'a'}]}
+ const tool=chatTools('a',{snapshot:()=>state,isCompanionRemoving:()=>false},{},{},{},'/partner-local/v1')[1]
+ const exec={signal:new AbortController().signal,concludeTurn(){},agent:{session:{id:'s',snapshotEvents:()=>[start,user]}}}
+ const text='啊 还是跑群里了 那这次私聊测试没过\n我用的确实是“回复当前对象”的语音入口 没填群号 现在还不知道是哪一步发错了 先不再试发'
+ for(const enabled of [true,false]){
+  card.segmentedReplies=enabled
+  const meta=await tool.execute({messages:[{text}]},exec)
+  const reply=await prepareChannelReply(channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta}},end],0),'/unused')
+  assert.deepEqual(replyDeliveryParts(reply), (enabled?text.split('\n'):[text]).map(text=>({type:'text',text})))
+ }
+ const code='说明\n\n```js\na()\n```';card.segmentedReplies=true
+ assert.deepEqual((await tool.execute({messages:[{text:code}]},exec)).parts,[{type:'text',text:code}])
+ const explicit=[{text:'第一条\n保持边界'},{text:'第二条'}]
+ assert.deepEqual((await tool.execute({messages:explicit},exec)).parts,explicit.map(p=>({type:'text',...p})))
+})
+
+test('chat line normalization preserves sticker order and total part limit',()=>{
+ const input=[{stickerId:'before'},{text:'第一段\r\n\r\n第二段'},{stickerId:'after'}]
+ assert.deepEqual(segmentChatInput(input,true),[{stickerId:'before'},{text:'第一段'},{text:'第二段'},{stickerId:'after'}])
+ const tooMany=[{text:Array(8).fill('一段').join('\n')},{stickerId:'after'}]
+ assert.equal(segmentChatInput(tooMany,true),tooMany)
+ assert.equal(segmentChatInput(input,false),input)
 })

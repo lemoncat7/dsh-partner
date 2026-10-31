@@ -37,6 +37,9 @@ export interface EphemeralExecutionRequest {
   systemInstruction?: string
   timeoutMinutes?: number
   destroyAfterRun?: boolean
+  /** Explicit source-bound bridge; native preset tools remain inaccessible. */
+  bridgeTools?: ToolDefinition[]
+  collectOutput?: () => string
 }
 
 export interface EphemeralExecutionResult { run: ExecutionRun; output: string }
@@ -112,11 +115,12 @@ export class EphemeralExecutionService {
           if (!presets) throw new Error('Temporary partner session is missing Agent Presets')
           await presets.mount(agentCtx, request.companion.presetId)
           agentCtx.systemPrompt.section({ name: 'partner-identity', order: -10, text: renderPartnerPersona(request.companion, 'ephemeral') })
-          agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: renderToolProtocol() })
+          agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: request.bridgeTools ? '工作工具仅由当前提供的桥接入口调用，原会话权限实时校验。不要调用未提供的工具。' : renderToolProtocol() })
           if (request.systemInstruction) agentCtx.systemPrompt.section({ name: 'partner-ephemeral-task', order: -8, text: request.systemInstruction })
           agentCtx.tools.presentAs('native')
-          for (const tool of this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
-          if (request.allowedTools !== undefined) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.allowedTools)
+          for (const tool of request.bridgeTools ?? this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
+          if (request.bridgeTools) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.bridgeTools.map(t=>t.name))
+          else if (request.allowedTools !== undefined) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.allowedTools)
         },
       })
       this.active.set(sessionId, handle)
@@ -137,7 +141,7 @@ export class EphemeralExecutionService {
       request.signal?.addEventListener('abort', cancel, { once: true })
       if (request.signal?.aborted) cancel()
       try { await handle.agent.whenIdle(); request.signal?.throwIfAborted() } finally { clearTimeout(timer); request.signal?.removeEventListener('abort', cancel) }
-      output = assistantTextAfter(handle.agent, startSeq)
+      output = request.collectOutput ? request.collectOutput() : assistantTextAfter(handle.agent, startSeq)
       if (timedOut) { status = 'timed-out'; error = 'Temporary execution exceeded its time limit' }
       else if (!output) { status = 'failed'; error = 'Temporary execution produced no text result' }
       else status = 'completed'
@@ -175,5 +179,5 @@ export class ExecutionFailedError extends Error {
 }
 
 function executionSummary(kind: ExecutionKind): string {
-  return ({ skill: '伙伴执行 Skill', delegation: '伙伴执行委派任务', review: '伙伴核验看板任务', schedule: '伙伴执行定时任务' })[kind]
+  return ({ work: '伙伴独立工作', skill: '伙伴执行 Skill', delegation: '伙伴执行委派任务', review: '伙伴核验看板任务', schedule: '伙伴执行定时任务' })[kind]
 }

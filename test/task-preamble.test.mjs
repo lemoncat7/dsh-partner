@@ -49,8 +49,14 @@ test('real unified entry blocks image execution, delivers progress without concl
  agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画张图'}]}),{surfaceOp:'append'})
  let seq=0
  const call=(name,args={})=>root.tools.execute({name:'partner_tools',arguments:{action:'call',name,argumentsJson:JSON.stringify(args)},agent,signal:new AbortController().signal,callId:'call-'+seq++})
+ let collected=0
+ t.after(scope.ctx.tools.register({name:'partner_qq',description:'QQ',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{collected++;return {ok:true}}}))
+ const sticker=await call('partner_qq',{action:'call',operation:'add_custom_face'});assert.equal(sticker.value.dispatch.isError,true);assert.equal(collected,0);assert.deepEqual(sent,[])
+ const deny=scope.ctx.on('tools/pre-execute',async(exec,next)=>exec.name==='partner_qq'?{kind:'deny',reason:'permission denied'}:next())
+ const denied=await call('partner_qq',{action:'call',operation:'add_custom_face'});assert.equal(denied.value.dispatch.isError,true);assert.equal(collected,0);deny()
  const blocked=await call('generate_image');assert.equal(blocked.value.dispatch.isError,true);assert.equal(executions,0)
  const ack=await call('partner_chat_progress',{text:'等着，我来画。'});assert.equal(ack.value.dispatch.isError,false);assert.ok(!ack.concludesTurn);assert.deepEqual(sent,['等着，我来画。'])
+ const collection=await call('partner_qq',{action:'call',operation:'add_custom_face'});assert.equal(collection.value.dispatch.isError,false);assert.equal(collected,1);assert.equal(sent.length,1)
  const image=await call('generate_image');assert.equal(image.value.dispatch.isError,false);assert.equal(executions,1)
  dispose();assert.equal(scope.ctx.tools.get('partner_chat_progress',agent),undefined)
 })
@@ -64,4 +70,17 @@ test('a shared-session input from another route cannot send through the previous
  await assert.rejects(g.acknowledge('不能发到旧会话'))
  assert.equal(await g.before('generate_image',{}),undefined)
  assert.deepEqual(sent,['我先去看看。'])
+})
+
+test('sticker mutations share one persona preamble while discovery and autonomous housekeeping remain silent',async()=>{
+ const events=[{type:'turn/start'},user('u')],sent=[]
+ const g=new TaskPreambleGate(()=>events,async text=>sent.push(text))
+ assert.equal(await g.before('partner_qq',{action:'call',operation:'fetch_custom_face_detail'}),undefined)
+ for(const operation of ['add_custom_face','modify_custom_face','move_custom_face_to_front','delete_custom_face','send_group_msg','unknown'])assert.match(await g.before('partner_qq',{action:'call',operation}),/尚未执行/)
+ await g.acknowledge('这张我喜欢！我收起来，再记个名字～')
+ for(const operation of ['add_custom_face','modify_custom_face','move_custom_face_to_front','delete_custom_face'])assert.equal(await g.before('partner_qq',{action:'call',operation}),undefined)
+ assert.equal(sent.length,1)
+ events.push({type:'turn/start'},{type:'user/message',data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}})
+ assert.equal(await g.before('partner_qq',{action:'call',operation:'add_custom_face'}),undefined)
+ assert.equal(sent.length,1)
 })

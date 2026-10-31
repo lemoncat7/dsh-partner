@@ -36,6 +36,7 @@ export function isAutonomousDeliveryTurn(events: readonly SessionEvent[], histor
 }
 
 export interface ChannelReplyParts {
+  alreadyDelivered?: boolean
   chatParts?: ChatPart[]
   chatOriginRouteId?: string | null
   text: string
@@ -49,31 +50,35 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
   let answer = ''
   let chat: ChatPart[] | undefined
   let hasChat = false
+  let alreadyDelivered = false
+  let chatDelivered = false
   let chatOriginRouteId: string | null | undefined
   const ordered: ChatPart[] = []
   let references: string[] = []
   const messages: string[] = [], referenceTexts: string[] = []
   const flush = (): void => {
     if (direct) {
+      if(chatDelivered)alreadyDelivered=true
       if (chat) { ordered.push(...chat); hasChat = true; messages.push(chat.map(p => p.type === 'text' ? p.text : `[表情：${p.type==='emoji'?p.emoji.label:p.label}]`).join('\n\n')) }
       else if (answer) { messages.push(answer); ordered.push({type:'text',text:answer}) }
       referenceTexts.push(...references)
     }
-    answer = ''; references = []; chat = undefined
+    answer = ''; references = []; chat = undefined; chatDelivered=false
   }
   for (const event of events) {
     if (event.seq <= fromSeq) continue
     if (event.type === 'turn/start') { flush(); direct = autonomous }
     else if (event.type === 'turn/end') {
-      if (event.data.reason.kind !== 'completed') { answer = ''; references = []; chat = undefined }
+      if (event.data.reason.kind !== 'completed' && !chatDelivered) { answer = ''; references = []; chat = undefined }
       flush(); direct = false
     }
     else if (event.type === 'user/message' && event.data.source.kind === 'user') direct = true
     else if (isRequirementDeliveryReceipt(event) && direct && !autonomous) { /* Preserve the current user's final answer. */ }
-    else if (isInternalTaskNotice(event)) { answer = ''; references = []; chat = undefined; direct = false }
+    else if (isInternalTaskNotice(event)) { answer = ''; references = []; chat = undefined; chatDelivered=false; direct = false }
     else if (direct && chatReplyFromEvent(event)) {
       const reply=chatReplyFromEvent(event)!
       chat = reply.parts; answer = ''
+      chatDelivered=reply.delivered===true
       chatOriginRouteId = chatOriginRouteId === undefined ? reply.originRouteId : chatOriginRouteId === reply.originRouteId ? chatOriginRouteId : null
     }
     else if (direct && event.type === 'tool/result' && !chat) answer = ''
@@ -85,7 +90,7 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
     }
   }
   flush()
-  return { text: messages.join('\n\n'), referenceTexts, ...(hasChat ? {chatParts:ordered,...(chatOriginRouteId!==undefined?{chatOriginRouteId}:{})} : {}) }
+  return { text: messages.join('\n\n'), referenceTexts, ...(alreadyDelivered?{alreadyDelivered:true}:{}), ...(hasChat ? {chatParts:ordered,...(chatOriginRouteId!==undefined?{chatOriginRouteId}:{})} : {}) }
 }
 
 /** whenIdle may encompass follow-up turns: don't append internal reviews to a user reply. */

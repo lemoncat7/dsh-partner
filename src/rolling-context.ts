@@ -1,3 +1,4 @@
+import {isIdleContactNotice} from './character/idle-contact.js'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
 import type {Session,SessionEvent,SessionSeq} from '@deepseek-ai/dsh-session'
 import type {CompanionAutomation} from './domain.js'
@@ -41,11 +42,12 @@ export function rollConversationContext(session:Session,settings:CompanionAutoma
  if(!nodes.length)return snapshotsRemoved
  const turnBySeq=new Map<number,number>();let turn=-1,open=-1
  for(const e of events){if(e.type==='turn/start'){turn=e.seq;open=turn}if(e.type==='turn/end')open=-1;turnBySeq.set(e.seq,turn)}
- // Count complete user turns, not each tool step or intermediate assistant message.
+ // Count complete conversation turns, including authorized autonomous activity.
+ // Activity can continue without any real user node remaining after host compaction.
  const groups:Array<{turn:number;index:number}>=[]
  for(let i=0;i<nodes.length;i++){
   const e=nodes[i]!
-  if(e.type!=='user/message'||e.data.source.kind!=='user')continue
+  if(e.type!=='user/message'||e.data.source.kind!=='user'&&!isIdleContactNotice(e))continue
   const id=turnBySeq.get(e.seq)??e.seq
   if(groups.some(g=>g.turn===id))continue
   let start=i

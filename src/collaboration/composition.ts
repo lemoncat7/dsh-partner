@@ -1,7 +1,8 @@
+import {workflowProtocol} from './workflow-protocols.js'
+import {workExecutionTool} from '../execution/work-tool.js'
 import { idleActivityFinishTool } from '../character/activity-tool.js'
 import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
-import { SLEEP_PROMPT } from '../character/sleep.js'
-import { identityTool, IDENTITY_PROMPT } from '../companions/identity-tool.js'
+import { identityTool } from '../companions/identity-tool.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
 import type { ToolDefinition, ToolRunContext, ToolRuntime } from '@deepseek-ai/dsh-tools'
@@ -13,22 +14,19 @@ import type { PartnerStore } from '../store.js'
 import type { SkillService } from '../skills/service.js'
 import type { McpService } from '../mcp/service.js'
 import { renderEnabledSkills } from '../skills/service.js'
-import type { LoadedSkill } from '../skills/domain.js'
 import type { TaskBoardService } from '../tasks/service.js'
 import type { PartnerSchedulerService } from '../scheduler/service.js'
 import type { PartnerCollaborationService } from './service.js'
 import type { CompanionService } from '../companions/service.js'
 import type { CompanionManagementService } from '../companions/management.js'
 import type { CompanionKnowledgeMounts } from '../companions/knowledge-mounts.js'
-import { companionManagementTool, COMPANION_MANAGEMENT_PROMPT } from '../companions/management-tool.js'
+import { companionManagementTool } from '../companions/management-tool.js'
 import { RequirementService } from '../requirements/service.js'
 import { requirementTool } from '../requirements/tool.js'
 import { contractParameters, checksParameter } from '../tasks/contract.js'
 import { TaskWorkflowError } from '../tasks/workflow-error.js'
 
 type AgentCompositionContext = Context & { tools: ToolRuntime }
-const MAX_INLINE_SKILLS = 8
-const MAX_INLINE_SKILL_CHARS = 32_000
 
 /** Composes partner-only tools into one agent scope. No global tool is registered. */
 export class PartnerAgentComposition {
@@ -58,12 +56,16 @@ export class PartnerAgentComposition {
   async compose(ctx: AgentCompositionContext, companion: Companion): Promise<() => void> {
     const skillsEnabled = companion.capabilities.includes('skills')
     const enabledSkills = skillsEnabled ? this.skills.bindings(companion.id) : []
-    const inlineSkills = await loadInlineSkills(this.skills, enabledSkills)
-    const injectedSkillIds = new Set(inlineSkills.map(skill => skill.id))
     const disposers: Array<() => void> = []
     const catalog:DiscoverableTool[]=[]
+    const protocol=(name:string)=>workflowProtocol(name,this.store.snapshot().companions.find(c=>c.id===companion.id)??companion)
     const add=(tool:ToolDefinition,allowed=()=>true):void=>{
-      if(companion.toolDiscovery)catalog.push({tool,allowed})
+      const original=tool
+      tool={...original,async execute(args,exec){
+        if(!allowed())throw Error('能力已撤回')
+        return original.execute(args,exec)
+      }}
+      if(companion.toolDiscovery)catalog.push({tool,allowed,protocol:()=>protocol(tool.name)})
       else disposers.push(ctx.tools.register(tool))
     }
     const register = (tool: ToolDefinition, capability: CompanionCapability): void => {
@@ -74,6 +76,8 @@ export class PartnerAgentComposition {
       } },()=>this.store.hasCapability(companion.id,capability))
     }
     try {
+      add(workExecutionTool(companion.id,this.store,this.executor,ctx.tools,name=>protocol(name)))
+      add(textTool({name:'partner_workflow',description:'按需读取已提供的工作工具操作流程，不执行任务、不改变权限。',parameters:actionParameters(['inspect'],{tool:{type:'string'}},['tool']),async execute(raw,exec){const input=record(raw);const name=requiredText(input.tool,'tool',120);if(!ctx.tools.get(name,exec.agent))throw Error('工具当前不可用');return protocol(name)||'此工具没有额外工作流程，请查看工具自身说明。'}}))
       if (this.sleepToolFactory) add(this.sleepToolFactory(companion.id))
       add(identityTool(companion.id, this.store))
       add(idleActivityFinishTool(companion.id, this.store))
@@ -93,39 +97,14 @@ export class PartnerAgentComposition {
       add(collaborationTool(companion, this.store, this.collaboration))
       if (companion.capabilities.includes('schedules')) register(scheduleTool(companion, this.scheduler, this.store), 'schedules')
       if(companion.toolDiscovery)disposers.push(installToolDiscovery(ctx.tools,companion.id,this.store,catalog))
-      const directory = this.collaboration.directoryFor(companion.id)
       disposers.push(ctx.systemPrompt.section({
-        name: 'partner-collaboration', order: -7,
-        text: [
-        '以下是工作能力与执行流程，适用于用户的实际任务、已接受任务的续接及自动化执行。所有已授权工具始终可用；普通闲聊、玩笑、告别和情绪表达无需创建需求、看板或协作，不把聊天改写成工作计划或验收汇报。需要核实事实时仍正常使用工具。',
-        companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '',
-        IDENTITY_PROMPT,
-        this.sleepToolFactory ? SLEEP_PROMPT : '',
-        renderEnabledSkills(companion, enabledSkills, injectedSkillIds),
-        '持续关注不是待办清单：用户让你修复、生成、部署、调研时先完成工作，不因为工作尚未完成就新增关注。已有关注由你自主用 partner_concerns list/update/resolve/archive/restore 维护，无需用户另行语义授权；根据实际进展调整 priority 并说明 reason，不因沉默机械降温。尊重用户置顶/停止；明确交代的关注仅在解决或到期后归档。修改或恢复应复用原条目，永久删除只在页面操作。',
-        companion.capabilities.includes('schedules') ? '定时计划须有明确生命周期。当前工作已完成、不再需要时取消并删除对应临时计划；不得清理用户仍要求的周期交付。为看板创建临时计划时填写 boardTaskId，任务完成或删除后系统自动清理。外部任务等待仍用 defer，不要用周期 create 轮询。续接最终答复未送达、看板尚未消费回执时不要手动删除计划。' : '',
-        '看板受阻由系统持久化协调：先唤醒任务创建者排查与调整，再升级给需求负责人；只有确实无法解决或需要用户决策时由需求负责人统一汇报，不要让子伙伴直接逐项发渠道错误。保留已完成产物，不原样循环重试。',
-        companion.capabilities.includes('schedules') ? '看板内长任务等待必须使用 partner_schedule defer 并填写 boardTaskId，不用 create 周期任务轮询。系统将此任务挂起，等待说明不是交付物，不送验收。关联看板的定时唤醒只检查外部状态并 resolve 后结束，由看板恢复原任务执行 nextStep，不在唤醒里再执行一遍。未关联看板的预约才在 resolve completed 后自行继续 nextStep。completion 仅描述外部任务自己的完成条件，仍运行则 pending 保存延期；不 sleep、不为等待创建或修改 Goal。后续自动轮次先 list，未到期不重复查询。原会话提前核实 waiting 任务已完成/失败，可用 scheduleId、精确 externalTaskId、summary、outcome=completed/blocked 提前关闭且不传 runToken；running 状态必须使用当前 token。过期唤醒不执行。' : '',
-        companion.capabilities.includes('companions') ? '你拥有“创建伙伴”能力。只有用户明确要求创建新伙伴，或用户的当前需求明确要求建立一个长期独立身份时，才可调用 partner_companions；创建时必须填写清晰的身份、职责与行为准则。新伙伴不会自动获得任何能力、记忆、心跳或协作权限。若你另获伙伴管理能力，可在创建后按用户明确要求配置身份与能力；否则由用户在管理台单独授权。' : '',
-        companion.capabilities.includes('administration') ? COMPANION_MANAGEMENT_PROMPT : '',
-        companion.capabilities.includes('access') ? '你拥有“伙伴授权”能力。只有用户明确要求时，才可配置某个伙伴访问另一个伙伴的单向关系；如果用户要求你创建伙伴并同时说明它应访问谁，创建成功后应继续完成授权，不必等待用户再次提醒。不得推断、扩大或双向化用户没有要求的权限。' : '',
-        companion.capabilities.includes('schedules') ? '关注与定时任务按交付意图区分：持续观察、有变化再通知，调用 partner_concern_suggest 保存“在意的事”。明确按时执行或周期交付才用 partner_schedule create。例外：已提交并拿到任务 ID 的长时间工作，可用 partner_schedule defer 预约一次性续接，无需绑定 Skill：填写稳定 taskKey、externalTaskId、title、check 检查方法、nextStep 授权的后续步骤、delayMinutes（默认2）、deadlineMinutes（默认1440）、maxAttempts（默认12）。原会话由工具自动记录；相同 taskKey 幂等，不重复预约。返回成功后结束当前轮次。唤醒后检查已有任务，不重复提交；resolve 携带 scheduleId、runToken、summary 和 outcome=pending/completed/blocked，pending 保存延期后结束；用户取消用 cancel。关闭能力即禁止预约和执行。不要用此功能替代关注、当前可立即完成的工作或绕过授权，凭据不得存入计划。' : '',
-        '你可以使用伙伴看板维护工作。只有下面明确列出的授权伙伴可被你查看公开能力、分配或委派；用户本人在管理台直接指派伙伴不受此伙伴间授权限制。用户以“@伙伴名”要求协作时，先在授权目录解析稳定 id，再创建或选定看板任务并真实委派，不得只口头声称对方会处理。',
-        '收到需求时主动应用用途匹配的已启用 Skill，不必等待用户再次点名触发。未启用的 Skill 不作为指令注入，也不自动开启。',
-        '看板工具语义：partner_task_board create 指定 assignee 后默认 autoRun=true，任务持久化后进入执行队列；dependencyTaskIds 全部验收为 done 后才启动。autoRun=false 只保存规划、不执行。为已有任务提交执行使用 partner_collaborate delegate。工具返回 submitted/queued 仅表示已提交/排队，不表示完成。',
-        '看板状态协议：执行结果进入 review，由验收者 accept 或 reject；任务终态内部通知创建者，后续任务自动接续。执行、重试、待验收和返工不逐项通知渠道。仅当需求只剩已完成/受阻任务且没有排队执行时统一汇报成果和阻塞，不以归档为前提；只要还有收集箱、待开始、执行中或待验收就不发阶段通知。确认完整范围且全部任务完成后汇总归档。需求变更用 partner_requirements update，具体任务变更用 partner_task_board update；打回必须填写明确缺项和修正要求，并针对实际读取的 expectedRevision 决策。',
-        directory.length > 0 ? `已授权伙伴：${directory.map(item => `@${item.name}（id: ${item.id}；${item.role}；职责：${item.description || '见角色'}；能力：${item.capabilities.join('、') || '未声明'}；Skill：${item.enabledSkills.map(skill => skill.name).join('、') || '无'}；${item.availability}）`).join('；')}` : '当前没有授权你访问的其他伙伴；你仍可读写共享看板和维护自己的任务。',
-        `你自己的伙伴 id：${companion.id}。`,
-        '临时 SSH 授权不等于永久挂载，也不会自动共享给其他伙伴。需委派远程任务时，先以 autoRun=false 建立有明确负责人的看板任务，再通过 ssh 入口 describe 操作 ssh_request_temporary_access，随后 call，arguments 提交 target、task、taskId；原操作核验真实用户授意，无需重复审批弹窗。只有 granted=true 才提交同一任务执行。granted=false 时完整展示授权范围并等待用户在聊天中确认，禁止自己重复请求。执行者若已收到任务绑定授权，通过同一 ssh 入口 describe/call 操作 ssh_temporary_exec，不再申请或借用创建者的会话权限。旧版仅在真实暴露同名独立工具时直接调用。任务结束、取消、改派或要求变更后授权失效。',
-        '伙伴间只共享公开身份、公开能力、任务信封与结果摘要，不共享私有会话、凭据、长期记忆或渠道内容。',
+        name:'partner-collaboration',order:-7,
+        text:[companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '伙伴能力通过当前工具调用。工作流程可用 partner_workflow 查询，Skill 使用 partner_skill 加载；权限以实际校验为准。',
+          '任务分流：用户要求实际查证、排障、寻找实现方案或重新核实旧结论时，先回应再直接调用 partner_work_execute，将调查过程留在独立工作上下文，事实结果返回后由原会话答复。不要把这种请求改答成通用知识或工具目录介绍。只问概念、仅查工具清单、普通聊天和一次轻量操作直接处理；已有看板任务或明确委派沿用原任务，不重复执行。',
+          '当前目录只代表已暴露的能力，不代表所有实现方案均已调查。区分未提供入口、尚未验证和实际失败；需要调查的请求应继续检索或验证。',
+          renderEnabledSkills(companion,enabledSkills),
+          `当前伙伴 id：${companion.id}。授权伙伴目录通过 partner_collaborate directory 查询；流程说明通过 partner_tools describe 或 partner_workflow inspect 按需读取。`,
         ].filter(Boolean).join('\n\n'),
-      }))
-      if (inlineSkills.length > 0) disposers.push(ctx.systemPrompt.section({
-        name: 'partner-inline-skills', order: -6,
-        text: [
-          '以下是已启用且经校验的可信 inline Skill 指令。每次接到需求先对照其用途；明确点名或用途匹配时必须主动应用，不需要用户再说触发词，也无需重复调用 partner_skill load。采用时用一句话说明所用 Skill 与对应产出，后续落实为真实工具操作；不匹配时不要强行套用。伙伴 Skill 与原生 skill 工具是不同目录，禁止用原生 skill(name=...) 加载这里的技能；需要读取时使用 partner_skill load。',
-          ...inlineSkills.map(skill => `<partner-inline-skill id="${skill.id}" name="${skill.displayName}">\n资源目录：${JSON.stringify(skill.rootPath)}（相对路径均基于此目录；读取或执行仍需现有工具权限）。\n${skill.body}\n</partner-inline-skill>`),
-        ].join('\n\n'),
       }))
     } catch (error) {
       disposeAll(disposers)
@@ -180,19 +159,6 @@ function disposeAll(disposers: Array<() => void>): void {
   for (let index = disposers.length - 1; index >= 0; index -= 1) disposers[index]?.()
 }
 
-async function loadInlineSkills(service: SkillService, enabled: ReturnType<SkillService['bindings']>): Promise<LoadedSkill[]> {
-  const loaded: LoadedSkill[] = []
-  let characters = 0
-  for (const metadata of enabled) {
-    if (!metadata.trusted || metadata.executionContext !== 'inline' || loaded.length >= MAX_INLINE_SKILLS) continue
-    const skill = await service.load(metadata.id).catch(() => undefined)
-    if (!skill || characters + skill.body.length > MAX_INLINE_SKILL_CHARS) continue
-    loaded.push(skill)
-    characters += skill.body.length
-  }
-  return loaded
-}
-
 function companionTool(companions: CompanionService): ToolDefinition {
   return textTool({
     name: 'partner_companions',
@@ -230,7 +196,7 @@ function companionTool(companions: CompanionService): ToolDefinition {
 function skillTool(companion: Companion, skills: SkillService, executor: EphemeralExecutionService): ToolDefinition {
   return textTool({
     name: 'partner_skill',
-    description: 'List, load, or execute Skills enabled for this companion. For an actual work request that may match an authorized companion specialty, proactively apply the enabled task-planning Skill to decide assignment and decomposition, then use partner_task_board and partner_collaborate for real delegation; do not wait for the user to name the Skill or @ a companion. Follow already-injected inline instructions directly; use load only when trusted inline instructions are not yet available, and execute fork Skills in a temporary session. Partner Skills belong to partner_skill, not the native skill tool: never call skill(name="task-planning") for this catalog. A Skill never grants tools outside current DSH permissions.',
+    description: 'List, load, or execute Skills enabled for this companion. For an actual work request that may match an authorized companion specialty, proactively apply the enabled task-planning Skill to decide assignment and decomposition, then use partner_task_board and partner_collaborate for real delegation; do not wait for the user to name the Skill or @ a companion. Read the full enabled inline Skill with load before applying it; execute fork Skills in a temporary session. Partner Skills belong to partner_skill, not the native skill tool: never call skill(name="task-planning") for this catalog. A Skill never grants tools outside current DSH permissions.',
     parameters: actionParameters(['list', 'load', 'run'], {
       skillId: { type: 'string', description: 'Installed Skill id.' },
       input: { type: 'string', description: 'Concrete task or arguments for the Skill.' },

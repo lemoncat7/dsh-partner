@@ -116,7 +116,7 @@ test('single QQ entry discovers categories before bounded operation lists and in
  assert.equal(tools.length,1)
  const initial=await f.tool.execute({action:'list'},f.exec)
  assert.equal(initial.channels[0].actions,undefined)
- assert.equal(initial.channels[0].categories.length,10)
+ assert.equal(initial.channels[0].categories.length,11)
  assert.doesNotMatch(JSON.stringify(initial),/set_qq_profile|parameters/)
  const detail=await f.tool.execute({action:'list',category:'profile'},f.exec)
  assert.ok(detail.channels[0].actions.some(a=>a.id==='set_qq_profile'))
@@ -138,4 +138,58 @@ test('QQ discovery and empty API acknowledgements satisfy DSH canonical JSON out
   const result=await root.tools.execute({callId:'qq-'+(++n),name:'partner_qq',arguments:args,agent,signal:signal()})
   assert.equal(result.isError,false,JSON.stringify(result));if(args.action==='call')assert.equal(result.value.result,null)
  }
+})
+
+test('QQ sticker collection validates image, checks MD5 and refreshes after mutation',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'qq-stickers-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ const data=Buffer.from('GIF89a\x01\x00\x01\x00');await writeFile(join(dir,'happy.gif'),data);await writeFile(join(dir,'bad.txt'),'not image')
+ const f=fixture();f.state.sessions[0].cwd=dir;let existing=[],changed=0;const calls=[]
+ const tool=qqActionTools('c',f.store,async(id,name,params,signal,guard)=>{guard();calls.push({name,params});return name==='fetch_custom_face_detail'?existing:{emoji_id:'new-sticker'}},()=>changed++)[0]
+ const run=(file,callId)=>tool.execute({action:'call',operation:'add_custom_face',params:{file}},{...f.exec,callId})
+ await assert.rejects(run('bad.txt','bad'),/只支持/);assert.equal(calls.length,0)
+ const added=await run('happy.gif','add');assert.equal(added.result.emoji_id,'new-sticker');assert.equal(changed,1)
+ const {qqCustomCatalog}=await import('../lib/channels/qq/catalog.js')
+ assert.equal(added.stickerId,'qq-custom-'+qqCustomCatalog([{emoji_id:added.result.emoji_id}])[0].id);assert.match(added.next,/modify_custom_face/)
+ assert.deepEqual(calls.map(c=>c.name),['fetch_custom_face_detail','add_custom_face']);assert.equal(calls[1].params.file,'base64://'+data.toString('base64'))
+ existing=[{emoji_id:'new-sticker',md5:(await import('node:crypto')).createHash('md5').update(data).digest('hex')}]
+ const duplicate=await run('happy.gif','another');assert.equal(duplicate.alreadyCollected,true);assert.equal(duplicate.stickerId,added.stickerId);assert.equal(changed,1);assert.equal(calls.filter(c=>c.name==='add_custom_face').length,1)
+ await tool.execute({action:'call',operation:'modify_custom_face',params:{emoji_id:'new-sticker',desc:'开心 得意'}},{...f.exec,callId:'rename'});assert.equal(changed,2)
+ f.channel.qq.enabledActions=[];await assert.rejects(run('happy.gif','revoked'),/关闭|当前会话可用/)
+})
+test('failed sticker mutation invalidates cache without retrying unknown result',async()=>{
+ const f=fixture();let changed=0,calls=0
+ const tool=qqActionTools('c',f.store,async()=>{calls++;throw Error('offline')},()=>changed++)[0]
+ const args={action:'call',operation:'move_custom_face_to_front',params:{emoji_id:'known'}}
+ await assert.rejects(tool.execute(args,f.exec),/勿自动/);assert.equal(changed,1)
+ assert.equal((await tool.execute(args,f.exec)).duplicate,true);assert.equal(calls,1)
+})
+
+test('guest collection works without private capabilities but cannot access other channels or private APIs',async t=>{
+ const f=fixture(),dir=await mkdtemp(join(tmpdir(),'qq-public-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ await writeFile(join(dir,'face.gif'),Buffer.from('GIF89a\x01\x00\x01\x00'))
+ const route=f.state.sessions[0];Object.assign(route,{id:'route',kind:'channel',channelId:'qq',userId:'834426963',inboundMessageIds:['u'],cwd:dir})
+ f.channel.qq.identityBinding={enabled:true,qqIds:['12345678']};f.channel.qq.autonomousActions=false
+ f.exec.agent.session.snapshotEvents=()=>[{type:'user/message',data:{id:'u',source:{kind:'user'},content:[]}}]
+ f.state.channels.push({...f.channel,id:'other',qq:{...f.channel.qq,autonomousActions:true}})
+ const calls=[]
+ const tool=qqActionTools('c',f.store,async(id,name,params,_signal,guard)=>{guard();calls.push({id,name,params});return name==='fetch_custom_face_detail'?[]:{emoji_id:'new-public'}})[0]
+ const invoke=args=>tool.execute(args,{...f.exec,callId:JSON.stringify(args)})
+ const listed=await invoke({action:'list',category:'stickers'})
+ assert.equal(listed.channels.length,1);assert.equal(listed.channels[0].id,'qq')
+ assert.deepEqual(listed.channels[0].actions.map(a=>a.id).sort(),['fetch_custom_face_detail','add_custom_face','modify_custom_face','move_custom_face_to_front','delete_custom_face'].sort())
+ const add=await invoke({action:'call',operation:'add_custom_face',params:{file:'face.gif'}})
+ assert.match(add.stickerId,/^qq-custom-/)
+ await invoke({action:'call',operation:'modify_custom_face',params:{emoji_id:'new-public',desc:'开心'}})
+ await invoke({action:'call',operation:'delete_custom_face',params:{emoji_id:'new-public'}})
+ assert.equal(calls.at(-1).name,'delete_custom_face')
+ const count=calls.length
+ for(const args of [
+  {action:'call',operation:'send_qzone_msg',params:{content:'no'}},
+  {action:'describe',operation:'set_qq_profile'},
+  {action:'call',channelId:'other',operation:'fetch_custom_face_detail'},
+ ])await assert.rejects(invoke(args))
+ assert.equal(calls.length,count)
+ f.channel.qq.enabledActions=[];await assert.rejects(invoke({action:'call',operation:'fetch_custom_face_detail'}))
+ f.channel.qq.enabledActions=['fetch_custom_face_detail'];f.state.pairings[0].status='blocked'
+ await assert.rejects(invoke({action:'call',operation:'fetch_custom_face_detail'}));assert.equal(calls.length,count)
 })

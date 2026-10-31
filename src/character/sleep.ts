@@ -50,6 +50,7 @@ export function renderSleepContext(companion: Companion, routeId: string | strin
   const fatigue = fatigueValue(companion, now), receipt = companion.sleepState?.reception
   const sleeping = isSleeping(companion, now)
   const text = [`【当前休息状态】疲惫 ${Math.round(fatigue)}/100 · ${fatigueLabel(fatigue)}；${sleeping ? '正在睡眠' : '清醒'}。疲惫随清醒时间增加，随实际睡眠时间慢慢恢复；被叫醒不会归零。保持当前人格的表达。`]
+  if (sleeping) text.push('睡眠状态由同一个伙伴的所有会话共享，不因切换私聊或群聊而清醒。当前仍在睡眠：不要正常热聊、主动接话或开展新活动；被直接呼唤时按人格简短、迷糊地回应或保持安静。需要恢复正常交流时，先用 partner_sleep wake 真正更新共享状态，不能只口头说醒了。')
   if (receipt && messageId && receipt.messageId === messageId && now - receipt.at < 15 * 60_000) {
     text.push(receipt.state === 'sleeping' && sleeping
       ? `本轮是睡眠中的私聊呼唤，已经回应唤醒 ${receipt.calls}/${receipt.needed} 次，仍未清醒。用当前人格给一个简短、迷糊的睡眠回应（如 zzz、唔…zzz，仅作示意，可自行表达，不固定复读），不要当作完整清醒的工作答复，也不要假装已处理请求。正在做的梦已中断，已完成的片段仍保留。醒后接续尚未处理的请求。用户明确要求立刻醒来、停止睡眠或遇到紧急事项时可用 partner_sleep wake。`

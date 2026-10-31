@@ -12,7 +12,7 @@ import { roleTextForCard } from './domain.js'
 import { fatigueValue, settleFatigue, fatigueSleepProbability, fatigueSleepMinutes, wakeCallsNeeded } from './fatigue.js'
 import { isSleeping, sleepActivity, sleepPolicy, sleepWorkPending, type Dream } from './sleep.js'
 
-type Ports = { busy(id: string): boolean; archived(sessionId: string): boolean; now?(): number; random?(): number }
+type Ports = { busy(id: string, exceptSessionId?: string): boolean; archived(sessionId: string): boolean; now?(): number; random?(): number }
 const IDLE_MS = 3 * 60_000
 /** A separate, read-only memory consumer. No reflection, memory writes, session turns or deliveries. */
 export class SleepService {
@@ -65,7 +65,7 @@ export class SleepService {
         const e = status.episode!
         if (e.dream === 'generating') e.dream = 'interrupted'
         if (e.dreamAllowed && ['pending', 'interrupted'].includes(e.dream)) e.nextDreamAt = at + 15 * 60_000
-        if (!privateMessage) return // Group chatter may interrupt a dream, but does not accumulate wake calls.
+        if (!privateMessage && !urgent) return // Ordinary group chatter never accumulates wake calls.
         const pressure = status.wakePressure
         const recent = pressure?.episodeId === e.id && at - pressure.at < 10 * 60_000
         const count = recent ? pressure!.count + (at - pressure!.at >= 10_000 ? 1 : 0) : 1
@@ -111,7 +111,8 @@ export class SleepService {
       if (!sleepPolicy(c).enabled) throw new Error('自主睡眠未开启')
       if (sleepWorkPending(state, id)) throw new Error('仍有待执行或执行中的任务，完成后再休息')
       if (isSleeping(c, now)) throw new Error('已经在休息，不重复延长睡眠')
-      if (expectedActivity !== undefined && (sleepActivity(state, c) !== expectedActivity || this.ports.busy(id))) throw new Error('已经有新活动，本次不入睡')
+      if (this.ports.busy(id, expectedActivity === undefined ? route.sessionId : undefined)) throw new Error('其他会话仍在回复或执行任务，完成后再休息')
+      if (expectedActivity !== undefined && sleepActivity(state, c) !== expectedActivity) throw new Error('已经有新活动，本次不入睡')
       settleFatigue(c, now)
       const status = c.sleepState!
       delete status.reception; delete status.wakePressure

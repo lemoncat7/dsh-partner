@@ -157,7 +157,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     composer.setMcpService(mcp)
     executor.setMcpTools(id => mcp.definitions(id))
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer)
-    const sleep = new SleepService(ctx, store, memory, { busy: id => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation'), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
+    const sleep = new SleepService(ctx, store, memory, { busy: (id, exceptSessionId) => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation' && (!exceptSessionId || a.sessionId !== exceptSessionId)), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
     agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
@@ -195,7 +195,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       qqCatalogs.set(key,{at:Date.now(),faces});if(qqCatalogs.size>100)qqCatalogs.delete(qqCatalogs.keys().next().value!)
       try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
     }))
-    composer.setChatToolFactory(id => [...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args)),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args))])
+    composer.setChatToolFactory(id => [...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {

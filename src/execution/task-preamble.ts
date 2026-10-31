@@ -7,7 +7,9 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 const conversational = new Set(['partner_tools','partner_channel_access','partner_chat_progress','partner_chat_reply','partner_stickers','partner_qq_reply','partner_activity_finish','partner_identity','partner_sleep'])
 export function needsTaskPreamble(name:string,args:unknown):boolean {
   if(conversational.has(name))return false
-  const action=args && typeof args==='object' ? (args as {action?:unknown}).action : undefined
+  const input = args && typeof args === 'object' ? args as {action?:unknown;operation?:unknown} : undefined
+  const action = input?.action
+  if(name === 'partner_qq' && action === 'call' && input?.operation === 'fetch_custom_face_detail')return false
   return !['list','describe','load','unload','reference','inspect'].includes(String(action))
 }
 /** Only the active user turn can request a private-channel acknowledgement. */

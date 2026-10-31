@@ -72,3 +72,14 @@ test('bounded observations exclude the current and later events from the context
  const context=JSON.parse(gate.context('c',input('message-98',{},'98')))
  assert.equal(context.length,16);assert.equal(context.at(-1).text,'message-97')
 })
+
+test('shared sleep stops an ongoing hot group thread before semantic classification',async()=>{
+ let calls=0;const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return undefined})
+ const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'聊着呢')
+ const sleeping={...companion,sleepPolicy:{enabled:true},sleepState:{episode:{wakeAt:context.now+60000}}}
+ assert.equal(await gate.shouldReply('c',input('然后呢'),sleeping,signal()),false)
+ assert.equal(calls,0);assert.match(gate.status('c').reason,/睡眠/)
+ assert.equal(await gate.shouldReply('c',input('醒醒',{mentioned:true}),sleeping,signal()),true)
+ sleeping.sleepState.episode.wokeAt=context.now
+ assert.equal(await gate.shouldReply('c',input('然后呢'),sleeping,signal()),true)
+})

@@ -45,7 +45,7 @@ test('role and chat preferences survive companion serialization without reducing
   assert.equal(saved.characterCard.chatStyle, input.characterCard.chatStyle)
   assert.deepEqual(saved.capabilities, input.capabilities)
   const prompt = renderPartnerPersona(saved, 'conversation')
-  assert.match(prompt, /工具与工作能力保持完整/)
+  assert.match(prompt, /工具权限与结果/)
   assert.match(prompt, /玩笑直接接/)
   for (const surface of ['heartbeat','ephemeral']) assert.doesNotMatch(renderPartnerPersona(saved, surface), /角色表达|本轮聊天提醒/)
   assert.doesNotMatch(renderPartnerPersona({...saved,characterCard:{...saved.characterCard,enabled:false}}), /角色表达|坦率的同行者/)
@@ -65,7 +65,7 @@ test('turn guidance works without a memory service, combines consecutive message
   assert.equal(await runtime.prepareConversationContext(agent,signal),true)
   assert.equal(sections.size,1)
   assert.match([...sections.values()][0].text,/连续发了 2 条/)
-  assert.match([...sections.values()][0].text,/全部已授权工具/)
+  assert.doesNotMatch([...sections.values()][0].text,/任务回应流程|自然坦率/)
   assert.equal(await runtime.prepareConversationContext(agent,signal),false)
   config.companion = {...companion,characterCard:{...companion.characterCard,enabled:false}}
   config.revision = '2'
@@ -74,54 +74,47 @@ test('turn guidance works without a memory service, combines consecutive message
   assert.equal(session.snapshotEvents().length,2,'guidance must not rewrite stored session history')
 })
 
-test('chat behavior never asks for a transport tool or synthetic wait', () => {
-  const text = renderConversationBehavior(normalizeCharacterCard({enabled:true,roleText:'随和',length:'short'}))
-  assert.match(text,/不凑满一至三句/)
-  assert.match(text,/不要逐词拆句或人为延迟/)
-  assert.match(text,/私聊明确找你时必须有可见回复/)
-  assert.equal(renderConversationTurn(undefined,2),'')
+test('persona and protocols stay stable while expression options occur once in current context', () => {
+ const card=normalizeCharacterCard({enabled:true,roleText:'独特角色说明',chatStyle:'独特聊天偏好',length:'short',segmentedReplies:true,stickersEnabled:true})
+ const before=JSON.stringify(card)
+ const persona=renderPartnerPersona({...createDefaultCompanion(),characterCard:card})
+ assert.equal(persona.split(card.roleText).length-1,1)
+ assert.equal(persona.split(card.chatStyle).length-1,1)
+ assert.doesNotMatch(persona,/篇幅偏好/)
+ assert.match(persona,/任务回应流程/)
+ assert.match(persona,/分段回复已开启/)
+ assert.match(persona,/partner_chat_progress/)
+ for(const autonomous of [false,true]) {
+  const turn=renderConversationTurn(card,2,autonomous)
+  for(const stable of [card.roleText,card.chatStyle,'任务回应流程','聊天投递协议']) assert.ok(!turn.includes(stable))
+ }
+ assert.match(renderConversationTurn(card,1),/篇幅偏好：简短/)
+ assert.equal(renderConversationTurn(undefined,2),'')
+ assert.equal(renderConversationTurn({...card,enabled:false},2),'')
+ assert.match(renderConversationTurn(card,2),/连续发了 2 条/)
+ assert.match(renderConversationTurn(card,1,true),/partner_activity_finish/)
+ assert.equal(JSON.stringify(card),before)
 })
 
-
-test('segmentation permits multiple messages without encouraging a second reply at each turn', () => {
-  const card=normalizeCharacterCard({enabled:true,roleText:'坦率的同行者',length:'short',segmentedReplies:true,stickersEnabled:true})
-  const behavior=renderConversationBehavior(card),turn=renderConversationTurn(card,1)
-  assert.match(behavior,/篇幅偏好：简短/)
-  for(const prompt of [behavior,turn]) {
-    assert.match(prompt,/分段回复已开启/)
-    assert.match(prompt,/允许分段，不是要求多发/)
-    assert.doesNotMatch(prompt,/优先分成两条|有前后两个接话点时分别发两条/)
-    assert.match(prompt,/表情包已开启/)
-    assert.match(prompt,/partner_chat_reply/)
-    assert.match(prompt,/不每轮固定发/)
-  }
-  assert.doesNotMatch(renderConversationTurn({...card,enabled:false},1),/partner_chat_reply/)
-  assert.match(renderConversationTurn({...card,segmentedReplies:false},1),/文字只用一条/)
-  assert.match(renderConversationTurn({...card,stickersEnabled:false},1),/不查找或提交表情/)
-  assert.doesNotMatch(renderConversationTurn({...card,stickersEnabled:false,segmentedReplies:false},1),/partner_chat_reply/)
+test('delivery settings retain exact channel operations without prescribing expression',()=>{
+ const card=normalizeCharacterCard({enabled:true,roleText:'任何风格',segmentedReplies:true,stickersEnabled:true})
+ const text=renderConversationBehavior(card)
+ for(const name of ['partner_chat_reply','stickerId','partner_stickers','partner_qq_reply','partner_chat_progress','partner_requirements'])assert.ok(text.includes(name))
+ assert.match(text,/每次最多两张/)
+ assert.match(text,/确认送达后继续/)
+ assert.match(text,/已确认送达的文字、图片或语音不重复发送/)
+ assert.doesNotMatch(text,/一两句|吐槽|撒娇|得意|自然语意|优先考虑用一张|全部已授权工具/)
+ assert.match(renderConversationBehavior({...card,segmentedReplies:false}),/文字只用一条/)
+ assert.match(renderConversationBehavior({...card,stickersEnabled:false}),/不查找或提交表情/)
+ assert.doesNotMatch(renderConversationBehavior({...card,segmentedReplies:false,stickersEnabled:false}),/【聊天投递协议】/)
 })
 
-
-test('tool discovery never changes the full persona or drops dialogue examples',()=>{
- const companion={...createDefaultCompanion(),characterCard:normalizeCharacterCard({enabled:true,roleText:'## 你是谁\n坦率的同行者。\n\n## 对话参考\n对方：下雨了。\n回应：那今天就赖着。',chatStyle:'接话直接，不机械追问'})}
- const regular=renderPartnerPersona({...companion,toolDiscovery:false},'conversation')
- const discovered=renderPartnerPersona({...companion,toolDiscovery:true},'conversation')
- assert.equal(discovered,regular);assert.ok(discovered.includes(companion.characterCard.roleText));assert.match(discovered,/接话直接/)
- const turn=renderConversationTurn(companion.characterCard,1)
- assert.match(turn,/你仍是同一个角色/);assert.match(turn,/人格说明/)
- const activity=renderConversationTurn(companion.characterCard,1,true)
- assert.match(activity,/partner_activity_finish/);assert.doesNotMatch(activity,/直接私聊需要可见回复/)
-})
-
-for(const length of ['short','natural','rich'])test(`persona instructions retain expression control for ${length} replies including work`,()=>{
- const card=normalizeCharacterCard({enabled:true,roleText:'处理工作也保持简短口语，问起细节再解释。',chatStyle:'按自己的设定说话。',length})
- const text=renderConversationBehavior(card)+'\n'+renderConversationTurn(card,1)
+for(const length of ['short','natural','rich'])test(`configured expression is preserved once for ${length}`,()=>{
+ const card=normalizeCharacterCard({enabled:true,roleText:'处理工作也保持自己的表达。',chatStyle:'按自己的设定说话。',length})
+ const text=renderPartnerPersona({...createDefaultCompanion(),characterCard:card})+'\n'+renderConversationTurn(card,1)
+ assert.equal(text.split('【用户配置的表达选项】').length-1,1)
  assert.match(text,/具体角色说明和本轮用户要求优先/)
- assert.match(text,/处理工作也保持简短口语/)
- assert.doesNotMatch(text,/不受闲聊字数限制|工作交付按需要展开|3–20|仅用于日常对话/)
-})
-
-test('Markdown role title does not displace the actual personality in per-turn reminders',()=>{
- const card=normalizeCharacterCard({enabled:true,roleText:'# 角色卡：小岚\n\n## 一、你是谁\n直率好胜，喜欢冒险，遇到玩笑会接梗。\n\n## 说话方式\n按眼前话题自然接话。'})
- for(const autonomous of [false,true])assert.match(renderConversationTurn(card,1,autonomous),/直率好胜，喜欢冒险，遇到玩笑会接梗/)
+ assert.ok(text.includes(card.roleText))
+ assert.ok(text.includes(card.chatStyle))
+ assert.doesNotMatch(text,/不受闲聊字数限制|工作交付按需要展开|不凑满一至三句/)
 })

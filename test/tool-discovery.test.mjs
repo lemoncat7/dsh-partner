@@ -51,9 +51,9 @@ test('QQ adapter lists only authorized abilities, changes identity without chang
  for(const [id,userId] of [['owner','12345678'],['guest','22345678']])f.state.sessions.push({id,kind:'channel',channelId:'qq',userId,companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[]})
  const send=id=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'hello'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'});f.state.sessions.find(s=>s.id===id).inboundMessageIds.push(m.id)}
  const before=f.root.tools.schemas(f.agent)
- send('owner');let access=await f.invoke('partner_channel_access');assert.ok(access.value.tools.some(t=>t.name==='partner_identity'));assert.ok(access.value.tools.some(t=>t.name==='host_private'))
+ send('owner');let access=await f.invoke('partner_channel_access',{offset:0});assert.ok(access.value.tools.some(t=>t.name==='partner_identity'));assert.ok(access.value.tools.some(t=>t.name==='host_private'))
  assert.equal((await f.call('partner_identity')).value.dispatch.isError,false)
- send('guest');access=await f.invoke('partner_channel_access');assert.deepEqual(access.value.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
+ send('guest');access=await f.invoke('partner_channel_access',{offset:0});assert.deepEqual(access.value.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
  assert.equal((await f.call('partner_identity')).isError,true);assert.equal((await f.invoke('partner_identity')).isError,true)
  assert.equal((await f.invoke('partner_tools',{action:'describe',name:'host_private'})).isError,true)
  assert.equal((await f.call('partner_chat_reply')).value.dispatch.isError,false)
@@ -87,7 +87,7 @@ test('revoked catalogue entries and recursive gateway calls never execute',async
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_test'),allowed:()=>allowed}]))
  allowed=false
  for(const name of ['partner_test','partner_tools','partner_channel_access','run_code'])assert.equal((await f.call(name)).isError,true)
- const listed=await f.invoke('partner_channel_access');assert.deepEqual(listed.value.tools,[])
+ const listed=await f.invoke('partner_channel_access');assert.equal(listed.value.total,0);assert.deepEqual(listed.value.categories,[]);assert.equal(listed.value.tools,undefined)
  f.state.sessions=[];assert.equal((await f.invoke('partner_channel_access')).isError,true)
 })
 test('discovery setting remains validated and participates in next-turn composition revision',()=>{
@@ -184,4 +184,24 @@ test('missing tools are distinguished from revoked permissions',async t=>{
  assert.equal(missing.isError,true);assert.match(JSON.stringify(missing.content),/未注册或已结束/)
  const revoked=await f.call('revoked')
  assert.equal(revoked.isError,true);assert.match(JSON.stringify(revoked.content),/当前渠道未授权/)
+})
+
+
+test('permission summary is bounded and paginated, never dumps the whole tool catalogue',async t=>{
+ const f=fixture(t)
+ const tools=Array.from({length:93},(_,i)=>definition('mcp__test_'+i))
+ tools.push(definition('partner_work_execute'))
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,tools.map(tool=>({tool,allowed:()=>true}))))
+ const summary=await f.invoke('partner_channel_access')
+ assert.equal(summary.value.total,94);assert.equal(summary.value.tools,undefined)
+ assert.ok(JSON.stringify(summary.value).length<1800);assert.match(summary.value.next,/partner_work_execute/)
+ const found=[]
+ for(let offset=0;offset<93;offset+=12){
+  const page=await f.invoke('partner_channel_access',{category:'mcp',offset})
+  assert.ok(page.value.tools.length<=12);found.push(...page.value.tools.map(t=>t.name))
+ }
+ assert.equal(new Set(found).size,93)
+ const empty=await f.invoke('partner_tools',{action:'list',query:'browser'})
+ assert.deepEqual(empty.value.tools,[]);assert.match(empty.value.next,/partner_work_execute/)
+ assert.equal((await f.invoke('partner_channel_access',{offset:-1})).isError,true)
 })

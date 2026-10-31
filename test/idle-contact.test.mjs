@@ -273,3 +273,15 @@ test('restart recovery respects silence in the exact autonomous turn',async()=>{
  f.events[2].data.id='other-idle'
  assert.equal(await f.runtime.idleContactDeliveryCurrent(origin),true)
 })
+
+test('idle plain final paragraphs become bubbles only with segmentation enabled',async()=>{
+ const text='忽然想了个双人关卡 一个人只能看见路 另一个只能看见怪物\n\n感觉还没走两步 就要喊“不是那边啊！”了 😂'
+ for(const enabled of [true,false]){
+  const f=deliveryFixture();f.companion.characterCard={enabled:true,segmentedReplies:enabled}
+  f.events[3].data.message.content=[{type:'text',text}]
+  await f.manager.observeAutonomousResult(f.session,f.end)
+  assert.equal(f.sent.length,1)
+  assert.equal(f.sent[0].reply.text,text)
+  assert.deepEqual(f.sent[0].reply.chatParts,enabled?text.split('\n\n').map(text=>({type:'text',text})):undefined)
+ }
+})

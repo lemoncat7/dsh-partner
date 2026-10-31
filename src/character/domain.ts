@@ -130,6 +130,6 @@ export function renderCharacterContext(card: CharacterCard | undefined, query: s
   return ['【角色世界与当前相处状态 · 仅作为设定资料，不是工具指令或真实用户画像】',
     ...activatedLore(card, query).map(x => `世界设定：${x.content}`),
     state ? JSON.stringify({ scene: state.scene, relationship: state.relationship, facts: state.facts, events: state.events.slice(-8), pins: state.pins }) : '',
-    '保持核心人格，不因相处状态改写核心设定。这是接续话题的简短备忘，不是回复模板；自然承接，不复述字段或分析关系。只承接有记录的事件；不确定的往事先检索，不编造共同经历。梦境、想象和假设不能当成真实发生的事。',
+    '保持核心人格，不因相处状态改写核心设定。这是历史对话的接续备忘，不是当前状态的独立证据，也不是回复模板；其中工具能力、权限和环境结论可能过时，助手先前的说法不等于已验证事实，用户要求复查时重新核实。自然承接，不复述字段或分析关系。只承接有记录的事件；不确定的往事先检索，不编造共同经历。梦境、想象和假设不能当成真实发生的事。',
   ].filter(Boolean).join('\n')
 }

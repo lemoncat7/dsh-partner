@@ -3,12 +3,12 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerOutboundAttachment, PartnerReply } from '../channel-message.js'
 
 export type ChatPart = {type:'emoji';emoji:NativeEmoji} | { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
-export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; originRouteId?: string | null }
+export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; delivered?:boolean; spokenText?:string; originRouteId?: string | null }
 export function chatReplyFromEvent(event: SessionEvent): ChatReply | undefined {
   if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch') return
   if (!event.data || (event.type === 'tool/result' ? event.data.message?.isError : event.data.isError)) return
   const value = event.data.meta as unknown as ChatReply | undefined
-  if (value?.kind !== 'partner-chat-v1' || !Array.isArray(value.parts) || (!value.parts.length && value.silent!==true) || value.parts.length > 8) return
+  if (value?.kind !== 'partner-chat-v1' || !Array.isArray(value.parts) || (!value.parts.length && value.silent!==true && !(value.delivered===true && typeof value.originRouteId==='string' && value.originRouteId.length>0)) || value.parts.length > 8) return
   if (!value.parts.every(p => p && typeof p === 'object' && (p.type === 'text' ? typeof p.text === 'string' && !!p.text.trim() : p.type==='emoji'?validNativeEmoji(p.emoji):p.type === 'image' && p.attachment?.kind === 'image' && typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//') && typeof p.label === 'string'))) return
   return value
 }
@@ -62,4 +62,31 @@ export function withChatCompanionText(input: Array<{text:string} | {stickerId:st
     return parseChatInput({messages:[{text:speech},...input]})
   }
   return input
+}
+
+/** Only idle chat's unstructured, short paragraphs get a delivery fallback.
+ * Explicit tool parts, documents and attachment replies keep authored boundaries.
+ * Call before persisting the delivery so retries retain stable part indexes.
+ */
+export function segmentIdleChatReply(reply: PartnerReply, enabled: boolean): PartnerReply {
+  if (!enabled || reply.chatParts !== undefined || reply.attachments.length || reply.text.length > 600) return reply
+  const paragraphs = shortChatLines(reply.text)
+  if (!paragraphs) return reply
+  return {...reply, chatParts: paragraphs.map(text => ({type:'text' as const, text}))}
+}
+
+function shortChatLines(text: string): string[] | undefined {
+  if (text.length > 600 || /[`~<>|]/.test(text) || /^(?: {4}|\t|\s*(?:#{1,6}\s|[-*+]\s|\d+[.)、]\s|>))/m.test(text)) return
+  const lines = text.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean)
+  if (lines.length < 2 || lines.length > 8 || lines.some(p => p.length > 200)) return
+  return lines
+}
+
+/** Normalize only a single short text item; keep explicit multi-bubble order and the 8-part limit. */
+export function segmentChatInput(input: Array<{text:string} | {stickerId:string}>, enabled: boolean): Array<{text:string} | {stickerId:string}> {
+  if (!enabled || input.filter(p => 'text' in p).length !== 1) return input
+  const text = input.find(p => 'text' in p) as {text:string}
+  const lines = shortChatLines(text.text)
+  if (!lines || input.length - 1 + lines.length > 8) return input
+  return input.flatMap<{text:string} | {stickerId:string}>(p => 'text' in p ? lines.map(text => ({text})) : [p])
 }

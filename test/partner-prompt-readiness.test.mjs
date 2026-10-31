@@ -153,11 +153,11 @@ for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} 
  assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
 })
 
-for(const mode of ['native','ptc'])test(`public recall and gateway assembly remain identical across QQ owner and guest under ${mode}`,async t=>{
+for(const mode of ['native','ptc'])test(`public recall and gateway assembly preserves public entries and restricts direct work across QQ owner and guest under ${mode}`,async t=>{
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
  const {installToolDiscovery}=await import('../lib/collaboration/tool-discovery.js')
  let compositions=0,store
- const f=await fixture(t,{async compose(ctx,companion){compositions++;return installToolDiscovery(ctx.tools,companion.id,store,['partner_identity','partner_chat_reply'].map(name=>({tool:defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]}),allowed:()=>true}))) }},mode)
+ const f=await fixture(t,{async compose(ctx,companion){compositions++;return installToolDiscovery(ctx.tools,companion.id,store,['partner_identity','partner_chat_reply','partner_work_execute'].map(name=>({tool:defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]}),allowed:()=>true}))) }},mode)
  store=f.store;f.agent.session=Session.create('session-stable-tools')
  await store.update(s=>{
   s.companions[0].toolDiscovery=true;s.sessions[0].sessionId=f.agent.session.id
@@ -167,8 +167,8 @@ for(const mode of ['native','ptc'])test(`public recall and gateway assembly rema
  let first
  for(const id of ['owner','guest','owner','guest']){
   const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
-  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),['partner_channel_access','partner_memory_recall','partner_tools']);assert.equal(f.root.tools.modeFor(f.agent),'native')
-  if(first)assert.deepEqual(a.tools,first);else first=a.tools
+  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),(id==='owner'?['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_tools','partner_work_execute']:['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_tools']));assert.equal(f.root.tools.modeFor(f.agent),'native')
+  const publicTools=a.tools.filter(t=>t.name!=='partner_work_execute');if(first)assert.deepEqual(publicTools,first);else first=publicTools
  }
  assert.equal(compositions,1)
 })
@@ -202,7 +202,7 @@ test('consecutive claimed activities use THIS admitted notice in the first promp
   const seq=f.agent.session.seq
   await f.step([message],turn)
   const {assembly,text}=await f.prompt()
-  assert.match(text,/本轮自主活动提醒/);assert.match(text,/系统核验的自主活动/);assert.match(text,/OWNER_RELATION/)
+  assert.match(text,/系统自主活动/);assert.match(text,/系统核验的自主活动/);assert.match(text,/OWNER_RELATION/)
   assert.doesNotMatch(text,/账号未归属|非归属账号只可/)
   assert.ok(assembly.tools.some(t=>t.name==='partner_identity'))
   assert.equal(f.agent.session.seq,seq,'preparation does not mutate history')
@@ -312,4 +312,23 @@ test('public recall is visible and callable by QQ guests without learning or a m
  const value=JSON.parse(result.value)
  assert.deepEqual(value.memories,[]);assert.deepEqual(value.history,[])
  assert.equal(value.conversation.length,1);assert.equal(value.conversation[0].user,'blue-secret guest')
+})
+
+test('request assembly rolls autonomous rounds before any pre-step pressure listener',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session')
+ const {createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await fixture(t,{async compose(){return()=>{}}})
+ f.agent.session=Session.create('session-assembly')
+ for(let n=1;n<=4;n++){
+  f.agent.session.append('turn/start',{turn:n})
+  f.agent.session.append('user/message',createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'},content:[{type:'text',text:'autonomous-round-'+n}]}),{surfaceOp:'append'})
+  f.agent.session.append('turn/end',{turn:n,reason:{kind:'completed'}})
+ }
+ await f.store.update(s=>{s.companions[0].automation.memory.rollingContextEnabled=true;s.companions[0].automation.memory.rollingContextTurns=2})
+ const history=structuredClone(f.agent.session.snapshotEvents())
+ await f.assemble()
+ const context=JSON.stringify(f.agent.session.deriveMessages())
+ assert.ok(!context.includes('autonomous-round-1'));assert.ok(!context.includes('autonomous-round-2'))
+ assert.ok(context.includes('autonomous-round-3'));assert.ok(context.includes('autonomous-round-4'))
+ assert.deepEqual(f.agent.session.snapshotEvents().slice(0,history.length),history)
 })

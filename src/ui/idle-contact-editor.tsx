@@ -13,7 +13,7 @@ export function IdleContactEditor({companionId,value,disabled,onChange}:{compani
   const patch=(p:Partial<IdleContactPolicy>)=>onChange({...policy,...p})
   return <section className="dsh-partner-character" aria-label="闲时自主活动">
     <header><div><h3>闲时自主活动 <small>可选</small></h3><p>空闲时逐渐增加活动概率，让伙伴自己决定聊天、使用已授权能力，或安静待着。</p></div><div className="dsh-partner-character-toggle"><button type="button" role="switch" className="dsh-partner-switch" aria-label="开启闲时自主活动" aria-checked={policy.enabled} data-on={policy.enabled} disabled={disabled} onClick={()=>patch({enabled:!policy.enabled})}><i aria-hidden="true"/></button><span>{policy.enabled?'已开启':'已关闭'}</span></div></header>
-    <p className="dsh-partner-character-hint">每分钟检查一次，抽中才唤起 AI 决定做什么；不是每分钟请求模型。正在聊天、执行任务或睡觉时等待。开启好感度后，回复送达还可能触发主动延续；QQ 仅对归属账号生效。修改后保存身份生效。</p>
+    <p className="dsh-partner-character-hint">每分钟检查一次，抽中才唤起 AI 决定做什么；不是每分钟请求模型。正在聊天、执行任务或睡觉时等待。回复送达后有 45%–80% 概率获得自主活动机会，好感度影响初始概率；活动后继续机会逐轮减半，每条链最多 5 轮，选择不行动时停止。新消息优先。QQ 回复后延续仅对归属账号生效。修改后保存身份生效。</p>
     {error&&<p role="alert" className="dsh-partner-inline-error">{error}</p>}
     {policy.enabled&&<fieldset disabled={disabled} className="dsh-partner-character-fields">
       <Field label="活动所在会话" hint="从这个会话读取上下文，普通聊天回复发到这里。其他工具操作按各自的渠道授权执行；不会自动群发。"><select required value={policy.routeId} onChange={e=>patch({routeId:e.target.value})}><option value="">选择一个会话</option>{routes.map(r=><option key={r.id} value={r.id}>{r.kind==='local'?'网页聊天':`${snapshot?.channels.find(c=>c.id===r.channelId)?.name??'渠道'} · ${snapshot?.pairings.find(p=>p.channelId===r.channelId&&p.userId===r.userId)?.displayName??r.userId}`}</option>)}</select></Field>

@@ -122,7 +122,7 @@ export interface PartnerDelegationView {
 export interface CompanionAccessView { targetIds: string[]; companions: PartnerDirectoryEntryView[] }
 
 export type ScheduledTaskView = import('./scheduler/domain.js').ScheduledPartnerTask
-export interface ExecutionRunView { id: string; kind: 'schedule' | 'delegation' | 'review' | 'skill' | 'observation'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
+export interface ExecutionRunView { id: string; kind: 'work' | 'schedule' | 'delegation' | 'review' | 'skill' | 'observation'; ownerCompanionId: string; sessionId: string; sourceId: string; status: string; destroyAfterRun: boolean; startedAt: number; completedAt?: number; outputSummary?: string; error?: string }
 
 export async function api<T>(path = '', init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'

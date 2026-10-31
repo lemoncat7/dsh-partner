@@ -16,13 +16,15 @@ test('default stays unchanged; only a known QQ origin uses channel-specific stic
  const adapter=registry.forRoute({channelId:'qq',companionId:'c'},[channel])
  assert.equal((await adapter.list('c','微笑',signal))[0].id,'qq-face-14')
  assert.equal((await adapter.resolve('c','qq-face-14',signal)).native.id,'14')
- assert.equal((await adapter.resolve('c','builtin-happy',signal)).native.id,'14')
+ await assert.rejects(adapter.resolve('c','builtin-happy',signal),/当前使用 QQ 表情库/)
  assert.equal((await registry.forRoute({channelId:'qq',companionId:'other'},[channel]).resolve('c',item.id,signal)).data,data)
 })
-test('default preference and unavailable catalogs fall back before sending; custom IDs remain bound to their account',async()=>{
+test('explicit default preference works; offline QQ never substitutes defaults and custom IDs remain bound to their account',async()=>{
  const fallback=new StickerAdapters(library).fallback
  assert.equal((await qqStickerAdapter({...channel,qq:{stickerSource:'default'}},fallback,async()=>faces).resolve('c',item.id,signal)).data,data)
- assert.equal((await qqStickerAdapter(channel,fallback,async()=>{throw Error('offline')}).resolve('c',item.id,signal)).data,data)
+ const offline=qqStickerAdapter(channel,fallback,async()=>{throw Error('offline')})
+ assert.deepEqual(await offline.list('c','',signal),[])
+ await assert.rejects(offline.resolve('c',item.id,signal),/当前使用 QQ 表情库/)
  const custom=qqCustomCatalog([{emoji_id:'favorite-full-id',desc:'得意',url:'https://gchat.qpic.cn/favorite.gif'}])
  const adapter=qqStickerAdapter(channel,fallback,async()=>custom),list=await adapter.list('c','得意',signal)
  const result=await adapter.resolve('c',list[0].id,signal)
@@ -37,4 +39,29 @@ test('native emoji replies preserve text order and survive transcript and notifi
  assert.deepEqual(chatReplyFromEvent(event).parts,parts)
  assert.deepEqual(replyDeliveryParts({text:'你好',attachments:[],chatParts:parts}),parts)
  assert.deepEqual(replyDeliveryParts({text:'你好',attachments:[],chatParts:parts,attachmentPolicy:'text-only'}),[{type:'text',text:'你好'},{type:'text',text:''}])
+})
+
+test('autonomous inspection of a builtin keeps its real bitmap despite a matching QQ face',async()=>{
+ const {chatTools}=await import('../lib/chat/tools.js')
+ const {StickerLibrary}=await import('../lib/chat/stickers.js')
+ const real=new StickerLibrary(()=>'/unused'),adapters=new StickerAdapters(real)
+ adapters.register('qq',c=>qqStickerAdapter(c,adapters.fallback,async()=>[{id:'371',name:'/冒泡',category:'QQ',image:'https://qzonestyle.gtimg.cn/qzone/em/e10371.gif'}]))
+ const route={id:'r',channelId:'qq',kind:'channel',companionId:'c',sessionId:'s',inboundMessageIds:['u']}
+ const state={channels:[{...channel,qq:{stickerSource:'default'}}],sessions:[route],companions:[{id:'c',characterCard:{enabled:true,stickersEnabled:true}}]}
+ const events=[{type:'user/message',seq:1,data:{id:'u',source:{kind:'user'}}},{type:'turn/start',seq:2},{type:'user/message',seq:3,data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}}]
+ const expected=await real.image('c','builtin-fox-peek');let saved
+ const tool=chatTools('c',{snapshot:()=>state,isCompanionRemoving:()=>false},real,{}, {attachments:{saveImage:async value=>{saved=value;return {kind:'image',path:'local'}}}},'',adapters)[0]
+ const result=await tool.execute({action:'inspect',id:'builtin-fox-peek'},{signal:new AbortController().signal,agent:{session:{id:'s',snapshotEvents:()=>events}}})
+ assert.deepEqual(saved.data,expected.data);assert.equal(result.content[1].type,'image')
+ assert.equal((await adapters.forRoute(route,state.channels).resolve('c','builtin-fox-peek',signal)).native,undefined)
+})
+
+test('QQ searches never introduce builtins and empty-query browsing keeps collections first',async()=>{
+ const fallback={list:async()=>assert.fail('must not query builtin library'),resolve:async()=>assert.fail('must not read builtin library')}
+ const custom=qqCustomCatalog([{emoji_id:'favorite',desc:'猫咪 无语'}])
+ const adapter=qqStickerAdapter(channel,fallback,async()=>[...custom,...faces])
+ assert.deepEqual(await adapter.list('c','抱抱',signal),[])
+ const list=await adapter.list('c','',signal)
+ assert.equal(list[0].id.startsWith('qq-custom-'),true);assert.equal(list[1].id,'qq-face-14')
+ await assert.rejects(adapter.resolve('c','builtin-care',signal),/不使用内置表情替代/)
 })

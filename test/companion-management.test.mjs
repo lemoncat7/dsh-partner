@@ -170,7 +170,8 @@ test('management tool is companion-scoped, absent without opt-in and checks live
   const on = await composition.compose(ctx, store.snapshot().companions[0])
   const tool = registered.get('partner_companion_manage')
   assert.ok(tool)
-  assert.match(sections.at(-1).text, /知识库挂载/)
+  assert.doesNotMatch(sections.at(-1).text, /知识库挂载/)
+  assert.match(sections.at(-1).text, /partner_workflow/)
   const exec = { agent: { session: { id: 'manager-session' } }, signal: new AbortController().signal }
   await assert.rejects(tool.execute({ action: 'catalog' }, { signal: exec.signal }), /会话中调用/)
   assert.ok(JSON.parse(await tool.execute({ action: 'catalog' }, exec)).capabilities.length)

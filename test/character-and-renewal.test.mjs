@@ -201,3 +201,16 @@ test('ordinary memory extraction maintains current relationship state without du
  assert.match(renderCharacterContext(card(),'',state),/不复述字段或分析关系/)
  assert.equal(renderCharacterContext({...card(),enabled:false},'',state),'')
 })
+
+
+test('legacy capability claims stay historical and reflection does not promote them to character facts',async()=>{
+ const {renderCharacterContext}=await import('../lib/character/domain.js')
+ const {characterStateReflectionPrompt}=await import('../lib/character/state-policy.js')
+ const state={scene:'用户要求重新查证',relationship:'',facts:['不能操作浏览器'],events:[],pins:['用户固定事项'],updatedAt:1}
+ const before=structuredClone(state),rendered=renderCharacterContext(card(),'',state)
+ assert.deepEqual(state,before,'context rendering must not edit saved history or pinned content')
+ assert.match(rendered,/工具能力、权限和环境结论可能过时/)
+ assert.match(rendered,/用户要求复查时重新核实/)
+ assert.match(characterStateReflectionPrompt(state),/不写入 facts/)
+ assert.match(characterStateReflectionPrompt(state),/助手自己说/)
+})

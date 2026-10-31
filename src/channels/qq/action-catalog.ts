@@ -3,6 +3,7 @@
 export interface ApiSchema {type?:string|string[];properties?:Record<string,ApiSchema>;required?:string[];items?:ApiSchema;enum?:unknown[];minimum?:number;maximum?:number;minLength?:number;maxLength?:number;maxItems?:number;default?:unknown;description?:string;additionalProperties?:boolean;not?:{const:unknown}}
 export interface QqAction {id:string;category:string;title:string;description:string;effect:'read'|'write'|'destructive';schema:ApiSchema;media?:string[];messageScope?:boolean}
 export const QQ_ACTION_CATEGORIES = [
+  {id:"stickers",title:"收藏表情",description:"收藏图片、整理备注与排序、清理重复表情"},
   {
     "id": "space",
     "title": "QQ 空间",
@@ -55,6 +56,116 @@ export const QQ_ACTION_CATEGORIES = [
   }
 ]
 export const QQ_ACTIONS:readonly QqAction[] = [
+{
+  "id": "fetch_custom_face_detail",
+  "category": "stickers",
+  "title": "获取自定义表情详情",
+  "description": "获取自定义表情详情",
+  "effect": "read",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 100,
+        "maximum": 200
+      }
+    },
+    "additionalProperties": false
+  }
+},
+{
+  "id": "add_custom_face",
+  "category": "stickers",
+  "title": "添加收藏表情",
+  "description": "收藏工作目录内的表情图片到当前 QQ 账号；先查看图片是否适合当前人格，已收藏的相同图片不重复添加。成功后可备注情绪关键词，再用 partner_stickers 查找发送。",
+  "effect": "write",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "file": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "当前伙伴工作目录中的表情图片路径，PNG/JPEG/GIF/WebP，最多 2 MB；收到的聊天图片先使用已经落盘的附件路径"
+      }
+    },
+    "required": [
+      "file"
+    ],
+    "additionalProperties": false
+  },
+  "media": [
+    "file"
+  ]
+},
+{
+  "id": "modify_custom_face",
+  "category": "stickers",
+  "title": "修改收藏表情备注",
+  "description": "修改收藏表情备注",
+  "effect": "write",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "emoji_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "desc": {
+        "type": "string",
+        "default": "",
+        "maxLength": 80,
+        "description": "简短名称和情绪关键词，例如 得意 开心 嘿嘿，便于以后按场景检索"
+      }
+    },
+    "required": [
+      "emoji_id"
+    ],
+    "additionalProperties": false
+  }
+},
+{
+  "id": "move_custom_face_to_front",
+  "category": "stickers",
+  "title": "收藏表情移到最前",
+  "description": "收藏表情移到最前",
+  "effect": "write",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "emoji_id": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "emoji_id"
+    ],
+    "additionalProperties": false
+  }
+},
+{
+  "id": "delete_custom_face",
+  "category": "stickers",
+  "title": "删除收藏表情",
+  "description": "删除明确重复或不再需要的收藏表情；不批量清空，不因暂时没用到就删除。",
+  "effect": "destructive",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "emoji_id": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "emoji_id"
+    ],
+    "additionalProperties": false
+  }
+},
   {
     "id": "get_qzone_feeds",
     "category": "space",

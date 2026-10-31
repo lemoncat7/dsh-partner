@@ -22,6 +22,8 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  /** A tool already delivered the reply to the channel (for example QQ voice). */
+  alreadyDelivered?: boolean
   /** Internal provenance, armed only after confirmed channel delivery. */
   postReplySource?: { routeId: string; sessionId: string; userMessageId: string }
   idleContactOrigin?: {routeId:string;sessionId:string;messageId:string;userMessageId:string;policyRevision:number}

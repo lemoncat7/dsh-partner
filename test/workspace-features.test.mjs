@@ -372,7 +372,7 @@ test('cross-partner delegation uses directed grants while user delegation bypass
   assert.equal(userDelegation.fromCompanionId, undefined)
 })
 
-test('partner collaboration tools are always available, grant-scoped, and inject trusted inline Skills', async t => {
+test('partner collaboration keeps capabilities while loading inline Skill bodies on demand', async t => {
   const item = await fixture(); t.after(item.close)
   const skills = new SkillService(item.store, new SkillRepository(join(item.root, 'skills')))
   await skills.initialize()
@@ -416,10 +416,13 @@ test('partner collaboration tools are always available, grant-scoped, and inject
   assert.ok(authorizedNames.includes('partner_schedule'))
   assert.ok(authorizedNames.includes('partner_access_grants'))
   const inlineSkills = authorizedComposition.sections.find(section => section.name === 'partner-inline-skills')
-  assert.ok(inlineSkills)
-  assert.match(inlineSkills.text, /<partner-inline-skill id="task-planning"/)
-  assert.match(inlineSkills.text, /多来源收集 \+ 真实性核验 \+ 结论整理/)
-  assert.match(authorizedComposition.sections.find(section => section.name === 'partner-collaboration').text, /已注入当前会话/)
+  assert.equal(inlineSkills,undefined)
+  const summary=authorizedComposition.sections.find(section=>section.name==='partner-collaboration').text
+  assert.match(summary,/task-planning/)
+  assert.match(summary,/按需加载/)
+  assert.doesNotMatch(summary,/多来源收集 \+ 真实性核验 \+ 结论整理|看板状态协议|expectedRevision/)
+  const loaded=JSON.parse(await authorizedTools.find(t=>t.name==='partner_skill').execute({action:'load',skillId:planning.id},{}))
+  assert.match(loaded.instructions,/多来源收集 \+ 真实性核验 \+ 结论整理/)
   const created = JSON.parse(await authorizedTools.find(tool => tool.name === 'partner_companions').execute({
     action: 'create', name: '资料伙伴', role: '资料研究', description: '负责持续研究与核验', instructions: '引用证据，明确不确定性。',
   }, {}))
