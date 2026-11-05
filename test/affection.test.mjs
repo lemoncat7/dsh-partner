@@ -67,9 +67,9 @@ test('meaningful interactions can rise and fall within minutes without daily bud
  assert.throws(()=>change(f.c,'paused',now+6000),/暂停/)
  assert.equal(renderAffection(f.c,true),'')
 })
-test('eleven bidirectional stages, saturation and positive probability even at negative extreme',()=>{
+test('baseline score preserves saturation and never overrides autonomous timing',()=>{
  const f=fixture()
- for(const [score,level] of [[-100,1],[-75,2],[-50,3],[-25,4],[-10,5],[0,6],[10,7],[25,8],[45,9],[70,10],[90,11],[100,11]])assert.equal(affectionProgress({score}).level,level)
+ for(const score of [-100,-25,0,8,45,100]){const p=affectionProgress({score});assert.equal(p.score,score);assert.equal(p.lastChange,null);assert.equal('name' in p,false);assert.equal('multiplier' in p,false)}
  for(const [initial,delta,expected] of [[99,5,100],[-99,-5,-100]]) {
   f.c.affection={score:initial,updatedAt:1,lastAwardAt:0,lastTurnId:'old'}
   assert.equal(change(f.c,'edge',now,delta),true);assert.equal(f.c.affection.score,expected)
@@ -141,3 +141,12 @@ test('relationship bookkeeping needs no chat preamble and history is not injecte
  const f=fixture();change(f.c,'a',now,-1)
  assert.ok(!renderAffection(f.c,true).includes('当前用户原话'))
 })
+
+test('baseline is interpreted by persona and relationship without resetting their state',()=>{
+ const f=fixture();f.c.relationshipText='已经熟悉的家人';
+ for(const score of [-100,0,8,100]){
+  f.c.affection={score,updatedAt:1,lastAwardAt:0,lastTurnId:'old'};const before=structuredClone(f.c);
+  const prompt=renderAffection(f.c,true);assert.match(prompt,/0 为既定关系基线/);assert.match(prompt,/人物设定决定性格/);assert.match(prompt,/关系设定决定身份/);assert.match(prompt,/短暂开心/);assert.doesNotMatch(prompt,/初识|阶段 \d|主动概率 ×/);assert.deepEqual(f.c,before);
+ }
+ change(f.c,'loss',now,-2);const p=affectionProgress(f.c.affection);assert.equal(p.lastChange.delta,-2);assert.equal(p.lastChange.reason,'具体互动带来的感受');
+});

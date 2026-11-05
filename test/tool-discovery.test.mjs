@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {Context} from '@deepseek-ai/cordis'
@@ -19,7 +20,7 @@ function fixture(t){
  const agent={session:Session.create('discovery'),options:{}},scope=createScope(root,agent);agent.ctx=scope.ctx
  const companion={id:'c',toolDiscovery:true},state={companions:[companion],channels:[],sessions:[{id:'local',kind:'local',companionId:'c',sessionId:agent.session.id,channelId:'local',userId:'owner'}]}
  const store={snapshot:()=>state,isCompanionRemoving:()=>false}
- const invoke=(name,args={},signal=new AbortController().signal)=>root.tools.execute({callId:'call-'+name,name,arguments:args,agent,signal})
+ const invoke=(name,args={},signal=new AbortController().signal)=>dispatchTool(root.tools, {callId:'call-'+name,name,arguments:args,agent,signal})
  const call=(name,args={},signal)=>invoke('partner_tools',{action:'call',name,argumentsJson:JSON.stringify(args)},signal)
  t.after(()=>scope.dispose());return {root,agent,scope,store,state,companion,invoke,call}
 }
@@ -228,7 +229,7 @@ test('sticker lookup is a direct entry and still honors live capability revocati
  assert.equal(calls,1)
 })
 
-test('autonomous persona update concludes through unified gateway with a silent receipt',async t=>{
+test('unified gateway cannot bypass retirement of autonomous persona rewrites',async t=>{
  const {identityTool}=await import('../lib/companions/identity-tool.js')
  const f=fixture(t);Object.assign(f.companion,createDefaultCompanion(),{id:'c',characterCard:{enabled:true,roleText:'原角色'},idleContact:{enabled:true,routeId:'local',idleMinutes:120,selfRefinement:true}})
  f.store.update=async update=>{update(f.state);return f.state}
@@ -239,11 +240,10 @@ test('autonomous persona update concludes through unified gateway with a silent 
  f.state.sessions[0].idleContactState={messageId:notice.id,userMessageId:user.id,policyRevision:f.companion.updatedAt}
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:identityTool('c',f.store),allowed:()=>true}]))
  const result=await f.call('partner_identity',{action:'update',expectedAt:f.companion.updatedAt,patch:{characterCard:{roleText:'自己决定的新角色'}},reason:'最近有了新的喜好'})
- assert.equal(result.value.dispatch.isError,false,JSON.stringify(result.content))
- assert.equal(result.concludesTurn,true)
- assert.equal(f.companion.personaHistory.length,1)
- assert.equal(result.value.dispatch.meta.kind,'partner-activity-silent-v1')
- assert.equal(f.agent.session.snapshotEvents().some(e=>e.type==='tool/ptc-dispatch'&&e.data.meta?.kind==='partner-activity-silent-v1'),true)
+ assert.equal(result.value.dispatch.isError,true)
+ assert.match(JSON.stringify(result.content),/已停用/)
+ assert.equal(f.companion.characterCard.roleText,'原角色')
+ assert.equal(f.companion.personaHistory,undefined)
 })
 
 test('failed discovered tool exposes exact current evidence accepted by blocked reply without retry',async t=>{
@@ -286,3 +286,15 @@ test('autonomous discovery reflects live abilities and revocation without a fixe
  f.agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'帮我看看'}]}),{surfaceOp:'append'})
  assert.doesNotMatch((await f.invoke('partner_channel_access',{})).value.next,/按自己的兴趣/)
 })
+
+test('nested entry calls retain the step admission for conditional tools',async t=>{
+ const f=fixture(t);let calls=0
+ const tool=definition('partner_conditional',async()=>{calls++;return {ok:true}})
+ const dispose=f.scope.ctx.tools.register(tool,{when:()=>false});t.after(dispose)
+ const toolSet=await f.root.tools.resolve({agent:f.agent,modelSelection:{provider:'fixture',model:'fixture'},signal:new AbortController().signal})
+ try{
+  assert.equal(f.root.tools.executable(tool.name,f.agent,toolSet),undefined)
+  const result=await dispatchTool(f.scope.ctx.tools,{name:tool.name,arguments:{},agent:f.agent,signal:new AbortController().signal,callId:'conditional',toolSet})
+  assert.equal(result.isError,true);assert.equal(calls,0)
+ }finally{toolSet.dispose()}
+});

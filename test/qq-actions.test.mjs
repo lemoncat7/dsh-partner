@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,writeFile,symlink,rm,mkdir} from 'node:fs/promises'
@@ -135,7 +136,7 @@ test('QQ discovery and empty API acknowledgements satisfy DSH canonical JSON out
  scope.ctx.tools.register(qqActionTools('c',f.store,async()=>undefined)[0])
  let n=0
  for(const args of [{action:'list'},{action:'list',category:'profile'},{action:'describe',operation:'send_qzone_msg'},{action:'describe',operation:'send_voice'},{action:'call',operation:'set_qq_profile',params:{nickname:'测试昵称'}}]){
-  const result=await root.tools.execute({callId:'qq-'+(++n),name:'partner_qq',arguments:args,agent,signal:signal()})
+  const result=await dispatchTool(root.tools, {callId:'qq-'+(++n),name:'partner_qq',arguments:args,agent,signal:signal()})
   assert.equal(result.isError,false,JSON.stringify(result));if(args.action==='call')assert.equal(result.value.result,null)
  }
 })

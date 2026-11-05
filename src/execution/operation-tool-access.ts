@@ -1,3 +1,4 @@
+import { nativePresentation } from '../compat/native-presentation.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
@@ -41,10 +42,5 @@ export function restrictExecutionTools(ctx: Context & { tools: ToolRuntime }, ag
   const policy = operationToolAccess(requested, ctx.tools.schemas(agent).map(tool => tool.name))
   const allowed = new Set(policy.allowed)
   ctx.tools.guard(exec => policy.denial(exec.name, exec.arguments))
-  // tools.restrict rejects same-scope MCP names. Filter the assembled native
-  // schema instead and enforce every real call with the monotonic guard above.
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-    const assembly = await next()
-    return { ...assembly, tools: assembly.tools.filter(tool => allowed.has(tool.name)) }
-  })
+  nativePresentation(ctx, tools => tools.filter(tool => allowed.has(tool.name)))
 }

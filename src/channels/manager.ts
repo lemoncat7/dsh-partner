@@ -210,7 +210,7 @@ export class ChannelManager {
         runtimeStatus: runtime.status,
         ...(channel.platform==='qq'?{qqLatency:this.qqLatency.view(channel.id)}:{}),
         ...(runtime.lastError ? { lastError: runtime.lastError } : {}),
-        credentialConfigured: await this.credentials.configured(channel.id),
+        credentialConfigured: channel.platform==='bilibili'?true:await this.credentials.configured(channel.id),
         ...(this.groupAutonomy.status(channel.id)?{groupDecision:this.groupAutonomy.status(channel.id)!}:{}),
         ...this.idleDeliveryStatus(channel.id),
         activity:this.agents.companionActivity?.(channel.companionId)??[],
@@ -245,6 +245,7 @@ export class ChannelManager {
       this.runtime.set(channelId, { status: 'error', lastError: '此伙伴有多个微信渠道启用，请先停用其他渠道，再重新扫码连接需要保留的渠道' })
       return
     }
+    if(channel.platform==='bilibili'){this.runtime.set(channelId,{status:channel.enabled?'running':'stopped'});return}
     const credential = await this.credentials.read(channelId)
     const controller = new AbortController()
     this.runtime.set(channelId, { status: 'starting' })
@@ -848,12 +849,13 @@ export class ChannelManager {
       if(!live)throw new Error('QQ 渠道尚未连接，请稍后重试')
       return live.forTarget(targetId,expected,authorize)
     }
+    if(channel.platform==='bilibili')throw Error('B 站渠道使用专用 API，不作为聊天收件人')
     return new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId},credential.botToken,expected,authorize)
   }
 
   /** Independent connector loop. Cursor is persisted only after receipt handoff. */
   private async directLoop(channel: WeixinChannel, outerSignal: AbortSignal): Promise<void> {
-    if (!channel.direct || !channel.platform || channel.platform==='weixin') throw new Error('渠道配置无效')
+    if (!channel.direct || !channel.platform || channel.platform==='weixin'||channel.platform==='bilibili') throw new Error('渠道配置无效')
     const credential = await this.credentials.read(channel.id)
     const api = new DirectTransport({platform:channel.platform,baseUrl:credential.baseUrl,targetId:channel.direct.targetId,...(channel.qq?{qq:channel.qq}:{})},credential.botToken,{accountId:channel.accountId,peerId:channel.direct.peerId})
     this.directTransports.set(channel.id,api)

@@ -1,3 +1,7 @@
+import { nativePresentation } from './compat/native-presentation.js'
+import { renderHabits, habitScope } from './character/habits.js'
+import { renderPersonaDelivery } from './chat/persona-delivery.js'
+import { composeConversationExpression } from './chat/work-expression.js'
 import {collectActivityJournal,mergeActivityJournal,activityJournalRecall,renderActivityJournal} from './character/activity-journal.js'
 import { createChannelActivities } from './channels/activity-defaults.js'
 import type { ChannelActivityRegistry } from './channels/activity-registry.js'
@@ -175,6 +179,7 @@ export class PartnerAgentRuntime {
   private readonly disposeToolAuthority: () => void
   private readonly disposeAssemblyListener: () => void
   private readonly disposeRollingContext: () => void
+  private readonly disposePreparation: () => void
   private readonly autonomousAssemblyContexts = new WeakSet<object>()
   private readonly rebuildingAssemblies = new WeakSet<object>()
   private readonly configurations: SessionConfigurationIndex
@@ -197,6 +202,25 @@ export class PartnerAgentRuntime {
     private readonly channelActivities:ChannelActivityRegistry=createChannelActivities(),
   ) {
     this.configurations = new SessionConfigurationIndex(store)
+    const preparations:Array<()=>void>=[]
+    const refreshIdle=(agent:Agent)=>{
+      if(this.closed||agent.status!=='idle'||typeof agent.runMaintenance!=='function')return
+      const installed=this.restoredCompositions.get(agent.session.id),configuration=this.configurations.forSession(agent.session.id)
+      if(!configuration||installed?.revision===configuration.revision)return
+      try {void agent.runMaintenance(signal=>this.prepareAgentAssembly(agent,signal)).catch(error=>this.ctx.logger.warn('伙伴配置准备失败：'+String(error)))}catch { /* Another maintenance owner will release the next idle boundary. */ }
+    }
+    if(typeof this.ctx.on==='function'&&typeof this.ctx.tools?.resolve==='function'){
+      preparations.push(this.ctx.on('agent/created',async ({agent})=>{await this.prepareAgentAssembly(agent,AbortSignal.timeout(60000))}))
+      preparations.push(this.ctx.on('agent/status',({agent,status})=>{if(status==='idle')refreshIdle(agent)}))
+      const claimedTurns=new WeakMap<Agent,number>()
+      preparations.push(this.ctx.on('agent/inbox/claimed',({agent,message,turn})=>{
+        const current=claimedTurns.get(agent)===turn?this.admittedInputs.get(agent)??[]:[]
+        claimedTurns.set(agent,turn);this.admittedInputs.set(agent,[...current,message])
+      }))
+    }
+    if(typeof store.subscribe==='function'&&typeof this.ctx.tools?.resolve==='function')preparations.push(store.subscribe(()=>{for(const {agent} of this.restoredCompositions.values())refreshIdle(agent)},()=>{}))
+    this.disposePreparation=()=>{for(const dispose of preparations.reverse())dispose()}
+
     this.disposeRollingContext = typeof this.ctx.on === 'function' ? this.ctx.on('agent/pre-step',async ({agent,signal},next)=>{
       signal.throwIfAborted()
       const memory=this.configurations.forSession(agent.session.id)?.companion.automation.memory
@@ -216,9 +240,10 @@ export class PartnerAgentRuntime {
         if(this.configurations.forSession(context.agent.session.id))normalizeBackgroundContext(context.agent.session)
         const rollingMemory = this.configurations.forSession(context.agent.session.id)?.companion.automation.memory
         if (rollingMemory?.rollingContextEnabled) rollConversationContext(context.agent.session, rollingMemory)
-        const enforce = (assembly: typeof _assembly) => {
+        const enforce = (presentation: typeof _assembly) => {
+          const assembly={...presentation,tools:'tools' in presentation ? (presentation as import('@deepseek-ai/dsh-system-prompt').PromptAssembly).tools : context.agent!.ctx.tools.schemas(context.agent,context.toolSet)}
           const configuration=this.configurations.forSession(context.agent!.session.id)
-          const project = (value: typeof _assembly) => configuration ? projectConversationPrompt(projectAgreements(value,this.store.snapshot(),configuration.companion.id,context.agent!.session.id,this.inputEvents(context.agent!)), context.agent!, {
+          const project = (value: import('@deepseek-ai/dsh-system-prompt').PromptAssembly) => configuration ? projectConversationPrompt(projectAgreements(value,this.store.snapshot(),configuration.companion.id,context.agent!.session.id,this.inputEvents(context.agent!)), context.agent!, {
             roleEnabled: configuration.companion.characterCard?.enabled === true,
             exclusive: configuration.companion.characterCard?.exclusivePrompt === true,
             discovery: configuration.companion.toolDiscovery === true,
@@ -593,6 +618,7 @@ export class PartnerAgentRuntime {
     if (!companion || !route || this.isArchived(route)) throw new Error('原续接会话不存在或已归档')
     const agent = await this.ensureAgent(companion, route)
     if (!this.store.snapshot().sessions.some(s => s.id === route.id && s.sessionId === wake.originSessionId) || this.isArchived(route)) throw new Error('原续接会话已变更')
+    await this.prepareAgentAssembly(agent,signal)
     const preflight = assembleContextFor(agent, signal)
     this.autonomousAssemblyContexts.add(preflight)
     try {
@@ -984,12 +1010,20 @@ export class PartnerAgentRuntime {
     const access = resolveToolAccess({agent, state:this.store.snapshot(), ...(this.admittedInputs.get(agent)?.length ? {events:this.inputEvents(agent)} : {})})
     let presentationChanged = false
     const stableNative=configuration.companion.toolDiscovery||!!access.allowedTools
-    if (stableNative && !this.replyPresentations.has(agent) && typeof agent.ctx.tools?.presentAs === 'function') {
-      this.replyPresentations.set(agent, agent.ctx.tools.presentAs('native')); presentationChanged = true
+    if (stableNative && !this.replyPresentations.has(agent) && (typeof agent.ctx.tools?.setExecutor === 'function' || typeof (agent.ctx.tools as unknown as {presentAs?:unknown})?.presentAs === 'function')) {
+      this.replyPresentations.set(agent, nativePresentation(agent.ctx, tools => {
+        const current=this.configurations.forSession(agent.session.id)
+        const access=resolveToolAccess({agent,state:this.store.snapshot(),...(this.admittedInputs.get(agent)?.length?{events:this.inputEvents(agent)}:{})})
+        return tools.filter(tool=>{
+          if(current?.companion.toolDiscovery&&!PARTNER_TOOL_ENTRIES.some(name=>name===tool.name)&&isPartnerDiscoveryTool(this.store,current.companion.id,tool.name))return false
+          return ['partner_tools','partner_channel_access','partner_memory_recall'].includes(tool.name)||access.sendTools&&(!access.allowedTools||access.allowedTools.includes(tool.name))
+        })
+      })); presentationChanged = true
     } else if (!stableNative && this.replyPresentations.has(agent)) {
       this.replyPresentations.get(agent)!(); this.replyPresentations.delete(agent); presentationChanged = true
     }
     const installed = this.restoredCompositions.get(agent.session.id)
+    if(installed?.agent===agent&&installed.revision!==configuration.revision&&agent.status!=='idle'&&typeof agent.runMaintenance==='function'&&typeof agent.ctx.tools?.resolve==='function')return presentationChanged
     if (installed?.agent !== agent || installed.revision !== configuration.revision) {
       const job = (async () => {
         signal.throwIfAborted()
@@ -1044,7 +1078,9 @@ export class PartnerAgentRuntime {
     const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
     const access = resolveToolAccess({agent, state, events})
     const replyContinuity = renderReplyContinuity(agent.session.id, events, state.sessions)
-    const revision = `${createHash('sha256').update(replyContinuity).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
+    const habitOrigin=questionOrigin(agent.session.id,events,state.sessions)??state.sessions.find(r=>r.kind==='local'&&r.sessionId===agent.session.id&&r.companionId===companion.id)
+    const habitContext=renderHabits(companion,habitOrigin?habitScope(habitOrigin):undefined)
+    const revision = `${habitContext}:${createHash('sha256').update(replyContinuity).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -1060,6 +1096,7 @@ export class PartnerAgentRuntime {
     const text = [origin?.type === 'user/message' && origin.data.source.kind === 'user' && access.sendTools && (!access.allowedTools || access.allowedTools.includes('partner_identity')) && personaReferenceRequested(query) ? renderPersonaReference() : '', access.allowedTools || !access.sendTools ? access.denialReason + ' 回复能力通过 partner_tools 查询和调用（未开启统一入口时使用原工具）；语音、真正群 @ 提及和已开启的戳一戳使用 partner_qq_reply（voices/voice/mention/poke）；不能代办操作，不承诺使用私有能力。' : '',
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
       renderAffection(companion,affectionAudience),
+      habitContext,
       renderActivityJournal(activityJournalRecall(state.companions?.find(c=>c.id===companion.id)??companion,agent.session.id,affectionAudience&&!questionOrigin(agent.session.id,events,state.sessions)?.userId.startsWith('group:'),agent.session.snapshotEvents?.()??[],3)),
       renderCharacterContext(companion.characterCard, query, relationshipAllowed ? story : undefined),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
@@ -1182,6 +1219,7 @@ export class PartnerAgentRuntime {
   async close(): Promise<void> {
     this.closed = true
     this.disposeConfigurationListener()
+    this.disposePreparation()
     this.disposeAssemblyListener()
     this.disposeRollingContext()
     this.disposeToolAuthority()
@@ -1247,7 +1285,9 @@ export class PartnerAgentRuntime {
     const detachSpeech=progress?.acknowledge ? installLiveSpeech(agent,progress.acknowledge,
       ()=>questionOrigin(agent.session.id,agent.session.snapshotEvents(),this.store.snapshot().sessions)?.id===session.id?session.id:undefined,
       ()=>{const card=this.store.snapshot().companions.find(c=>c.id===companion.id)?.characterCard;return !!card?.enabled&&!!card.segmentedReplies},
-      ()=>usesShortDeliveryPolicy(this.store.snapshot().companions.find(c=>c.id===companion.id)?.characterCard)) : undefined
+      ()=>usesShortDeliveryPolicy(this.store.snapshot().companions.find(c=>c.id===companion.id)?.characterCard),
+      (selection,exec,beforeTools)=>composeConversationExpression(this.ctx,companion.id,this.store,exec,[],selection,{beforeTools,single:true}),
+      (text,exec,beforeTools,preserveText,inlineDetails)=>renderPersonaDelivery(this.ctx,companion.id,this.store,exec,[{text}],{beforeTools,preserveText,inlineDetails,single:true})) : undefined
     const completion=new ReplyCompletionGuard(agent,()=>questionOrigin(agent.session.id,agent.session.snapshotEvents(),this.store.snapshot().sessions)?.id===session.id)
     const detachCompletion=this.ctx.on('agent/turn-stopping',completion.stop)
     const detachCompletionTools=agent.ctx.on('tools/pre-execute',async(exec,next)=>{

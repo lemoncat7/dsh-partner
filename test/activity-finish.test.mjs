@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {idleActivityFinishTool,isSilentActivityResult} from '../lib/character/activity-tool.js'
@@ -11,7 +12,7 @@ function fixture(t){
  const store={snapshot:()=>state,isCompanionRemoving:()=>false},root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
  const agent={session:{id:'s',header:{},snapshotEvents:()=>events},options:{}},scope=createScope(root,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())
  scope.ctx.tools.register(idleActivityFinishTool('c',store))
- const invoke=()=>root.tools.execute({callId:'a',name:'partner_activity_finish',arguments:{reason:'暂时没有想做的事'},agent,signal:new AbortController().signal})
+ const invoke=()=>dispatchTool(root.tools, {callId:'a',name:'partner_activity_finish',arguments:{reason:'暂时没有想做的事'},agent,signal:new AbortController().signal})
  return {state,events,invoke}
 }
 test('silent completion preserves terminal metadata through the real runtime',async t=>{

@@ -27,8 +27,9 @@ export interface ConcernSuggestion {
 
 /** One concern entry point for explicit watches and evidence-backed implicit candidates. */
 export function registerPartnerConcernTool(ctx: ConcernToolContext, store: PartnerStore, concerns: PartnerConcernStore): () => void {
-  const disposeManagement = ctx.tools.register(concernManagementTool(store, concerns))
-  const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()))
+  const when=({agent}:{agent:Agent})=>{const state=store.snapshot();return state.sessions.some(s=>s.sessionId===agent.session.id&&state.companions.some(c=>c.id===s.companionId))}
+  const disposeManagement = ctx.tools.register(concernManagementTool(store, concerns),{when})
+  const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()),{when})
   const disposeVisibility = installVisibility(ctx, store)
   return () => { disposeVisibility(); disposeTool(); disposeManagement() }
 }
@@ -129,7 +130,7 @@ function installVisibility(ctx: ConcernToolContext, store: PartnerStore): () => 
       const result = await next()
       const route = store.snapshot().sessions.find(item => item.sessionId === agent.session.id)
       const companion = route === undefined ? undefined : store.snapshot().companions.find(item => item.id === route.companionId)
-      applyConcernToolVisibility(result, route !== undefined && companion !== undefined)
+      if('tools' in result)applyConcernToolVisibility(result as PromptAssembly, route !== undefined && companion !== undefined)
       return result
     })
     attached.set(agent, dispose)

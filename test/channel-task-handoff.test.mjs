@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {Context} from '@deepseek-ai/cordis'
@@ -36,7 +37,7 @@ test('QQ input during silent autonomous work starts an owned reply and delivers 
  t.after(scope.ctx.tools.register(def('generate_image',async()=>{sent.push('image generated');return {ok:true}})))
  t.after(scope.ctx.tools.register(def('partner_send_attachment',async()=>{sent.push('image sent');return {ok:true}})))
  let calls=0
- const call=async(name,args={})=>{const request={name,arguments:args,agent,callId:'call-'+calls++,signal:new AbortController().signal};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ const call=async(name,args={})=>{const request={name,arguments:args,agent,callId:'call-'+calls++,signal:new AbortController().signal};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  agent.followup=message=>{
   agent.status='running';session.append('turn/start',{turn:2});session.append('user/message',message,{surfaceOp:'append'})
   work=(async()=>{

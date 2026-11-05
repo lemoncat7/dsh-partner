@@ -4,7 +4,7 @@ import type { PartnerStore } from '../store.js'
 import type { PartnerState } from '../domain.js'
 import { record } from '../core/validation.js'
 import { affectionTurnEligible } from './affection-context.js'
-import { AFFECTION_DELTAS, AFFECTION_GUIDANCE, adjustAffection, affectionEnabled, affectionProgress, type AffectionState } from './affection.js'
+import { AFFECTION_DELTAS, AFFECTION_MEANING, AFFECTION_GUIDANCE, adjustAffection, affectionEnabled, affectionProgress, type AffectionState } from './affection.js'
 function currentTurn(events:readonly SessionEvent[]) {
   let start=-1
   for(let i=events.length-1;i>=0;i--)if(events[i]!.type==='turn/start'){start=i;break}
@@ -16,7 +16,7 @@ function toolProgress(state?:AffectionState) {
 }
 export function affectionTool(owner:string,store:PartnerStore):ToolDefinition {
   return {
-    name:'partner_affection',description:`根据当前真实互动记录自己的好感变化，不自动报分或发送消息。${AFFECTION_GUIDANCE}原因须符合当前人格和事实，不能因离线、正常拒绝或工具失败扣分。每条用户消息只记一次，没有时间或每日加减分配额。没有变化时无需调用 adjust（该操作只接受非零变化）。inspect 查看当前进度；adjust 提交当前用户原文 evidence 与 reason。系统活动、陌生 QQ 账号不能改分。`,
+    name:'partner_affection',description:`根据当前真实互动记录自己的好感变化，不自动报分或发送消息。${AFFECTION_MEANING}${AFFECTION_GUIDANCE}原因须符合当前人格和事实，不能因离线、正常拒绝或工具失败扣分。每条用户消息只记一次，没有时间或每日加减分配额。没有变化时无需调用 adjust（该操作只接受非零变化）。inspect 查看当前进度；adjust 提交当前用户原文 evidence 与 reason。系统活动、陌生 QQ 账号不能改分。`,
     parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['inspect','adjust']},delta:{type:'integer',enum:[...AFFECTION_DELTAS]},reason:{type:'string',maxLength:300},evidence:{type:'string',maxLength:300}}},
     output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},
     presentCall:()=>({card:'generic',title:'记录相处感受'}),

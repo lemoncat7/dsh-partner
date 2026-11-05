@@ -1,3 +1,4 @@
+import { dispatchTool } from '../compat/tool-dispatch.js'
 import { isIdleContactNotice } from '../character/idle-contact.js'
 import { AGREEMENT_GUIDANCE } from '../chat/agreements.js'
 import type {ToolDefinition,ToolRuntime,ToolRunContext,ToolExecutionResult} from '@deepseek-ai/dsh-tools'
@@ -18,7 +19,7 @@ const GROUPS=[
  {id:'chat',title:'聊天回复',description:'文字、表情与语音'},
  {id:'memory',title:'回忆',description:'长期记忆与历史对话检索'},
  {id:'media',title:'图片创作',description:'生图、画图、图生图与图片编辑'},
- {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、好感度、自主念头、睡眠和头像'},
+ {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、好感度、自主念头、自主习惯、睡眠和头像'},
  {id:'work',title:'任务与协作',description:'需求、任务看板和伙伴协作'},
  {id:'automation',title:'定时与续接',description:'定时计划、长任务等待与恢复'},
  {id:'skills',title:'技能',description:'查询、加载和运行已启用 Skill'},
@@ -36,7 +37,7 @@ function category(name:string):string {
  if(name==='partner_memory_recall')return 'memory'
  if(['generate_image','image_gen.imagegen'].includes(name))return 'media'
  if(['partner_chat_reply','partner_agreement','partner_chat_say','partner_chat_progress','partner_stickers','partner_qq_reply'].includes(name))return 'chat'
- if(/identity|affection|thoughts|sleep|avatar|activity/.test(name))return 'identity'
+ if(/identity|affection|thoughts|habits|sleep|avatar|activity/.test(name))return 'identity'
  if(/task_board|requirements|collaborate|work_execute|workflow/.test(name))return 'work'
  if(/schedule/.test(name))return 'automation'
  if(/skill/.test(name))return 'skills'
@@ -68,7 +69,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
  const available=(exec:ToolRunContext)=>{
   const access=resolveToolAccess({agent:exec.agent!,state:store.snapshot()})
   const tools=new Map<string,ToolDefinition>()
-  for(const entry of entries){const tool=runtime.get(entry.tool.name,exec.agent);if(entry.allowed()&&tool)tools.set(tool.name,tool)}
+  for(const entry of entries){const tool=typeof runtime.executable==='function'?runtime.executable(entry.tool.name,exec.agent,exec.toolSet):runtime.get(entry.tool.name,exec.agent);if(entry.allowed()&&tool)tools.set(tool.name,tool)}
   return [...tools.values()].filter(tool=>!['partner_tools','partner_channel_access','run_code'].includes(tool.name)&&access.sendTools&&(!access.allowedTools||access.allowedTools.includes(tool.name)))
  }
  const visible=(tool:ToolDefinition)=>({name:tool.name,category:category(tool.name),summary:(['generate_image','image_gen.imagegen'].includes(tool.name)?'生图、画图、图生图、图片编辑。'+tool.description:tool.description).slice(0,160)})
@@ -87,7 +88,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
   const subCallId=ToolCallId(`${exec.callId}:capability`),rootCallId=exec.rootCallId??exec.callId
   const log={rootCallId,parentCallId:exec.callId,subCallId,name,arguments:JSON.stringify(args)}
   exec.agent!.session.append('tool/ptc-dispatch-start',log)
-  const result=await runtime.execute({name,arguments:args,agent:exec.agent!,signal:exec.signal,callId:subCallId,rootCallId,parent:exec.token})
+  const result=await dispatchTool(runtime, {name,arguments:args,agent:exec.agent!,signal:exec.signal,callId:subCallId,rootCallId,parent:exec.token,...(exec.toolSet?{toolSet:exec.toolSet}:{})})
   let content=result.content
   // Honor the host's durable-log projection (large output locators/redaction).
   try {content=await exec.agent!.ctx.waterfall(scopeTarget(runtime,exec.agent!), 'tools/ptc-dispatch-log',{exec,agent:exec.agent!,subCallId,name,isError:result.isError,content},()=>Promise.resolve(content))}catch { /* the settled result must still be recorded */ }

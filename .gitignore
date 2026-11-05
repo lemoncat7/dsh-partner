@@ -4,3 +4,5 @@ dist/
 *.tgz
 
 __pycache__/
+
+resources/bilibili/__pycache__/

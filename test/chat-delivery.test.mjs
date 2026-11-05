@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,readFile} from 'node:fs/promises'
@@ -138,7 +139,7 @@ test('DSH tool runtime commits terminal success and presentation metadata, but n
   const agent={session:{id:'s',header:{},snapshotEvents:()=>[start,user]},options:{}}
   const scope=createScope(ctx,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())
   scope.ctx.tools.register(chatTools('a',store,{}, {},ctx,'/partner-local/v1')[1])
-  const invoke=()=>ctx.tools.execute({callId:'reply-call',name:'partner_chat_reply',arguments:{messages:[{text:'第一条'},{text:'第二条'}]},agent,signal:new AbortController().signal})
+  const invoke=()=>dispatchTool(ctx.tools, {callId:'reply-call',name:'partner_chat_reply',arguments:{messages:[{text:'第一条'},{text:'第二条'}]},agent,signal:new AbortController().signal})
   const success=await invoke();assert.equal(success.isError,false);assert.equal(success.concludesTurn,true)
   assert.equal(success.meta.kind,'partner-chat-v1');assert.equal(success.meta.parts.length,2)
   card.enabled=false;const failure=await invoke();assert.equal(failure.isError,true);assert.equal(failure.concludesTurn,undefined)

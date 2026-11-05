@@ -12,6 +12,9 @@ export interface CompanionView {
   activityPlan?: import('./character/activity-plan.js').ActivityPlan
   thoughts?: import('./character/thoughts.js').CompanionThought[]
   interactionReview?: import('./character/interaction-review.js').InteractionReviewState
+  habitDismissals?: Array<{scope:string;text:string;at:number}>
+  habits?: import('./character/habits.js').CompanionHabit[]
+  habitCheck?: import('./character/habits.js').HabitCheck
   personaHistory?: import('./companions/persona-refinement.js').PersonaRevision[]
   affection?: import('./character/affection.js').AffectionState
   toolDiscovery?: boolean
@@ -29,9 +32,11 @@ export interface CompanionView {
   automation: AutomationView
 }
 export interface ChannelView {
+  bilibili?: import('./channels/bilibili/catalog.js').BiliSettings
+  bilibiliActivity?: import('./channels/bilibili/service.js').BiliReceipt[]
   qq?: import('./channels/qq/settings.js').QqSettings
   qqActivity?: import('./channels/qq/actions.js').QqActionReceipt[]
-  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
+  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq' | 'bilibili'
   direct?: { baseUrl: string; targetId: string; peerId: string }
   id: string; companionId: string; accountId: string; name: string; enabled: boolean
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'

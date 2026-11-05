@@ -1,9 +1,11 @@
+import {defineContentToolFixture} from './runtime-022.mjs'
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import { ToolRuntime, defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { executeObservationLoop, observationToolNames } from '../lib/observation-loop.js'
 
 test('observation inherits session plugin capabilities without granting absent tools', () => {
@@ -33,7 +35,7 @@ test('inherited plugin execution retains parent authorization guards', async () 
   }))
   try {
     assert.equal(observationToolNames(ctx.tools.schemas(agent), false, false).has('custom_authorized_lookup'), true)
-    const invoke = () => ctx.tools.execute({callId: 'test', name: 'custom_authorized_lookup', arguments: {}, agent, signal: new AbortController().signal})
+    const invoke = () => dispatchTool(ctx.tools, {callId: 'test', name: 'custom_authorized_lookup', arguments: {}, agent, signal: new AbortController().signal})
     assert.equal((await invoke()).isError, false)
     source.ctx.tools.guard(() => 'source authorization denied')
     assert.equal((await invoke()).isError, true)
@@ -51,7 +53,7 @@ test('lightweight observation fails closed without inherited tool scope', async 
 test('lightweight runner retains bounded private messages and native tool execution', async () => {
   const source = await readFile(new URL('../src/observation-loop.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /executor\.execute|agents\.create|session\.append|tools\.restrict\(/)
-  assert.match(source, /ctx\.tools\.execute/)
+  assert.match(source, /dispatchTool\(ctx\.tools/)
   assert.doesNotMatch(source, /calls >= 24|stageRemainingMs|150_000/)
   assert.match(source, /AbortSignal\.timeout\(OBSERVATION_MODEL_TIMEOUT_MS\)/)
   assert.match(source, /await scope\.dispose\(\)/)

@@ -38,6 +38,7 @@ export function replyContinuity(sessionId: string, events: readonly SessionEvent
   const prefix: SessionEvent[] = []
   const callOrigins = new Map<string, string | undefined>()
   let eventRoute: ReturnType<typeof questionOrigin>
+  let finalText = ''
   for (const event of events) {
     prefix.push(event)
     if (event.type === 'user/message' && event.data.source.kind === 'user') eventRoute = questionOrigin(sessionId, prefix, sessions)
@@ -45,6 +46,14 @@ export function replyContinuity(sessionId: string, events: readonly SessionEvent
     if (event.type === 'tool/ptc-dispatch-start') callOrigins.set(event.data.subCallId, callOrigins.has(event.data.rootCallId) ? callOrigins.get(event.data.rootCallId) : eventRoute?.id)
     if (event.seq < since) continue
     const sameRoute = eventRoute?.id === route?.id
+    // Only a completed terminal plain response is visible conversation. Intermediate
+    // planner prose beside/before tools must never become a voice example.
+    if (event.type === 'turn/start' || event.type === 'user/message' && event.data.source.kind === 'user' || event.type === 'tool/call' || event.type === 'tool/result' || event.type === 'tool/ptc-dispatch') finalText = ''
+    if (event.type === 'assistant/message') finalText = sameRoute && !event.data.interrupted && !event.data.message.content.some(b => b.type === 'tool-call') ? textOf(event.data.message.content) : ''
+    if (event.type === 'turn/end') {
+      if (sameRoute && event.data.reason.kind === 'completed' && finalText.trim() && dialogue.at(-1)?.text !== finalText) dialogue.push({role:'assistant',text:finalText})
+      finalText = ''
+    }
     const progressCallId = event.type === 'tool/result' ? event.data.message.toolCallId : event.type === 'tool/ptc-dispatch' ? (callOrigins.has(event.data.subCallId) ? event.data.subCallId : event.data.rootCallId) : undefined
     const progressForRoute = progressCallId && callOrigins.has(progressCallId) && callOrigins.get(progressCallId) === route?.id
     if (progressForRoute && progress.has(event.seq)) { dialogue.push({ role: 'assistant', text: progress.get(event.seq)! }); confirmedMessages.push({ seq: event.seq, text: progress.get(event.seq)! }) }

@@ -24,17 +24,17 @@ const unchanged={affection:{delta:0,reason:'普通交流，无明确变化',evid
 test('background check records unchanged independently of score and persona revisions',async()=>{
  const f=fixture(),r=f.service.prepare(f.turn);assert.ok(r)
  await f.service.apply(f.turn,{request:r.request,evaluation:unchanged})
- assert.equal(f.c.interactionReview.affection.outcome,'unchanged');assert.equal(f.c.interactionReview.persona.outcome,'unchanged')
+ assert.equal(f.c.interactionReview.affection.outcome,'unchanged');assert.equal(f.c.interactionReview.persona,undefined)
  assert.equal(f.c.affection,undefined);assert.equal(f.c.personaHistory,undefined)
- assert.equal(f.service.prepare(f.turn),undefined)
+ assert.equal(f.service.prepare(f.turn).request.affection,false)
  assert.equal(f.service.prepare({...f.turn,id:'next',at:Date.now()}).request.affection,true)
 })
 test('grounded changes save once; direct tool and reflection share the user-message dedup key',async()=>{
  const f=fixture(),r=f.service.prepare(f.turn)
  await f.service.apply(f.turn,{request:r.request,evaluation:positive})
- assert.equal(f.c.affection.score,1);assert.equal(f.c.characterCard.chatStyle,'随意聊天，少用反问句',JSON.stringify(f.c.interactionReview));assert.equal(f.c.personaHistory.length,1)
+ assert.equal(f.c.affection.score,1);assert.equal(f.c.characterCard.chatStyle,'随意聊天');assert.equal(f.c.personaHistory,undefined)
  await f.service.apply(f.turn,{request:r.request,evaluation:positive})
- assert.equal(f.c.affection.score,1);assert.equal(f.c.personaHistory.length,1)
+ assert.equal(f.c.affection.score,1);assert.equal(f.c.personaHistory,undefined)
  assert.equal(adjustAffection(f.c,'s:u',Date.now()+86400000,1,'再次','我很认真在听你说。'),false)
 })
 test('fabricated evidence, assistant quotes, policy fields and missing results never mutate identity or score',async()=>{
@@ -42,12 +42,12 @@ test('fabricated evidence, assistant quotes, policy fields and missing results n
   const f=fixture(),r=f.service.prepare(f.turn)
   await f.service.apply(f.turn,{request:r.request,evaluation})
   assert.equal(f.c.affection,undefined);assert.equal(f.c.personaHistory,undefined)
-  assert.equal(f.c.interactionReview.affection.outcome,'failed');assert.equal(f.c.interactionReview.persona.outcome,'failed')
+  assert.equal(f.c.interactionReview.affection.outcome,'failed');assert.equal(f.c.interactionReview.persona,undefined)
  }
 })
 test('unknown provenance, old jobs and repairs do not get retroactive awards',()=>{
  const f=fixture()
- for(const turn of [{...f.turn,interactionEligible:undefined},{...f.turn,interactionEligible:false},{...f.turn,userMessageIds:[]},{...f.turn,at:Date.now()-7200000}])assert.equal(f.service.prepare(turn),undefined)
+ for(const turn of [{...f.turn,userMessageIds:[]},{...f.turn,at:Date.now()-7200000}])assert.equal(f.service.prepare(turn),undefined)
 })
 test('QQ guest, mixed turn, revoked binding and absent transport provenance fail closed',async()=>{
  const f=fixture();f.state.channels=[{id:'qq',companionId:'c',platform:'qq',enabled:true,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
@@ -56,9 +56,9 @@ test('QQ guest, mixed turn, revoked binding and absent transport provenance fail
  const r=f.service.prepare(f.turn);assert.ok(r)
  f.state.channels[0].qq.identityBinding.qqIds=[]
  await f.service.apply(f.turn,{request:r.request,evaluation:positive});assert.equal(f.c.interactionReview,undefined)
- assert.equal(f.service.prepare(f.turn),undefined)
+ assert.equal(f.service.prepare(f.turn)?.request.affection??false,false)
  f.state.channels[0].qq.identityBinding.qqIds=['12345678'];route.inboundMessageIds=[]
- assert.equal(f.service.prepare(f.turn),undefined)
+ assert.equal(f.service.prepare(f.turn)?.request.affection??false,false)
 })
 test('concurrent identity changes, disabled learning/refinement and changed score cannot be overwritten',async()=>{
  for(const mutation of [f=>f.c.updatedAt++,f=>f.c.automation.memory.enabled=false,f=>f.c.idleContact.selfRefinement=false]){
@@ -119,7 +119,7 @@ test('successive background reviews allow larger positive and negative changes w
 
 
 test('relationship context is bounded, prior, same audience and not valid evidence by itself', async () => {
- const f=fixture(); const recent=Array.from({length:6},(_,i)=>({...f.turn,id:'old'+i,at:f.at-1000+i,user:'背景'+i,assistant:'回复'.repeat(600)}));
+ const f=fixture(); f.c.idleContact.habitsEnabled=false; const recent=Array.from({length:6},(_,i)=>({...f.turn,id:'old'+i,at:f.at-1000+i,user:'背景'+i,assistant:'回复'.repeat(600)}));
  const alien={...f.turn,id:'alien',at:f.at-1,sessionId:'other',user:'别人的秘密'};
  const future={...f.turn,id:'future',at:f.at+1,user:'未来内容'};
  const r=f.service.prepare(f.turn,Date.now(),[...recent,alien,future]);
@@ -127,4 +127,10 @@ test('relationship context is bounded, prior, same audience and not valid eviden
  assert.ok(r.prompt.length<10000);
  await f.service.apply(f.turn,{request:r.request,evaluation:{affection:{delta:1,reason:'历史互动',evidence:'背景5'}}});
  assert.equal(f.c.affection,undefined);assert.equal(f.c.interactionReview.affection.outcome,'failed');
+});
+
+test('background affection interpretation receives relationship and baseline independently of score',()=>{
+ const f=fixture();f.c.relationshipText='多年熟悉的家人，平时直来直去';f.c.affection={score:0,updatedAt:0,lastAwardAt:0,lastTurnId:''};
+ const before=structuredClone(f.c);const prepared=f.service.prepare(f.turn);assert.ok(prepared);
+ assert.match(prepared.prompt,/多年熟悉的家人/);assert.match(prepared.prompt,/0 是既定关系的基线/);assert.match(prepared.prompt,/短暂开心/);assert.deepEqual(f.c,before);
 });

@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {Session} from '@deepseek-ai/dsh-session'
@@ -91,7 +92,7 @@ test('real unified voice call persists delivery metadata for channel projection'
  f.state.companions=[{id:'c',toolDiscovery:true}]
  const agent=f.exec.agent;agent.options={};const scope=createScope(root,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())
  t.after(installToolDiscovery(scope.ctx.tools,'c',f.store,[{tool:f.tool,allowed:()=>true}]))
- const result=await root.tools.execute({name:'partner_tools',arguments:{action:'call',name:'partner_qq_reply',argumentsJson:JSON.stringify({action:'voice',text:'你好'})},agent,signal:new AbortController().signal,callId:'unified-voice'})
+ const result=await dispatchTool(root.tools, {name:'partner_tools',arguments:{action:'call',name:'partner_qq_reply',argumentsJson:JSON.stringify({action:'voice',text:'你好'})},agent,signal:new AbortController().signal,callId:'unified-voice'})
  assert.equal(result.isError,false);assert.equal(result.concludesTurn,true);assert.equal(f.requests.length,1)
  const projected=await prepareChannelReply(channelReplyPartsAfter(agent.session.snapshotEvents(),-1),'/tmp')
  assert.equal(projected.alreadyDelivered,true);assert.equal(projected.text,'');assert.deepEqual(projected.chatParts,[])

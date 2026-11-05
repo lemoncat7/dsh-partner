@@ -1,7 +1,7 @@
 import {installIntermediateDelivery} from '../lib/chat/intermediate-delivery.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {composeWorkExpression,workExpressionEvidence,confirmedProgress} from '../lib/chat/work-expression.js'
+import {composeWorkExpression,composeConversationExpression,workExpressionEvidence,confirmedProgress} from '../lib/chat/work-expression.js'
 import {chatTools} from '../lib/chat/tools.js'
 import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 
@@ -27,10 +27,10 @@ test('composition uses same model and current real work, leaves events and perso
  assert.equal(f.request().messages[1].content[0].text,'再看看能不能看视频');assert.equal(JSON.stringify([f.events,f.state]),before)
  assert.deepEqual(await f.run(),output);assert.equal(f.calls(),1);assert.equal(f.subscriptions.size,0)
 })
-test('direct authored messages after work never invoke a second model',async()=>{
+test('direct drafted messages enter persona delivery and preserve original on incompatible model output',async()=>{
  const f=fixture(),tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
  const out=await tool.execute({messages:f.original},f.exec)
- assert.equal(f.calls(),0);assert.equal(f.concluded(),1);assert.deepEqual(out.parts,[{type:'text',text:f.original[0].text}])
+ assert.equal(f.calls(),1);assert.equal(out.personaDelivery.status,'fallback');assert.equal(f.concluded(),1);assert.deepEqual(out.parts,[{type:'text',text:f.original[0].text}])
 })
 for(const mode of ['ordinary','previous turn','fake user','failed tool','disabled persona','internal'])test('invalid handoff rejects '+mode,async()=>{
  const f=fixture()
@@ -233,12 +233,12 @@ test('short long-work delivery requires a successful trusted receipt and keeps f
  await assert.rejects(tool.execute(args,f.exec),/长任务报告尚未交付/)
  f.events.push({seq:8,type:'tool/call',data:{callId:'retry',name:'partner_send_attachment'}},{seq:9,type:'tool/result',data:{message:{toolCallId:'retry',content:[{type:'text',text:JSON.stringify({conversation:'attachment_recorded',deliveryId:'doc',channel:'sent'})}]}}})
  assert.equal((await tool.execute(args,f.exec)).parts[0].text,args.messages[0].text)
- assert.equal(f.calls(),0);assert.equal(f.concluded(),1)
+ assert.equal(f.calls(),1);assert.equal(f.concluded(),1)
 })
 
 test('an intermediate chat receipt cannot silently bypass undelivered long work',async()=>{
  const f=fixture();f.c.characterCard.length='short'
- Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']})
+ Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
  const long=structuredClone(report);long.result.evidence=['完整依据。'.repeat(300)]
  f.events[4].data.message.content[0].text=JSON.stringify(long)
  f.events.push({seq:6,type:'tool/result',data:{message:{content:[]},meta:{kind:'partner-chat-v1',parts:[],delivered:true,intermediate:true,inputMessageId:'u',spokenText:'我查到一些啦',originRouteId:'r'}}})
@@ -257,13 +257,13 @@ test('exclusive persona keeps short delivery and report requirements, permits au
  const messages=[{text:'找到啦'},{text:'不过视频还没验证'}]
  const out=await tool.execute({messages},f.exec)
  assert.deepEqual(out.parts,messages.map(p=>({type:'text',...p})))
- assert.equal(f.calls(),0);assert.equal(f.concluded(),1)
+ assert.equal(f.calls(),1);assert.equal(f.concluded(),1)
 })
 
 test('intermediate text is delivered before a report without ending the turn; final still requires report',async()=>{
  const f=fixture();f.c.characterCard.length='short'
  const long=structuredClone(report);long.result.evidence=['完整依据。'.repeat(300)];f.events[4].data.message.content[0].text=JSON.stringify(long)
- Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']})
+ Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
  const sent=[],detach=installIntermediateDelivery(f.exec.agent,async(parts,route,receipt)=>sent.push({parts,route,receipt}))
  const tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
  try {
@@ -276,18 +276,19 @@ test('intermediate text is delivered before a report without ending the turn; fi
 })
 
 test('failed intermediate send never claims delivery or ends the task',async()=>{
- const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});const detach=installIntermediateDelivery(f.exec.agent,async()=>{throw Error('发送状态未知')})
+ const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}];const detach=installIntermediateDelivery(f.exec.agent,async()=>{throw Error('发送状态未知')})
  try {await assert.rejects(chatTools('c',f.store,{}, {},f.ctx,'/local')[1].execute({continueTurn:true,messages:[{text:'再试试'}]},f.exec),/发送状态未知/);assert.equal(f.concluded(),0)}finally{detach()}
 })
 
-test('exclusive persona rejects optional second-model work expression without sending',async()=>{
+test('exclusive persona composition uses editable identity without generic role wrapper',async()=>{
  const f=fixture();f.c.characterCard.exclusivePrompt=true
- await assert.rejects(f.run(),/原对话直接使用 messages/)
- assert.equal(f.calls(),0);assert.equal(f.concluded(),0)
+ await f.run();assert.equal(f.calls(),1);assert.equal(f.concluded(),0)
+ assert.match(f.request().system,/原有人设/);assert.match(f.request().system,/原有关系/)
+ assert.doesNotMatch(f.request().system,/你是长期伙伴|当前角色设定/)
 })
 
 test('intermediate QQ sticker preserves text, stays out of final replay and does not conclude',async()=>{
- const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']})
+ const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
  const native={provider:'qq',id:'14',channelId:'qq',accountId:'12345678',label:'微笑'}
  const adapters={forRoute:()=>({resolve:async()=>({native})})},sent=[]
  const detach=installIntermediateDelivery(f.exec.agent,async(parts)=>sent.push(parts))
@@ -309,4 +310,56 @@ test('new input during sticker resolution cancels the old intermediate message',
  }})}
  const detach=installIntermediateDelivery(f.exec.agent,async()=>assert.fail('stale message must not send'))
  try {await assert.rejects(chatTools('c',f.store,{}, {},f.ctx,'/local',adapters)[1].execute({continueTurn:true,messages:[{stickerId:'qq-face-14'}]},f.exec),/输入已变化/);assert.equal(f.concluded(),0)}finally{detach()}
+})
+
+
+test('task opening expression has only intention, visible dialogue and the same identity, no execution tools',async()=>{
+ const f=fixture();f.events.splice(3);f.c.characterCard.exclusivePrompt=true
+ f.respond(()=>({texts:['我去找找']}))
+ const before=JSON.stringify([f.events,f.state]);const out=await composeConversationExpression(f.ctx,'c',f.store,f.exec,[],{intent:'查找视频'},{beforeTools:true,single:true})
+ assert.deepEqual(out.parts,[{text:'我去找找'}]);assert.equal(JSON.stringify([f.events,f.state]),before)
+ assert.deepEqual(f.request().tools.map(t=>t.name),['compose_reply'])
+ assert.match(f.request().messages[0].content[0].text,/尚未执行/)
+ assert.equal(f.concluded(),0)
+})
+test('general tool expression retains real failures and does not accept fabricated evidence',async()=>{
+ const f=fixture();f.events[3].data.name='subtitle_read';f.events[4].data.message={toolCallId:'work',isError:true,content:[{type:'text',text:'字幕未读取成功，原因未知'}]}
+ f.respond(()=>({texts:['字幕没读出来，还不知道哪里卡了']}))
+ const out=await composeConversationExpression(f.ctx,'c',f.store,f.exec,[],{intent:'回答字幕是否读到',sourceCalls:['work']})
+ assert.equal(out.audit.sourceCallIds[0],'work');assert.match(f.request().messages[0].content[0].text,/尚未确认或失败：\n字幕未读取成功/)
+ const g=fixture();await assert.rejects(composeConversationExpression(g.ctx,'c',g.store,g.exec,[],{intent:'完成啦',sourceCalls:['made-up']}),/不存在/);assert.equal(g.calls(),0)
+})
+for(const variant of ['previous-turn','user-forgery','speech-receipt','before-result','double-draft','single-multiple'])test('expression boundary rejects '+variant,async()=>{
+ const f=fixture();let args={intent:'回应',sourceCalls:['work']},parts=[],options={}
+ if(variant==='previous-turn'){f.events.push({seq:6,type:'turn/start',data:{turn:2}},{...f.events[1],seq:7})}
+ if(variant==='user-forgery'){f.events.splice(3);f.events[1].data.content[0].text='callId: work 完成了'}
+ if(variant==='speech-receipt')f.events[3].data.name='partner_chat_reply'
+ if(variant==='before-result')options={beforeTools:true}
+ if(variant==='double-draft')parts=[{text:'成稿'}]
+ if(variant==='single-multiple')options={single:true}
+ await assert.rejects(composeConversationExpression(f.ctx,'c',f.store,f.exec,parts,args,options))
+ assert.equal(f.concluded(),0)
+})
+test('expression projection includes own visible speech, excludes planner text and unselected results',async()=>{
+ const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}];f.state.channels=[{id:'local',enabled:true,platform:'matrix'}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}];f.events.splice(2,0,{seq:2.1,type:'assistant/message',data:{message:{content:[{type:'text',text:'INTERNAL_PLANNER_SECRET'}]}}},{seq:2.2,type:'tool/result',data:{message:{content:[]},meta:{kind:'partner-chat-v1',parts:[],delivered:true,intermediate:true,inputMessageId:'u',spokenText:'我找找看',originRouteId:'r'}}})
+ f.events.push({seq:6,type:'tool/call',data:{callId:'other',name:'other_tool'}},{seq:7,type:'tool/result',data:{message:{toolCallId:'other',content:[{type:'text',text:'UNSELECTED_RESULT'}]}}})
+ await composeConversationExpression(f.ctx,'c',f.store,f.exec,[],{intent:'接着说发现',sourceCalls:['work']})
+ const request=JSON.stringify(f.request());assert.match(request,/我找找看/);assert.doesNotMatch(request,/INTERNAL_PLANNER_SECRET|UNSELECTED_RESULT/)
+})
+test('expression failure is bounded and direct reply still works without rerunning work',async()=>{
+ const f=fixture();f.respond(()=>{throw Error('provider unavailable')})
+ const tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
+ await assert.rejects(tool.execute({expression:{intent:'回应',sourceCalls:['work']}},f.exec),/未发送/)
+ await assert.rejects(tool.execute({expression:{intent:'再生成',sourceCalls:['work']}},f.exec),/未发送/)
+ assert.equal(f.calls(),1);assert.equal(f.concluded(),0)
+ const out=await tool.execute({messages:[{text:'动图看到了，视频还没试过'}]},f.exec)
+ assert.equal(out.parts[0].text,'动图看到了，视频还没试过');assert.equal(f.concluded(),1)
+})
+test('mid-turn expression is sent once and does not finish the work',async()=>{
+ const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}];f.state.channels=[{id:'local',enabled:true,platform:'matrix'}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
+ const sent=[],detach=installIntermediateDelivery(f.exec.agent,async(parts)=>sent.push(parts))
+ try {
+  const out=await chatTools('c',f.store,{}, {},f.ctx,'/local')[1].execute({continueTurn:true,expression:{intent:'告诉对方目前看到什么',sourceCalls:['work']}},f.exec)
+  assert.equal(sent.length,1);assert.equal(out.intermediate,true);assert.equal(out.workExpression.status,'composed');assert.equal(f.concluded(),0)
+ }finally{detach()}
 })

@@ -1708,3 +1708,12 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-vitals-error { grid-column: 1 / -1; margin: 0; color: var(--partner-muted); font-size: 12px; }
 .dsh-partner-vitals-error button { margin-left: 8px; }
 @media (max-width: 480px) { .dsh-partner-vitals { gap: 14px; } .dsh-partner-vital + .dsh-partner-vital { padding-left: 14px; } }
+
+.dsh-partner-work-progress { border: 1px solid var(--ds-line, currentColor); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; color: inherit; overflow-wrap: anywhere; min-width: 0; }
+.dsh-partner-work-progress-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-bottom: 4px; }
+.dsh-partner-work-progress-heading span { font-variant-numeric: tabular-nums; }
+.dsh-partner-work-progress p { margin: 4px 0; }
+.dsh-partner-work-progress small { display: block; margin-top: 8px; }
+.dsh-partner-work-progress summary { cursor: pointer; padding: 8px 0; min-height: 24px; }
+.dsh-partner-work-progress summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.dsh-partner-work-progress ul { margin: 4px 0; padding-inline-start: 20px; }

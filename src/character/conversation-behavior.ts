@@ -52,7 +52,7 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
 
 /** The user-requested before/after workflow, independent of response style. */
 export function renderTaskConversationGuidance(): string {
-  return '【任务回应流程】私聊执行工具任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）按角色自然接一句，确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。执行中与结果回复仍是同一个角色，流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
+  return '【任务回应流程】私聊执行工具任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）优先用 expression.intent 说明准备做的动作，让同一人物表达器接一句；也可用 text 直接按角色成稿。确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。执行中与结果可用 expression 引用本轮 sourceCalls 或 workReply 引用工作事实，让表达器只依据近期聊天和必要结果说话；不把执行分析当回复稿。直接成稿仍按当前人物。流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
 }
 
 /** Delivery policy, not a replacement persona. Explicit requests override defaults. */
@@ -61,6 +61,6 @@ export function renderReplyRhythm(card?: CharacterCard): string {
     '一轮可以有多个执行目标。过程中可用 partner_chat_say 接话，或 partner_chat_reply continueTurn:true 穿插文字、表情，随后继续执行；没有新话不必播报。',
     '长任务的过程、结论、未确认事项和依据用 partner_send_attachment 交付报告；workReport 可合并本轮多个 runId，name 按实际主题命名，例如“视频接口核验.md”；不要固定叫工作结果。其他长文可用 document。',
     usesShortDeliveryPolicy(card) ? '短句已开启：日常聊天正文一轮最终提交最多 180 字，多个意思按自然停顿分别写进 messages；详细结果放报告，不截断、不为分段凑话。用户明确要展开或附件失败时可用 inlineDetails 正文交付。' : '',
-    '报告确认送达后仍要收尾。所有开场、穿插和收尾都依据当前人物及关系设定，自行决定说什么，不复读整份报告，不套用汇报或回执话术；未知和失败按事实说明。',
+    '报告确认送达后按当前人物与关系设定自然收尾，先回应用户最关心的结果，可补一个具体发现；正文不再重复报告提纲、验证过程和完整限制清单。会影响用户判断的失败、未完成或不确定性须简短说明，不能因有附件就藏起来；追问细节时再展开。已送达的同一结论无新内容不重发。所有开场和穿插也保持同一人格，不套用汇报话术。',
   ].filter(Boolean).join('\n')
 }

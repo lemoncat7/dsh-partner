@@ -196,54 +196,18 @@ test('ordinary inspection and autonomous edits omit authoring references; explic
  assert.equal((await f.inspect()).identity.description,'自主优化后的通用定位')
 })
 
-test('autonomous refinement is opt-in, own-persona only, terminal and reversible without restoring permissions', async t => {
-  const f = await fixture(t)
-  await f.update({characterCard:{enabled:true,roleText:'原来的角色',chatStyle:'原语气'},relationshipText:'哥哥',idleContact:{enabled:true,routeId:'local'}})
-  const user={type:'user/message',seq:2,data:{id:'u',source:{kind:'user'},content:[]}}
-  const notice={type:'user/message',seq:4,data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'},content:[]}}
-  let events=[user,{type:'turn/start',seq:3},notice], ended=0
-  f.exec.agent.session.snapshotEvents=()=>events
-  f.exec.concludeTurn=()=>ended++
-  await f.store.update(s=>{s.sessions.find(r=>r.id==='local').idleContactState={messageId:'idle',userMessageId:'u',policyRevision:s.companions[0].updatedAt}})
-  const change=async(patch={characterCard:{roleText:'自己选择的角色'}},extra={})=>f.call({action:'update',expectedAt:(await f.inspect()).expectedAt,patch,reason:'最近更喜欢直接表达自己的想法',...extra})
-  await assert.rejects(change(),/未开启/)
-  await assert.rejects(change({idleContact:{selfRefinement:true}}),/未开启/)
-  await f.store.update(s=>{s.companions[0].idleContact.selfRefinement=true})
-  for(const patch of [{relationshipText:'陌生人'},{idleContact:null},{sleepPolicy:{enabled:false}},{characterCard:null},{characterCard:{relationship:'改关系'}},{characterCard:{stickersEnabled:false}},{capabilities:[]}]) await assert.rejects(change(patch))
-  await assert.rejects(change(undefined,{reason:''}),/原因/)
-  const stale=(await f.inspect()).expectedAt-1
-  await assert.rejects(change(undefined,{expectedAt:stale}),/身份已变化/)
-  assert.equal(ended,0)
-  const result=await change()
-  assert.equal(result.kind,'partner-activity-silent-v1');assert.equal(ended,1)
-  let c=f.store.snapshot().companions[0]
-  assert.equal(c.personaHistory.length,1);assert.equal(c.relationshipText,'哥哥')
-  assert.equal(c.personaHistory[0].before.characterCard.roleText,'原来的角色')
-  assert.equal(c.characterCard.chatStyle,'原语气')
-  const {patchIdentity}=await import('../lib/companions/identity.js')
-  const restored=patchIdentity(c,c.personaHistory[0].before)
-  assert.equal(restored.characterCard.roleText,'原来的角色');assert.equal(restored.idleContact.selfRefinement,true)
-  assert.equal(restored.relationshipText,'哥哥')
-  assert.deepEqual((await PartnerStore.open(f.path)).snapshot().companions[0].personaHistory,c.personaHistory)
-  await f.store.update(s=>{s.companions[0].idleContact.selfRefinement=false})
-  await assert.rejects(change(),/未开启/)
-  events=[...events,{...user,seq:9,data:{...user.data,id:'new'}}]
-  await f.update({characterCard:{chatStyle:'用户要求的新语气'}})
-  await assert.rejects(f.update({idleContact:{selfRefinement:true}}),/页面设置/)
-  events.push({type:'user/message',seq:10,data:{id:'task',source:{kind:'plugin:other',form:'notice'}}})
-  await assert.rejects(f.update({name:'后台任务改名'}),/身份修改只允许/)
-})
-
-test('self refinement records are bounded; no-op and revoked activities do not write',async t=>{
-  const f=await fixture(t)
-  await f.update({characterCard:{enabled:true,roleText:'初始'},idleContact:{enabled:true,routeId:'local'}})
-  const {applyPersonaRefinement}=await import('../lib/companions/persona-refinement.js')
-  await f.store.update(s=>{s.companions[0].idleContact.selfRefinement=true})
-  for(let i=0;i<14;i++)await f.store.update(s=>{const c=s.companions[0];applyPersonaRefinement(s,c,{characterCard:{roleText:`角色 ${i}`}},c.updatedAt,'有新的偏好')})
-  const before=f.store.snapshot(),c=before.companions[0]
-  assert.equal(c.personaHistory.length,12)
-  await assert.rejects(f.store.update(s=>applyPersonaRefinement(s,s.companions[0],{characterCard:{roleText:'角色 13'}},c.updatedAt,'重复')),/没有变化/)
-  assert.deepEqual(f.store.snapshot(),before)
+test('autonomous identity rewriting is retired even with legacy switch enabled', async t=>{
+ const f=await fixture(t)
+ await f.update({characterCard:{enabled:true,roleText:'固定角色'},idleContact:{enabled:true,routeId:'local'}})
+ const user={type:'user/message',seq:2,data:{id:'u',source:{kind:'user'},content:[]}}
+ const notice={type:'user/message',seq:4,data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'},content:[]}}
+ f.exec.agent.session.snapshotEvents=()=>[user,{type:'turn/start',seq:3},notice];f.exec.concludeTurn=()=>{}
+ await f.store.update(s=>{s.companions[0].idleContact.habitsEnabled=true;s.sessions.find(r=>r.id==='local').idleContactState={messageId:'idle',userMessageId:'u',policyRevision:s.companions[0].updatedAt}})
+ const before=f.store.snapshot()
+ await assert.rejects(f.call({action:'update',expectedAt:(await f.inspect()).expectedAt,patch:{characterCard:{roleText:'变成别人'}},reason:'改一下'}),/已停用/)
+ assert.deepEqual(f.store.snapshot(),before)
+ const {applyPersonaRefinement}=await import('../lib/companions/persona-refinement.js')
+ assert.throws(()=>applyPersonaRefinement(before,before.companions[0],{},before.companions[0].updatedAt,'改'),/已停用/)
 })
 
 test('queued persona edits reject a changed input before mutation',async t=>{
@@ -253,4 +217,24 @@ test('queued persona edits reject a changed input before mutation',async t=>{
  const update=f.store.update.bind(f.store)
  f.store.update=async fn=>{events.push({type:'user/message',seq:3,data:{id:'new',source:{kind:'user'},content:[]}});return update(fn)}
  await assert.rejects(f.update({name:'过期的决定'}),/会话输入已变化/)
+})
+
+test('legacy refinement switch migrates to habits; page pause/delete uses revisions and preserves identity',async t=>{
+ const f=await fixture(t)
+ await f.store.update(s=>{const c=s.companions[0];c.idleContact={enabled:true,routeId:'local',idleMinutes:30,selfRefinement:true};c.characterCard={enabled:true,roleText:'固定角色'};})
+ let c=f.store.snapshot().companions[0];assert.equal(c.idleContact.habitsEnabled,true);assert.equal(c.idleContact.selfRefinement,undefined)
+ const {observeHabit}=await import('../lib/character/habits.js')
+ await f.store.update(s=>observeHabit(s.companions[0],'local:local',{kind:'interest',text:'喜欢猫图'},{id:'e',at:Date.now(),excerpt:'猫图'}))
+ let handler;registerPartnerApi({register(r){handler=r.handler;return()=>{}}},'/api',{store:f.store})
+ const post=async(body,headers={'x-dsh-partner-request':'1'})=>{
+  const req=Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]),{method:'POST',url:`/api/companions/${f.id}/habits`,headers}),res={statusCode:0,setHeader(){},end(data){this.body=data?JSON.parse(data):undefined}}
+  await handler(req,res);return res
+ }
+ c=f.store.snapshot().companions[0];const h=c.habits[0],before=effectiveIdentity(c)
+ assert.equal((await post({action:'pause',id:h.id,expectedAt:h.updatedAt},{})).statusCode,403)
+ assert.equal((await post({action:'pause',id:h.id,expectedAt:0})).statusCode,409)
+ const paused=await post({action:'pause',id:h.id,expectedAt:h.updatedAt});assert.equal(paused.statusCode,200);assert.equal(paused.body.habits[0].status,'paused')
+ const deleted=await post({action:'delete',id:h.id,expectedAt:paused.body.habits[0].updatedAt});assert.equal(deleted.statusCode,200);assert.equal(deleted.body.habits.length,0)
+ c=f.store.snapshot().companions[0];assert.deepEqual(effectiveIdentity(c),before);assert.equal(c.habitDismissals.length,1)
+ const reopened=await PartnerStore.open(f.path);assert.deepEqual(reopened.snapshot().companions[0].habitDismissals,c.habitDismissals)
 })

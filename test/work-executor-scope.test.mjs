@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
@@ -21,7 +22,7 @@ test('real ephemeral service restricts native preset and MCP tools to bridge, re
  const ctx={agentDefaultModel:{currentSelection:()=>({provider:'test',model:'fake'})},workspaceRegistry:{create:async()=>{throw Error('must not attach transient work to main history')}},agents:{async create(options){
   captured=options
   const agent={session:Session.create(options.sessionId),options:{},cancel(){},followup(message){this.session.append('user/message',message,{surfaceOp:'append'})},async whenIdle(){
-   const run=name=>root.tools.execute({name,arguments:{},agent:this,signal:new AbortController().signal,callId:name})
+   const run=name=>dispatchTool(root.tools, {name,arguments:{},agent:this,signal:new AbortController().signal,callId:name})
    assert.equal((await run('native_danger')).isError,true)
    assert.equal((await run('bridge_operation')).isError,false)
    assert.equal(root.tools.get('unrelated_mcp',this),undefined)

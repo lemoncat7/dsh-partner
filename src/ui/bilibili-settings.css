@@ -1,0 +1,24 @@
+/* Same flat navigation and semantic tokens as the QQ account settings. */
+.dsh-partner-workspace .dsh-partner-bili-settings { display:flex; flex-direction:column; gap:16px; }
+.dsh-partner-bili-settings p { margin:0; color:var(--partner-text-secondary); font-size:13px; line-height:1.7; }
+.dsh-partner-bili-account { display:flex; align-items:center; gap:14px; padding:18px; border-radius:14px; background:var(--partner-interaction-well); }
+.dsh-partner-bili-account > div { flex:1; min-width:0; }
+.dsh-partner-bili-account strong { font-size:20px; overflow-wrap:anywhere; }
+.dsh-partner-bili-account > img { flex:0 0 52px; border-radius:50%; object-fit:cover; }
+.dsh-partner-bili-mark { width:52px; height:52px; flex:0 0 52px; display:grid; place-items:center; border:1px solid var(--partner-border); border-radius:12px; font-size:12px; font-weight:700; }
+.dsh-partner-bili-badge { font-size:12px; white-space:nowrap; color:var(--partner-text-secondary); }
+.dsh-partner-bili-actions,.dsh-partner-bili-management { display:flex; flex-wrap:wrap; gap:8px; }
+.dsh-partner-bili-management { margin-top:12px; padding-top:16px; border-top:1px solid var(--partner-separator); }
+.dsh-partner-bili-section h3 { margin:4px 0 10px; font-size:14px; }
+.dsh-partner-bili-section p+p { margin-top:12px; }
+.dsh-partner-bili-capabilities { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-bili-capabilities label { display:flex; align-items:flex-start; gap:10px; padding:12px 0; margin:0; border-bottom:1px solid var(--partner-separator); min-width:0; }
+.dsh-partner-bili-capabilities strong { font-size:13px; line-height:1.6; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-bili-settings input[type=checkbox] { appearance:auto !important; width:18px !important; height:18px !important; min-height:18px !important; flex:0 0 18px; padding:0 !important; margin:3px 0 !important; }
+.dsh-partner-workspace #dsh-partner-channels .dsh-partner-bili-toggle { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 0; margin:0; border-bottom:1px solid var(--partner-separator); }
+.dsh-partner-bili-toggle strong { margin-bottom:5px; font-size:14px; }
+.dsh-partner-bili-qr { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin:0; padding:16px; background:var(--partner-interaction-well); border-radius:12px; }
+.dsh-partner-bili-qr img { max-width:100%; object-fit:contain; }
+.dsh-partner-bili-qr figcaption { flex:1; min-width:150px; font-size:13px; line-height:1.7; }
+.dsh-partner-bili-record { padding:12px 0; border-bottom:1px solid var(--partner-separator); }
+@media(max-width:600px) { .dsh-partner-bili-capabilities { grid-template-columns:1fr; } .dsh-partner-bili-account { gap:10px; padding:14px; } .dsh-partner-bili-account strong { font-size:17px; } }

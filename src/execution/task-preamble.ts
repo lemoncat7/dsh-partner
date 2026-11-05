@@ -5,7 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
-const conversational = new Set(['partner_tools','partner_channel_access','partner_agreement','partner_chat_say','partner_chat_progress','partner_chat_reply','partner_stickers','partner_qq_reply','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_sleep'])
+const conversational = new Set(['partner_tools','partner_channel_access','partner_agreement','partner_chat_say','partner_chat_progress','partner_chat_reply','partner_stickers','partner_qq_reply','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_habits','partner_sleep'])
 export function needsTaskPreamble(name:string,args:unknown):boolean {
   if(conversational.has(name))return false
   const input = args && typeof args === 'object' ? args as {action?:unknown;operation?:unknown} : undefined
@@ -52,7 +52,7 @@ export class TaskPreambleGate {
     if(!this.active() || !needsTaskPreamble(name,args))return
     const id=inputId(this.events())
     if(!id)return
-    if(this.unified)return hasTaskPreamble(this.events())?undefined:'本次工作尚未执行：先用 partner_chat_say，text 按当前人格简短说明准备做什么，beforeTools:true；确认送达后再执行。普通接话不能冒充动作告知，不要另发重复的前置回应。'
+    if(this.unified)return hasTaskPreamble(this.events())?undefined:'本次工作尚未执行：先用 partner_chat_say，expression.intent 简述准备做的动作（或 text 直接按人格成稿），beforeTools:true，expectedTools 填实际工具名；确认送达后再执行。普通接话不能冒充动作告知，不要另发重复的前置回应。'
     let pending=this.sent.get(id)
     if(!pending){
       const message=[...this.events()].reverse().find(e=>e.type==='assistant/message'||e.type==='user/message'||e.type==='turn/start')

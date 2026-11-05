@@ -1,3 +1,4 @@
+import { nativePresentation } from '../compat/native-presentation.js'
 import { randomUUID } from 'node:crypto'
 import { restrictExecutionTools } from './operation-tool-access.js'
 import { mkdir } from 'node:fs/promises'
@@ -40,6 +41,8 @@ export interface EphemeralExecutionRequest {
   /** Explicit source-bound bridge; native preset tools remain inaccessible. */
   bridgeTools?: ToolDefinition[]
   collectOutput?: () => string
+  /** Presentation only; callback failure cannot change execution. */
+  onStarted?: () => void
 }
 
 export interface EphemeralExecutionResult { run: ExecutionRun; output: string }
@@ -117,7 +120,7 @@ export class EphemeralExecutionService {
           agentCtx.systemPrompt.section({ name: 'partner-identity', order: -10, text: renderPartnerPersona(request.companion, 'ephemeral') })
           agentCtx.systemPrompt.section({ name: 'partner-tool-routing', order: -9, text: request.bridgeTools ? '工作工具仅由当前提供的桥接入口调用，原会话权限实时校验。不要调用未提供的工具。' : renderToolProtocol() })
           if (request.systemInstruction) agentCtx.systemPrompt.section({ name: 'partner-ephemeral-task', order: -8, text: request.systemInstruction })
-          agentCtx.tools.presentAs('native')
+          if(request.allowedTools===undefined&&!request.bridgeTools)nativePresentation(agentCtx)
           for (const tool of request.bridgeTools ?? this.mcpTools?.(request.companion.id) ?? []) agentCtx.effect(() => agentCtx.tools.register(tool))
           if (request.bridgeTools) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.bridgeTools.map(t=>t.name))
           else if (request.allowedTools !== undefined) restrictExecutionTools(agentCtx as ExecutionContext, agent, request.allowedTools)
@@ -131,6 +134,7 @@ export class EphemeralExecutionService {
       }
       const startSeq = handle.agent.session.seq
       request.signal?.throwIfAborted()
+      try { request.onStarted?.() } catch { /* UI observer only. */ }
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: request.prompt }],
         source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: executionSummary(request.kind) },

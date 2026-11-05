@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
@@ -65,7 +66,7 @@ function runtimeFixture(t) {
     output:{schema:{type:'string'},render:(_args,value)=>[{type:'text',text:value}]},
     execute:async args => {calls.push({name,args});return 'ok'}})
   const register = (name,scoped=false) => (scoped?scope.ctx:root).tools.register(definition(name))
-  const invoke = (name,args={}) => root.tools.execute({callId:'test-'+name,name,arguments:args,agent,signal:new AbortController().signal})
+  const invoke = (name,args={}) => dispatchTool(root.tools, {callId:'test-'+name,name,arguments:args,agent,signal:new AbortController().signal})
   t.after(()=>scope.dispose())
   return {root,agent,scope,calls,register,invoke}
 }
@@ -110,6 +111,6 @@ test('an explicitly allowed scoped MCP still works beside legacy SSH operations'
   assert.equal((await f.invoke('mcp_allowed')).isError,false)
   assert.equal((await f.invoke('mcp_private')).isError,true)
   const assembly = {tools:f.root.tools.schemas(f.agent)}
-  const filtered = await f.scope.ctx.waterfall('system-prompt/assemble',assembly,{agent:f.agent},async()=>assembly)
+  const filtered = {tools:f.scope.ctx.tools.selectExecutor(f.agent).describe(f.root.tools.definitions(f.agent)).schemas}
   assert.deepEqual(filtered.tools.map(tool=>tool.name).sort(),['mcp_allowed','ssh'])
 });

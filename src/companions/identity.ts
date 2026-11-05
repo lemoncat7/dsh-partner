@@ -45,8 +45,8 @@ export function applyIdentity(state: PartnerState, companion: Companion, raw: un
     const patch = record(raw, 'identity')
     if (patch.idleContact !== undefined) {
       const policy = patch.idleContact === null ? undefined : record(patch.idleContact, 'idleContact')
-      if (policy && 'selfRefinement' in policy) throw new Error('自主调整权限只能在页面设置')
-      if (!policy && companion.idleContact?.selfRefinement) throw new Error('不能通过清空活动设置修改自主调整权限')
+      if (policy && ('selfRefinement' in policy || 'habitsEnabled' in policy)) throw new Error('自主习惯开关只能在页面设置')
+      if (!policy && (companion.idleContact?.habitsEnabled??companion.idleContact?.selfRefinement)) throw new Error('不能通过清空活动设置修改自主习惯开关')
     }
   }
   const next = patchIdentity(source === 'page' ? { name: '', role: '', description: '', instructions: '' } : companion, raw)

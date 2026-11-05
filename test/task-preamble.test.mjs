@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {TaskPreambleGate,installTaskPreamble,needsTaskPreamble} from '../lib/execution/task-preamble.js'
@@ -48,7 +49,7 @@ test('native entry blocks image execution, delivers progress without concluding,
  agent.session.append('turn/start',{turn:1})
  agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画张图'}]}),{surfaceOp:'append'})
  let seq=0
- const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:new AbortController().signal,callId:'call-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:new AbortController().signal,callId:'call-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  let collected=0
  t.after(scope.ctx.tools.register({name:'partner_qq',description:'QQ',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{collected++;return {ok:true}}}))
  const sticker=await call('partner_qq',{action:'call',operation:'add_custom_face'});assert.equal(sticker.isError,true);assert.equal(collected,0);assert.deepEqual(sent,[])

@@ -22,6 +22,9 @@ export interface Companion {
   activityPlan?: import('./character/activity-plan.js').ActivityPlan
   thoughts?: import('./character/thoughts.js').CompanionThought[]
   interactionReview?: import('./character/interaction-review.js').InteractionReviewState
+  habitDismissals?: Array<{scope:string;text:string;at:number}>
+  habits?: import('./character/habits.js').CompanionHabit[]
+  habitCheck?: import('./character/habits.js').HabitCheck
   personaHistory?: import('./companions/persona-refinement.js').PersonaRevision[]
   identityDraft?: import('./companions/identity.js').CompanionIdentity
   idleContact?: import('./character/idle-contact.js').IdleContactPolicy
@@ -81,9 +84,11 @@ export interface HeartbeatRuntimeState {
 
 export interface WeixinChannel {
   /** Missing platform is legacy WeChat; IDs and credential keys stay unchanged. */
+  bilibili?: import('./channels/bilibili/catalog.js').BiliSettings
+  bilibiliActivity?: import('./channels/bilibili/service.js').BiliReceipt[]
   qq?: import('./channels/qq/settings.js').QqSettings
   qqActivity?: import('./channels/qq/actions.js').QqActionReceipt[]
-  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq'
+  platform?: 'weixin' | 'matrix' | 'mattermost' | 'qq' | 'bilibili'
   direct?: { baseUrl: string; targetId: string; peerId: string; cursor?: string }
   id: string
   companionId: string

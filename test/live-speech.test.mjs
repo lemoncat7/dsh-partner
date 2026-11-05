@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {LiveSpeech,installLiveSpeech,hasCurrentSpeech} from '../lib/chat/live-speech.js'
@@ -62,7 +63,7 @@ test('actual scoped runtime supports successive native calls, silent explicit en
  const terminal=chatTools('c',store,{}, {},{},'/api').find(t=>t.name==='partner_chat_reply');t.after(scope.ctx.tools.register(terminal))
  agent.session.append('turn/start',{turn:1});agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'给我吃一口'}]}),{surfaceOp:'append'})
  state.sessions[0].inboundMessageIds=[agent.session.snapshotEvents().find(e=>e.type==='user/message').data.id]
- let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'call-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'call-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  for(const text of ['才不给你','就一小口哦']){
   const r=await call('partner_chat_say',{text});assert.equal(r.isError,false);assert.ok(!r.concludesTurn)
  }
@@ -83,7 +84,7 @@ test('native speech releases work only after action receipt, never duplicates a 
  assert.equal(scope.ctx.tools.get('partner_chat_progress',agent),undefined)
  let executed=0;t.after(scope.ctx.tools.register({name:'generate_image',description:'image',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{executed++;return {ok:true}}}))
  agent.session.append('turn/start',{turn:1});agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画张图'}]}),{surfaceOp:'append'})
- let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'unified-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'unified-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  await call('partner_chat_say',{text:'哥哥来啦'})
  assert.equal((await call('generate_image')).isError,true);assert.equal(executed,0)
  const ack=await call('partner_chat_say',{text:'我画给你看',beforeTools:true,expectedTools:['generate_image']});assert.equal(ack.isError,false)
@@ -136,7 +137,7 @@ test('unknown names never send; recall then additional image obligations persist
  for(const name of ['partner_memory_recall','generate_image','partner_send_attachment'])t.after(scope.ctx.tools.register({name,description:name,parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{executed.push(name);return {ok:true}}}))
  t.after(scope.ctx.tools.register(chatTools('c',store,{},{},{},'/api').find(t=>t.name==='partner_chat_reply')))
  agent.session.append('turn/start',{turn:1});agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'看看屋里有什么'}]}),{surfaceOp:'append'})
- let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'stage-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'stage-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  const wrong=await call('partner_chat_say',{text:'我画给你看',beforeTools:true,expectedTools:['image_gen.imagegen','partner_send_attachment']})
  assert.equal(wrong.isError,true);assert.deepEqual(sent,[]);assert.deepEqual(pendingActions(agent.session.snapshotEvents()),[])
  await call('partner_chat_say',{text:'我想想屋里的摆设',beforeTools:true,expectedTools:['partner_memory_recall']});await call('partner_memory_recall')
@@ -163,7 +164,7 @@ test('speech length preference adds no retry while action completion and preambl
  let executed=0;t.after(scope.ctx.tools.register({name:'generate_image',description:'image',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{executed++;return {ok:true}}}))
  t.after(scope.ctx.tools.register(chatTools('c',store,{},{},{},'/api').find(t=>t.name==='partner_chat_reply')))
  agent.session.append('turn/start',{turn:1});agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画一张图'}]}),{surfaceOp:'append'})
- let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'short-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await root.tools.execute(request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
+ let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'short-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
  const long='接下来我会根据你说的内容绘制一张图片并查看结果。'
  const denied=await call('partner_chat_say',{text:long,beforeTools:true,expectedTools:['generate_image']})
  assert.equal(denied.isError,false);assert.deepEqual(sent,[long]);assert.deepEqual(pendingActions(agent.session.snapshotEvents()),['generate_image']);assert.equal(executed,0)
@@ -190,4 +191,53 @@ test('invalid action preamble can be corrected without caching unsent failure; u
  fail=true;await assert.rejects(tool.execute({...args,text:'再画'},exec),/delivery unknown/)
  await assert.rejects(tool.execute({...args,text:'不要重复发'},exec),/delivery unknown/)
  assert.deepEqual(sent,['开始画','再画'])
+})
+
+test('expression preamble waits for composition and delivery, records the actual words and deduplicates',async()=>{
+ let tool,compositions=0,release
+ const events=[start,user()],sent=[];const pending=new Promise(r=>release=r)
+ const agent={session:{id:'s',snapshotEvents:()=>events},ctx:{tools:{register:t=>{tool=t;return()=>{}},get:()=>({})}}}
+ installLiveSpeech(agent,async text=>{sent.push(text);await pending},()=> 'r',()=>true,()=>true,async(selection,exec,before)=>{compositions++;assert.equal(before,true);assert.deepEqual(selection,{intent:'查找视频'});return {parts:[{text:'我去翻翻'}],audit:{status:'composed',sourceCallIds:[]}}})
+ const args={expression:{intent:'查找视频'},beforeTools:true,expectedTools:['search_video']}
+ let completed=false;const job=tool.execute(args,{agent,signal:signal()}).then(x=>{completed=true;return x})
+ await new Promise(r=>setImmediate(r));assert.equal(completed,false);assert.deepEqual(sent,['我去翻翻'])
+ release();const result=await job;assert.equal(result.spokenText,'我去翻翻');assert.equal(result.taskPreamble,true)
+ const again=await tool.execute(args,{agent,signal:signal()});assert.equal(again.alreadyAnnounced,true);assert.equal(compositions,1);assert.equal(sent.length,1)
+ await assert.rejects(tool.execute({...args,text:'稿子'},{agent,signal:signal()}),/不能同时/)
+})
+test('failed expression emits nothing and direct text fallback still uses the same sender',async()=>{
+ let tool
+ const events=[start,user()],sent=[]
+ const agent={session:{id:'s',snapshotEvents:()=>events},ctx:{tools:{register:t=>{tool=t;return()=>{}},get:()=>({})}}}
+ installLiveSpeech(agent,async text=>sent.push(text),()=> 'r',()=>true,()=>true,async()=>{throw Error('expression unavailable')})
+ await assert.rejects(tool.execute({expression:{intent:'查找视频'},beforeTools:true,expectedTools:['search_video']},{agent,signal:signal()}),/unavailable/)
+ assert.equal(sent.length,0)
+ const out=await tool.execute({text:'我去找找',beforeTools:true,expectedTools:['search_video']},{agent,signal:signal()})
+ assert.deepEqual(sent,['我去找找']);assert.equal(out.delivered,true)
+})
+
+
+test('queued expression revalidates persona and authorization at actual delivery',async()=>{
+ const events=[start,user()],sent=[];let release,valid=true
+ const gate=new Promise(r=>release=r)
+ const live=new LiveSpeech(()=>events,async text=>{sent.push(text);await gate},()=>true)
+ const first=live.say('already sending',signal())
+ const next=live.say('stale expression',signal(),false,false,()=>{if(!valid)throw Error('persona changed')})
+ const rejected=assert.rejects(next,/persona changed/)
+ await new Promise(r=>setImmediate(r));valid=false;release();await first;await rejected
+ assert.deepEqual(sent,['already sending'])
+})
+
+test('ordinary direct preamble waits for persona delivery and sends only actual rendered words',async()=>{
+ const events=[start,user()],sent=[];let definition,release
+ const gate=new Promise(r=>release=r)
+ const agent={session:{snapshotEvents:()=>events},ctx:{tools:{register(t){definition=t;return()=>{}},get(){return {}}}}}
+ let count=0
+ const detach=installLiveSpeech(agent,async text=>sent.push(text),()=> 'r',()=>true,()=>true,undefined,async(text)=>{count++;assert.equal(text,'输入草稿');await gate;return {parts:[{text:'实际接话'}],audit:{status:'rendered',surface:'chat',durationMs:1}}})
+ try{
+  const job=definition.execute({text:'输入草稿',beforeTools:true,expectedTools:['read']},{signal:signal()})
+  await new Promise(r=>setImmediate(r));assert.deepEqual(sent,[]);release();const result=await job
+  assert.deepEqual(sent,['实际接话']);assert.equal(result.spokenText,'实际接话');assert.equal(result.personaDelivery.status,'rendered');assert.match(definition.output.render({},result)[0].text,/实际发送的正文：实际接话/)
+  await definition.execute({text:'输入草稿',beforeTools:true,expectedTools:['read']},{signal:signal()});assert.equal(count,1);assert.equal(sent.length,1)
+ }finally{detach()}
 })

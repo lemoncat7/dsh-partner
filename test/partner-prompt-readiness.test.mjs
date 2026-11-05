@@ -1,3 +1,6 @@
+import {native,ptc,modeFor} from './runtime-022.mjs'
+import {defineContentToolFixture} from './runtime-022.mjs'
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import {normalizeCharacterCard} from '../lib/character/domain.js'
 import assert from 'node:assert/strict'
@@ -6,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import {ToolRuntime,defineContentToolFixture} from '@deepseek-ai/dsh-tools'
+import {ToolRuntime} from '@deepseek-ai/dsh-tools'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { PartnerStore } from '../lib/store.js'
 import { PartnerAgentRuntime } from '../lib/agent-runtime.js'
@@ -19,7 +22,7 @@ async function fixture(t, composer, mode = 'native') {
   const root = new Context()
   new SystemPrompt(root, {})
   root.provide('ptcRuntime', {language:'typescript',programFormat:'script'})
-  new ToolRuntime(root, {mode})
+  new ToolRuntime(root);(mode==='ptc'?ptc:native)(root)
   const agent = { status: 'running', session: { id: 'session-assembly', seq: 0, snapshotEvents:()=>[] } }
   const scope = createScope(root, agent, { parent: {} })
   agent.ctx = scope.ctx
@@ -34,7 +37,7 @@ async function fixture(t, composer, mode = 'native') {
   })
   const runtime = new PartnerAgentRuntime(ctx, store, directory, undefined, undefined, undefined, composer)
   t.after(async () => { await runtime.close(); await scope.dispose(); await rm(directory, { recursive: true, force: true }) })
-  const assemble = () => root.systemPrompt.assemble({ agent, scope: agent, signal: new AbortController().signal })
+  const assemble = async () => {const signal=new AbortController().signal;await runtime.prepareAgentAssembly(agent,signal);return root.systemPrompt.assemble({agent,scope:agent,signal})}
   return { root, agent, store, runtime, assemble }
 }
 
@@ -89,17 +92,11 @@ test('composition error blocks assembly; retry installs once, without leaking pa
   assert.equal(result.tools.filter(s => s.name === 'partner_schedule').length, 1)
 })
 
-test('wake preflight respects downstream tool filtering, does not restore restricted tools', async t => {
-  const f = await fixture(t, { async compose(ctx) {
-    return ctx.systemPrompt.tools(() => ({ schemas: [{ name: 'partner_schedule', parameters: { type: 'object' } }] }))
-  } })
-  f.agent.ctx.on('system-prompt/assemble', async (assembly, context, next) => {
-    const result = await next(); result.tools = []; return result
-  })
-  const result = await f.assemble()
-  assert.deepEqual(result.tools, [])
-  assert.throws(() => assertWakeTools({ continuation: { check: 'mcp__generation_get' } }, result.tools.map(t => t.name)), /续接工具未就绪/)
-  assert.throws(() => assertWakeTools({ continuation: { check: 'mcp__generation_get' } }, ['partner_schedule']), /mcp__generation_get/)
+test('wake preflight respects conditional admission and does not restore restricted tools',async t=>{
+ const f=await fixture(t,{async compose(ctx){return ctx.tools.register(defineContentToolFixture({name:'partner_schedule',description:'schedule',parameters:{},execute:async()=>[]}),{when:()=>false})}})
+ await f.runtime.prepareAgentAssembly(f.agent,new AbortController().signal)
+ const toolSet=await f.root.tools.resolve({agent:f.agent,modelSelection:{provider:'fixture',model:'test'},signal:new AbortController().signal})
+ try{const result=await f.root.systemPrompt.assemble({agent:f.agent,scope:f.agent,toolSet,signal:new AbortController().signal});assert.ok(!result.tools.some(t=>t.name==='partner_schedule'));assert.throws(()=>assertWakeTools({continuation:{check:'mcp__generation_get'}},result.tools.map(t=>t.name)),/续接工具未就绪/)}finally{toolSet.dispose()}
 })
 
 test('parallel first assemblies serialize composition', async t => {
@@ -135,7 +132,7 @@ test('legacy check text is not promoted into completion criteria or linked to Go
 
 test('QQ guest assembly exposes reply tools only and owner/local restores existing tools',async t=>{
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
- const f=await fixture(t,{async compose(ctx){return ctx.systemPrompt.tools(()=>({schemas:['run_code','partner_identity','ssh_exec','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>({name,parameters:{type:'object'}}))}))}})
+ const f=await fixture(t,{async compose(ctx){const ds=['host_tool','partner_identity','ssh_exec','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return ()=>ds.forEach(d=>d())}})
  f.agent.session=Session.create('session-assembly')
  // Keep fixture routes linked to the real session ID.
  await f.store.update(s=>{
@@ -165,12 +162,13 @@ for (const mode of ['native','ptc']) test(`QQ reply tools execute under ${mode} 
  const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
  const guest=await send('guest')
  assert.deepEqual(guest.tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
- assert.equal(f.root.tools.modeFor(f.agent),'native')
+ assert.equal(modeFor(f.root.tools,f.agent),'native')
  assert.ok(!guest.sections.some(s=>s.text.includes('partner_identity')),'private tool SDK must not leak')
- assert.equal((await f.root.tools.execute({agent:f.agent,name:'partner_chat_reply',callId:'reply',arguments:{},signal:new AbortController().signal})).isError,false)
+ assert.equal((await dispatchTool(f.root.tools, {agent:f.agent,name:'partner_chat_reply',callId:'reply',arguments:{},signal:new AbortController().signal})).isError,false)
  const owner=await send('owner')
- assert.equal(f.root.tools.modeFor(f.agent),mode)
+ assert.equal(modeFor(f.root.tools,f.agent),mode)
  assert.ok(owner.tools.some(t=>t.name===(mode==='ptc'?'run_code':'partner_identity')))
+ if(mode==='ptc')assert.ok(owner.sections.some(s=>s.text.includes('partner_identity')),'restoring PTC also restores its SDK guidance')
  assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
 })
 
@@ -188,7 +186,7 @@ for(const mode of ['native','ptc'])test(`public recall and gateway assembly pres
  let first
  for(const id of ['owner','guest','owner','guest']){
   const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
-  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),(id==='owner'?['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_stickers','partner_tools','partner_work_execute']:['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_stickers','partner_tools']));assert.equal(f.root.tools.modeFor(f.agent),'native')
+  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),(id==='owner'?['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_stickers','partner_tools','partner_work_execute']:['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_stickers','partner_tools']));assert.equal(modeFor(f.root.tools,f.agent),'native')
   const publicTools=a.tools.filter(t=>t.name!=='partner_work_execute');if(first)assert.deepEqual(publicTools,first);else first=publicTools
  }
  assert.equal(compositions,1)
@@ -217,7 +215,7 @@ test('partner discovery preserves external entries and their protocols without w
   for(const name of ['ssh','knowledge','write'])assert.equal(a.tools.some(t=>t.name===name),id==='image-owner')
   assert.equal(a.tools.some(t=>t.name==='image_gen.imagegen'),id==='image-owner')
   assert.equal(a.tools.some(t=>t.name==='generate_image'),id==='image-owner','external plugin entries must retain their native visibility')
-  const result=await f.root.tools.execute({agent:f.agent,name:'image_gen.imagegen',callId:id,arguments:{},signal:new AbortController().signal})
+  const result=await dispatchTool(f.root.tools, {agent:f.agent,name:'image_gen.imagegen',callId:id,arguments:{},signal:new AbortController().signal})
   assert.equal(Boolean(result.isError),id==='image-guest')
  }
  assert.equal(calls,2,'guest cannot bypass the channel guard using the alias')
@@ -227,7 +225,7 @@ test('partner discovery preserves external entries and their protocols without w
 // Exercise that ordering; appending first would conceal the production regression.
 async function pendingInputFixture(t) {
  const {Session}=await import('@deepseek-ai/dsh-session')
- const f=await fixture(t,{async compose(ctx){return ctx.systemPrompt.tools(()=>({schemas:['partner_identity','partner_chat_reply'].map(name=>({name,parameters:{type:'object'}}))}))}})
+ const f=await fixture(t,{async compose(ctx){const ds=['partner_identity','partner_chat_reply'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return ()=>ds.forEach(d=>d())}})
  f.agent.session=Session.create('pending-input')
  await f.store.update(s=>{
   const c=s.companions[0];c.characterCard=normalizeCharacterCard({enabled:true,roleText:'保持自己的说话方式'});c.relationshipText='OWNER_RELATION';c.automation.memory.enabled=false
@@ -357,7 +355,7 @@ test('public recall is visible and callable by QQ guests without learning or a m
   f.agent.session.append('user/message',m,{surfaceOp:'append'})
  }
  const assembly=await f.assemble();assert.ok(assembly.tools.some(t=>t.name==='partner_memory_recall'))
- const result=await f.root.tools.execute({agent:f.agent,name:'partner_memory_recall',arguments:{query:'blue-secret'},callId:'recall',signal:new AbortController().signal})
+ const result=await dispatchTool(f.root.tools, {agent:f.agent,name:'partner_memory_recall',arguments:{query:'blue-secret'},callId:'recall',signal:new AbortController().signal})
  assert.equal(result.isError,false)
  const value=JSON.parse(result.value)
  assert.deepEqual(value.memories,[]);assert.deepEqual(value.history,[])

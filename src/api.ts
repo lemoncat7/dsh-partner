@@ -1,3 +1,4 @@
+import { habitBaseline, habitData } from './character/habits.js'
 import { validateAgreements, type TemporaryAgreement } from './chat/agreements.js'
 import { fatigueValue } from './character/fatigue.js'
 import { applyIdentity } from './companions/identity.js'
@@ -54,6 +55,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  bilibili?: import('./channels/bilibili/service.js').BilibiliService
   sleep?: import('./character/sleep-service.js').SleepService
   stickers?: StickerLibrary
   push?: PushService
@@ -231,6 +233,21 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
         return sendJson(res,200,{agreements:saved.companions.find(c=>c.id===id)!.temporaryAgreements})
       }
     }
+    if(id&&segments[2]==='habits'&&segments.length===3){
+      if(method==='GET'){const c=requiredCompanion(runtime.store,id);return sendJson(res,200,habitData(c))}
+      if(method==='POST'){
+        mutation(req);const body=await readObject(req)
+        if(!['pause','resume','delete'].includes(String(body.action)))throw httpError(400,'习惯操作无效')
+        const saved=await runtime.store.update(state=>{
+          const c=state.companions.find(c=>c.id===id);if(!c)throw httpError(404,'伙伴不存在')
+          const h=c.habits?.find(h=>h.id===body.id);if(!h)throw httpError(404,'习惯不存在')
+          if(h.updatedAt!==body.expectedAt)throw httpError(409,'习惯已变化，请刷新')
+          if(body.action==='delete'){c.habitDismissals=[...(c.habitDismissals??[]),{scope:h.scope,text:h.text,at:Date.now()}].slice(-24);c.habits=c.habits!.filter(x=>x.id!==h.id)}
+          else {h.status=body.action==='pause'?'paused':'candidate';h.updatedAt=Math.max(Date.now(),h.updatedAt+1);if(body.action==='resume'){h.evidence=[];h.baseline=habitBaseline(c)}}
+        })
+        const c=saved.companions.find(c=>c.id===id)!;return sendJson(res,200,habitData(c))
+      }
+    }
     if (id && method === 'PUT' && segments[2] === 'identity' && segments.length === 3) {
       mutation(req)
       const body = await readObject(req)
@@ -247,7 +264,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, ...(previous.activityJournal?{activityJournal:previous.activityJournal}:{}), ...(previous.activityPlan?{activityPlan:previous.activityPlan}:{}), ...(previous.thoughts?{thoughts:previous.thoughts}:{}), ...(previous.interactionReview?{interactionReview:previous.interactionReview}:{}), ...(previous.personaHistory?{personaHistory:previous.personaHistory}:{}), ...(previous.temporaryAgreements?{temporaryAgreements:previous.temporaryAgreements}:{}), ...(previous.affection ? {affection:previous.affection} : {}), ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), ...(draft.relationshipText === undefined && previous.relationshipText !== undefined ? {relationshipText:previous.relationshipText} : {}), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const next: Companion = { ...draft, ...(previous.habitDismissals?{habitDismissals:previous.habitDismissals}:{}), ...(previous.habits?{habits:previous.habits}:{}), ...(previous.habitCheck?{habitCheck:previous.habitCheck}:{}), ...(previous.activityJournal?{activityJournal:previous.activityJournal}:{}), ...(previous.activityPlan?{activityPlan:previous.activityPlan}:{}), ...(previous.thoughts?{thoughts:previous.thoughts}:{}), ...(previous.interactionReview?{interactionReview:previous.interactionReview}:{}), ...(previous.personaHistory?{personaHistory:previous.personaHistory}:{}), ...(previous.temporaryAgreements?{temporaryAgreements:previous.temporaryAgreements}:{}), ...(previous.affection ? {affection:previous.affection} : {}), ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), ...(draft.relationshipText === undefined && previous.relationshipText !== undefined ? {relationshipText:previous.relationshipText} : {}), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         if (next.idleContact?.enabled && !idleContactRouteAllowed(state, next, next.idleContact.routeId)) throw httpError(400, '请选择本伙伴可用的会话；渠道联系人须已授权')
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })
@@ -437,6 +454,19 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
 
   if (segments[0] === 'channels') {
     if(method==='GET'&&segments[1]==='status'&&segments.length===2)return sendJson(res,200,{channels:await runtime.channels.views(),pairings:runtime.store.snapshot().pairings})
+    if(segments[1]==='bilibili'&&segments.length===2&&method==='POST') {
+      mutation(req);const b=await readObject(req);if(!runtime.bilibili)throw httpError(503,'B 站服务未就绪')
+      const result=await runtime.bilibili.create(text(b.companionId,'伙伴',120),text(b.name??'B 站','名称',80));await runtime.channels.start(result.id);return sendJson(res,201,result)
+    }
+    if(segments[2]==='bilibili'&&segments.length===4) {
+      if(!runtime.bilibili)throw httpError(503,'B 站服务未就绪')
+      const id=segments[1]!,op=segments[3]
+      if(method==='GET'&&op==='status')return sendJson(res,200,await runtime.bilibili.account(id,'status'))
+      if(method==='POST') {mutation(req);const b=await readObject(req)
+        if(op==='settings'){if(typeof b.expectedUpdatedAt!=='number')throw httpError(400,'缺少配置版本');await runtime.bilibili.settings(id,b.settings,b.expectedUpdatedAt);return sendJson(res,200,{ok:true})}
+        if(op==='login'||op==='login_check'||op==='logout')return sendJson(res,200,await runtime.bilibili.account(id,op))
+      }
+    }
     if (method === 'POST' && (segments.length === 1 || (segments.length === 2 && segments[1] === 'test'))) {
       mutation(req)
       const body = await readObject(req)
@@ -505,6 +535,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && method === 'DELETE' && segments.length === 2) {
       mutation(req)
+      if(runtime.store.snapshot().channels.find(c=>c.id===id)?.platform==='bilibili')await runtime.bilibili?.account(id,'logout')
       await runtime.channels.delete(id)
       return sendJson(res, 204, undefined)
     }

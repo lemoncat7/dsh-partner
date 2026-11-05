@@ -1,3 +1,4 @@
+import { registerWorkProgressCards } from './execution/work-progress-card.js'
 import { CompanionVitals } from './ui/companion-vitals.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -44,6 +45,7 @@ import { ChannelsPanel } from './ui/channels-panel.js'
 import { useChannelStatus } from './ui/use-channel-status.js'
 import identityCssText from './ui/identity-editor.css'
 import characterCssText from './ui/character-editor.css'
+import biliCssText from './ui/bilibili-settings.css'
 import qqChannelCssText from './ui/qq-channel-settings.css'
 import formSurfaceCssText from './ui/form-surface.css'
 import interactionThemeCssText from './ui/interaction-theme.css'
@@ -58,7 +60,7 @@ import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}\n${biliCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns'
@@ -70,6 +72,7 @@ const WORKSPACE_PAGES = new Set<View>(['skills', 'mcp', 'board', 'schedules', 'p
 export const inject = ['slots', 'layout', 'sessions', 'uiWorkspace']
 
 export function apply(ctx: ClientContext): void {
+  registerWorkProgressCards(ctx)
   registerDecisionCards(ctx)
   registerChatReplies(ctx)
   ctx.effect(installStyles, 'dsh-partner: styles')

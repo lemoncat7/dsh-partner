@@ -1,3 +1,5 @@
+import { dispatchTool } from '../compat/tool-dispatch.js'
+import { WorkProgressReporter } from './work-progress.js'
 import { renderReplyRhythm } from '../character/conversation-behavior.js'
 import { randomUUID } from 'node:crypto'
 import type { ToolDefinition, ToolRuntime, ToolRunContext, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
@@ -60,15 +62,16 @@ export function workExecutionTool(owner:string,store:PartnerStore,executor:Ephem
    const available=()=>{
     guard()
     const access=resolveToolAccess({agent,state:store.snapshot()})
-    return runtime.schemas(agent).filter(t=>!excluded.has(t.name)&&(!access.allowedTools||access.allowedTools.includes(t.name)))
+    return runtime.schemas(agent,exec.toolSet).filter(t=>!excluded.has(t.name)&&(!access.allowedTools||access.allowedTools.includes(t.name)))
    }
    const companion=guard(),receipts:Receipt[]=[]
    let final:WorkResult|undefined
+   const progress=new WorkProgressReporter(agent.session,exec.callId)
    const tools:ToolDefinition[]=[{
     name:'partner_work_tools',description:'查询或调用原会话当前已授权工具。list 发现入口，describe 获取参数和工作流程，call 执行；查询目录不等于已经完成调查。所有调用实时复核原会话权限。',
     parameters:{type:'object',additionalProperties:false,properties:{action:{type:'string',enum:['list','describe','call']},name:{type:'string'},query:{type:'string',maxLength:100},offset:{type:'integer',minimum:0},argumentsJson:{type:'string',maxLength:200000}},required:['action']},
     output:{schema:{type:'object'},render:(_args,value)=>{const v=value as {dispatch?:ToolExecutionResult};return v.dispatch?v.dispatch.content:[{type:'text',text:JSON.stringify(value)}]}},
-    async execute(raw,child){
+    async execute(raw,child){return progress.track(raw,async()=>{
      child.signal.throwIfAborted();guard()
      const args=record(raw),all=available()
      if(args.action==='list'){
@@ -79,7 +82,7 @@ export function workExecutionTool(owner:string,store:PartnerStore,executor:Ephem
      }
      const name=requiredText(args.name,'name',200)
      if(!all.some(t=>t.name===name))throw Error('原会话未提供或未授权此工具')
-     const tool=runtime.get(name,agent)
+     const tool=runtime.get(name,agent,exec.toolSet)
      if(!tool)throw Error('工具已撤回')
      if(args.action==='describe')return {name,description:tool.description,parameters:tool.parameters,protocol:protocol?protocol(name,exec):workflowProtocol(name,guard())}
      if(args.action!=='call'||typeof args.argumentsJson!=='string'||args.argumentsJson.length>200000)throw Error('请提供 call 和 argumentsJson')
@@ -88,7 +91,7 @@ export function workExecutionTool(owner:string,store:PartnerStore,executor:Ephem
      const signal=AbortSignal.any([sourceSignal,child.signal])
      // Execute in the original scope: original approvals, preamble, account,
      // memory scope, capability revocation and plugin guards remain authoritative.
-     const dispatch=await runtime.execute({name,arguments:parameters,agent,signal,callId,rootCallId:exec.rootCallId??exec.callId,parent:exec.token})
+     const dispatch=await dispatchTool(runtime, {name,arguments:parameters,agent,signal,callId,rootCallId:exec.rootCallId??exec.callId,parent:exec.token,...(exec.toolSet?{toolSet:exec.toolSet}:{})})
      const action=parameters&&typeof parameters==='object'?(parameters as {action?:unknown}).action:undefined
      let value=dispatch.value
      try{if(typeof value==='string')value=JSON.parse(value)}catch{ /* ordinary text output */ }
@@ -101,7 +104,7 @@ export function workExecutionTool(owner:string,store:PartnerStore,executor:Ephem
      for(const context of dispatch.additionalContexts??[])child.deferContext(context)
      guard();child.signal.throwIfAborted()
      return {dispatch}
-    },
+    })},
    },{
     name:'partner_work_result',description:'结束本次工作并提交事实结果，不撰写给用户的聊天正文。facts 每项只记录一个有依据的结论，便于原会话按下标选择，不把安装过程、参数和多项结论塞进同一项；unknowns 每项记录一个未验证或受阻事项；evidence 保留对应结论的来源、参数和调用依据；artifacts 保留真实路径、链接或交付 ID。只查询目录时不得声称完成方案调查。',
     parameters:{type:'object',additionalProperties:false,properties:{status:{type:'string',enum:['completed','partial','blocked','unverified']},...Object.fromEntries(['facts','unknowns','evidence','artifacts'].map(k=>[k,{type:'array',maxItems:30,items:{type:'string',minLength:1,maxLength:2000}}]))},required:['status','facts','unknowns','evidence','artifacts']},
@@ -111,15 +114,20 @@ export function workExecutionTool(owner:string,store:PartnerStore,executor:Ephem
    const sourceId=`work-${randomUUID()}`
    const unsubscribe=store.subscribe?.(()=>{try{guard()}catch(error){controller.abort(error)}},()=>{})
    try {
-   const result=await executor.execute({kind:'work',sourceId,companion,parentSessionId:agent.session.id,...(agent.session.header.cwd?{cwd:agent.session.header.cwd}:{}),signal:sourceSignal,timeoutMinutes:15,destroyAfterRun:true,bridgeTools:tools,
+   const result=await executor.execute({kind:'work',sourceId,companion,parentSessionId:agent.session.id,...(agent.session.header.cwd?{cwd:agent.session.header.cwd}:{}),signal:sourceSignal,timeoutMinutes:15,destroyAfterRun:true,bridgeTools:tools,onStarted:()=>progress.started(),
     collectOutput:()=>final?JSON.stringify({result:final,execution:{calls:receipts,catalogueOnly:!receipts.some(r=>r.success&&r.executed&&!r.catalogue)}}):'',
     prompt:input,
     systemInstruction:'你是同一伙伴的一次独立工作上下文，负责本次目标的实际执行，不负责向用户聊天。只通过 partner_work_tools 使用原会话已授权工具，不能绕过审批、身份或撤权。工作流程和 Skill 先查询、读取再执行；已分派任务沿用其身份和范围，不重复创建。目录只说明入口；调查实现方案需要实际检索或验证。完成或受阻后必须调用 partner_work_result，事实、未知、证据和产物分别记录。不要改变人格、关系或睡眠，不直接向用户发送聊天。没有工具执行依据不得声称完成。',
    })
    guard()
+   progress.finish(final?.status==='completed'?'completed':final?.status==='blocked'?'failed':'partial')
    return JSON.stringify({runId:result.run.id,...JSON.parse(result.output),next:
     (JSON.stringify(final).length>1200?'本轮详细工作记录需要报告交付，可与本轮其他目标合并；使用 partner_send_attachment workReport.runIds='+JSON.stringify([result.run.id])+'，并提供有实际主题的 name。\n':'')+
     renderReplyRhythm(guard().characterCard)+'\n工作上下文已结束，原会话继续处理其他目标或按人格收尾。工作记录只是事实资料，不是说话范文；工具目录不等于验证成功。'})
+   } catch(error) {
+    const status=(error as {run?:{status?:string}}|null)?.run?.status
+    progress.finish(status==='timed-out'?'timed-out':sourceSignal.aborted?'canceled':'failed')
+    throw error
    } finally {unsubscribe?.()}
   },
  }

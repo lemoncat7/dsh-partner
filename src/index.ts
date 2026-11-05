@@ -1,3 +1,5 @@
+import {BilibiliService} from './channels/bilibili/service.js'
+import {bilibiliTool} from './channels/bilibili/tools.js'
 import { createChannelActivities } from './channels/activity-defaults.js'
 import { ThoughtService } from './character/thoughts.js'
 import { InteractionReviewService } from './character/interaction-review.js'
@@ -201,7 +203,8 @@ export function apply(context: Context, config: PartnerConfig): void {
       qqCatalogs.set(key,{at:Date.now(),faces});if(qqCatalogs.size>100)qqCatalogs.delete(qqCatalogs.keys().next().value!)
       try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
     }))
-    composer.setChatToolFactory(id => [agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args))])
+    const bilibili = new BilibiliService(store)
+    composer.setChatToolFactory(id => [bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -254,7 +257,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

@@ -1,3 +1,4 @@
+import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {Context} from '@deepseek-ai/cordis'
@@ -22,8 +23,9 @@ function fixture(t){
   requests++;childAgent={session:Session.create('work'),options:{}};const childScope=createScope(root,childAgent);childAgent.ctx=childScope.ctx
   try{
    for(const definition of request.bridgeTools)childScope.ctx.tools.register(definition)
+   request.onStarted?.()
    let n=0
-   const invoke=(name,args)=>root.tools.execute({name,arguments:args,agent:childAgent,signal:request.signal,callId:'child-'+(++n)})
+   const invoke=(name,args)=>dispatchTool(root.tools, {name,arguments:args,agent:childAgent,signal:request.signal,callId:'child-'+(++n)})
    await driver({request,invoke,child:childAgent})
    const output=request.collectOutput();if(!output)throw Error('工作没有提交事实结果')
    return {run:{id:'run-work'},output}
@@ -31,7 +33,7 @@ function fixture(t){
  }}
  const work=workExecutionTool('c',store,executor,scope.ctx.tools)
  scope.ctx.tools.register(work)
- const invoke=(name,args={},signal=new AbortController().signal)=>root.tools.execute({name,arguments:args,agent,signal,callId:'parent-'+name})
+ const invoke=(name,args={},signal=new AbortController().signal)=>dispatchTool(root.tools, {name,arguments:args,agent,signal,callId:'parent-'+name})
  const input=()=>agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'查证视频能力'}]}),{surfaceOp:'append'})
  agent.session.append('turn/start',{turn:1});input()
  t.after(()=>scope.dispose())
@@ -57,6 +59,8 @@ test('work keeps tool trace separate and executes in original permission scope, 
  assert.equal(f.agent.session.snapshotEvents().some(e=>e.type==='tool/ptc-dispatch'),false)
  assert.equal(f.child().session.snapshotEvents().some(e=>e.type==='tool/ptc-dispatch'&&e.data.name==='web_read'),true)
  assert.equal(f.subscriptions(),0)
+ const progress=f.agent.session.snapshotEvents().filter(e=>e.type==='plugin:dsh-partner/work-progress')
+ assert.ok(progress.length>2);assert.equal(progress.at(-1).data.phase,'completed');assert.ok(progress.every(e=>e.ignorable===true))
 })
 test('catalogue-only work cannot report a verified completed investigation',async t=>{
  const f=fixture(t)
@@ -166,5 +170,5 @@ test('exclusive persona preserves named report workflow without prescribing clos
  assert.deepEqual(parsed.result,long)
  assert.doesNotMatch(parsed.next,/半句|不汇总|workReply/)
  assert.match(parsed.next,/name/);assert.match(parsed.next,/180/)
- assert.match(parsed.next,/未知和失败按事实说明/)
+ assert.match(parsed.next,/会影响用户判断的失败、未完成或不确定性须简短说明/);assert.match(parsed.next,/正文不再重复报告提纲/)
 })
