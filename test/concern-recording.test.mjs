@@ -43,3 +43,18 @@ test('recording note tool only writes the selected target and enforces revision'
   assert.deepEqual(calls, [{ id: 'note-1', value: 'original\nnew', revision: 'r1' }])
   assert.deepEqual(synced, ['c1'])
 })
+
+test('sync schema and execution reject append; patch preserves unrelated text and checks revision', async()=>{
+ let body='human notes\nsection: old\nother section',revision='r1',writes=0
+ const bridge={version:1,read:async()=>({id:'n',name:'note',content:body,revision}),update:async(_id,next)=>{body=next;revision='r2';writes++;return {changed:true}}}
+ const tool=recordingNoteTool([{id:'c',recordTarget:{kind:'note',locator:'n'}}],()=>bridge,undefined,'sync')
+ assert.deepEqual(tool.parameters.properties.operation.enum,['read','patch','replace'])
+ await assert.rejects(tool.execute({concernId:'c',operation:'append',content:'x',revision:'r1'},{}),/不允许/)
+ await assert.rejects(tool.execute({concernId:'c',operation:'patch',oldText:'absent',content:'x',revision:'r1'},{}),/唯一匹配/)
+ await tool.execute({concernId:'c',operation:'patch',oldText:'section: old',content:'section: new',revision:'r1'},{})
+ assert.equal(body,'human notes\nsection: new\nother section');assert.equal(writes,1)
+ await assert.rejects(tool.execute({concernId:'c',operation:'patch',oldText:'section: new',content:'x',revision:'r1'},{}),/重新读取/)
+ const reader=recordingNoteTool([{id:'c',recordTarget:{kind:'note',locator:'n'}}],()=>bridge,undefined,'read')
+ assert.deepEqual(reader.parameters.properties.operation.enum,['read'])
+ await assert.rejects(reader.execute({concernId:'c',operation:'replace',content:'x',revision:'r2'},{}),/不允许/)
+})

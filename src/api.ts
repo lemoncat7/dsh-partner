@@ -1,3 +1,6 @@
+import {withActivityDeliveries} from './character/activity-summary.js'
+import {dispatchTtsApi} from './api/features/tts-api.js'
+import type {TtsService} from './voice/service.js'
 import { habitBaseline, habitData } from './character/habits.js'
 import { validateAgreements, type TemporaryAgreement } from './chat/agreements.js'
 import { fatigueValue } from './character/fatigue.js'
@@ -55,6 +58,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  tts?:TtsService
   bilibili?: import('./channels/bilibili/service.js').BilibiliService
   sleep?: import('./character/sleep-service.js').SleepService
   stickers?: StickerLibrary
@@ -106,6 +110,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if (runtime.tts && await dispatchTtsApi(req,res,segments,runtime.tts)) return
   if (runtime.push && await dispatchPushApi(req, res, segments, runtime.push)) return
   if (runtime.mcp && await dispatchMcpApi(req, res, segments, runtime.mcp)) return
   if(method==='GET'&&segments.length===2&&segments[0]==='storage'&&segments[1]==='status') {
@@ -352,11 +357,12 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       if (method === 'POST' && segments.length === 5 && segments[4] === 'retry-execution') {
         mutation(req)
         const body = await readObject(req)
-        if(body.mode==='recover') {
+        if(body.mode==='recover'||body.mode==='reconcile') {
           if(!runtime.concernExecution)throw httpError(503,'执行恢复服务不可用')
           if(typeof body.executionId!=='string' || !body.executionId || !Number.isSafeInteger(body.expectedUpdatedAt))throw httpError(400,'缺少执行标识或状态版本')
-          try {await runtime.concernExecution.recover(id,segments[3]!,body.executionId,body.expectedUpdatedAt as number)}catch(error){throw httpError(409,error instanceof Error?error.message:'恢复失败')}
-          return sendJson(res,202,{ok:true,reason:'已请求恢复：先核对已有产物，再继续缺失步骤；不是从头重跑'})
+          let result
+          try {result=body.mode==='reconcile'?await runtime.concernExecution.recover(id,segments[3]!,body.executionId,body.expectedUpdatedAt as number,true):await runtime.concernExecution.recover(id,segments[3]!,body.executionId,body.expectedUpdatedAt as number)}catch(error){throw httpError(409,error instanceof Error?error.message:'恢复失败')}
+          return sendJson(res,202,{ok:true,reason:result==='reconciled'?'已找到该次执行的完整答复，已修正回执；未重新执行外部操作，具体结果见卡片':'已请求恢复：先核对已有产物，再继续缺失步骤；不是从头重跑'})
         }
         await runtime.store.update(s => {
           const receipt=s.concernExecutions?.find(r=>r.id===body.executionId && r.companionId===id && r.concernId===segments[3])
@@ -453,7 +459,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   }
 
   if (segments[0] === 'channels') {
-    if(method==='GET'&&segments[1]==='status'&&segments.length===2)return sendJson(res,200,{channels:await runtime.channels.views(),pairings:runtime.store.snapshot().pairings})
+    if(method==='GET'&&segments[1]==='status'&&segments.length===2)return sendJson(res,200,{channels:await runtime.channels.views(),pairings:runtime.store.snapshot().pairings,companionActivity:companionActivityView(runtime)})
     if(segments[1]==='bilibili'&&segments.length===2&&method==='POST') {
       mutation(req);const b=await readObject(req);if(!runtime.bilibili)throw httpError(503,'B 站服务未就绪')
       const result=await runtime.bilibili.create(text(b.companionId,'伙伴',120),text(b.name??'B 站','名称',80));await runtime.channels.start(result.id);return sendJson(res,201,result)
@@ -593,9 +599,11 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   throw httpError(404, 'Partner API route was not found')
 }
 
+function companionActivityView(runtime:ApiRuntime){return Object.fromEntries(runtime.store.snapshot().companions.map(c=>[c.id,runtime.agents.companionActivity?.(c.id)??[]]))}
+
 async function snapshot(runtime: ApiRuntime): Promise<{
   pushChannels: import('./notifications/push-domain.js').PushChannelView[]
-  companions: Companion[]; channels: ChannelView[]; pairings: ReturnType<PartnerStore['snapshot']>['pairings']; sessions: ReturnType<PartnerStore['snapshot']>['sessions']; heartbeatStates: ReturnType<PartnerStore['snapshot']>['heartbeatStates']; presets: { id: string; name: string; broken?: string }[]
+  companionActivity:Record<string,{kind:string;label:string;sessionId?:string}[]>; companions: Companion[]; channels: ChannelView[]; pairings: ReturnType<PartnerStore['snapshot']>['pairings']; sessions: ReturnType<PartnerStore['snapshot']>['sessions']; heartbeatStates: ReturnType<PartnerStore['snapshot']>['heartbeatStates']; presets: { id: string; name: string; broken?: string }[]
 }> {
   const state = runtime.store.snapshot()
   const presets = await runtime.ctx.agentPresets.list().then(items => items.map(item => ({
@@ -604,7 +612,7 @@ async function snapshot(runtime: ApiRuntime): Promise<{
     ...(item.broken ? { broken: item.broken } : {}),
   }))).catch(() => [])
   const sessions = state.sessions.map(item => ({ ...item, archived: runtime.agents.isArchived(item) }))
-  return { companions: state.companions, channels: await runtime.channels.views(), pushChannels: runtime.push?.views() ?? [], pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
+  return { companionActivity:companionActivityView(runtime), companions: state.companions.map(c=>withActivityDeliveries(c,state.notificationDeliveries??[])), channels: await runtime.channels.views(), pushChannels: runtime.push?.views() ?? [], pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
 }
 
 function localDay(now: number): string { const date = new Date(now); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }

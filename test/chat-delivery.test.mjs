@@ -281,3 +281,27 @@ test('local Markdown image cannot conclude chat before explicit attachment deliv
  assert.deepEqual((await tool.execute({messages:[{text:'画好了 这车真没轮子'}]},exec)).parts,[{type:'text',text:'画好了 这车真没轮子'}]);assert.equal(ended,1)
  const code='写法示例：`![图](generated/a.png)`';assert.deepEqual((await tool.execute({messages:[{text:code}]},exec)).parts,[{type:'text',text:code}])
 })
+
+
+test('plain terminal reply without a chat tool still delivers separate short paragraphs when enabled',async()=>{
+ const text='刚才还发得出来，现在却说缺密钥。\n\n新试听还没做出来。'
+ const events=[start,user,{seq:3,type:'assistant/message',data:{message:{role:'assistant',content:[{type:'text',text}]}}},{seq:4,type:'turn/end',data:{reason:{kind:'completed'}}}]
+ const parts=channelReplyPartsAfter(events,0)
+ const reply=await prepareChannelReply(parts,'/tmp',true)
+ assert.deepEqual(replyDeliveryParts(reply),[{type:'text',text:'刚才还发得出来，现在却说缺密钥。'},{type:'text',text:'新试听还没做出来。'}])
+ assert.equal((await prepareChannelReply(parts,'/tmp',false)).chatParts,undefined)
+ assert.equal(events.some(e=>e.type==='tool/call'),false)
+})
+test('plain fallback does not split structured documents or reinterpret confirmed delivery',async()=>{
+ const text='- 一条\n- 另一条'
+ assert.equal((await prepareChannelReply({text,referenceTexts:[]},'/tmp',true)).chatParts,undefined)
+ const reply=await prepareChannelReply({text:'',referenceTexts:[],chatParts:[],alreadyDelivered:true},'/tmp',true)
+ assert.deepEqual(reply.chatParts,[]);assert.equal(reply.alreadyDelivered,true);assert.equal(reply.text,'')
+})
+
+
+test('segmented channel fallback permits more than three short messages',async()=>{
+ const texts=['第一段。','第二段。','第三段。','第四段。']
+ const reply=await prepareChannelReply({text:texts.join('\n\n'),referenceTexts:[]},'/tmp',true)
+ assert.deepEqual(replyDeliveryParts(reply),texts.map(text=>({type:'text',text})))
+})

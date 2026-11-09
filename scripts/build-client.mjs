@@ -17,6 +17,22 @@ await build({
 })
 
 await build({
+  entryPoints: ['src/ui/tts-settings.tsx'], outfile: 'lib/client.tts.js',
+  bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', minify: true,
+  jsx: 'automatic', external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-api-remotes/client'],
+  banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pluginId)}, chunk: 'client.tts.js', factory: (require) => { var module = { exports: {} }; var exports = module.exports;` },
+  footer: { js: 'return module.exports; } });' },
+})
+
+await build({
+  entryPoints: ['src/ui/thoughts-panel.tsx'], outfile: 'lib/client.activities.js',
+  bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', minify: true,
+  jsx: 'automatic', external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-api-remotes/client'],
+  banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pluginId)}, chunk: 'client.activities.js', factory: (require) => { var module = { exports: {} }; var exports = module.exports;` },
+  footer: { js: 'return module.exports; } });' },
+})
+
+await build({
   entryPoints: ['src/client.tsx'],
   minifySyntax: true,
   outfile: 'lib/client.js',

@@ -1,5 +1,5 @@
 import { HabitsPanel } from './habits-panel.js'
-import { ThoughtsPanel } from './thoughts-panel.js'
+import { ThoughtsPanel } from './thoughts-panel-loader.js'
 import {channelReplyAllowed} from '../channels/reply-access.js'
 import { useEffect, useState } from 'react'
 import { loadPartner, type PartnerSnapshot } from '../client-api.js'

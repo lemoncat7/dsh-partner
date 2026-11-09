@@ -1,3 +1,4 @@
+import {TtsSettings} from './tts-settings-loader.js'
 import {BilibiliSettings} from './bilibili-settings.js'
 import {QqConnectionGuide} from './qq-connection-guide.js'
 import {useState, useRef, type ReactNode, type FormEvent} from 'react'
@@ -23,6 +24,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   const [addingPush,setAddingPush]=useState(false)
   const [fixedPlatform,setFixedPlatform]=useState(false)
   const [configuring,setConfiguring]=useState<string>()
+  const [ttsEdit,setTtsEdit]=useState({dirty:false,busy:false}),[discardTts,setDiscardTts]=useState(false)
   const qqEdit=useRef({dirty:false,busy:false})
   const [discardQq,setDiscardQq]=useState(false)
   const closeAdd=()=>{setAdding(false);setToken('');setPassword('');setMfaToken('')}
@@ -40,7 +42,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   })
   return <div id="dsh-partner-channels" className="dsh-partner-form is-channel dsh-partner-channels">
     <div className="dsh-partner-channel-toolbar">
-      <SectionHeading eyebrow="CHANNELS" title="我的渠道" detail="查看连接状态，管理联系人与通知投递。" />
+      <SectionHeading eyebrow="CHANNELS" title="我的渠道" detail="按类型管理消息、通知与通用语音服务。" />
       <button type="button" onClick={()=>openAdd()}>添加渠道</button>
     </div>
     {!adding&&feedback&&<p role="status">{feedback}</p>}
@@ -62,7 +64,10 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       </form>
     </WorkspaceDialog>}
     <div className="dsh-partner-channel-list">
+    <h3 className="dsh-partner-channel-category">通知</h3>
     <PushChannels companion={companion} snapshot={snapshot} onChanged={onChanged} adding={addingPush} closeAdd={()=>setAddingPush(false)}/>
+    <div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>{companion.notificationDelivery?.mode==='selected'?`已指定 ${companion.notificationDelivery.targets.length} 位接收人`:'默认跟随最近渠道与用户'}</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div>
+    <h3 className="dsh-partner-channel-category">消息</h3>
     <div className="dsh-partner-channel-row">
       <span><strong>微信</strong><small>{channels.some(c=>!c.platform||c.platform==='weixin')?'管理连接与私聊授权':'尚未连接 · 扫码接入'}</small></span>{channels.find(c=>!c.platform||c.platform==='weixin')&&<ChannelStatus channel={channels.find(c=>!c.platform||c.platform==='weixin')!}/>}<button type="button" aria-label="配置微信" onClick={()=>setConfiguring('weixin')}>配置</button>
       {configuring==='weixin'&&<WorkspaceDialog title="微信配置" detail="管理扫码登录、连接与联系人授权。" close={()=>setConfiguring(undefined)}>{weixin}</WorkspaceDialog>}
@@ -95,8 +100,12 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       {channel.idleDelivery&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>主动联系投递</strong><p>{channel.idleDelivery}</p></div>}
       {channel.lastError&&<div className="dsh-partner-channel-inline-notice" role="status" aria-atomic="true"><strong>{channel.runtimeStatus==='running'?'会话提示':'连接提示'}</strong><p>{channel.lastError}</p></div>}
     </div>)}
+    <h3 className="dsh-partner-channel-category">TTS</h3>
+    <div className="dsh-partner-channel-row"><span><strong>通用 TTS</strong><small>统一管理语音服务、音色与试听 · 多个消息渠道共用</small></span><button type="button" aria-label="配置通用 TTS" onClick={()=>setConfiguring('tts')}>配置</button></div>
     </div>
-    <section className="dsh-partner-channel-notifications" aria-label="通知设置"><div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>{companion.notificationDelivery?.mode==='selected'?`已指定 ${companion.notificationDelivery.targets.length} 位接收人`:'默认跟随最近渠道与用户'}</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div></section>
+    {configuring==='tts'&&<WorkspaceDialog title="通用 TTS" detail="配置语音服务，再分配给需要使用的消息渠道。" close={()=>{if(ttsEdit.busy)return;if(ttsEdit.dirty){setDiscardTts(true);return}setConfiguring(undefined)}}><TtsSettings companionId={companion.id} channels={channels} onChanged={onChanged} onEdit={setTtsEdit}/></WorkspaceDialog>}
+    {discardTts&&<DiscardChangesDialog keepEditing={()=>setDiscardTts(false)} discard={()=>{setDiscardTts(false);setConfiguring(undefined)}}/>}
+
     {discardQq&&<DiscardChangesDialog keepEditing={()=>setDiscardQq(false)} discard={()=>{setDiscardQq(false);setConfiguring(undefined)}}/>}
     {configuring==='delivery'&&<WorkspaceDialog title="通知与交付" detail="选择通知渠道，再选择各渠道的接收人；支持同时投递。" close={()=>setConfiguring(undefined)}><NotificationSettings companion={companion} snapshot={snapshot} onChanged={onChanged}/></WorkspaceDialog>}
   </div>

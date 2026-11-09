@@ -20,6 +20,8 @@ import { parseChatInput } from './protocol.js'
 
 type Parts=ReturnType<typeof parseChatInput>
 export interface PersonaDeliveryOptions {
+  /** Chat tools already receive a persona-authored draft; validate without rewriting it. */
+  authored?: boolean
   surface?: 'chat'|'public-comment'
   target?: string
   single?: boolean
@@ -57,6 +59,7 @@ export async function renderPersonaDelivery(ctx:Context,owner:string,store:Partn
   if(JSON.stringify([c.name,c.role,c.description,c.instructions,c.characterCard,c.relationshipText,c.habits,c.idleContact])!==identity||latestSource(es)?.seq!==source?.seq||questionOrigin(agent.session.id,es,live.sessions)?.id!==route?.id)throw Error('输入、人物或回复对象已变化，未发送旧表达')
  }
  check()
+ if(surface==='chat'&&options.authored)return {parts,validate:check,audit:{status:'preserved',surface,reason:'authored-text',durationMs:0}}
  const config=[...events].reverse().find(e=>e.type==='request/header')?.data.header.config
  const fallback=(reason:string,durationMs=0):PersonaDeliveryResult=>{check();return {parts,validate:check,audit:{status:'fallback',surface,reason,durationMs}}}
  if(workExpressionFailed(agent))return fallback('previous-expression-failed')

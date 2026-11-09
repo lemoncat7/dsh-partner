@@ -9,14 +9,15 @@ import {resolveToolAccess} from '../execution/tool-access-adapter.js'
 import {discoveredToolProtocol} from '../character/prompt-projection.js'
 
 export interface DiscoverableTool {tool:ToolDefinition;allowed:()=>boolean;protocol?:(exec:ToolRunContext)=>string}
-export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access','partner_memory_recall','partner_work_execute','partner_chat_reply','partner_agreement','partner_chat_say','partner_stickers'] as const
+export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access','partner_memory_recall','partner_work_execute','partner_chat_reply','partner_agreement','partner_chat_say'] as const
 // Track actual registrations, not a name prefix: other plugins keep ownership.
 const ownedTools=new WeakMap<PartnerStore,Map<string,Map<object,Set<string>>>>()
 export function isPartnerDiscoveryTool(store:PartnerStore,owner:string,name:string):boolean {
  return [...(ownedTools.get(store)?.get(owner)?.values()??[])].some(names=>names.has(name))
 }
 const GROUPS=[
- {id:'chat',title:'聊天回复',description:'文字、表情与语音'},
+ {id:'chat',title:'聊天回复',description:'当前会话接话与最终回复'},
+ {id:'activity',title:'自主活动',description:'语音表达、表情包查询收藏整理、渠道互动与活动结束；普通聊天也可按语境使用'},
  {id:'memory',title:'回忆',description:'长期记忆与历史对话检索'},
  {id:'media',title:'图片创作',description:'生图、画图、图生图与图片编辑'},
  {id:'identity',title:'身份与生活',description:'人格参考模板、角色与关系设定、好感度、自主念头、自主习惯、睡眠和头像'},
@@ -30,13 +31,15 @@ const GROUPS=[
 ]
 const IMAGE_ALIASES=['生图','画图','绘图','生成图片','图片生成','图生图','改图','编辑图片','图片编辑','画一张','画张','绘制','图片','image generation','image editing']
 function toolSearchMatches(tool:ToolDefinition,query:string):boolean {
+ if(tool.name==='partner_voice_reply'&&/(?:tts|语音|声音|音色)/iu.test(query))return true
  if(tool.name==='partner_qq_reply'&&/(?:@|提及|艾特|戳一戳|拍一拍|poke|mention|语音)/iu.test(query))return true
  return `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query) || ['generate_image','image_gen.imagegen'].includes(tool.name) && IMAGE_ALIASES.some(alias=>alias.includes(query)||query.includes(alias))
 }
 function category(name:string):string {
+ if(['partner_voice_reply','partner_stickers','partner_qq_reply','partner_qq','partner_bilibili','partner_activity_finish'].includes(name))return 'activity'
  if(name==='partner_memory_recall')return 'memory'
  if(['generate_image','image_gen.imagegen'].includes(name))return 'media'
- if(['partner_chat_reply','partner_agreement','partner_chat_say','partner_chat_progress','partner_stickers','partner_qq_reply'].includes(name))return 'chat'
+ if(['partner_chat_reply','partner_agreement','partner_chat_say','partner_chat_progress','partner_stickers','partner_voice_reply','partner_qq_reply'].includes(name))return 'chat'
  if(/identity|affection|thoughts|habits|sleep|avatar|activity/.test(name))return 'identity'
  if(/task_board|requirements|collaborate|work_execute|workflow/.test(name))return 'work'
  if(/schedule/.test(name))return 'automation'
@@ -47,7 +50,7 @@ function category(name:string):string {
  return 'other'
 }
 const PERSONA_REFERENCE_CALL = JSON.stringify({action:'call',name:'partner_identity',argumentsJson:JSON.stringify({action:'reference'})})
-export const TOOL_DISCOVERY_PROMPT=AGREEMENT_GUIDANCE+'\n'+'partner_channel_access 查询真实渠道权限摘要，partner_tools 分页查询和调用能力。partner_work_execute 是直接可调用的调查与多步执行入口，无需先查询目录或 describe。partner_memory_recall 是直接公开的基础回忆工具，也可通过统一入口调用，无需先加载；所有聊天账号可用，按真实会话检索。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。伙伴入口只管理本插件注册的能力；其他插件和宿主工具保留自己的顶层入口，直接按其说明调用，不经 partner_tools 转调。生图优先用顶层 image_gen.imagegen，兼容 generate_image；一次请求只调用其中一个，动作登记使用实际工具名。图片生成后用 partner_send_attachment 交付返回文件，确认渠道回执后再回复；不要把本地文件链接当作已发送。回应和结果说明保持当前人格。私聊任务与普通接话统一使用 partner_chat_say。执行工具前 call partner_chat_say，argumentsJson 为 {"text":"按当前人格简短说准备做什么","beforeTools":true,"expectedTools":["本轮准备调用的真实工具名"]} 的 JSON 字符串；成功后再工作，此工具不结束回合。partner_chat_say、partner_chat_reply 和 partner_stickers 提供在顶层时直接调用，不必先查目录。当前用户聊天可以用 partner_chat_say 先说一句并继续本轮，确认送达后再自然补话；不必等自主活动。说完使用 partner_chat_reply；当前输入后已有接话送达且没有新话时可 messages:[] 安静结束。最终文字回复使用 partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。需分条时在 messages 中提交多个 text 条目，普通正文换行不会分条；未提供聊天工具时用普通最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
+export const TOOL_DISCOVERY_PROMPT=AGREEMENT_GUIDANCE+'\n'+'partner_channel_access 查询真实渠道权限摘要，partner_tools 分页查询和调用能力。partner_work_execute 是直接可调用的调查与多步执行入口，无需先查询目录或 describe。partner_memory_recall 是直接公开的基础回忆工具，也可通过统一入口调用，无需先加载；所有聊天账号可用，按真实会话检索。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。伙伴入口只管理本插件注册的能力；其他插件和宿主工具保留自己的顶层入口，直接按其说明调用，不经 partner_tools 转调。生图优先用顶层 image_gen.imagegen，兼容 generate_image；一次请求只调用其中一个，动作登记使用实际工具名。图片生成后用 partner_send_attachment 交付返回文件，确认渠道回执后再回复；不要把本地文件链接当作已发送。回应和结果说明保持当前人格。私聊任务与普通接话统一使用 partner_chat_say。执行工具前 call partner_chat_say，argumentsJson 为 {"text":"按当前人格简短说准备做什么","beforeTools":true,"expectedTools":["本轮准备调用的真实工具名"]} 的 JSON 字符串；成功后再工作，此工具不结束回合。partner_chat_say、partner_chat_reply 提供在顶层时直接调用，不必先查目录。语音、表情包和渠道互动在 partner_tools 的 activity（自主活动）目录下查询、describe 和 call；普通聊天同样可用，不限于闲时触发。当前用户聊天可以用 partner_chat_say 先说一句并继续本轮，确认送达后再自然补话；不必等自主活动。说完使用 partner_chat_reply；当前输入后已有接话送达且没有新话时可 messages:[] 安静结束。最终文字回复使用 partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。需分条时在 messages 中提交多个 text 条目，普通正文换行不会分条；未提供聊天工具时用普通最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
 
 /** Stable model-facing entries; original definitions remain registered in scope
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
@@ -122,7 +125,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
      ...(access.denialReason?{notice:access.denialReason}:{})}
    }
   }))
-  disposers.push(runtime.register({name:'partner_tools',description:'仅查询、调用伙伴插件自身已授权工具；其他插件直接使用自己的入口。list 按 category/query 返回概要，describe（或兼容 load）返回完整参数；call 使用 name 和 argumentsJson（原工具参数的 JSON 字符串）执行，仍走原权限、审批和取消流程。切换账号不增删顶层工具。人格参考模板直接调用：'+PERSONA_REFERENCE_CALL+'。聊天调用 partner_chat_reply，原工具参数为 {"messages":[{"text":"回复内容"}]}，须序列化到 argumentsJson；表情先查询 partner_stickers。分条聊天用多个 text 条目；仅需一条或聊天工具不可用时可直接最终回答。',
+  disposers.push(runtime.register({name:'partner_tools',description:'仅查询、调用伙伴插件自身已授权工具；其他插件直接使用自己的入口。list 按 category/query 返回概要，describe（或兼容 load）返回完整参数；call 使用 name 和 argumentsJson（原工具参数的 JSON 字符串）执行，仍走原权限、审批和取消流程。切换账号不增删顶层工具。人格参考模板直接调用：'+PERSONA_REFERENCE_CALL+'。按语境先选择文字、图片表情或语音，语音与表情包在 activity（自主活动）目录中查询，经本入口 describe/call 调用 partner_voice_reply 或 partner_stickers；文字和图片表情调用 partner_chat_reply，原工具参数为 {"messages":[{"text":"回复内容"}]}，须序列化到 argumentsJson；表情先查询 partner_stickers。分条聊天用多个 text 条目；仅需一条或聊天工具不可用时可直接最终回答。',
    parameters:{type:'object',properties:{action:{type:'string',enum:['list','describe','load','unload','call']},category:{type:'string'},query:{type:'string',maxLength:80},name:{type:'string'},offset:{type:'integer',minimum:0},argumentsJson:{type:'string',maxLength:200000}},required:['action'],additionalProperties:false},
    output:{schema:{type:'object'},render},presentCall:()=>({card:'generic',title:'伙伴能力'}),
    async execute(raw,exec){

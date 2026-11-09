@@ -32,6 +32,7 @@ export interface CompanionView {
   automation: AutomationView
 }
 export interface ChannelView {
+  tts?: import('./voice/domain.js').ChannelTts
   bilibili?: import('./channels/bilibili/catalog.js').BiliSettings
   bilibiliActivity?: import('./channels/bilibili/service.js').BiliReceipt[]
   qq?: import('./channels/qq/settings.js').QqSettings
@@ -83,12 +84,13 @@ export interface ConcernObservationView {
   decision: 'drop' | 'remember' | 'defer' | 'feed' | 'notify'; notificationRuleEffect: 'auto' | 'notify' | 'suppress'
   notificationRuleReason: string; decisionReason: string; createdAt: number; mentionedAt?: number
 }
-export interface ConcernExecutionView {id:string;concernId:string;status:'pending'|'running'|'completed'|'failed';updatedAt:number;createdAt:number;error?:string;recoveryFromMessageId?:string}
+export interface ConcernExecutionView {id:string;concernId:string;status:'pending'|'running'|'completed'|'failed';updatedAt:number;createdAt:number;error?:string;resultSummary?:string;recoveryFromMessageId?:string}
 export interface ConcernActivityView { concerns: ConcernView[]; observations: ConcernObservationView[]; executions?:ConcernExecutionView[] }
 export interface ConcernSourceView { kind: 'file' | 'knowledge' | 'note'; label: string; detail: string; token: string }
 export interface PresetView { id: string; name: string; broken?: string }
 export interface ModelCatalogView { providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>; defaultSelection: { provider: string; model: string } }
 export interface PartnerSnapshot {
+  companionActivity?: Record<string,{kind:string;label:string;sessionId?:string}[]>
   pushChannels?: import('./notifications/push-domain.js').PushChannelView[]
   companions: CompanionView[]; channels: ChannelView[]; pairings: PairingView[]; sessions: ChannelSessionView[]; heartbeatStates: HeartbeatStateView[]; presets: PresetView[]
 }

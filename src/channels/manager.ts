@@ -205,15 +205,16 @@ export class ChannelManager {
   async views(): Promise<ChannelView[]> {
     return Promise.all(this.store.snapshot().channels.map(async channel => {
       const runtime = this.runtime.get(channel.id) ?? { status: 'stopped' as const }
+      const {ttsReceipts: _ttsReceipts,...channelView}=channel
       return {
-        ...channel,
+        ...channelView,
         runtimeStatus: runtime.status,
         ...(channel.platform==='qq'?{qqLatency:this.qqLatency.view(channel.id)}:{}),
         ...(runtime.lastError ? { lastError: runtime.lastError } : {}),
         credentialConfigured: channel.platform==='bilibili'?true:await this.credentials.configured(channel.id),
         ...(this.groupAutonomy.status(channel.id)?{groupDecision:this.groupAutonomy.status(channel.id)!}:{}),
         ...this.idleDeliveryStatus(channel.id),
-        activity:this.agents.companionActivity?.(channel.companionId)??[],
+        activity:this.agents.companionActivity?.(channel.companionId,channel.id)??[],
       }
     }))
   }
@@ -323,6 +324,18 @@ export class ChannelManager {
     if(!channelReplyAllowed(this.store.snapshot(),route.channelId,route.userId))throw new Error('渠道联系人尚未批准')
     const credential=await this.credentials.read(route.channelId)
     await this.sender(channel, credential, route.userId).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
+  }
+
+  /** TTS has its own durable receipt; transport resolves only after the channel acknowledges audio delivery. */
+  async sendTtsAudio(sessionId:string,file:PartnerOutboundAttachment,signal:AbortSignal,routeId:string,guard:()=>void):Promise<void> {
+    guard()
+    const route=this.store.snapshot().sessions.find(r=>r.id===routeId&&r.sessionId===sessionId&&r.kind==='channel')
+    if(!route)throw Error('语音会话已变化')
+    const channel=requiredChannel(this.store,route.channelId)
+    if(!['weixin','matrix','mattermost'].includes(channel.platform??'weixin'))throw Error('此渠道不支持音频附件交付')
+    const credential=await this.credentials.read(channel.id)
+    guard()
+    await this.sender(channel,credential,route.userId).sendAttachment(route.userId,file,this.contextTokens.get(`${channel.id}:${route.userId}`),signal,()=>{guard();return true})
   }
 
   async notifyContinuation(entry: import('../scheduler/domain.js').ScheduledPartnerTask): Promise<void> {

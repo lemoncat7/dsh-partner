@@ -44,3 +44,52 @@ test('activity journal survives durable storage without changing identity revisi
  const reopened=await PartnerStore.open(file),c=reopened.snapshot().companions[0]
  assert.equal(c.updatedAt,before);assert.equal(c.activityJournal[0].summary,'做了一道搭桥题，留着以后玩')
 })
+
+test('silent finish does not erase confirmed speech and a successful call alone is not delivery',()=>{
+ const e=events();e.splice(-1,0,{type:'tool/ptc-dispatch',data:{name:'partner_chat_reply',arguments:'{}',isError:false,meta:{kind:'partner-chat-v1',parts:[{type:'text',text:'发现一个好玩的'}],delivered:true,originRouteId:'r'}}})
+ const r=collectActivityJournal('s',e)[0];assert.equal(r.silent,true);assert.equal(r.sharing,'confirmed');assert.equal(r.sharedText,'发现一个好玩的')
+ delete e.at(-2).data.meta.delivered
+ assert.equal(collectActivityJournal('s',e)[0].sharing,'pending')
+ delete e.at(-2).data.meta
+ assert.equal(collectActivityJournal('s',e)[0].sharing,'none')
+})
+test('successful edits connect work progress and old receipts can be repaired without duplicates',()=>{
+ const e=events();e[2].data.name='edit';const row=collectActivityJournal('s',e)[0]
+ assert.deepEqual(row.artifacts,['activities/puzzle.md'])
+ const legacy={...row};delete legacy.sharing;const c={activityJournal:[legacy]}
+ assert.equal(mergeActivityJournal(c,[row]),true);assert.equal(c.activityJournal.length,1);assert.equal(c.activityJournal[0].sharing,'none')
+ assert.equal(mergeActivityJournal(c,[row]),false)
+})
+test('statistics separate confirmed, pending, unknown and overlapping categories',async()=>{
+ const {summarizeActivities}=await import('../lib/character/activity-summary.js')
+ const base=collectActivityJournal('s',events())[0]
+ const s=summarizeActivities([{...base,sharing:'confirmed'},{...base,sharing:'pending'},{...base,sharing:undefined}])
+ assert.equal(s.total,3);assert.equal(s.confirmed,1);assert.equal(s.pending,1);assert.equal(s.unknown,1);assert.equal(s.failed,3)
+})
+test('deferred delivery updates view only from acknowledged parts and exact owner/message',async()=>{
+ const {withActivityDeliveries}=await import('../lib/character/activity-summary.js')
+ const c={id:'c',activityJournal:collectActivityJournal('s',events())}
+ const delivery={companionId:'c',reply:{idleContactOrigin:{messageId:'idle'}},targets:[{sentParts:[]}]}
+ assert.equal(withActivityDeliveries(c,[delivery]).activityJournal[0].sharing,'pending')
+ delivery.targets[0].sentParts=[0]
+ assert.equal(withActivityDeliveries(c,[delivery]).activityJournal[0].sharing,'confirmed')
+ delivery.companionId='other';assert.equal(withActivityDeliveries(c,[delivery]).activityJournal[0].sharing,'none')
+ assert.equal(c.activityJournal[0].sharing,'none')
+})
+test('completed legacy receipts still match activity after payload scrubbing',async()=>{
+ const {withActivityDeliveries}=await import('../lib/character/activity-summary.js')
+ const c={id:'c',activityJournal:collectActivityJournal('s',events())}
+ const delivery={id:JSON.stringify(['c','idle:idle']),companionId:'c',completedAt:123,reply:{text:'',attachments:[]},targets:[{sentParts:[0]}]}
+ assert.equal(withActivityDeliveries(c,[delivery]).activityJournal[0].sharing,'confirmed')
+ delivery.id=JSON.stringify(['c','idle:other']);assert.equal(withActivityDeliveries(c,[delivery]).activityJournal[0].sharing,'none')
+})
+
+test('explicit activity recall searches retained older entries rather than the latest eight',()=>{
+ const make=(id,summary,at,sessionId='s')=>({id,summary,at,sessionId,silent:true,tools:[],artifacts:[]})
+ const c={activityJournal:[make('origin','搜索卡比冷知识，从画册视频简介找到官方链接',1),...Array.from({length:12},(_,i)=>make(String(i),'翻看其他作品',i+2)),make('recent','卡比官网角色介绍',20),make('private','卡比画册私密内容',30,'other')]}
+ assert.deepEqual(activityJournalRecall(c,'s',true,[],8,'卡比画册').map(r=>r.id),['origin','recent'])
+ assert.equal(activityJournalRecall(c,'s',true,[],8,'最初为啥搜索卡比')[0].id,'origin')
+ assert.deepEqual(activityJournalRecall(c,'s',true,[],8,'不存在的火星任务'),[])
+ assert.deepEqual(activityJournalRecall(c,'s',false,[],8,'卡比'),[])
+ assert.equal(activityJournalRecall(c,'s',true,[],3).length,3,'automatic context stays bounded')
+})

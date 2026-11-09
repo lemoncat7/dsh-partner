@@ -1717,3 +1717,11 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-work-progress summary { cursor: pointer; padding: 8px 0; min-height: 24px; }
 .dsh-partner-work-progress summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .dsh-partner-work-progress ul { margin: 4px 0; padding-inline-start: 20px; }
+
+.dsh-partner-tts{display:grid;gap:16px;min-width:0}.dsh-partner-tts-divider{border:0;border-top:1px solid var(--border,rgba(128,128,128,.3));width:100%;margin:16px 0}.dsh-partner-tts-editor{display:grid;gap:14px;min-width:0;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:10px;padding:16px}.dsh-partner-tts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dsh-partner-tts-service{display:flex;align-items:center;justify-content:space-between;gap:12px}.dsh-partner-tts-service>span{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}.dsh-partner-tts-service small{opacity:.7}.dsh-partner-tts input,.dsh-partner-tts select,.dsh-partner-tts textarea{min-width:0;max-width:100%;box-sizing:border-box}.dsh-partner-tts audio{width:100%;max-width:100%}.dsh-partner-tts button{min-height:40px}.dsh-partner-tts textarea{resize:vertical}@media(max-width:540px){.dsh-partner-tts-grid{grid-template-columns:1fr}.dsh-partner-tts-editor{padding:12px}.dsh-partner-tts button{min-height:44px}}
+
+/* Types share one hierarchy; separators are decorative, headings remain readable. */
+.dsh-partner-channel-category{display:flex;align-items:center;gap:12px;margin:16px 0 2px;color:var(--partner-text-secondary);font-size:13px;font-weight:600;line-height:1.5}
+.dsh-partner-channel-category::after{content:"";height:1px;background:var(--partner-separator);flex:1;min-width:24px}
+.dsh-partner-channel-category:first-child{margin-top:0}
+.dsh-partner-tts-service{flex-wrap:wrap}

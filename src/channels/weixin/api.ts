@@ -48,7 +48,9 @@ export class WeixinApi {
     }
   }
 
-  async sendAttachment(toUserId: string, attachment: PartnerOutboundAttachment, contextToken: string | undefined, signal?: AbortSignal): Promise<void> {
+  async sendAttachment(toUserId: string, attachment: PartnerOutboundAttachment, contextToken: string | undefined, signal?: AbortSignal, allowed:()=>boolean=()=>true): Promise<void> {
+    const guard=()=>{signal?.throwIfAborted();if(!allowed())throw Error('渠道或联系人授权已撤销')}
+    guard()
     const info = await stat(attachment.path)
     if (!info.isFile()) throw new Error('微信待发送附件不是普通文件')
     if (info.size > PARTNER_MEDIA_MAX_BYTES) throw new Error('微信待发送附件超过 64 MB 限制')
@@ -57,6 +59,7 @@ export class WeixinApi {
     const fileKey = randomBytes(16).toString('hex')
     const cipher = createCipheriv('aes-128-ecb', key, null)
     const encrypted = Buffer.concat([cipher.update(plain), cipher.final()])
+    guard()
     const upload = await this.post<UploadResponse>('ilink/bot/getuploadurl', {
       filekey: fileKey,
       media_type: attachment.kind === 'image' ? 1 : 3,
@@ -73,11 +76,13 @@ export class WeixinApi {
     if (!uploadUrl) throw new Error('微信附件上传地址缺失')
     const parsedUploadUrl = new URL(uploadUrl)
     if (parsedUploadUrl.protocol !== 'https:' || !trustedWeixinHost(parsedUploadUrl.hostname)) throw new Error('微信附件上传地址不可信')
+    guard()
     const encryptedParam = await uploadCdn(parsedUploadUrl.toString(), encrypted, signal)
     const media = { encrypt_query_param: encryptedParam, aes_key: Buffer.from(key.toString('hex')).toString('base64'), encrypt_type: 1 }
     const item = attachment.kind === 'image'
       ? { type: 2, image_item: { content_type: attachment.mediaType, media, mid_size: encrypted.length } }
       : { type: 4, file_item: { media, file_name: basename(attachment.name), len: String(plain.length) } }
+    guard()
     const response = await this.post<{ ret?: number; errcode?: number; errmsg?: string }>('ilink/bot/sendmessage', {
       msg: {
         to_user_id: toUserId,

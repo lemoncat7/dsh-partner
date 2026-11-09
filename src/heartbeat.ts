@@ -151,7 +151,7 @@ export class HeartbeatScheduler {
         execution=await this.agents.heartbeat(companion,route,[item])
         const synced=execution.recording?.some(state=>state.concernId===item.id&&state.state==='synced')===true
         await this.concerns.settleRecording(item,synced)
-        await this.recordActivity(companion,route,execution,synced?'quiet':'failed',synced?undefined:'记录同步未完成，15分钟后单独重试；不重新抓取或提醒')
+        await this.recordActivity(companion,route,execution,synced?'quiet':'failed',synced?undefined:'记录同步未完成，按连续失败次数退避15分钟至6小时后单独重试；不重新抓取或提醒')
         return {checked:false,sent:false,reason:synced?'记录同步完成':'记录待重试'}
       } catch(error) {await this.concerns.settleRecording(item,false);throw error}
     }

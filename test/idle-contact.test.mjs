@@ -243,7 +243,7 @@ test('idle prompts do not reinject repetitive silence rationales as activity gui
  const prompt=idleActivityPrompt(state,companion,events)
  assert.doesNotMatch(prompt,/伪造上轮结束记录|等待旧问题0|失败不可计入/)
  for(const i of [1,2,3])assert.doesNotMatch(prompt,new RegExp('等待旧问题'+i))
- assert.match(prompt,/不是每轮必须联系的对象/);assert.match(prompt,/不必产生聊天内容或给谁汇报/)
+ assert.match(prompt,/不是每轮必须联系的对象/);assert.match(prompt,/不按固定调用次数或发言条数结束/)
  assert.match(prompt,/仍可休息/)
 })
 
@@ -295,7 +295,7 @@ test('idle continuation keeps user and own reply anchors when autonomous chatter
  assert.equal(context.at(-1).text,'自主消息19')
  assert.equal(context[0].at,10);assert.deepEqual(events,before)
  const {state,companion}=fixture(),prompt=idleActivityPrompt(state,companion,events)
- assert.match(prompt,/决定想探索什么/)
+ assert.match(prompt,/决定探索、创作、交流或休息/)
  assert.match(prompt,/partner_memory_recall/)
  assert.doesNotMatch(prompt,/闲下来时优先找一件|只有没有合适行动/)
 })
@@ -352,4 +352,18 @@ test('scheduler uses injected channel registry and picks up registration and rem
  await f.runtime.idleContact('c');assert.match(f.followed[1].content[0].text,/matrix_feed/)
  dispose();delete f.route.idleActivityCheck;delete f.route.idleContactState
  await f.runtime.idleContact('c');assert.ok(!f.followed[2].content[0].text.includes('matrix_feed'))
+})
+
+test('activity context distinguishes mutual replies from autonomous stories and excludes internal work',async()=>{
+ const {activityConversation,activityConversationPosition}=await import('../lib/character/idle-contact.js')
+ const user={type:'user/message',time:100,data:{source:{kind:'user'},content:[{type:'text',text:'这个游戏好玩'}]}}
+ const answer=text=>({type:'assistant/message',data:{message:{content:[{type:'text',text}]}}})
+ const idle={type:'user/message',data:{source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE}}}
+ const events=[user,answer('我们刚聊的游戏'),idle,answer('自己编的勇者'),answer('同轮第二句'),idle,answer('自己又续了一段'),{type:'user/message',data:{source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴执行看板任务'}}},answer('只给内部任务的报告')]
+ const history=activityConversation(events)
+ assert.equal(history.find(r=>r.text==='我们刚聊的游戏').origin,'reply')
+ assert.equal(history.find(r=>r.text==='自己编的勇者').origin,'autonomous')
+ assert.ok(!history.some(r=>r.text==='只给内部任务的报告'))
+ assert.deepEqual(activityConversationPosition(events),{lastUserAt:100,unansweredAutonomousTurns:2})
+ assert.equal(activityConversationPosition([...events,{...user,time:200}]).unansweredAutonomousTurns,0)
 })

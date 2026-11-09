@@ -217,12 +217,12 @@ test('permission summary is bounded and paginated, never dumps the whole tool ca
  assert.equal((await f.invoke('partner_channel_access',{offset:-1})).isError,true)
 })
 
-test('sticker lookup is a direct entry and still honors live capability revocation',async t=>{
+test('sticker lookup is nested under activity and honors live capability revocation',async t=>{
  const f=fixture(t);let allowed=true,calls=0
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_stickers',async()=>{calls++;return {ok:true}}),allowed:()=>allowed}]))
- assert.ok(PARTNER_TOOL_ENTRIES.includes('partner_stickers'))
- assert.ok(names(f).includes('partner_stickers'))
- assert.equal((await f.invoke('partner_stickers')).isError,false)
+ assert.ok(!PARTNER_TOOL_ENTRIES.includes('partner_stickers'))
+ assert.equal((await f.invoke('partner_tools',{action:'list',category:'activity'})).value.tools[0].name,'partner_stickers')
+ assert.equal((await f.call('partner_stickers')).value.dispatch.isError,false)
  allowed=false
  assert.equal((await f.invoke('partner_stickers')).isError,true)
  assert.equal((await f.call('partner_stickers')).isError,true)
@@ -298,3 +298,16 @@ test('nested entry calls retain the step admission for conditional tools',async 
   assert.equal(result.isError,true);assert.equal(calls,0)
  }finally{toolSet.dispose()}
 });
+
+test('voice is nested under activity while revocation still blocks execution',async t=>{
+ const f=fixture(t);let calls=0,allowed=true
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_voice_reply',async()=>{calls++;return {ok:true}}),allowed:()=>allowed}]))
+ assert.ok(!PARTNER_TOOL_ENTRIES.includes('partner_voice_reply'))
+ assert.equal((await f.invoke('partner_tools',{action:'list',category:'activity'})).value.tools[0].name,'partner_voice_reply')
+ assert.match((await f.invoke('partner_tools',{action:'describe',name:'partner_voice_reply'})).value.next,/不要直接调用/)
+ assert.equal((await f.call('partner_voice_reply')).value.dispatch.isError,false)
+ allowed=false
+ assert.equal((await f.call('partner_voice_reply')).isError,true)
+ assert.equal((await f.invoke('partner_tools',{action:'list',category:'activity'})).value.total,0)
+ assert.equal(calls,1)
+})

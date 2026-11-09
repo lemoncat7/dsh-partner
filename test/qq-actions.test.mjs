@@ -257,3 +257,15 @@ test('explicit remote API failure is recorded separately from timeout and retain
  assert.equal(f.channel.qqActivity[0].status,'failed');assert.match(f.channel.qqActivity[0].error,/Process_Nudge/)
  assert.equal((await tool.execute(args,f.exec)).status,'failed');assert.equal(calls,1)
 })
+
+test('channel activity excludes background work and follows actual shared-session input',()=>{
+ const f=fixture(),events=[{type:'user/message',data:{id:'input',source:{kind:'user'}}}]
+ f.state.sessions=[{id:'local',kind:'local',companionId:'c',sessionId:'s'},{id:'qq',kind:'channel',companionId:'c',sessionId:'s',channelId:'qq',inboundMessageIds:['input']},{id:'matrix',kind:'channel',companionId:'c',sessionId:'s',channelId:'matrix',inboundMessageIds:[]}]
+ const runtime=new PartnerAgentRuntime({agents:{get:()=>({status:'running',session:{snapshotEvents:()=>events}})}},f.store,'/tmp',undefined,{isRunning:()=>true})
+ runtime.observationJobs.set('c',1)
+ assert.deepEqual(runtime.companionActivity('c','qq').map(r=>r.kind),['conversation'])
+ assert.deepEqual(runtime.companionActivity('c','matrix'),[])
+ assert.equal(runtime.companionActivity('c').filter(r=>r.kind==='memory').length,1)
+ events.push({type:'user/message',data:{id:'browser-input',source:{kind:'user'}}})
+ assert.deepEqual(runtime.companionActivity('c','qq'),[])
+})

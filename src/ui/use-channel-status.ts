@@ -1,7 +1,7 @@
 import {useEffect, type Dispatch, type SetStateAction} from 'react'
 import {api, type PartnerSnapshot} from '../client-api.js'
 
-type Status=Pick<PartnerSnapshot,'channels'|'pairings'>
+type Status=Pick<PartnerSnapshot,'channels'|'pairings'|'companionActivity'>
 const listeners=new Set<(value:Status)=>void>()
 let timer:ReturnType<typeof setTimeout>|undefined
 let active:AbortController|undefined

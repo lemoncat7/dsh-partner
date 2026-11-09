@@ -1,3 +1,6 @@
+import {TtsService} from './voice/service.js'
+import {TtsCredentials} from './voice/credentials.js'
+import {voiceReplyTool} from './voice/tool.js'
 import {BilibiliService} from './channels/bilibili/service.js'
 import {bilibiliTool} from './channels/bilibili/tools.js'
 import { createChannelActivities } from './channels/activity-defaults.js'
@@ -108,6 +111,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     ctx.effect(() => () => { notices.close(); inbox.close() }, 'dsh-partner.inbox')
     syncStorageNotice(inbox, storageConfig.storageVersion, TARGET_STORAGE_VERSION)
     const credentials = new PartnerCredentialVault(ctx.credentials)
+    const tts=new TtsService(store,new TtsCredentials(ctx.credentials),join(dirname(resolved.statePath),'tts-audio'))
+    await tts.recover()
     const push = new PushService(store, new PushCredentials(ctx.credentials), message => ctx.logger.warn(`dsh-partner push: ${message}`))
     const pushObserver = new PushObserver(store, push, () => ctx.logger.warn('dsh-partner: 推送通知入队失败，请检查通知队列'))
     ctx.effect(() => async () => { await pushObserver.close(); await push.close() }, 'dsh-partner.push')
@@ -204,7 +209,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
     }))
     const bilibili = new BilibiliService(store)
-    composer.setChatToolFactory(id => [bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args))])
+    composer.setChatToolFactory(id => [voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -257,7 +262,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili, tts })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

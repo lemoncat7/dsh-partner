@@ -64,3 +64,25 @@ test('registered non-QQ capabilities reach activity prompt without changing sche
  const old=r.register(provider);old();const current=r.register(provider);old()
  assert.equal(r.describe(fixture(),'c').length,1);current();assert.deepEqual(r.describe(fixture(),'c'),[])
 })
+
+test('expression activities follow approved routes and the live TTS switch',()=>{
+ const r=createChannelActivities(),s=fixture(),q=s.channels.find(c=>c.id==='q')
+ q.qq={privateReplies:true,enabledActions:[]};q.tts={enabled:true,profileId:'voice'}
+ s.sessions=[{id:'route',kind:'channel',companionId:'c',channelId:'q',sessionId:'s',userId:'12345678'}]
+ const expressions=()=>r.describe(s,'c').filter(x=>['qq.expression','tts.expression'].includes(x.provider)).flatMap(x=>x.activities)
+ assert.deepEqual(expressions(),[])
+ s.pairings=[{channelId:'q',userId:'12345678',status:'approved'}]
+ assert.deepEqual(expressions().map(a=>a.tool),['partner_stickers','partner_voice_reply'])
+ assert.ok(expressions().every(a=>a.visibility==='public'&&a.description.includes('partner_tools')))
+ q.tts.enabled=false;assert.deepEqual(expressions().map(a=>a.tool),['partner_stickers','partner_voice_reply'])
+ s.pairings[0].status='blocked';assert.deepEqual(expressions(),[])
+})
+
+for(const platform of ['weixin','matrix','mattermost'])test('shared TTS appears in authorized activity catalogue: '+platform,()=>{
+ const s=fixture(),channel=s.channels[0];channel.platform=platform;channel.tts={enabled:true,profileId:'p'}
+ s.channels=[channel];s.sessions=[{id:'r',kind:'channel',companionId:'c',channelId:'m',sessionId:'s',userId:'peer'}]
+ s.pairings=[{channelId:'m',userId:'peer',status:'approved'}]
+ const activities=()=>createChannelActivities().describe(s,'c').flatMap(p=>p.activities)
+ assert.ok(activities().some(a=>a.tool==='partner_voice_reply'))
+ channel.tts.enabled=false;assert.ok(activities().find(a=>a.tool==='partner_voice_reply').operations.includes('send_file'))
+})

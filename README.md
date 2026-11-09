@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/%40lemoncat7%2Fdsh-partner)](https://www.npmjs.com/package/@lemoncat7/dsh-partner)
 
-当前版本：[2.23.40 更新说明](docs/releases/2.23.40.md)，包含 [2.21.12 会话与自主活动改进](docs/releases/2.21.12.md)。
+当前版本：[2.25.0 更新说明](docs/releases/2.25.0.md)。
 
 ## 功能
 
@@ -19,7 +19,7 @@
 
 ## 安装
 
-当前插件版本 **2.23.33**，最低支持 DeepSeek Harness **0.2.1-rc.2**，已在 **0.2.1-rc.5** 部署验证（宿主仍为 RC），需要 Node.js **^22.19.0 或 >=24.0.0**。其他宿主版本请先查阅[兼容说明](docs/dsh-021-compatibility.md)和对应版本的发布说明。
+当前插件版本 **2.25.0**，支持 DeepSeek Harness **0.2.2-rc.1**（宿主仍为 RC），需要 Node.js **>=24.9.0**。其他宿主版本请先查阅[兼容说明](docs/compatibility-0.2.2-rc.1.md)；此版本不适用于旧版宿主。
 
 ```bash
 dsh plugin --profile web add @lemoncat7/dsh-partner@latest

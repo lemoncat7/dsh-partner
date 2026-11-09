@@ -16,7 +16,7 @@ export interface DirectMessage { qqReplyId?:string; qqQuote?:import('../qq/quote
 export interface DirectBatch { cursor: string; messages: DirectMessage[]; warning?: string }
 export interface ChannelSender {
   sendText(userId: string, text: string, context: string | undefined, signal?: AbortSignal): Promise<void>
-  sendAttachment(userId: string, file: PartnerOutboundAttachment, context: string | undefined, signal?: AbortSignal): Promise<void>
+  sendAttachment(userId: string, file: PartnerOutboundAttachment, context: string | undefined, signal?: AbortSignal, allowed?: () => boolean): Promise<void>
 }
 export class ChannelHttpError extends Error {
   constructor(readonly status: number, readonly retryAfterMs = 0) { super(`渠道请求失败（HTTP ${status}）`) }

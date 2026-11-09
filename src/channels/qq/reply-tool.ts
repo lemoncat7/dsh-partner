@@ -10,10 +10,10 @@ import { qqMediaUrl } from './transport.js'
 import type { QqActionCall } from './actions.js'
 
 /** Conversation-only voice delivery: no target, file, URL or arbitrary API arguments. */
-export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCall): ToolDefinition {
+export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCall, external?:ToolDefinition): ToolDefinition {
   return {
     name: 'partner_qq_reply',
-    description: '真正群 @ 用 mention（userId 为当前群成员 QQ 号，text 可附带短句），不能用文字 @昵称 冒充提及；戳一戳用 poke（默认当前发言人，可指定当前群成员 userId，需已开启 send_poke）。这两项发送后可以继续说话，只能作用于当前聊天。向当前 QQ 聊天对象回复语音，属于公开聊天能力，不需要归属账号或私有能力总开关。按人格与场景可自行选择语音，不必等用户点名索要。voices 查询当前可用音色；voice 把 text 转成语音并发送，成功后结束回合，不重复发文字。无需填写接收人；不能读取本地文件、转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
+    description: '真正群 @ 用 mention（userId 为当前群成员 QQ 号，text 可附带短句），不能用文字 @昵称 冒充提及；戳一戳用 poke（默认当前发言人，可指定当前群成员 userId，需已开启 send_poke）。这两项发送后可以继续说话，只能作用于当前聊天。向当前 QQ 聊天对象回复语音，属于公开聊天能力，不需要归属账号或私有能力总开关。按人格与场景可自行选择语音，不必等用户点名索要。渠道启用外部语音 TTS 时自动使用该服务；voices 查询当前可用音色；voice 把 text 转成语音并发送，成功后结束回合，不重复发文字。脚本生成的音频通过 partner_tools 调用 partner_voice_reply 的 send_file（path）发送，不用 voice 重新合成。无需填写接收人；不能转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
     parameters: { type:'object', additionalProperties:false, required:['action'], properties:{
       action:{type:'string',enum:['voices','voice','mention','poke']}, text:{type:'string',minLength:1,maxLength:2000}, character:{type:'string',minLength:1,maxLength:200}, userId:{type:'string',pattern:'^[0-9]{5,12}$'},
     }},
@@ -42,6 +42,10 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
       const initial=origin(),route=initial.route
       const channel=initial.state.channels.find(c=>c.id===route?.channelId&&c.companionId===owner&&c.platform==='qq')
       if(!route||route.companionId!==owner||!channel)throw Error('只能回复本轮实际来自的 QQ 会话')
+      if(channel.tts?.enabled&&external&&['voices','voice'].includes(args.action)){
+        if(args.userId!==undefined)throw Error('语音回复不能指定其他对象')
+        return external.execute({action:args.action==='voices'?'status':'speak',...(args.text!==undefined?{text:args.text}:{}),...(args.character!==undefined?{voice:args.character}:{})},exec)
+      }
       const group=qqGroupPeer(route.userId)
       const guard=()=>{
         exec.signal.throwIfAborted()

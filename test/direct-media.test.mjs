@@ -147,3 +147,27 @@ test('manager hands off attachment-only input, delivers output, and bad media do
   await manager.handleDirect(channel,api,{id:'unapproved',sender:peer,text:'',media:[{source:'mxc://local/image'}]},signal())
   assert.equal(received,undefined)
 })
+
+for(const platform of ['matrix','mattermost'])test('shared TTS manager delivers audio through acknowledged '+platform+' transport',async t=>{
+ const s=await server(t,call=>{
+  if(call.path.startsWith('/_matrix/media/v3/upload'))return {content_uri:'mxc://local/audio'}
+  if(call.path.includes('/send/m.room.message/')){assert.equal(JSON.parse(call.body).msgtype,'m.audio');return {event_id:'audio-event'}}
+  if(call.path==='/api/v4/files')return {file_infos:[{id:fileId}]}
+  if(call.path==='/api/v4/posts'){assert.deepEqual(JSON.parse(call.body).file_ids,[fileId]);return {id:'audio-post'}}
+  return {}
+ })
+ const userId=platform==='matrix'?peer:'peer',targetId=platform==='matrix'?room:'dm'
+ const state={channels:[{id:'ch',platform,companionId:'c',enabled:true,accountId:platform==='matrix'?'@bot:local':'bot',direct:{targetId,baseUrl:s.url}}],pairings:[{channelId:'ch',userId,status:'approved',directTargetId:targetId}],sessions:[{id:'r',sessionId:'sess',kind:'channel',channelId:'ch',companionId:'c',userId}]}
+ const manager=Object.create(ChannelManager.prototype);Object.assign(manager,{store:{snapshot:()=>state},credentials:{read:async()=>({baseUrl:s.url,botToken:'fixture'})},contextTokens:new Map()})
+ const audio={...await file(t,Buffer.from('audio fixture'),'voice.wav'),kind:'file',mediaType:'audio/wav'}
+ let checks=0;await manager.sendTtsAudio('sess',audio,signal(),'r',()=>{checks++})
+ assert.ok(checks>=4);assert.equal(s.requests.filter(c=>c.path.includes('/send/m.room.message/')||c.path==='/api/v4/posts').length,1)
+})
+
+test('TTS manager rechecks permission after async credential loading before sending',async()=>{
+ let revoked=false,sent=0
+ const state={channels:[{id:'ch',platform:'matrix',enabled:true}],sessions:[{id:'r',kind:'channel',sessionId:'s',channelId:'ch',userId:'peer'}]}
+ const manager=Object.create(ChannelManager.prototype);Object.assign(manager,{store:{snapshot:()=>state},credentials:{read:async()=>{revoked=true;return {}}},sender:()=>{sent++;throw Error('must not create sender')}})
+ await assert.rejects(manager.sendTtsAudio('s',{},signal(),'r',()=>{if(revoked)throw Error('permission revoked')}),/revoked/)
+ assert.equal(sent,0)
+})

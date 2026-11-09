@@ -6,9 +6,11 @@ import type {PartnerConcern, ConcernObservation} from './concern-domain.js'
 export interface ConcernExecutionReceipt {
   id: string; companionId: string; concernId: string; fingerprint: string; sessionId: string; messageId: string
   status: 'pending' | 'running' | 'completed' | 'failed'; createdAt: number; updatedAt: number; error?: string; reconcileOnly?: boolean
+  resultSummary?: string
   recoveryFromMessageId?: string
 }
 export interface ConcernConversationExecutor {
+  reconcileConcern?(receipt:ConcernExecutionReceipt):Promise<string|undefined>
   executeConcern(receipt: ConcernExecutionReceipt, concern: PartnerConcern, prompt: string): Promise<void>
 }
 
@@ -16,19 +18,31 @@ export interface ConcernConversationExecutor {
 export class ConcernExecutionDispatcher {
   private readonly active = new Set<string>()
   constructor(private readonly store: PartnerStore, private readonly concerns: PartnerConcernStore, private readonly executor: ConcernConversationExecutor) {}
-  async recover(companionId:string, concernId:string, executionId:string, expectedUpdatedAt:number):Promise<void> {
+  async recover(companionId:string, concernId:string, executionId:string, expectedUpdatedAt:number,existingReplyOnly=false):Promise<'reconciled'|'queued'> {
     if(this.active.has(companionId))throw new Error('伙伴已有执行在进行，请等待完成')
     const concern=(await this.concerns.list(companionId)).find(c=>c.id===concernId)
     if(!concern?.executionInstructions || !['active','watching'].includes(concern.state) || concern.control==='stopped')throw new Error('关注已停止或未配置执行要求')
     const original=this.store.snapshot().concernExecutions?.find(r=>r.id===executionId&&r.companionId===companionId&&r.concernId===concernId)
+    if(!original||original.status!=='failed'||original.updatedAt!==expectedUpdatedAt)throw new Error('执行状态已变化，请刷新后再试')
+    const summary=await this.executor.reconcileConcern?.(original)
+    if(summary!==undefined){
+      await this.store.update(s=>{
+        const r=s.concernExecutions?.find(r=>r.id===executionId&&r.companionId===companionId&&r.concernId===concernId)
+        if(!r||r.status!=='failed'||r.updatedAt!==expectedUpdatedAt)throw new Error('执行状态已变化，请刷新后再试')
+        r.status='completed';r.resultSummary=summary;r.updatedAt=Math.max(Date.now(),r.updatedAt+1);delete r.error
+      })
+      return 'reconciled'
+    }
+    if(existingReplyOnly)throw new Error('没有可确认的完整答复，未重新执行')
     if(!original || !(await this.concerns.activity(companionId)).observations.some(e=>e.concernId===concernId&&e.fingerprint===original.fingerprint&&e.decision!=='drop'))throw new Error('原执行依据已不可用，请重新检查')
     await this.store.update(s=>{
       const r=s.concernExecutions?.find(r=>r.id===executionId && r.companionId===companionId && r.concernId===concernId)
       if(!r || r.status!=='failed' || r.updatedAt!==expectedUpdatedAt)throw new Error('执行状态已变化，请刷新后再试')
       if(s.concernExecutions?.some(x=>x.companionId===companionId && ['pending','running'].includes(x.status)))throw new Error('伙伴已有排队或执行中的任务')
-      r.recoveryFromMessageId=r.messageId;r.messageId=randomUUID();r.status='pending';r.updatedAt=Date.now();delete r.error;delete r.reconcileOnly
+      r.recoveryFromMessageId=r.messageId;r.messageId=randomUUID();r.status='pending';r.updatedAt=Date.now();delete r.error;delete r.resultSummary;delete r.reconcileOnly
     })
     await this.dispatch(companionId)
+    return 'queued'
   }
   async dispatch(companionId: string): Promise<void> {
     if (this.active.has(companionId)) return

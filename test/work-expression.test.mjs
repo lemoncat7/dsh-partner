@@ -27,10 +27,10 @@ test('composition uses same model and current real work, leaves events and perso
  assert.equal(f.request().messages[1].content[0].text,'再看看能不能看视频');assert.equal(JSON.stringify([f.events,f.state]),before)
  assert.deepEqual(await f.run(),output);assert.equal(f.calls(),1);assert.equal(f.subscriptions.size,0)
 })
-test('direct drafted messages enter persona delivery and preserve original on incompatible model output',async()=>{
+test('direct drafted messages preserve authored speech without another model call',async()=>{
  const f=fixture(),tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
  const out=await tool.execute({messages:f.original},f.exec)
- assert.equal(f.calls(),1);assert.equal(out.personaDelivery.status,'fallback');assert.equal(f.concluded(),1);assert.deepEqual(out.parts,[{type:'text',text:f.original[0].text}])
+ assert.equal(f.calls(),0);assert.equal(out.personaDelivery.reason,'authored-text');assert.equal(f.concluded(),1);assert.deepEqual(out.parts,[{type:'text',text:f.original[0].text}])
 })
 for(const mode of ['ordinary','previous turn','fake user','failed tool','disabled persona','internal'])test('invalid handoff rejects '+mode,async()=>{
  const f=fixture()
@@ -233,7 +233,7 @@ test('short long-work delivery requires a successful trusted receipt and keeps f
  await assert.rejects(tool.execute(args,f.exec),/长任务报告尚未交付/)
  f.events.push({seq:8,type:'tool/call',data:{callId:'retry',name:'partner_send_attachment'}},{seq:9,type:'tool/result',data:{message:{toolCallId:'retry',content:[{type:'text',text:JSON.stringify({conversation:'attachment_recorded',deliveryId:'doc',channel:'sent'})}]}}})
  assert.equal((await tool.execute(args,f.exec)).parts[0].text,args.messages[0].text)
- assert.equal(f.calls(),1);assert.equal(f.concluded(),1)
+ assert.equal(f.calls(),0);assert.equal(f.concluded(),1)
 })
 
 test('an intermediate chat receipt cannot silently bypass undelivered long work',async()=>{
@@ -257,7 +257,7 @@ test('exclusive persona keeps short delivery and report requirements, permits au
  const messages=[{text:'找到啦'},{text:'不过视频还没验证'}]
  const out=await tool.execute({messages},f.exec)
  assert.deepEqual(out.parts,messages.map(p=>({type:'text',...p})))
- assert.equal(f.calls(),1);assert.equal(f.concluded(),1)
+ assert.equal(f.calls(),0);assert.equal(f.concluded(),1)
 })
 
 test('intermediate text is delivered before a report without ending the turn; final still requires report',async()=>{

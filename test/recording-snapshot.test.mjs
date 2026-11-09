@@ -77,3 +77,20 @@ test('sync-only scheduler never records observations or sends notifications',asy
  assert.equal(called,1)
  assert.equal(await concerns.pendingRecording('c'),undefined)
 })
+
+test('repeated recording failures back off durably and retain checkpoint',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'record-backoff-'));t.after(()=>rm(root,{recursive:true,force:true}))
+ const store=new PartnerConcernStore(root)
+ const item=await store.createExplicit('c','*','watch','',{kind:'note',locator:'n',label:'record'})
+ await store.checkpointRecording(item,{data:'facts',instructions:'merge',capturedAt:1})
+ let queued=await store.pendingRecording('c')
+ for(const minutes of [15,30,60,120,240,360,360]){
+  await store.settleRecording(queued,false)
+  const reopened=new PartnerConcernStore(root)
+  assert.equal(await reopened.pendingRecording('c',Date.now()+(minutes-1)*60000),undefined)
+  queued=await reopened.pendingRecording('c',Date.now()+(minutes+1)*60000)
+  assert.equal(queued.recordingSnapshot.data,'facts')
+ }
+ await store.settleRecording(queued,true)
+ assert.equal(await store.pendingRecording('c',Date.now()+24*3600000),undefined)
+})

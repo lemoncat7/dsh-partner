@@ -1,3 +1,4 @@
+import { segmentIdleChatReply } from '../chat/protocol.js'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -81,7 +82,7 @@ export async function extractOutboundAttachments(text: string, cwd: string): Pro
 }
 
 /** Channel projection only; never rewrites the conversation or guesses virtual paths. */
-export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string): Promise<PartnerReply> {
+export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string, segmented = false): Promise<PartnerReply> {
   if(parts.chatParts?.length===0&&!parts.text.trim())return {text:'',attachments:[],chatParts:[],...(parts.alreadyDelivered?{alreadyDelivered:true}:{}),...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})}
   // A Markdown mention is not delivery intent. Only the explicit tool sends
   // conversational attachments; backend requirement reports have their own flow.
@@ -94,5 +95,5 @@ export async function prepareChannelReply(parts: ChannelReplyParts, _cwd: string
   text = text.replace(SANDBOX, raw => label(raw, raw))
   if (missingSandbox) text += '\n\n这里只提供了沙箱引用，未发送该附件。请让伙伴使用 partner_send_attachment 交付真实文件；sandbox 地址不能直接在渠道打开。'
   if (!text.trim()) text = '本轮未生成可发送的最终答复，请重试或在会话中查看执行状态。'
-  return { text: text.trim(), attachments: [], ...(parts.chatParts ? {chatParts:parts.chatParts,...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})} : {}) }
+  return segmentIdleChatReply({ text: text.trim(), attachments: [], ...(parts.chatParts ? {chatParts:parts.chatParts,...(parts.chatOriginRouteId!==undefined?{chatOriginRouteId:parts.chatOriginRouteId}:{})} : {}) }, segmented)
 }

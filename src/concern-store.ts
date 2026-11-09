@@ -645,7 +645,11 @@ export class PartnerConcernStore {
   async settleRecording(item: PartnerConcern, synced: boolean): Promise<void> {
     await this.serialValue(this.path(item.companionId),async()=>{
       const db=await this.open(item.companionId)
-      try {db.prepare('UPDATE concerns SET recording_pending=?, recording_snapshot_json=CASE WHEN ? THEN NULL ELSE recording_snapshot_json END, recording_retry_at=?, recording_attempts=recording_attempts+1 WHERE id=? AND companion_id=? AND record_target_json=? AND recording_snapshot_json=?').run(synced?0:1,synced?1:0,Date.now()+15*60000,item.id,item.companionId,JSON.stringify(item.recordTarget),JSON.stringify(item.recordingSnapshot))}
+      try {
+        const row=db.prepare('SELECT recording_attempts FROM concerns WHERE id=? AND companion_id=?').get(item.id,item.companionId) as {recording_attempts:number}|undefined
+        const delayMinutes=Math.min(360,15*2**Math.min(5,row?.recording_attempts??0))
+        db.prepare('UPDATE concerns SET recording_pending=?, recording_snapshot_json=CASE WHEN ? THEN NULL ELSE recording_snapshot_json END, recording_retry_at=?, recording_attempts=CASE WHEN ? THEN 0 ELSE recording_attempts+1 END WHERE id=? AND companion_id=? AND record_target_json=? AND recording_snapshot_json=?').run(synced?0:1,synced?1:0,Date.now()+delayMinutes*60000,synced?1:0,item.id,item.companionId,JSON.stringify(item.recordTarget),JSON.stringify(item.recordingSnapshot))
+      }
       finally {db.close()}
     })
   }

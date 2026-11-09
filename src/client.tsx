@@ -266,6 +266,7 @@ function HomePanel({ companion, snapshot, navigate, openSession, startSession, r
     </header>
 
     <CompanionVitals key={companion.id} companion={companion} />
+    {!!snapshot.companionActivity?.[companion.id]?.length&&<section className="dsh-partner-channel-inline-notice" aria-label="伙伴当前任务" role="status"><strong>当前任务</strong>{snapshot.companionActivity[companion.id]!.map((task,i)=><p key={task.kind+':'+(task.sessionId??i)} title={task.kind==='memory'?'后台进行，不阻止群聊判断':undefined}>{task.label}</p>)}</section>}
 
     <section className={`dsh-partner-home-channel${online ? ' is-online' : ''}`}>
       <div className="dsh-partner-home-route" aria-hidden="true">

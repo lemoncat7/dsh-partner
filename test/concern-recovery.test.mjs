@@ -65,3 +65,20 @@ test('stopped concerns cannot be recovered or alter persisted receipts',async()=
  await assert.rejects(dispatcher.recover('p','c','r',2),/关注已停止/)
  assert.equal(updates,0);assert.equal(receipt.status,'failed')
 })
+
+test('manual recovery reconciles a proven final answer without reinjection or external effects',async()=>{
+ const receipt={id:'r',companionId:'p',concernId:'c',status:'failed',messageId:'old',updatedAt:2,error:'no reply'},state={concernExecutions:[receipt]}
+ let executed=0
+ const store={snapshot:()=>structuredClone(state),update:async fn=>fn(state)}
+ const concerns={list:async()=>[{id:'c',state:'watching',executionInstructions:'只保存草稿'}],activity:async()=>{throw Error('no new observation needed for receipt reconciliation')}}
+ const dispatcher=new ConcernExecutionDispatcher(store,concerns,{reconcileConcern:async()=> '已核对，原草稿不存在，未重复建稿。',executeConcern:async()=>{executed++}})
+ assert.equal(await dispatcher.recover('p','c','r',2),'reconciled')
+ assert.equal(receipt.messageId,'old');assert.equal(receipt.status,'completed');assert.match(receipt.resultSummary,/未重复建稿/);assert.equal(receipt.error,undefined);assert.equal(executed,0)
+})
+
+test('reconciliation-only requests never queue execution when the log has no complete answer',async()=>{
+ const r={id:'r',companionId:'p',concernId:'c',status:'failed',messageId:'m',updatedAt:2};let writes=0,executed=0
+ const dispatcher=new ConcernExecutionDispatcher({snapshot:()=>({concernExecutions:[r]}),update:async()=>writes++},{list:async()=>[{id:'c',state:'watching',executionInstructions:'draft'}]}, {reconcileConcern:async()=>undefined,executeConcern:async()=>executed++})
+ await assert.rejects(dispatcher.recover('p','c','r',2,true),/未重新执行/)
+ assert.equal(writes,0);assert.equal(executed,0)
+})

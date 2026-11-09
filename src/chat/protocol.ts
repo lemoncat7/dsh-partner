@@ -64,7 +64,7 @@ export function withChatCompanionText(input: Array<{text:string} | {stickerId:st
   return input
 }
 
-/** Only idle chat's unstructured, short paragraphs get a delivery fallback.
+/** Unstructured short chat paragraphs get a delivery fallback (foreground and idle).
  * Explicit tool parts, documents and attachment replies keep authored boundaries.
  * Call before persisting the delivery so retries retain stable part indexes.
  */

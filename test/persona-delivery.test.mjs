@@ -67,3 +67,16 @@ test('local habits reach local expression but never public comments; provenance 
  await f.run();assert.match(f.request().system,/LOCAL_STYLE_ONLY/);assert.doesNotMatch(JSON.stringify(f.request()),/PRIVATE_HABIT_EVIDENCE/)
  await f.run([{text:'公开评论'}],{surface:'public-comment',single:true});assert.doesNotMatch(JSON.stringify(f.request()),/LOCAL_STYLE_ONLY|PRIVATE_HABIT_EVIDENCE/)
 })
+
+
+test('authored chat preserves words, segments and sticker order without a model request',async()=>{
+ const f=fixture(),parts=[{text:'第一句'},{stickerId:'s'},{text:'第二句'}]
+ const out=await f.run(parts,{authored:true})
+ assert.deepEqual(out.parts,parts);assert.equal(out.audit.reason,'authored-text');assert.equal(f.count(),0)
+ f.events.push({...f.events[1],seq:4})
+ assert.throws(()=>out.validate(),/变化/)
+})
+test('authored flag cannot skip public comment validation and rendering',async()=>{
+ const f=fixture();const out=await f.run([{text:'评论'}],{authored:true,surface:'public-comment',single:true})
+ assert.equal(f.count(),1);assert.equal(out.audit.status,'rendered')
+})

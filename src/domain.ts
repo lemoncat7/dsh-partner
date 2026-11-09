@@ -13,6 +13,7 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  ttsProfiles?: import('./voice/domain.js').TtsProfile[]
   activityJournal?: import('./character/activity-journal.js').ActivityJournalEntry[]
   temporaryAgreements?: import('./chat/agreements.js').TemporaryAgreement[]
   affection?: import('./character/affection.js').AffectionState
@@ -83,6 +84,8 @@ export interface HeartbeatRuntimeState {
 }
 
 export interface WeixinChannel {
+  tts?: import('./voice/domain.js').ChannelTts
+  ttsReceipts?: import('./voice/domain.js').TtsReceipt[]
   /** Missing platform is legacy WeChat; IDs and credential keys stay unchanged. */
   bilibili?: import('./channels/bilibili/catalog.js').BiliSettings
   bilibiliActivity?: import('./channels/bilibili/service.js').BiliReceipt[]
