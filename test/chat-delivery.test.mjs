@@ -192,7 +192,7 @@ test('QQ origin selects native emoji without dropping text or creating a default
  const {StickerAdapters}=await import('../lib/chat/sticker-adapter.js'),{qqStickerAdapter}=await import('../lib/channels/qq/sticker-adapter.js')
  const channel={id:'qq',platform:'qq',accountId:'12345678',companionId:'a',enabled:true}
  const route={id:'r',kind:'channel',channelId:'qq',userId:'22345678',sessionId:'s',companionId:'a',inboundMessageIds:['u']}
- const state={channels:[channel],sessions:[route],companions:[{id:'a',characterCard:{enabled:true,stickersEnabled:true,segmentedReplies:true}}]}
+ const state={pairings:[{channelId:'qq',userId:'22345678',status:'approved'}],channels:[channel],sessions:[route],companions:[{id:'a',characterCard:{enabled:true,stickersEnabled:true,segmentedReplies:true}}]}
  const store={snapshot:()=>state,isCompanionRemoving:()=>false},library={list:async()=>[],image:async()=>assert.fail('must not load a default bitmap')}
  const adapters=new StickerAdapters(library)
  adapters.register('qq',c=>qqStickerAdapter(c,adapters.fallback,async()=>[{id:'14',name:'微笑',category:'QQ'}]))

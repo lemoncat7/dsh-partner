@@ -1,9 +1,10 @@
+import type {TaskReviewReceipt} from './task-followup.js'
 import {validNativeEmoji,type NativeEmoji} from './sticker-adapter.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerOutboundAttachment, PartnerReply } from '../channel-message.js'
 
 export type ChatPart = {type:'emoji';emoji:NativeEmoji} | { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
-export interface ChatReply { kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; intermediate?:boolean; taskPreamble?:boolean; expectedTools?:string[]; taskDisposition?:'blocked'; inputMessageId?:string; deliveryKind?:'text'; delivered?:boolean; spokenText?:string; originRouteId?: string | null }
+export interface ChatReply { taskReview?:TaskReviewReceipt; kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; intermediate?:boolean; taskPreamble?:boolean; expectedTools?:string[]; taskDisposition?:'blocked'; inputMessageId?:string; deliveryKind?:'text'|'voice'; transportCallId?:string; delivered?:boolean; spokenText?:string; originRouteId?: string | null }
 export function chatReplyFromEvent(event: SessionEvent): ChatReply | undefined {
   if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch') return
   if (!event.data || (event.type === 'tool/result' ? event.data.message?.isError : event.data.isError)) return

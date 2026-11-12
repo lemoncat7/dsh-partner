@@ -9,7 +9,7 @@ import {resolveToolAccess} from '../execution/tool-access-adapter.js'
 import {discoveredToolProtocol} from '../character/prompt-projection.js'
 
 export interface DiscoverableTool {tool:ToolDefinition;allowed:()=>boolean;protocol?:(exec:ToolRunContext)=>string}
-export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access','partner_memory_recall','partner_work_execute','partner_chat_reply','partner_agreement','partner_chat_say'] as const
+export const PARTNER_TOOL_ENTRIES=['partner_tools','partner_channel_access','partner_memory_recall','partner_chat_reply','partner_agreement','partner_chat_say'] as const
 // Track actual registrations, not a name prefix: other plugins keep ownership.
 const ownedTools=new WeakMap<PartnerStore,Map<string,Map<object,Set<string>>>>()
 export function isPartnerDiscoveryTool(store:PartnerStore,owner:string,name:string):boolean {
@@ -50,7 +50,7 @@ function category(name:string):string {
  return 'other'
 }
 const PERSONA_REFERENCE_CALL = JSON.stringify({action:'call',name:'partner_identity',argumentsJson:JSON.stringify({action:'reference'})})
-export const TOOL_DISCOVERY_PROMPT=AGREEMENT_GUIDANCE+'\n'+'partner_channel_access 查询真实渠道权限摘要，partner_tools 分页查询和调用能力。partner_work_execute 是直接可调用的调查与多步执行入口，无需先查询目录或 describe。partner_memory_recall 是直接公开的基础回忆工具，也可通过统一入口调用，无需先加载；所有聊天账号可用，按真实会话检索。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。伙伴入口只管理本插件注册的能力；其他插件和宿主工具保留自己的顶层入口，直接按其说明调用，不经 partner_tools 转调。生图优先用顶层 image_gen.imagegen，兼容 generate_image；一次请求只调用其中一个，动作登记使用实际工具名。图片生成后用 partner_send_attachment 交付返回文件，确认渠道回执后再回复；不要把本地文件链接当作已发送。回应和结果说明保持当前人格。私聊任务与普通接话统一使用 partner_chat_say。执行工具前 call partner_chat_say，argumentsJson 为 {"text":"按当前人格简短说准备做什么","beforeTools":true,"expectedTools":["本轮准备调用的真实工具名"]} 的 JSON 字符串；成功后再工作，此工具不结束回合。partner_chat_say、partner_chat_reply 提供在顶层时直接调用，不必先查目录。语音、表情包和渠道互动在 partner_tools 的 activity（自主活动）目录下查询、describe 和 call；普通聊天同样可用，不限于闲时触发。当前用户聊天可以用 partner_chat_say 先说一句并继续本轮，确认送达后再自然补话；不必等自主活动。说完使用 partner_chat_reply；当前输入后已有接话送达且没有新话时可 messages:[] 安静结束。最终文字回复使用 partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。需分条时在 messages 中提交多个 text 条目，普通正文换行不会分条；未提供聊天工具时用普通最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
+export const TOOL_DISCOVERY_PROMPT=AGREEMENT_GUIDANCE+'\n'+'partner_channel_access 查询真实渠道权限摘要，partner_tools 分页查询和调用能力。调查和多步操作直接在当前会话调用实际工具，执行前、中途与结果都按当前人格接话；只有明确的后台、定时或委派任务使用对应任务入口。partner_memory_recall 是直接公开的基础回忆工具，也可通过统一入口调用，无需先加载；所有聊天账号可用，按真实会话检索。默认渠道沿用既有授权，QQ 由渠道适配器核验账号；不接受模型自报账号或权限。先用 list 查询（可按 category/query 缩小），describe 或 load 查看参数，再用 partner_tools action=call、name=真实工具名、argumentsJson=原工具参数的 JSON 字符串执行；不会另行向顶层工具表添加工具。伙伴入口只管理本插件注册的能力；其他插件和宿主工具保留自己的顶层入口，直接按其说明调用，不经 partner_tools 转调。生图使用当前顶层工具列表实际提供的入口（generate_image 或 image_gen.imagegen）；未出现的名称不可用，一次请求只调用一个，动作登记使用同一个真实工具名。图片生成后用 partner_send_attachment 交付返回文件，确认渠道回执后再回复；不要把本地文件链接当作已发送。回应和结果说明保持当前人格。私聊任务与普通接话统一使用 partner_chat_say。执行工具前 call partner_chat_say，argumentsJson 为 {"text":"按当前人格简短说准备做什么","beforeTools":true,"expectedTools":["本轮准备调用的真实工具名"]} 的 JSON 字符串；成功后再工作，此工具不结束回合。partner_chat_say、partner_chat_reply 提供在顶层时直接调用，不必先查目录。语音、表情包和渠道互动在 partner_tools 的 activity（自主活动）目录下查询、describe 和 call；普通聊天同样可用，不限于闲时触发。当前用户聊天可以用 partner_chat_say 先说一句并继续本轮，确认送达后再自然补话；有具体联想、共同兴趣或新发现可接着分享，不必只等下一问或用提问结尾，没有新内容就结束，不必等自主活动。说完使用 partner_chat_reply；当前输入后已有接话送达且没有新话时可 messages:[] 安静结束。最终文字回复使用 partner_chat_reply，参数为 {"messages":[{"text":"要说的话"}]}，表情独立使用 {"stickerId":"库内ID"}；先完成工作再提交最终回复。需分条时在 messages 中提交多个 text 条目，普通正文换行不会分条；未提供聊天工具时用普通最终回答。人格参考模板在 partner_identity 内置，包含基本身份、角色设定、关系设定和 qq-bridge 大肥鱼原卡；用户要参考时直接向 partner_tools 传入 '+PERSONA_REFERENCE_CALL+'，无需搜索 cosplay 配置或文件。普通修改和自主优化不要求读模板。每次调用都会再次检查实时权限，原工具审批、超时、取消与终结行为保留。'
 
 /** Stable model-facing entries; original definitions remain registered in scope
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
@@ -121,7 +121,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
      categories:GROUPS.map(g=>({id:g.id,title:g.title,count:all.filter(t=>category(t.name)===g.id).length})).filter(g=>g.count),
      total:filtered?found.length:all.length,
      ...(filtered?{tools:found.slice(offset,offset+12).map(visible),nextOffset:offset+12<found.length?offset+12:null}:{}),
-     next:autonomous?'这些分类来自当前实时授权的伙伴工具。按自己的兴趣选择 category/query 看具体能力，再 describe 核实参数；可探索、尝试或继续自己的事情，不必为了联系归属账号找话题。其他插件通过其自身入口发现，新能力仍按实时权限使用。':all.some(t=>t.name==='partner_work_execute')?'核实实现方案或排查问题直接调用 partner_work_execute；只需工具目录时按 category/query/offset 分页查询。':'按 category/query/offset 分页查询能力；具体参数用 partner_tools describe。',
+     next:autonomous?'这些分类来自当前实时授权的伙伴工具。按自己的兴趣选择 category/query 看具体能力，再 describe 核实参数；可探索、尝试或继续自己的事情，不必为了联系归属账号找话题。其他插件通过其自身入口发现，新能力仍按实时权限使用。':'按 category/query/offset 分页查询能力；具体参数用 partner_tools describe。',
      ...(access.denialReason?{notice:access.denialReason}:{})}
    }
   }))
@@ -138,7 +138,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
      if(!Number.isSafeInteger(offset)||offset<0||query.length>80)throw Error('查询参数无效')
      if(!args.category&&!query)return {categories:GROUPS.map(g=>({...g,count:all.filter(t=>category(t.name)===g.id).length})).filter(g=>g.count),next:'按 category 或 query 查询；call 通过本入口执行'}
      const found=all.filter(t=>(!args.category||category(t.name)===args.category)&&(!query||toolSearchMatches(t,query)))
-     return {tools:found.slice(offset,offset+12).map(visible),total:found.length,nextOffset:offset+12<found.length?offset+12:null,...(!found.length?{scopeMeaning:'仅表示当前工具名称和说明未匹配，不是功能可行性结论。',...(all.some(t=>t.name==='partner_work_execute')?{next:'用户要求查证、寻找实现方案或排障时，调用 partner_work_execute 继续调查；不要把空目录当作调查结果。'}:{})}:{})}
+     return {tools:found.slice(offset,offset+12).map(visible),total:found.length,nextOffset:offset+12<found.length?offset+12:null,...(!found.length?{scopeMeaning:'仅表示当前工具名称和说明未匹配，不是功能可行性结论。',next:'空目录只表示没有匹配的入口；核实当前可用的检索或执行工具继续调查，不把空目录当成调查结果。'}:{})}
     }
     const tool=all.find(t=>t.name===args.name)
     if(!tool)throw unavailable(args.name,exec)

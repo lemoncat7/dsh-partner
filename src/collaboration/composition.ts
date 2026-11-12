@@ -2,7 +2,6 @@ import { habitTool } from '../character/habit-tool.js'
 import { thoughtTool } from '../character/thought-tool.js'
 import { affectionTool } from '../character/affection-tool.js'
 import {workflowProtocol} from './workflow-protocols.js'
-import {workExecutionTool} from '../execution/work-tool.js'
 import { idleActivityFinishTool } from '../character/activity-tool.js'
 import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
 import { identityTool } from '../companions/identity-tool.js'
@@ -79,7 +78,6 @@ export class PartnerAgentComposition {
       } },()=>this.store.hasCapability(companion.id,capability))
     }
     try {
-      add(workExecutionTool(companion.id,this.store,this.executor,ctx.tools,name=>protocol(name)))
       add(textTool({name:'partner_workflow',description:'按需读取已提供的工作工具操作流程，不执行任务、不改变权限。',parameters:actionParameters(['inspect'],{tool:{type:'string'}},['tool']),async execute(raw,exec){const input=record(raw);const name=requiredText(input.tool,'tool',120);if(!ctx.tools.get(name,exec.agent))throw Error('工具当前不可用');return protocol(name)||'此工具没有额外工作流程，请查看工具自身说明。'}}))
       if (this.sleepToolFactory) add(this.sleepToolFactory(companion.id))
       add(identityTool(companion.id, this.store))
@@ -106,7 +104,7 @@ export class PartnerAgentComposition {
       disposers.push(ctx.systemPrompt.section({
         name:'partner-collaboration',order:-7,
         text:[companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '伙伴能力通过当前工具调用。工作流程可用 partner_workflow 查询，Skill 使用 partner_skill 加载；权限以实际校验为准。',
-          '需要实际调查、排障或较长执行时用 partner_work_execute，已有看板或委派沿用原任务；普通接话、概念讨论和轻量操作直接处理。操作流程在 describe 中按需读取，工具目录不代表已经完成调查。工作结果约束事实，回复语气仍由当前角色与关系决定。',
+          '实际调查、排障与多步操作直接在当前会话调用工具，当前人物自己写开场、中途和结果；只有明确后台任务或已有看板、委派沿用对应任务。操作流程在 describe 中按需读取，工具目录不代表已经完成调查。工作结果约束事实，回复语气仍由当前角色与关系决定。',
           companion.idleContact?.enabled ? '自主活动已开启。你可以按自己的意图继续行动，也可以结束；如想在本轮之后再继续，可按需查询 partner_thoughts，用 plan 留下下一步意图、会话和等待时间。没有安排就按空闲频率唤起，不因回复完成自动追加一轮。真实结果、用户新消息与停止要求优先；不必每轮计划或汇报计划。' : '',
           renderEnabledSkills(companion,enabledSkills),
           `当前伙伴 id：${companion.id}。授权伙伴目录通过 partner_collaborate directory 查询；流程说明通过 partner_tools describe 或 partner_workflow inspect 按需读取。`,

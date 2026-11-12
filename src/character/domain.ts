@@ -9,6 +9,7 @@ export interface CharacterCard {
   /** Authoritative free-form role. Absent means adapt the legacy fields losslessly. */
   roleText?: string
   chatStyle?: string
+  shortVoiceReplies?: boolean
   segmentedReplies?: boolean
   stickersEnabled?: boolean
   identity: string
@@ -53,9 +54,11 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   if (v.schemaVersion !== undefined && v.schemaVersion !== 1) throw new Error('不支持的人格卡版本')
   if (typeof v.enabled !== 'boolean') throw new Error('请选择是否启用人格强化')
   if (v.affectionEnabled !== undefined && typeof v.affectionEnabled !== 'boolean') throw new Error('请选择是否启用好感度')
+  if(v.shortVoiceReplies!==undefined&&typeof v.shortVoiceReplies!=='boolean')throw Error('短句优先语音须为开关值')
   if(v.exclusivePrompt!==undefined&&typeof v.exclusivePrompt!=='boolean')throw Error('独占系统提示须为开关值')
   const card: CharacterCard = {
     schemaVersion: 1, enabled: v.enabled,
+    ...(v.shortVoiceReplies!==undefined?{shortVoiceReplies:v.shortVoiceReplies as boolean}:{}),
     ...(v.exclusivePrompt!==undefined?{exclusivePrompt:v.exclusivePrompt as boolean}:{}),
     ...(v.affectionEnabled !== undefined ? {affectionEnabled:v.affectionEnabled as boolean} : {}),
     ...(v.segmentedReplies !== undefined ? { segmentedReplies: v.segmentedReplies === true } : {}),

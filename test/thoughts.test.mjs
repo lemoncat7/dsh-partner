@@ -112,9 +112,69 @@ test('a private follow-up result cannot hitchhike on a public-source thought bac
  const t=f.c.thoughts[0];t.result='私聊中的个人资料';t.resultRouteId='owner'
  assert.doesNotMatch(renderThoughts(f.state,f.c,f.group),/私聊中的个人资料/)
  assert.match(renderThoughts(f.state,f.c,f.owner),/私聊中的个人资料/)
- const listed=await thoughtTool('c',f.store).execute({action:'list'},{agent:{session:{id:f.group.sessionId,snapshotEvents:()=>[]}}})
+ const listed=await thoughtTool('c',f.store).execute({action:'list'},{signal:new AbortController().signal,agent:{session:{id:f.group.sessionId,snapshotEvents:()=>[]}}})
  assert.doesNotMatch(JSON.stringify(listed),/私聊中的个人资料/)
  const privateTurn={...f.turn,id:'private',sourceRouteIds:['owner'],at:now,sessionId:f.owner.sessionId}
  await f.service.apply(privateTurn,{...f.proposal,sourceRouteIds:['owner']})
  assert.equal(f.c.thoughts.length,2,'same wording from different origins does not merge provenance')
+})
+
+test('thought list is lossless JSON and same-route focus/settle continue actual work',async()=>{
+ const f=fixture();await f.service.apply(f.turn,f.proposal);const t=f.c.thoughts[0]
+ f.c.idleContact.routeId='owner';f.owner.idleContactState={kind:'autonomous',userMessageId:'u',messageId:'notice',policyRevision:1}
+ const events=[{type:'user/message',seq:1,data:{id:'u',source:{kind:'user'}}},{type:'turn/start',seq:2},{type:'user/message',seq:3,data:{id:'notice',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE}}}]
+ let ended=0
+ const exec={agent:{session:{id:f.owner.sessionId,snapshotEvents:()=>events}},signal:new AbortController().signal,concludeTurn(){ended++}}
+ const tool=thoughtTool('c',f.store)
+ const listed=await tool.execute({action:'list'},exec)
+ assert.deepEqual(JSON.parse(JSON.stringify(listed)),listed);assert.equal(listed.nextActivity,null)
+ const focused=await tool.execute({action:'focus',id:t.id,reason:'现在接着做'},exec)
+ assert.equal(focused.continueCurrentActivity,true);assert.equal(f.owner.idleContactState.thoughtId,t.id);assert.equal(f.c.activityPlan,undefined);assert.equal(ended,0)
+ const settled=await tool.execute({action:'settle',id:t.id,status:'done',reason:'已完成'},exec)
+ assert.equal(settled.continueCurrentActivity,true);assert.equal(t.status,'done');assert.equal(ended,0)
+ events.push({type:'user/message',seq:4,data:{id:'next',source:{kind:'user'}}})
+ await assert.rejects(tool.execute({action:'focus',id:t.id,reason:'旧活动'},exec),/自主活动/)
+})
+
+
+test('a later group message cannot inherit an earlier private autonomous thought audience',async()=>{
+ const f=fixture();f.turn.sourceRouteIds=['owner'];f.proposal.sourceRouteIds=['owner'];await f.service.apply(f.turn,f.proposal)
+ f.group.sessionId=f.owner.sessionId;f.group.inboundMessageIds=['group-input'];f.owner.idleContactState={kind:'autonomous',messageId:'old-idle',userMessageId:'old-user'}
+ const events=[{seq:1,type:'user/message',data:{id:'old-idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE}}},{seq:2,type:'user/message',data:{id:'group-input',source:{kind:'user'}}}]
+ const result=await thoughtTool('c',f.store).execute({action:'list'},{agent:{session:{id:f.group.sessionId,snapshotEvents:()=>events}},signal:new AbortController().signal})
+ assert.deepEqual(result.thoughts,[]);assert.deepEqual(JSON.parse(JSON.stringify(result)),result)
+ f.stranger.sessionId=f.owner.sessionId;f.state.channels[0].qq.identityBinding.qqIds.push('22334455')
+ assert.equal(thoughtTargetAllowed(f.state,f.c,['owner'],f.stranger),false)
+ f.local.sessionId=f.owner.sessionId;assert.equal(thoughtTargetAllowed(f.state,f.c,['owner'],f.local),true)
+})
+
+test('memory extraction enforces twelve open thoughts globally and preserves retired evidence',async()=>{
+ const f=fixture()
+ for(let i=0;i<30;i++)await f.service.apply({...f.turn,id:'turn-'+i,at:now+i},{...f.proposal,value:{...f.proposal.value,text:'想法'+i}})
+ assert.equal(f.c.thoughts.length,30);assert.equal(f.c.thoughts.filter(t=>t.status==='open').length,12)
+ assert.equal(f.c.thoughts.filter(t=>t.capacityArchivedAt).length,18)
+ assert.ok(f.c.thoughts.every(t=>t.evidence===f.proposal.value.evidence))
+ await f.service.apply({...f.turn,id:'reopen',at:now+100,user:'新依据'},{...f.proposal,value:{...f.proposal.value,text:'想法0',evidence:'新依据'}})
+ assert.equal(f.c.thoughts.filter(t=>t.status==='open').length,12)
+ assert.equal(f.c.thoughts.find(t=>t.text==='想法0').status,'open')
+})
+
+test('remember and reopening an archived thought respect the shared cap and keep focused/planned thoughts',async()=>{
+ const f=fixture();f.c.idleContact.routeId='owner'
+ f.owner.idleContactState={kind:'autonomous',userMessageId:'u',messageId:'notice',policyRevision:1}
+ const events=[{type:'user/message',seq:1,data:{id:'u',source:{kind:'user'}}},{type:'turn/start',seq:2},{type:'user/message',seq:3,data:{id:'notice',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE}}}]
+ const exec={agent:{session:{id:f.owner.sessionId,snapshotEvents:()=>events}},signal:new AbortController().signal,concludeTurn(){}}
+ const tool=thoughtTool('c',f.store)
+ for(let i=0;i<70;i++)await tool.execute({action:'remember',text:'念头'+i,reason:'想试试看'},exec)
+ assert.equal(f.c.thoughts.length,64);assert.equal(f.c.thoughts.filter(t=>t.status==='open').length,12)
+ const t=f.c.thoughts.find(t=>t.status==='dismissed')
+ await tool.execute({action:'focus',id:t.id,reason:'继续这个'},exec)
+ assert.equal(t.status,'open');assert.equal(t.capacityArchivedAt,undefined)
+ assert.equal(f.c.thoughts.filter(t=>t.status==='open').length,12)
+ const old=f.c.thoughts.find(t=>t.status==='dismissed')
+ await tool.execute({action:'focus',id:old.id,reason:'稍后继续',delayMinutes:10},exec)
+ assert.equal(old.status,'open');assert.equal(f.c.activityPlan.thoughtId,old.id)
+ assert.equal(f.c.thoughts.filter(t=>t.status==='open').length,12)
+ for(let i=0;i<15;i++)await tool.execute({action:'remember',text:'新念头'+i,reason:'想试试看'},exec)
+ assert.equal(t.status,'open');assert.equal(old.status,'open')
 })

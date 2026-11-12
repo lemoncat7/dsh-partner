@@ -138,7 +138,7 @@ test('unknown names never send; recall then additional image obligations persist
  t.after(scope.ctx.tools.register(chatTools('c',store,{},{},{},'/api').find(t=>t.name==='partner_chat_reply')))
  agent.session.append('turn/start',{turn:1});agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'看看屋里有什么'}]}),{surfaceOp:'append'})
  let seq=0;const call=async(name,args={})=>{const request={name,arguments:args,agent,signal:signal(),callId:'stage-'+seq++};agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId:request.callId});const result=await dispatchTool(root.tools, request);agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{id:request.callId,role:'tool',source:{kind:'tool',callId:request.callId},toolCallId:request.callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
- const wrong=await call('partner_chat_say',{text:'我画给你看',beforeTools:true,expectedTools:['image_gen.imagegen','partner_send_attachment']})
+ const wrong=await call('partner_chat_say',{text:'我画给你看',beforeTools:true,expectedTools:['not_registered_image_tool','partner_send_attachment']})
  assert.equal(wrong.isError,true);assert.deepEqual(sent,[]);assert.deepEqual(pendingActions(agent.session.snapshotEvents()),[])
  await call('partner_chat_say',{text:'我想想屋里的摆设',beforeTools:true,expectedTools:['partner_memory_recall']});await call('partner_memory_recall')
  assert.deepEqual(pendingActions(agent.session.snapshotEvents()),[])
@@ -193,24 +193,24 @@ test('invalid action preamble can be corrected without caching unsent failure; u
  assert.deepEqual(sent,['开始画','再画'])
 })
 
-test('expression preamble waits for composition and delivery, records the actual words and deduplicates',async()=>{
+test('direct preamble waits for delivery, records the actual words and never invokes legacy composition',async()=>{
  let tool,compositions=0,release
  const events=[start,user()],sent=[];const pending=new Promise(r=>release=r)
  const agent={session:{id:'s',snapshotEvents:()=>events},ctx:{tools:{register:t=>{tool=t;return()=>{}},get:()=>({})}}}
  installLiveSpeech(agent,async text=>{sent.push(text);await pending},()=> 'r',()=>true,()=>true,async(selection,exec,before)=>{compositions++;assert.equal(before,true);assert.deepEqual(selection,{intent:'查找视频'});return {parts:[{text:'我去翻翻'}],audit:{status:'composed',sourceCallIds:[]}}})
- const args={expression:{intent:'查找视频'},beforeTools:true,expectedTools:['search_video']}
+ const args={text:'我去翻翻',beforeTools:true,expectedTools:['search_video']}
  let completed=false;const job=tool.execute(args,{agent,signal:signal()}).then(x=>{completed=true;return x})
  await new Promise(r=>setImmediate(r));assert.equal(completed,false);assert.deepEqual(sent,['我去翻翻'])
  release();const result=await job;assert.equal(result.spokenText,'我去翻翻');assert.equal(result.taskPreamble,true)
- const again=await tool.execute(args,{agent,signal:signal()});assert.equal(again.alreadyAnnounced,true);assert.equal(compositions,1);assert.equal(sent.length,1)
- await assert.rejects(tool.execute({...args,text:'稿子'},{agent,signal:signal()}),/不能同时/)
+ const again=await tool.execute(args,{agent,signal:signal()});assert.equal(again.alreadyAnnounced,true);assert.equal(compositions,0);assert.equal(sent.length,1)
+ await assert.rejects(tool.execute({...args,expression:{intent:'查找'}},{agent,signal:signal()}),/不再二次/)
 })
 test('failed expression emits nothing and direct text fallback still uses the same sender',async()=>{
  let tool
  const events=[start,user()],sent=[]
  const agent={session:{id:'s',snapshotEvents:()=>events},ctx:{tools:{register:t=>{tool=t;return()=>{}},get:()=>({})}}}
  installLiveSpeech(agent,async text=>sent.push(text),()=> 'r',()=>true,()=>true,async()=>{throw Error('expression unavailable')})
- await assert.rejects(tool.execute({expression:{intent:'查找视频'},beforeTools:true,expectedTools:['search_video']},{agent,signal:signal()}),/unavailable/)
+ await assert.rejects(tool.execute({expression:{intent:'查找视频'},beforeTools:true,expectedTools:['search_video']},{agent,signal:signal()}),/不再二次/)
  assert.equal(sent.length,0)
  const out=await tool.execute({text:'我去找找',beforeTools:true,expectedTools:['search_video']},{agent,signal:signal()})
  assert.deepEqual(sent,['我去找找']);assert.equal(out.delivered,true)

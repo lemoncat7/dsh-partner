@@ -205,7 +205,7 @@ test('permission summary is bounded and paginated, never dumps the whole tool ca
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,tools.map(tool=>({tool,allowed:()=>true}))))
  const summary=await f.invoke('partner_channel_access')
  assert.equal(summary.value.total,94);assert.equal(summary.value.tools,undefined)
- assert.ok(JSON.stringify(summary.value).length<1800);assert.match(summary.value.next,/partner_work_execute/)
+ assert.ok(JSON.stringify(summary.value).length<1800);assert.doesNotMatch(summary.value.next,/partner_work_execute/)
  const found=[]
  for(let offset=0;offset<93;offset+=12){
   const page=await f.invoke('partner_channel_access',{category:'mcp',offset})
@@ -213,7 +213,7 @@ test('permission summary is bounded and paginated, never dumps the whole tool ca
  }
  assert.equal(new Set(found).size,93)
  const empty=await f.invoke('partner_tools',{action:'list',query:'browser'})
- assert.deepEqual(empty.value.tools,[]);assert.match(empty.value.next,/partner_work_execute/)
+ assert.deepEqual(empty.value.tools,[]);assert.doesNotMatch(empty.value.next,/partner_work_execute/)
  assert.equal((await f.invoke('partner_channel_access',{offset:-1})).isError,true)
 })
 

@@ -25,6 +25,7 @@ await build({
 })
 
 await build({
+  loader: { '.css': 'text' },
   entryPoints: ['src/ui/thoughts-panel.tsx'], outfile: 'lib/client.activities.js',
   bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', minify: true,
   jsx: 'automatic', external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-api-remotes/client'],

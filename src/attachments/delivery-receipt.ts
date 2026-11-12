@@ -12,3 +12,21 @@ export function deliveredAttachment(event:SessionEvent):string|undefined {
   const meta=event.data.meta as {kind?:string;originRouteId?:unknown}|undefined
   return meta?.kind==='partner-attachment-delivered-v1'&&typeof meta.originRouteId==='string'?meta.originRouteId:undefined
 }
+
+/** Compact, confirmed transport facts; prose about sending is never evidence. */
+export function attachmentDeliveryReceipt(event:SessionEvent):{deliveryId:string;name:string;routeId:string;at:number;status:'sent'}|undefined {
+ const routeId=deliveredAttachment(event)
+ if(!routeId)return
+ const data=event.type==='tool/result'?event.data.message:event.type==='tool/ptc-dispatch'?event.data:undefined
+ for(const block of data?.content??[]){
+  if(block.type!=='text')continue
+  const value=object(block.text)
+  if(value?.channel==='sent'&&value.conversation==='attachment_recorded'&&value.originRouteId===routeId&&typeof value.deliveryId==='string'&&value.deliveryId.length<=200&&typeof value.name==='string'&&value.name.length<=300)
+   return {deliveryId:value.deliveryId,name:value.name,routeId,at:event.time,status:'sent'}
+ }
+}
+export function recentAttachmentDeliveries(events:readonly SessionEvent[],routeId:string,limit=6){
+ const found=new Map<string,NonNullable<ReturnType<typeof attachmentDeliveryReceipt>>>()
+ for(let i=events.length-1;i>=0&&found.size<limit;i--){const receipt=attachmentDeliveryReceipt(events[i]!);if(receipt?.routeId===routeId&&!found.has(receipt.deliveryId))found.set(receipt.deliveryId,receipt)}
+ return [...found.values()].reverse()
+}

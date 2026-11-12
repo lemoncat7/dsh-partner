@@ -1,3 +1,4 @@
+import {withSpeechTail} from './audio-tail.js'
 import type {TtsProfile} from './domain.js'
 export const MAX_AUDIO_BYTES=10*1024*1024
 export function audioType(bytes:Buffer):'audio/wav'|'audio/mpeg' {
@@ -36,5 +37,6 @@ export async function synthesize(p:TtsProfile,key:string,text:string,voice:strin
   bytes=Buffer.from(value,'base64')
  }else if(!/^audio\//i.test(r.headers.get('content-type')??'')&&!/application\/octet-stream/i.test(r.headers.get('content-type')??''))throw Error('TTS 响应不是音频类型')
  if(bytes.length>MAX_AUDIO_BYTES)throw Error('TTS 音频超过大小限制')
- return {data:bytes,mediaType:audioType(bytes)}
+ const mediaType=audioType(bytes)
+ return {data:mediaType==='audio/wav'?withSpeechTail(bytes,MAX_AUDIO_BYTES):bytes,mediaType}
 }

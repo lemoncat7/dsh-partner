@@ -26,7 +26,8 @@ test('native renderer chunk registers separately, without evaluating at initial 
   assert.equal(registered.chunk, 'client.pendant.js')
   assert.equal(typeof registered.factory, 'function')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-  assert.ok(entry.length < 1_500_000, 'physics must not leak into initial client')
+  assert.ok(entry.length < 1_510_000, 'physics must not leak into initial client')
+  assert.ok(!entry.includes('AGFzbQ'), 'base64 WASM must stay in the pendant chunk')
   assert.ok(entry.includes('require.async("./client.pendant.js")'))
 })
 

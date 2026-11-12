@@ -48,7 +48,7 @@ export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefi
           exec.signal.throwIfAborted()
           if(!canFinishIdleActivity(owner,draft,agent.session.id,agent.session.snapshotEvents()))throw Error('自主活动已变化，未保存念头')
           const route=draft.sessions.find(r=>r.companionId===owner&&r.sessionId===agent.session.id&&notice.type==='user/message'&&r.idleContactState?.messageId===notice.data.id)!
-          const c=draft.companions.find(c=>c.id===owner)!,thoughts=c.thoughts??=[],now=Date.now(),text=nextThought.trim()
+          const c=draft.companions.find(c=>c.id===owner)!,thoughts=(c.thoughts??=[]),now=Date.now(),text=nextThought.trim()
           const id='thought-'+createHash('sha256').update(owner+':'+(notice.type==='user/message'?notice.data.id:'')+':'+text).digest('hex').slice(0,24)
           if(thoughts.some(t=>t.id===id||t.status==='open'&&t.text===text&&t.targetRouteId===route.id))return
           thoughts.push({id,text,why:reason.trim(),evidence:'自主活动结束时留下的意愿，不是已完成事实',sourceTurnId:'activity:'+notice.seq,sourceRouteIds:[route.id],sourceAt:now,targetRouteId:route.id,createdAt:now,updatedAt:now,status:'open',attempts:0})

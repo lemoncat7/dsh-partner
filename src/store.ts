@@ -1,3 +1,4 @@
+import { enforceThoughtBudget } from './character/thought-budget.js'
 import {validateTtsState} from './voice/validation.js'
 import { validateHabits } from './character/habits.js'
 import { validateAgreements } from './chat/agreements.js'
@@ -25,7 +26,11 @@ export class PartnerStore {
   }
 
   static async openSplit(split: SplitStatePersistence): Promise<PartnerStore> {
-    return new PartnerStore('', parseState(await split.read()), split)
+    const raw = await split.read(), original = structuredClone(raw)
+    const state = parseState(raw)
+    const store = new PartnerStore('', state, split)
+    if (!isDeepStrictEqual(original, state)) await store.persist(state)
+    return store
   }
   async freeze(): Promise<void> { this.frozen = true; await this.writes }
 
@@ -34,8 +39,9 @@ export class PartnerStore {
     let state: PartnerState
     try {
       const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
+      const original = structuredClone(raw)
       state = parseState(raw)
-      if (typeof raw === 'object' && raw !== null && (raw as { schemaVersion?: unknown }).schemaVersion !== state.schemaVersion) {
+      if (!isDeepStrictEqual(original, state)) {
         const store = new PartnerStore(path, state)
         await store.persist(state)
         return store
@@ -81,6 +87,7 @@ export class PartnerStore {
     this.writes = this.writes.then(async () => {
       const next = structuredClone(this.state)
       change(next)
+      for (const c of next.companions) enforceThoughtBudget(next, c)
       reconcileBoardContinuations(next)
       validateState(next)
       // Polling and repeated receipts often produce no change. Do not fsync or
@@ -280,6 +287,7 @@ function parseState(value: unknown): PartnerState {
     }
   }
   validateState(value)
+  for (const c of value.companions) enforceThoughtBudget(value, c)
   return value
 }
 

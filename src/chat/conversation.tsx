@@ -18,7 +18,7 @@ export const chatReplyDefinition:ConversationNodeDefinition<ChatReply>={
   start:(_ctx,match)=>chatReplyFromEvent(match.event as SessionEvent)!,
   update:(_ctx,match)=>chatReplyFromEvent(match.event as SessionEvent)!,
   buildViewNode:context=>{
-    if (!context.state||!context.start) return null
+    if (!context.state||!context.start||context.state.transportCallId) return null
     const {event,location}=context.start
     return {key:context.key,id:context.id,kind:'assistant-step',target:'chat',anchorSeq:event.seq,location,
       visibility:'visible',groupTree:'turn',data:{status:'settled',turn:'turn' in event.data?event.data.turn:0,

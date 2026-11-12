@@ -89,7 +89,7 @@ test('persona and protocols stay stable while expression options occur once in c
   assert.equal(turn.split(card.chatStyle).length-1,1)
   for(const stable of [card.roleText,'任务回应流程','聊天投递协议']) assert.ok(!turn.includes(stable))
  }
- assert.match(renderConversationTurn(card,1),/篇幅偏好：简短/)
+ assert.match(renderConversationTurn(card,1),/篇幅偏好：短句接话/)
  assert.equal(renderConversationTurn(undefined,2),'')
  assert.equal(renderConversationTurn({...card,enabled:false},2),'')
  assert.match(renderConversationTurn(card,2),/连续发了 2 条/)

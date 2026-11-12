@@ -20,7 +20,7 @@ export const IDENTITY_PATCH_SCHEMA = {
       description: 'Partial card; omitted fields stay. Use roleText for the authoritative character-only persona (no relationship to the user), enabled=true to apply. null removes card. Arrays replace.',
       properties: {
         schemaVersion: { type: 'integer', enum: [1] }, enabled: { type: 'boolean' }, roleText: text(48000), chatStyle: text(2000),
-        segmentedReplies: { type: 'boolean' }, stickersEnabled: { type: 'boolean' }, narration: { type: 'boolean' },
+        shortVoiceReplies: { type: 'boolean' }, segmentedReplies: { type: 'boolean' }, stickersEnabled: { type: 'boolean' }, narration: { type: 'boolean' },
         length: { type: 'string', enum: ['short', 'balanced', 'rich'] },
         identity: text(2000), motivation: text(3000), voice: text(1500), relationship: text(1000), greeting: text(1000),
         examples: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['user', 'assistant'], properties: { user: text(1000), assistant: text(1500), avoid: text(1500) } } },

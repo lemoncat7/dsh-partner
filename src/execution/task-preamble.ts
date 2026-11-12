@@ -35,6 +35,28 @@ export function hasTaskPreamble(events:readonly SessionEvent[]):boolean {
   }
   return false
 }
+/** An attempted task announcement that failed is not a completed user task. */
+export function failedTaskPreamble(events:readonly SessionEvent[]):boolean {
+  const id=inputId(events)
+  if(!id)return false
+  const start=events.findIndex(e=>e.type==='user/message'&&e.data.id===id)
+  const calls=new Set<string>();let failed=false
+  for(const e of events.slice(start+1)){
+    if(e.type==='tool/call'){
+      try {
+        let name=e.data.name,args=typeof e.data.arguments==='string'?JSON.parse(e.data.arguments):e.data.arguments
+        if(name==='partner_tools'&&args?.action==='call'){name=args.name;args=JSON.parse(args.argumentsJson)}
+        if(name==='partner_chat_progress'||name==='partner_chat_say'&&args?.beforeTools===true)calls.add(e.data.callId)
+      }catch { /* Invalid arguments are handled by the tool runtime. */ }
+    }
+    if(e.type==='tool/result'&&calls.has(e.data.message.toolCallId)&&e.data.message.isError)failed=true
+    const receipt=chatReplyFromEvent(e)
+    if(receipt?.delivered&&receipt.taskPreamble&&receipt.inputMessageId===id||receipt?.taskDisposition==='blocked')failed=false
+  }
+  return failed
+}
+export const FAILED_PREAMBLE_NOTICE='本轮任务前告知失败，任务还没开始，不能仅重复准备做什么就结束。根据当前实际工具列表修正 expectedTools，再用 partner_chat_say 的 text 告知并继续执行。未调用生图不代表生图服务失败。若确实不能继续，使用 partner_chat_reply taskDisposition=blocked、taskReason 与 taskEvidence（未执行用 not_executed）按事实说明。'
+
 export class TaskPreambleGate {
   private readonly sent=new Map<string,Promise<void>>()
   constructor(private readonly events:()=>readonly SessionEvent[],private readonly send:(text:string)=>Promise<void>,private readonly active:()=>boolean=()=>true,private readonly short:()=>boolean=()=>false,private readonly unified=false){}
@@ -52,7 +74,7 @@ export class TaskPreambleGate {
     if(!this.active() || !needsTaskPreamble(name,args))return
     const id=inputId(this.events())
     if(!id)return
-    if(this.unified)return hasTaskPreamble(this.events())?undefined:'本次工作尚未执行：先用 partner_chat_say，expression.intent 简述准备做的动作（或 text 直接按人格成稿），beforeTools:true，expectedTools 填实际工具名；确认送达后再执行。普通接话不能冒充动作告知，不要另发重复的前置回应。'
+    if(this.unified)return hasTaskPreamble(this.events())?undefined:'本次工作尚未执行：先用 partner_chat_say，text 按当前人格简短说明准备做什么，beforeTools:true，expectedTools 填实际工具名；确认送达后再执行。普通接话不能冒充动作告知，不要另发重复的前置回应。'
     let pending=this.sent.get(id)
     if(!pending){
       const message=[...this.events()].reverse().find(e=>e.type==='assistant/message'||e.type==='user/message'||e.type==='turn/start')

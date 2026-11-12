@@ -96,6 +96,7 @@ function ChatFields({ card, onChange, companionId }: { card: CharacterCard; comp
     <div className="dsh-partner-chat-options">
       <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>允许分段回复</strong><small>默认一句说完就停。确有新内容才另发一条，不凑条数、不刻意等待；长文和代码保持完整。</small></span></label>
       <label><input type="checkbox" checked={card.stickersEnabled===true} onChange={e=>onChange({...card,stickersEnabled:e.target.checked})}/><span><strong>表情包</strong><small>根据语境从表情库选图，作为单独消息发送。不支持表情的渠道会显示图片。</small></span></label>
+    {card.length==='short'&&<label ><input type="checkbox" checked={card.shortVoiceReplies===true} onChange={e=>onChange({...card,shortVoiceReplies:e.target.checked})}/><span><strong>私聊短句优先语音，长句用文字</strong><small>仅私聊的简短口语尽量使用当前渠道已配置的语音；群聊默认文字，明确需要语音时仍可发送。长句、链接、代码和需要回看的内容用文字。你明确要求的方式优先，语音不可用时仍可文字回复。</small></span></label>}
       <button type="button" onClick={()=>setLibrary(true)}>管理表情库</button>
     </div>
     {library&&<StickerLibraryDialog companionId={companionId} close={()=>setLibrary(false)}/>}

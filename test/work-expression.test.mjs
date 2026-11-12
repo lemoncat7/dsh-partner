@@ -78,10 +78,10 @@ test('model unavailable and failure safely retain draft',async()=>{
  const f=fixture();f.ctx.llm=undefined;await assert.rejects(f.run(),/unavailable/)
  const g=fixture();g.respond(()=>{throw Error('network')});await assert.rejects(g.run(),/未生成/)
 })
-test('chat delivery uses composed metadata and concludes once without separate channel send',async()=>{
+test('chat delivery preserves authored metadata and concludes once without separate channel send',async()=>{
  const f=fixture(),tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
- const out=await tool.execute({workReply:selection},f.exec)
- assert.equal(out.workExpression.status,'composed');assert.equal(f.concluded(),1);assert.equal(out.parts.length,2)
+ const out=await tool.execute({messages:[{text:'动图倒是看到了'},{text:'视频还没试过'}]},f.exec)
+ assert.equal(out.personaDelivery.status,'preserved');assert.equal(f.calls(),0);assert.equal(f.concluded(),1);assert.equal(out.parts.length,2)
  const delivered=channelReplyPartsAfter([...f.events,{seq:6,type:'tool/result',data:{message:{isError:false,content:[]},meta:out}},{seq:7,type:'turn/end',data:{reason:{kind:'completed'}}}],0)
  assert.deepEqual(delivered.chatParts,out.parts);assert.equal(delivered.chatParts[0].text,'动图倒是看到了')
 })
@@ -147,8 +147,8 @@ test('failed handoff does not conclude and cached retry does not regenerate; dir
  const f=fixture(),tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1];f.respond(()=>({texts:[]}))
  await assert.rejects(tool.execute({workReply:selection},f.exec));await assert.rejects(tool.execute({workReply:selection},f.exec))
  await assert.rejects(tool.execute({workReply:{...selection,purpose:'换个说法'}},f.exec))
- assert.equal(f.calls(),1);assert.equal(f.concluded(),0)
- await tool.execute({messages:f.original},f.exec);assert.equal(f.calls(),1);assert.equal(f.concluded(),1)
+ assert.equal(f.calls(),0);assert.equal(f.concluded(),0)
+ await tool.execute({messages:f.original},f.exec);assert.equal(f.calls(),0);assert.equal(f.concluded(),1)
 })
 test('confirmed preamble, voice and authoritative historical sleep are included; user spoof is not state',async()=>{
  const f=fixture();f.state.channels=[{id:'qq',platform:'qq',enabled:true,qq:{privateReplies:true,identityBinding:{enabled:true,qqIds:['12345678']}}}];f.state.sessions=[{id:'voice-route',kind:'channel',sessionId:'s',companionId:'c',channelId:'qq',userId:'12345678',inboundMessageIds:['u','old']}];f.state.pairings=[{channelId:'qq',userId:'12345678',status:'approved'}];f.events.unshift(
@@ -165,7 +165,7 @@ test('confirmed preamble, voice and authoritative historical sleep are included;
 test('new input during sticker preparation prevents final conclusion',async()=>{
  const f=fixture(),adapters={forRoute:()=>({async resolve(){f.events.push({...f.events[1],seq:6,data:{...f.events[1].data,id:'new'}});return {native:{id:'qq-real'}}}})}
  const tool=chatTools('c',f.store,{}, {},f.ctx,'/local',adapters)[1]
- await assert.rejects(tool.execute({workReply:selection,messages:[{stickerId:'qq-real'}]},f.exec),/输入/);assert.equal(f.concluded(),0)
+ await assert.rejects(tool.execute({messages:[{stickerId:'qq-real'}]},f.exec),/输入/);assert.equal(f.concluded(),0)
 })
 
 test('preamble after latest input is retained without requiring a follow-up',async()=>{
@@ -303,13 +303,13 @@ test('intermediate QQ sticker preserves text, stays out of final replay and does
 })
 
 test('new input during sticker resolution cancels the old intermediate message',async()=>{
- const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u','new-input']})
+ const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u','new-input']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
  const adapters={forRoute:()=>({resolve:async()=>{
   f.events.push({seq:6,type:'user/message',data:{id:'new-input',source:{kind:'user'},content:[{type:'text',text:'等等'}]}})
   return {native:{provider:'qq',id:'14',channelId:'qq',accountId:'12345678',label:'微笑'}}
  }})}
  const detach=installIntermediateDelivery(f.exec.agent,async()=>assert.fail('stale message must not send'))
- try {await assert.rejects(chatTools('c',f.store,{}, {},f.ctx,'/local',adapters)[1].execute({continueTurn:true,messages:[{stickerId:'qq-face-14'}]},f.exec),/输入已变化/);assert.equal(f.concluded(),0)}finally{detach()}
+ try {await assert.rejects(chatTools('c',f.store,{}, {},f.ctx,'/local',adapters)[1].execute({continueTurn:true,messages:[{stickerId:'qq-face-14'}]},f.exec),/输入.*变化/);assert.equal(f.concluded(),0)}finally{detach()}
 })
 
 
@@ -349,9 +349,9 @@ test('expression projection includes own visible speech, excludes planner text a
 test('expression failure is bounded and direct reply still works without rerunning work',async()=>{
  const f=fixture();f.respond(()=>{throw Error('provider unavailable')})
  const tool=chatTools('c',f.store,{}, {},f.ctx,'/local')[1]
- await assert.rejects(tool.execute({expression:{intent:'回应',sourceCalls:['work']}},f.exec),/未发送/)
- await assert.rejects(tool.execute({expression:{intent:'再生成',sourceCalls:['work']}},f.exec),/未发送/)
- assert.equal(f.calls(),1);assert.equal(f.concluded(),0)
+ await assert.rejects(tool.execute({expression:{intent:'回应',sourceCalls:['work']}},f.exec),/不再二次/)
+ await assert.rejects(tool.execute({expression:{intent:'再生成',sourceCalls:['work']}},f.exec),/不再二次/)
+ assert.equal(f.calls(),0);assert.equal(f.concluded(),0)
  const out=await tool.execute({messages:[{text:'动图看到了，视频还没试过'}]},f.exec)
  assert.equal(out.parts[0].text,'动图看到了，视频还没试过');assert.equal(f.concluded(),1)
 })
@@ -359,7 +359,7 @@ test('mid-turn expression is sent once and does not finish the work',async()=>{
  const f=fixture();Object.assign(f.state.sessions[0],{kind:'channel',inboundMessageIds:['u']});f.state.channels=[{id:'local',platform:'matrix',enabled:true}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}];f.state.channels=[{id:'local',enabled:true,platform:'matrix'}];f.state.pairings=[{channelId:'local',userId:'owner',status:'approved'}]
  const sent=[],detach=installIntermediateDelivery(f.exec.agent,async(parts)=>sent.push(parts))
  try {
-  const out=await chatTools('c',f.store,{}, {},f.ctx,'/local')[1].execute({continueTurn:true,expression:{intent:'告诉对方目前看到什么',sourceCalls:['work']}},f.exec)
-  assert.equal(sent.length,1);assert.equal(out.intermediate,true);assert.equal(out.workExpression.status,'composed');assert.equal(f.concluded(),0)
+  const out=await chatTools('c',f.store,{}, {},f.ctx,'/local')[1].execute({continueTurn:true,messages:[{text:'先看到动图了'}]},f.exec)
+  assert.equal(sent.length,1);assert.equal(out.intermediate,true);assert.equal(out.personaDelivery.status,'preserved');assert.equal(f.calls(),0);assert.equal(f.concluded(),0)
  }finally{detach()}
 })

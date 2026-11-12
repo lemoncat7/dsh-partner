@@ -176,7 +176,7 @@ for(const mode of ['native','ptc'])test(`public recall and gateway assembly pres
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
  const {installToolDiscovery}=await import('../lib/collaboration/tool-discovery.js')
  let compositions=0,store
- const f=await fixture(t,{async compose(ctx,companion){compositions++;return installToolDiscovery(ctx.tools,companion.id,store,['partner_identity','partner_chat_reply','partner_stickers','partner_voice_reply','partner_work_execute'].map(name=>({tool:defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]}),allowed:()=>true}))) }},mode)
+ const f=await fixture(t,{async compose(ctx,companion){compositions++;return installToolDiscovery(ctx.tools,companion.id,store,['partner_identity','partner_chat_reply','partner_stickers','partner_voice_reply'].map(name=>({tool:defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'ok'}]}),allowed:()=>true}))) }},mode)
  store=f.store;f.agent.session=Session.create('session-stable-tools')
  await store.update(s=>{
   s.companions[0].toolDiscovery=true;s.sessions[0].sessionId=f.agent.session.id
@@ -186,7 +186,7 @@ for(const mode of ['native','ptc'])test(`public recall and gateway assembly pres
  let first
  for(const id of ['owner','guest','owner','guest']){
   const m=createUserMessage({content:[{type:'text',text:'hello'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});await store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
-  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),(id==='owner'?['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_tools','partner_work_execute']:['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_tools']));assert.equal(modeFor(f.root.tools,f.agent),'native')
+  const a=await f.assemble();assert.deepEqual(a.tools.map(t=>t.name).sort(),['partner_channel_access','partner_chat_reply','partner_memory_recall','partner_tools']);assert.equal(modeFor(f.root.tools,f.agent),'native')
   const publicTools=a.tools.filter(t=>t.name!=='partner_work_execute');if(first)assert.deepEqual(publicTools,first);else first=publicTools
  }
  assert.equal(compositions,1)

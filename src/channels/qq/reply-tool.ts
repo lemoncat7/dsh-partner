@@ -1,3 +1,4 @@
+import {taskFollowup,checkTaskReview,TASK_REVIEW_SCHEMA,type TaskReviewReceipt} from '../../chat/task-followup.js'
 import {OneBotApiError} from './connection.js'
 import {channelReplyAllowed} from '../reply-access.js'
 import { createHash } from 'node:crypto'
@@ -13,20 +14,20 @@ import type { QqActionCall } from './actions.js'
 export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCall, external?:ToolDefinition): ToolDefinition {
   return {
     name: 'partner_qq_reply',
-    description: '真正群 @ 用 mention（userId 为当前群成员 QQ 号，text 可附带短句），不能用文字 @昵称 冒充提及；戳一戳用 poke（默认当前发言人，可指定当前群成员 userId，需已开启 send_poke）。这两项发送后可以继续说话，只能作用于当前聊天。向当前 QQ 聊天对象回复语音，属于公开聊天能力，不需要归属账号或私有能力总开关。按人格与场景可自行选择语音，不必等用户点名索要。渠道启用外部语音 TTS 时自动使用该服务；voices 查询当前可用音色；voice 把 text 转成语音并发送，成功后结束回合，不重复发文字。脚本生成的音频通过 partner_tools 调用 partner_voice_reply 的 send_file（path）发送，不用 voice 重新合成。无需填写接收人；不能转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
+    description: '真正群 @ 用 mention（userId 为当前群成员 QQ 号，text 可附带短句），不能用文字 @昵称 冒充提及；戳一戳用 poke（默认当前发言人，可指定当前群成员 userId，需已开启 send_poke）。这两项发送后可以继续说话，只能作用于当前聊天。向当前 QQ 聊天对象回复语音，属于公开聊天能力，不需要归属账号或私有能力总开关。按人格与场景可自行选择语音，不必等用户点名索要。渠道启用外部语音 TTS 时自动使用该服务；voices 查询当前可用音色；voice 把 text 转成语音并发送，有任务接续上下文时先提交 taskReview（与 partner_chat_reply 相同）；成功后结束回合，不重复发文字。脚本生成的音频通过 partner_tools 调用 partner_voice_reply 的 send_file（path）发送，不用 voice 重新合成。无需填写接收人；不能转发到其他联系人或使用 QQ 空间/管理能力。语音是否可用由渠道的聊天回复设置控制。普通文字和表情仍使用 partner_chat_reply 或最终正文。',
     parameters: { type:'object', additionalProperties:false, required:['action'], properties:{
-      action:{type:'string',enum:['voices','voice','mention','poke']}, text:{type:'string',minLength:1,maxLength:2000}, character:{type:'string',minLength:1,maxLength:200}, userId:{type:'string',pattern:'^[0-9]{5,12}$'},
+      taskReview:TASK_REVIEW_SCHEMA,action:{type:'string',enum:['voices','voice','mention','poke']}, text:{type:'string',minLength:1,maxLength:2000}, character:{type:'string',minLength:1,maxLength:200}, userId:{type:'string',pattern:'^[0-9]{5,12}$'},
     }},
     output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}],
     presentationMeta:(_args,value)=>{
-      const result=value as {status?:string;originRouteId?:string;spokenText?:string;interactionText?:string;inputMessageId?:string}
+      const result=value as {status?:string;originRouteId?:string;spokenText?:string;interactionText?:string;inputMessageId?:string;taskReview?:TaskReviewReceipt}
       if(result.status==='confirmed'&&result.interactionText&&result.originRouteId)return {kind:'partner-chat-v1',parts:[{type:'text',text:result.interactionText}],intermediate:true,delivered:true,...(result.inputMessageId?{inputMessageId:result.inputMessageId}:{}),originRouteId:result.originRouteId}
-      return result.status==='confirmed'&&result.originRouteId?{kind:'partner-chat-v1',parts:[],delivered:true,originRouteId:result.originRouteId,...(result.spokenText?{spokenText:result.spokenText}:{})}:null
+      return result.status==='confirmed'&&result.originRouteId?{kind:'partner-chat-v1',parts:[],delivered:true,originRouteId:result.originRouteId,...(result.taskReview?{taskReview:result.taskReview}:{}),...(result.spokenText?{spokenText:result.spokenText}:{})}:null
     }},
     presentCall:()=>({card:'generic',title:'QQ 聊天互动'}),
     async execute(raw, exec) {
-      const args=raw as {action:string;text?:string;character?:string;userId?:string}
-      if (!args || Object.keys(args).some(k=>!['action','text','character','userId'].includes(k)) || !['voices','voice','mention','poke'].includes(args.action)) throw Error('语音回复参数无效')
+      const args=raw as {action:string;text?:string;character?:string;userId?:string;taskReview?:TaskReviewReceipt}
+      if (!args || Object.keys(args).some(k=>!['action','text','character','userId','taskReview'].includes(k)) || !['voices','voice','mention','poke'].includes(args.action)) throw Error('语音回复参数无效')
       if(args.action==='voice' && (typeof args.text!=='string'||!args.text.trim()||args.text.length>2000))throw Error('请提供 1–2000 字的语音内容')
       if(args.character!==undefined && (typeof args.character!=='string'||!args.character.trim()||args.character.length>200))throw Error('音色标识无效')
       const agent=exec.agent
@@ -44,7 +45,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
       if(!route||route.companionId!==owner||!channel)throw Error('只能回复本轮实际来自的 QQ 会话')
       if(channel.tts?.enabled&&external&&['voices','voice'].includes(args.action)){
         if(args.userId!==undefined)throw Error('语音回复不能指定其他对象')
-        return external.execute({action:args.action==='voices'?'status':'speak',...(args.text!==undefined?{text:args.text}:{}),...(args.character!==undefined?{voice:args.character}:{})},exec)
+        return external.execute({action:args.action==='voices'?'status':'speak',...(args.text!==undefined?{text:args.text}:{}),...(args.character!==undefined?{voice:args.character}:{}),...(args.taskReview?{taskReview:args.taskReview}:{})},exec)
       }
       const group=qqGroupPeer(route.userId)
       const guard=()=>{
@@ -100,6 +101,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         return Array.isArray(result)?result.flatMap(row=>Array.isArray(row?.characters)?row.characters.filter((v:any)=>typeof v.character_id==='string'&&typeof v.character_name==='string').map((v:any)=>({id:v.character_id,name:v.character_name})):[]).slice(0,100):[]
       }
       if(args.action==='voices')return {voices:await voices()}
+      const taskReview=checkTaskReview(taskFollowup(store.snapshot(),owner,agent.session.id,agent.session.snapshotEvents()),args.taskReview)
       if(typeof exec.concludeTurn!=='function'||!exec.callId)throw Error('当前宿主不支持语音回复终结')
       const character=args.character?.trim()||settings.voiceCharacter||(await voices())[0]?.id
       if(!character)throw Error('当前没有可用音色，请选择音色或改用文字')
@@ -112,7 +114,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         previous=log.find(r=>r.id===receiptId)?.status
         if(!previous)log.push({id:receiptId,action:'reply_voice',at:Date.now(),status:'pending'})
       })
-      if(previous){if(previous==='confirmed')exec.concludeTurn();return {status:previous,resent:false,originRouteId:route.id}}
+      if(previous){if(previous==='confirmed')exec.concludeTurn();return {status:previous,resent:false,originRouteId:route.id,...(taskReview?{taskReview}:{})}}
       let sendAttempted=false
       try {
         guard()
@@ -130,7 +132,7 @@ export function qqReplyTool(owner: string, store: PartnerStore, call: QqActionCa
         if(!result||!['string','number'].includes(typeof result.message_id)||!String(result.message_id)||Number(result.message_id)===0)throw Error('QQ 未确认语音发送')
         await store.update(state=>{const receipt=state.channels.find(c=>c.id===channel.id)?.qqActivity?.find(r=>r.id===receiptId);if(receipt)receipt.status='confirmed'})
         exec.concludeTurn()
-        return {status:'confirmed',originRouteId:route.id,spokenText:args.text!.trim(),messageId:String(result.message_id)}
+        return {status:'confirmed',...(taskReview?{taskReview}:{}),originRouteId:route.id,spokenText:args.text!.trim(),messageId:String(result.message_id)}
       } catch {
         await store.update(state=>{
           const current=state.channels.find(c=>c.id===channel.id),receipt=current?.qqActivity?.find(r=>r.id===receiptId)

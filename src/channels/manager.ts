@@ -402,6 +402,18 @@ export class ChannelManager {
     })
   }
 
+  async sendIdleIntermediate(sessionId:string,parts:import('../chat/protocol.js').ChatPart[],routeId:string,receipt:string,signal:AbortSignal):Promise<void> {
+    signal.throwIfAborted()
+    const state=this.store.snapshot(),route=state.sessions.find(r=>r.id===routeId&&r.sessionId===sessionId),claim=route?.idleContactState
+    if(!route||route.kind!=='channel'||!claim||claim.policyRevision===undefined)throw Error('自主活动没有可投递的渠道来源')
+    const origin={routeId,sessionId,messageId:claim.messageId,userMessageId:claim.userMessageId,policyRevision:claim.policyRevision}
+    if(!await this.agents.idleContactDeliveryCurrent(origin))throw Error('自主活动已变化，未发送中途消息')
+    const reply:PartnerReply={text:'',attachments:[],chatParts:parts,idleContactOrigin:origin}
+    const channel=state.channels.find(c=>c.id===route.channelId)!
+    if(channel.direct)reply.directSource={routeId,sessionId,accountId:channel.accountId,baseUrl:channel.direct.baseUrl,targetId:directReplyTarget(state,route.channelId,route.userId)}
+    await this.queueProactive(route,receipt,reply,()=>!signal.aborted,true)
+  }
+
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
     // Idle greetings have an explicit route; don't broadcast through notification preferences.
     if (event.type === 'turn/end' && event.data.reason.kind === 'completed') {

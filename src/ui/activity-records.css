@@ -1,0 +1,54 @@
+/* Autonomous activity: one legible surface, compact rows, details on demand. */
+.dsh-partner-settings-panel > .dsh-partner-character.dsh-partner-autonomy { background:var(--partner-solid-panel); border:1px solid var(--partner-border); border-radius:14px; padding:18px; min-width:0; }
+.dsh-partner-autonomy .dsh-partner-autonomy-settings { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:16px; margin:0 0 16px; padding:0; border:0; }
+.dsh-partner-autonomy-settings select { width:100%; min-width:0; text-overflow:ellipsis; }
+.dsh-partner-activity-board { min-width:0; color:var(--partner-text); }
+.dsh-partner-activity-board p { margin:0; line-height:1.65; overflow-wrap:anywhere; }
+.dsh-partner-activity-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:12px 0; border-top:1px solid var(--partner-border); }
+.dsh-partner-activity-board button { color:var(--partner-text); background:var(--partner-solid-control); border:1px solid var(--partner-border); border-radius:8px; padding:8px 12px; min-height:44px; font:inherit; cursor:pointer; box-shadow:none; }
+.dsh-partner-activity-board button:disabled { opacity:.6; cursor:default; }
+.dsh-partner-activity-board button:hover:not(:disabled) { background:var(--partner-hover); }
+.dsh-partner-activity-board :is(button,summary):focus-visible,.dsh-partner-autonomy-habits>summary:focus-visible { outline:2px solid var(--partner-focus-ring); outline-offset:2px; }
+.dsh-partner-activity-switcher { display:flex; gap:4px; padding:3px; border-radius:10px; background:var(--partner-selected); }
+.dsh-partner-activity-switcher button { display:flex; align-items:center; gap:6px; background:transparent; border-color:transparent; }
+.dsh-partner-activity-switcher button[aria-pressed=true] { background:var(--partner-solid-control); border-color:var(--partner-border); font-weight:600; }
+.dsh-partner-activity-switcher span { color:var(--partner-text-secondary); font-size:12px; font-variant-numeric:tabular-nums; }
+.dsh-partner-activity-board .dsh-partner-activity-refresh { background:transparent; }
+.dsh-partner-activity-overview { display:flex; flex-wrap:wrap; gap:8px 18px; padding:4px 0 14px; color:var(--partner-text-secondary); font-size:13px; }
+.dsh-partner-activity-overview b { color:var(--partner-text); margin-left:4px; font-variant-numeric:tabular-nums; }
+.dsh-partner-activity-overview [data-warning=true],.dsh-partner-activity-warning { color:var(--partner-warning); }
+.dsh-partner-activity-row { border-top:1px solid var(--partner-border); min-width:0; }
+.dsh-partner-activity-row>summary { display:flex; flex-direction:column; gap:6px; position:relative; padding:14px 24px 14px 0; cursor:pointer; list-style:none; min-height:44px; }
+.dsh-partner-activity-row>summary::-webkit-details-marker { display:none; }
+.dsh-partner-activity-row>summary::after { content:'›'; position:absolute; right:4px; top:17px; color:var(--partner-text-secondary); font-size:18px; }
+.dsh-partner-activity-row[open]>summary::after { transform:rotate(90deg); }
+.dsh-partner-activity-row>summary:hover { background:var(--partner-hover); }
+.dsh-partner-activity-copy { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; line-height:1.65; font-size:14px; white-space:normal; overflow-wrap:anywhere; }
+.dsh-partner-activity-row[open] .dsh-partner-activity-copy { display:block; }
+.dsh-partner-activity-meta { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--partner-text-secondary); }
+.dsh-partner-activity-board small { color:var(--partner-text-secondary); line-height:1.6; font-size:12px; overflow-wrap:anywhere; }
+.dsh-partner-activity-detail { display:grid; gap:10px; padding:0 0 16px; font-size:13px; }
+.dsh-partner-activity-detail details { padding:0 12px; background:var(--partner-solid-raised); border-radius:8px; }
+.dsh-partner-activity-detail details>summary,.dsh-partner-activity-footnote>summary,.dsh-partner-activity-archive>summary,.dsh-partner-autonomy-habits>summary { cursor:pointer; padding:12px 0; min-height:44px; box-sizing:border-box; color:var(--partner-text-secondary); font-size:13px; }
+.dsh-partner-activity-detail details>p { padding-bottom:12px; }
+.dsh-partner-activity-detail li { overflow-wrap:anywhere; padding:2px 0; }
+.dsh-partner-activity-evidence { white-space:pre-wrap; }
+.dsh-partner-activity-artifact { display:flex; gap:12px; align-items:center; padding:4px 10px; border-radius:8px; background:var(--partner-solid-raised); }
+.dsh-partner-activity-artifact>span { min-width:0; flex:1; overflow-wrap:anywhere; font-size:12px; }
+.dsh-partner-activity-artifact>button { flex-shrink:0; font-size:12px; }
+.dsh-partner-activity-plan { display:grid; gap:4px; border-left:3px solid var(--partner-accent); background:var(--partner-solid-raised); padding:12px; margin:0 0 14px; border-radius:0 8px 8px 0; font-size:13px; }
+.dsh-partner-activity-board .dsh-partner-activity-more { width:100%; margin:8px 0; }
+.dsh-partner-activity-board .dsh-partner-activity-note,.dsh-partner-activity-footnote p { font-size:13px; color:var(--partner-text-secondary); padding:0 0 12px; }
+.dsh-partner-activity-board .dsh-partner-activity-empty { padding:24px 8px; color:var(--partner-text-secondary); text-align:center; font-size:14px; }
+.dsh-partner-activity-archive,.dsh-partner-autonomy-habits { border-top:1px solid var(--partner-border); margin-top:12px; }
+.dsh-partner-activity-copy-status { display:block; font-size:12px; color:var(--partner-text-secondary); }
+@media(max-width:680px) {
+ .dsh-partner-settings-panel > .dsh-partner-character.dsh-partner-autonomy { padding:12px; }
+ .dsh-partner-autonomy .dsh-partner-autonomy-settings { grid-template-columns:minmax(0,1fr); }
+ .dsh-partner-activity-switcher button { padding:8px; }
+ .dsh-partner-activity-toolbar { gap:4px; }
+}
+
+.dsh-partner-character.dsh-partner-autonomy .dsh-partner-activity-board p { margin:0; }
+.dsh-partner-autonomy .dsh-partner-autonomy-settings .dsh-partner-field { margin:8px 0; }
+.dsh-partner-autonomy > .dsh-partner-character-hint { margin:0 0 12px; }
