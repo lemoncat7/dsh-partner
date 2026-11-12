@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.25.8",
+  "version": "2.25.11",
   "description": "Long-lived AI companions with QQ, WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -31,6 +31,7 @@
     }
   },
   "files": [
+    "docs/releases/2.25.9.md",
     "docs/releases/2.25.8.md",
     "docs/releases/2.25.7.md",
     "docs/releases/2.25.6.md",
@@ -226,7 +227,10 @@
     "docs/releases/2.24.0-rc.4.md",
     "docs/releases/2.24.0-rc.5.md",
     "docs/releases/2.24.0-rc.6.md",
-    "docs/compatibility-0.2.2-rc.1.md"
+    "docs/compatibility-0.2.2-rc.1.md",
+    "docs/compatibility-0.2.2-rc.2.md",
+    "docs/releases/2.25.10.md",
+    "docs/releases/2.25.11.md"
   ],
   "dsh": {
     "bundle": {
@@ -247,7 +251,7 @@
   },
   "engines": {
     "node": ">=24.9.0",
-    "dsh": "=0.2.2-rc.1"
+    "dsh": "=0.2.2-rc.1 || =0.2.2-rc.2"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
@@ -255,7 +259,8 @@
     "prepare": "npm run clean && npm run build",
     "test": "npm run build && node --test test/*.test.mjs",
     "pack:check": "npm pack --dry-run",
-    "pack:verify": "node scripts/check-package.mjs"
+    "pack:verify": "node scripts/check-package.mjs",
+    "test:sidebar-browser": "node test/sidebar-anchor.browser.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.19.0",
@@ -326,7 +331,8 @@
     "typescript": "^5.9.3",
     "ws": "^8.22.0",
     "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-tool-executor-ptc": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-tool-executor-ptc": "0.2.2-rc.1",
+    "@types/react-dom": "18.3.7"
   },
   "publishConfig": {
     "access": "public"

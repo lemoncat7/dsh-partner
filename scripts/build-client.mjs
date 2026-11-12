@@ -46,6 +46,7 @@ await build({
   external: [
     'react',
     'react/jsx-runtime',
+    'react-dom',
     '@deepseek-ai/dsh-api-session-controller/client',
     '@deepseek-ai/dsh-api-remotes/client',
     '@deepseek-ai/dsh-client-ui-primitives',

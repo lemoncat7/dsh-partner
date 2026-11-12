@@ -55,7 +55,7 @@ test('memory off skips recall and clears its old snapshot on the next preparatio
   assert.doesNotMatch(f.contexts.values().next().value.text,/联系人画像|长期记忆/)
   f.config.companion.characterCard.enabled=false;f.config.revision='3'
   await f.runtime.prepareConversationContext(f.agent,signal)
-  assert.equal(f.contexts.size,0)
+  assert.equal(f.contexts.size,1);assert.match(f.contexts.values().next().value.text,/交流时间/);assert.doesNotMatch(f.contexts.values().next().value.text,/当前账号是这层关系|联系人画像|长期记忆|用户配置的表达选项/)
 })
 
 test('automatic history opt-out preserves explicit historical detail lookup and legacy recall',async t=>{
@@ -172,7 +172,7 @@ test('QQ binding refreshes independently of persona/tool discovery, shared routi
  state.channels[0].qq.identityBinding.qqId='22345678'
  await f.runtime.prepareConversationContext(f.agent,signal)
  assert.match(f.contexts.values().next().value.text,/当前账号是这层关系的绑定对象/)
- f.input('本地消息');await f.runtime.prepareConversationContext(f.agent,signal);assert.equal(f.contexts.size,0)
+ f.input('本地消息');await f.runtime.prepareConversationContext(f.agent,signal);assert.equal(f.contexts.size,1);assert.match(f.contexts.values().next().value.text,/交流时间/);assert.doesNotMatch(f.contexts.values().next().value.text,/当前账号是这层关系|联系人画像|长期记忆|用户配置的表达选项/)
  assert.equal(f.calls.length,0,'relation attribution does not add model calls or enable memory')
  assert.equal(f.sections.size,0,'does not replace personality/tool sections')
 })
@@ -206,4 +206,22 @@ test('a habit-only profile reaches the conversation without occupation facts or 
  paragraphs=[];f.input('今天想多说一点');await f.runtime.prepareConversationContext(f.agent,signal)
  assert.doesNotMatch(f.contexts.values().next().value.text,/少客套，不要每句追问/)
  assert.equal(f.sections.size,0)
+})
+
+test('time and real sticker context survive exclusive persona, stay origin scoped, and honor sticker disable',async()=>{
+ const f=fixture(false),signal=new AbortController().signal
+ Object.assign(f.config.companion.characterCard,{exclusivePrompt:true,stickersEnabled:true})
+ const route={id:'qq-owner',kind:'channel',channelId:'qq',sessionId:f.agent.session.id,companionId:f.config.companion.id,userId:'12345678',inboundMessageIds:[]}
+ const state={sessions:[f.config.route,route],channels:[{id:'qq',enabled:true,platform:'qq',companionId:f.config.companion.id}]}
+ f.runtime.store.snapshot=()=>state
+ const seen=[];f.runtime.setStickerContext(async r=>{seen.push(r.id);return 'ACTUAL_QQ_CATALOG'})
+ f.input('嗨');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
+ const raw=JSON.stringify(f.agent.session.snapshotEvents())
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.values().next().value.text,/交流时间/);assert.match(f.contexts.values().next().value.text,/ACTUAL_QQ_CATALOG/)
+ assert.equal(f.contexts.values().next().value.required,true);assert.equal(JSON.stringify(f.agent.session.snapshotEvents()),raw)
+ f.input('浏览器说话');await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.doesNotMatch(f.contexts.values().next().value.text,/ACTUAL_QQ_CATALOG/);assert.deepEqual(seen,['qq-owner'])
+ f.config.companion.characterCard.stickersEnabled=false;f.input('不发表情');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
+ await f.runtime.prepareConversationContext(f.agent,signal);assert.deepEqual(seen,['qq-owner'])
 })

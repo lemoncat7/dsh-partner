@@ -10,7 +10,7 @@ import {supportsChannelTts} from '../voice/domain.js'
 import {qqGroupRoute} from '../channels/qq/settings.js'
 import type {ChatReply} from './protocol.js'
 
-export const REPLY_DELIVERY_SCHEMA={type:'string',enum:['auto','text','voice'],description:'默认 auto：仅私聊开启短句优先语音且当前渠道可用时，简短口语自动合成发送，长内容仍文字；群聊不应用此偏好，默认文字。对方要求文字、安静或内容需要回看时选 text；明确需要语音选 voice，群聊仍可显式使用语音。沿用当前人物正文，不再转述。'}
+export const REPLY_DELIVERY_SCHEMA={type:'string',enum:['auto','text','voice'],description:'先按人格与场景选择口语或图片表情；语音偏好不取代图片表情。默认 auto：仅私聊开启短句优先语音且当前渠道可用时，简短口语自动合成发送，长内容仍文字；群聊不应用此偏好，默认文字。对方要求文字、安静或内容需要回看时选 text；明确需要语音选 voice，群聊仍可显式使用语音。沿用当前人物正文，不再转述。'}
 export interface ReplyDeliveryOptions {delivery?:'auto'|'text'|'voice';preserveText?:boolean;inlineDetails?:boolean}
 export function shortSpokenText(parts:readonly {text?:string}[]):string|undefined {
  if(parts.length!==1||parts.some(p=>typeof p.text!=='string'||!p.text.trim()))return

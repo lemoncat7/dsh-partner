@@ -172,3 +172,33 @@ test('voice already delivered by tool needs no extra message and counts as a suc
  await f.handle()
  assert.deepEqual(f.sent,[]);assert.deepEqual(armed,[source]);assert.equal(f.manager.qqLatency.view('qq')[0].outcome,'replied')
 })
+
+test('QQ polling merges a speaker burst and steers subsequent additions even with global queue setting',{timeout:15000},async t=>{
+ const f=fixture(),controller=new AbortController(),seen=[]
+ f.manager.ctx.settings={get:()=> 'queue'}
+ let polls=0,release,secondSent=false
+ const end=new Promise(r=>release=r)
+ t.after(()=>{controller.abort();release()})
+ f.agents.reply=async(_c,_channel,_sender,input,updates)=>{
+  seen.push({text:input.text,attachments:input.attachments})
+  if(seen.length===1)await end
+  else release()
+  return {text:'',attachments:[]}
+ }
+ f.agents.steer=async(_c,_ch,_sender,input)=>{if(!seen.length)return false;seen.push({text:input.text,attachments:input.attachments});release();return true}
+ t.mock.method(DirectTransport.prototype,'validate',async()=>({accountId:f.channel.accountId,peerId:f.peer}))
+ t.mock.method(DirectTransport.prototype,'poll',async()=>{
+  polls++
+  if(f.state.recentReceipts.includes('qq:three'))controller.abort()
+  if(polls===1)return {messages:[{...f.event,id:'one',text:'帮我看看'}]}
+  if(polls===2)return {messages:[{...f.event,id:'two',text:'还有这条',media:[{source:'test-image'}]}]}
+  if(seen.length===1&&!secondSent){secondSent=true;return {messages:[{...f.event,id:'three',text:'等等先别做',qqGroup:{...f.event.qqGroup,mentioned:false}}]}}
+  await new Promise(r=>setTimeout(r,20));return {messages:[]}
+ })
+ t.mock.method(DirectTransport.prototype,'receiveAttachments',async()=>[{kind:'image',name:'image.png',data:Buffer.from('image')}])
+ t.mock.method(DirectTransport.prototype,'sendText',async()=>{})
+ await f.manager.directLoop(f.channel,controller.signal)
+ assert.equal(seen.length,2);assert.match(seen[0].text,/帮我看看[\s\S]*还有这条/);assert.equal(seen[0].attachments.length,1)
+ assert.match(seen[1].text,/等等先别做/)
+ for(const id of ['one','two','three'])assert.ok(f.state.recentReceipts.includes('qq:'+id))
+})

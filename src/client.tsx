@@ -29,7 +29,7 @@ import { PendantSettingsPanel } from './pendant/settings-panel.js'
 import { PartnerPendant } from './pendant/widget.js'
 import { CompanionPicker } from './ui/companion-picker.js'
 import { api, loadPartner, cachedPartner, type ChannelView, type CompanionView, type LoginView, type PartnerSnapshot } from './client-api.js'
-import { useWorkspaceTopAnchor } from './sidebar-anchor.js'
+import { WorkspaceTopAnchor } from './sidebar-anchor.js'
 import { pendingStorageRecovery } from './ui/storage-recovery-marker.js'
 
 import { GlassSurface } from './glass-surface.js'
@@ -83,12 +83,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => () => controller.close(), 'dsh-partner: workspace lifecycle')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'partner', order: -120,
-  }, props => <PartnerSidebar {...props} controller={controller} collapse={() => ctx.layout.toggleSidebar()} />))
+  }, props => <WorkspaceTopAnchor id="partner" order={-120}><PartnerSidebar {...props} controller={controller} collapse={() => ctx.layout.toggleSidebar()} /></WorkspaceTopAnchor>))
 }
 
 function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse(): void }): JSX.Element {
-  const ref = useRef<HTMLElement>(null)
-  useWorkspaceTopAnchor(ref)
   const [open, setOpen] = useState(true)
   const [snapshot, setSnapshot] = useState<PartnerSnapshot | undefined>(cachedPartner)
   useChannelStatus(setSnapshot)
@@ -99,8 +97,8 @@ function PartnerSidebar(props: SidebarProps & { controller: Controller; collapse
     props.controller.open(id)
     if (props.wide && window.matchMedia('(max-width: 820px)').matches) props.collapse()
   }
-  if (!props.wide) return <section ref={ref} className="dsh-partner-sidebar is-rail"><button type="button" className={`dsh-partner-rail${props.controller.isOpen() ? ' is-active' : ''}`} title="伙伴" onClick={() => props.controller.toggle()}><IconAgentPresetOutline16 size={18} /></button></section>
-  return <section ref={ref} className="dsh-partner-sidebar">
+  if (!props.wide) return <section className="dsh-partner-sidebar is-rail"><button type="button" className={`dsh-partner-rail${props.controller.isOpen() ? ' is-active' : ''}`} title="伙伴" onClick={() => props.controller.toggle()}><IconAgentPresetOutline16 size={18} /></button></section>
+  return <section className="dsh-partner-sidebar">
     <div className="dsh-partner-sidebar-heading">
       <button type="button" className="dsh-partner-sidebar-title" aria-expanded={open} onClick={() => setOpen(value => !value)}><span data-open={open}><IconChevronDownOutline14 size={14} /></span>伙伴</button>
     </div>

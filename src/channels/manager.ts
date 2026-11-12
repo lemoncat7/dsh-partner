@@ -5,6 +5,7 @@ import { activityPolicyCurrent } from '../character/post-reply.js'
 import {channelReplyAllowed,directReplyTarget} from './reply-access.js'
 import { QqLatencyHistory,getReplyTiming } from './qq/latency.js'
 import { QqGroupAutonomy } from './qq/autonomy.js'
+import {QqGroupBursts,groupBurstEvent} from './qq/inbound-burst.js'
 import { qqFaceCatalog, qqCustomCatalog } from './qq/catalog.js'
 import { parseQqSettings, qqSettings, qqGroupPeer, qqPeerLabel, validQqId } from './qq/settings.js'
 import { OneBotError } from './qq/connection.js'
@@ -75,6 +76,7 @@ export class ChannelManager {
   private qqNames = new Map<string,{name:string;expires:number}>()
   private readonly qqLatency=new QqLatencyHistory()
   private readonly groupAutonomy:QqGroupAutonomy
+  private readonly pendingGroupReplies=new Map<string,number>()
   private notificationShutdown = new AbortController()
   private readonly tasks = new Map<string, { controller: AbortController; task: Promise<void> }>()
   private readonly runtime = new Map<string, RuntimeState>()
@@ -888,6 +890,7 @@ export class ChannelManager {
     const signal=AbortSignal.any([outerSignal,failure.signal])
     let dispatchError:unknown
     const dispatcher=new DirectDispatcher(signal,error=>{dispatchError=error;failure.abort()})
+    const groupBursts=new QqGroupBursts(dispatcher,signal)
     this.directDispatchers.set(channel.id,dispatcher)
     let cursor=channel.direct.cursor
     let failures=0
@@ -902,7 +905,7 @@ export class ChannelManager {
         else if(batch.messages.length)roomWarning=undefined
         this.runtime.set(channel.id,{status:'running',...(roomWarning?{lastError:roomWarning}:{})})
         const seenReceipts=new Set(this.store.snapshot().recentReceipts)
-        const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`)&&!dispatcher.has(message.id))
+        const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`)&&!dispatcher.has(message.id)&&!groupBursts.has(message.id))
         for(const group of groupDirectMessages(unseen,channel.direct.targetId)) {
           const message=group[0]!
           if(signal.aborted)break
@@ -913,15 +916,17 @@ export class ChannelManager {
               await targetApi.validate(signal)
               if(await this.answerPendingQuestion(pending.sessionId,message.text,channel,targetApi,message.sender,signal)){await this.rememberReceipt(`${channel.id}:${message.id}`);continue}
             }
-            const mode=busyEnterMode(this.ctx.settings)
+            const mode=channel.platform==='qq'&&message.qqGroup?'steer':busyEnterMode(this.ctx.settings)
             if (channel.platform === 'matrix' || channel.platform === 'qq') await dispatcher.waitForCapacity()
-            dispatcher.enqueue(group.map(item=>item.id),mode,async prepared=>{
+            const run=async (items:DirectMessage[],prepared:()=>void)=>{
               const started=Date.now()
               await targetApi.validate(signal)
               const validated=Date.now()
-              try { await this.handleDirect(channel,targetApi,message,signal,group,prepared,mode) }
+              try { await this.handleDirect(channel,targetApi,items[0]!,signal,items,prepared,mode) }
               finally { if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'dispatch',queueMs:message.receivedAt===undefined?undefined:started-message.receivedAt,validateMs:validated-started,totalMs:Date.now()-(message.receivedAt??started)})}`) }
-            },message.targetId||message.sender)
+            }
+            if(channel.platform==='qq'&&message.qqGroup)groupBursts.enqueue(group,run)
+            else dispatcher.enqueue(group.map(item=>item.id),mode,prepared=>run(group,prepared),message.targetId||message.sender)
           }
           catch { throw new DirectDeliveryError() }
         }
@@ -997,11 +1002,14 @@ export class ChannelManager {
       },signal)))
     }
     const rawText=events.map(quotedMessageText).filter(Boolean).join('\n\n')
+    if(event.qqGroup)event=groupBurstEvent(events,rawText)
     let text=event.qqGroup?`[QQ 群 ${event.qqGroup.groupId} · 发言人 ${event.qqGroup.senderName}（${event.qqGroup.userId}）${event.qqGroup.autonomous&&!event.qqGroup.mentioned?' · 自主接话':''}]\n${rawText}`:rawText
     const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     for(const item of events)this.groupAutonomy.observe(channel.id,item)
     if(event.qqGroup && isSleeping(requiredCompanion(this.store,channel.companionId)) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self'){this.groupAutonomy.record(channel.id,event,'伙伴正在睡眠，暂停群聊自主接话');await this.rememberReceipts(receipts);return}
-    if(event.qqGroup?.autonomous&&!event.qqGroup.mentioned) {
+    const groupReplyKey=JSON.stringify([channel.id,event.sender])
+    const continuingGroup=event.qqGroup&&!event.qqGroup.otherMention&&event.qqGroup.replyTo!=='other'&&this.pendingGroupReplies.has(groupReplyKey)
+    if(event.qqGroup?.autonomous&&!continuingGroup) {
       // Recheck current access: a queued event may outlive whitelist removal.
       if(!groupAccess){this.groupAutonomy.record(channel.id,event,'发言账号尚未审批，本条不接话');await this.rememberReceipts(receipts);return}
       const decisionStarted=Date.now()
@@ -1032,7 +1040,7 @@ export class ChannelManager {
         // Claim before starting tools. A delivery failure must not execute the same
         // user command twice on reconnect; its result remains in the DSH session.
         const companion=requiredCompanion(this.store,channel.companionId)
-        if(event.qqGroup?.autonomous&&companion.characterCard?.enabled)text=`群聊接话说明：本地判断只决定把消息交给你，不强制回复。明确呼唤和正在与你聊天时自然接续；确实在与别人交流或无需接话时，可调用 partner_chat_reply，messages 传空数组安静结束，不发送旁听说明。\n\n${text}`
+        if(event.qqGroup?.autonomous&&companion.characterCard?.enabled)text=`群聊接话说明：本地判断只决定把消息交给你，不强制回复。明确呼唤或有值得接的话才回应；正在聊天也可以对确认语、重复内容、别人之间的交流安静旁听，用 partner_chat_reply messages:[] 结束，不发送旁听说明。同一人的连续补充合起来理解，不逐条答复；已说过的话不重发。\n\n${text}`
         const allowed=()=>{
           const state=this.store.snapshot()
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&channelReplyAllowed(state,channel.id,event.sender,event.targetId||channel.direct?.targetId)
@@ -1089,7 +1097,10 @@ export class ChannelManager {
             await this.sendChatReply(channel,event.sender,key,{text:'',attachments:[],chatParts:parts,chatOriginRouteId:routeId})
           },
         })
-        const pendingReply=this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},updates)
+        if(event.qqGroup)this.pendingGroupReplies.set(groupReplyKey,(this.pendingGroupReplies.get(groupReplyKey)??0)+1)
+        const pendingReply=Promise.resolve().then(()=>this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},updates)).finally(()=>{
+          if(event.qqGroup){const left=(this.pendingGroupReplies.get(groupReplyKey)??1)-1;if(left)this.pendingGroupReplies.set(groupReplyKey,left);else this.pendingGroupReplies.delete(groupReplyKey)}
+        })
         prepared()
         const reply=await pendingReply.finally(()=>authored?.finish())
         const replyReady=Date.now()

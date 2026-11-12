@@ -25,7 +25,7 @@ async function fixture(t, makeComposer) {
   let compositions = 0
   let disposals = 0
   const agent = {
-    status: 'running', session: { id: route.sessionId, header: { cwd: directory }, events: [], seq: 0 },
+    status: 'running', session: { id: route.sessionId, header: { cwd: directory }, snapshotEvents:()=>[], deriveMessages:()=>[], events: [], seq: 0 },
     ctx: scope.ctx.extend({ agent: carrier,
       tools: { register(tool) { assert.equal(registered.has(tool.name), false); registered.set(tool.name, tool); return () => registered.delete(tool.name) } },
       systemPrompt: { context(value) { contexts.set(value.name,value.text); return () => contexts.delete(value.name) }, section(value) { assert.ok(!sections.has(value.name), 'no duplicate prompt sections'); sections.set(value.name, value.text); return () => sections.delete(value.name) } },
@@ -260,5 +260,6 @@ test('role chat preserves the registered tool set across enable, edit and disabl
   await step(4)
   assert.deepEqual([...registered.keys()].sort(), tools)
   assert.doesNotMatch(sections.get('partner-identity'), /用户配置的表达选项/)
-  assert.equal(contexts.has('partner-conversation-memory'), false)
+  assert.match(contexts.get('partner-conversation-memory'), /交流时间/)
+  assert.doesNotMatch(contexts.get('partner-conversation-memory'), /用户配置的表达选项/)
 })

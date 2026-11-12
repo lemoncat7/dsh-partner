@@ -32,7 +32,7 @@ async function fixture(t,options={}){
  t.after(installToolDiscovery(scope.ctx.tools,'c',store,[{tool:voice,allowed:()=>true}]))
  t.after(installLiveSpeech(agent,async text=>sent.push({text}),()=> 'r',()=>true,()=>true,undefined,undefined,(text,exec,opts)=>sendPreferredVoice('c',store,exec,[{text}],opts)))
  t.after(installTaskPreamble(agent,async()=>assert.fail('separate prelude'),()=>true,()=>true,true))
- t.after(scope.ctx.tools.register(chatTools('c',store,{},{},ctx,'/unused')[1]))
+ t.after(scope.ctx.tools.register(chatTools('c',store,{},{},ctx,'/unused',options.adapters)[1]))
  t.after(scope.ctx.tools.register({name:'generate_image',description:'image',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>({ok:true})}))
  const user=()=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画个漫画'}]});agent.session.append('user/message',m,{surfaceOp:'append'});state.sessions[0].inboundMessageIds.push(m.id)}
  agent.session.append('turn/start',{turn:1});user()
@@ -64,6 +64,20 @@ test('autonomous group activity also excludes automatic voice',async t=>{
  f.state.sessions[0].idleContactState={messageId:message.id}
  const r=await sendPreferredVoice('c',f.store,{agent:f.agent,callId:'idle',signal:new AbortController().signal},[{text:'刚才想到个好玩的'}])
  assert.equal(r,undefined);assert.equal(f.synth.length,0);assert.equal(f.sent.length,0)
+})
+for(const mixed of [false,true])test('voice preference preserves selected QQ image stickers: '+mixed,async t=>{
+ const native={provider:'qq-custom',id:'test-face',channelId:'ch',accountId:'87654321',label:'收藏图片'}
+ const adapters={forRoute:()=>({resolve:async(_owner,id)=>({item:{id,name:'收藏图片'},native})})}
+ const f=await fixture(t,{adapters});f.state.companions[0].characterCard.stickersEnabled=true
+ const messages=[...(mixed?[{text:'这个很像刚才那个'}]:[]),{stickerId:'qq-custom-test'}]
+ const r=await f.call('partner_chat_reply',{messages})
+ assert.equal(r.isError,false,JSON.stringify(r));assert.equal(r.concludesTurn,true)
+ assert.equal(f.synth.length,0);assert.equal(f.sent.length,0)
+ assert.deepEqual(r.meta.parts.map(p=>p.type),mixed?['text','emoji']:['emoji'])
+ assert.equal(r.meta.parts.at(-1).emoji.provider,'qq-custom')
+ f.agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}})
+ const delivery=channelReplyPartsAfter(f.agent.session.snapshotEvents(),0)
+ assert.equal(delivery.chatParts.at(-1).emoji.id,'test-face')
 })
 test('speech eligibility preserves prose, keeps long/structured/mixed content as text',()=>{
  assert.equal(shortSpokenText([{text:'我去画啦'}]),'我去画啦')

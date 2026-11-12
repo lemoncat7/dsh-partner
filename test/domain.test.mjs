@@ -140,6 +140,7 @@ test('recomposes one recovered partner agent exactly once and releases its scope
       agent: carrier,
       tools: {register:()=>()=>{}},
       systemPrompt: {
+        context:()=>()=>{},
         section(value) {
           assert.equal(sections.has(value.name), false)
           sections.add(value.name)
@@ -149,7 +150,7 @@ test('recomposes one recovered partner agent exactly once and releases its scope
     })
     const agent = {
       id: route.sessionId, status: 'idle', ctx: agentCtx,
-      session: { id: route.sessionId, header: { cwd: directory }, events: [], seq: 0 },
+      session: { id: route.sessionId, header: { cwd: directory }, snapshotEvents:()=>[], deriveMessages:()=>[], events: [], seq: 0 },
       async whenIdle() {},
       async runMaintenance(job) { maintenanceRuns += 1; return job(new AbortController().signal) },
     }

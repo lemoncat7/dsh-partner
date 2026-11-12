@@ -8,6 +8,22 @@ import { createDefaultCompanion, normalizeCompanionDraft } from '../lib/domain.j
 import { PartnerAgentRuntime } from '../lib/agent-runtime.js'
 import { Session } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import {projectConversationPrompt} from '../lib/character/prompt-projection.js'
+
+test('exclusive persona retains enabled sticker delivery alongside voice without prescribing personality',()=>{
+ const card=normalizeCharacterCard({enabled:true,roleText:'自定义人物',exclusivePrompt:true,length:'short',shortVoiceReplies:true,stickersEnabled:true})
+ for(const autonomous of [false,true]){
+  const turn=renderConversationTurn(card,1,autonomous)
+  const assembly=projectConversationPrompt({sections:[{name:'partner-identity',text:card.roleText},{name:'other',text:'discard'}],contexts:[{name:'partner-conversation-memory',text:turn}],tools:[]},{},{roleEnabled:true,discovery:true,exclusive:true})
+  assert.deepEqual(assembly.sections,[{name:'partner-identity',text:card.roleText}])
+  assert.match(assembly.contexts[0].text,/partner_stickers/)
+  assert.match(turn,/不取代图片表达/);assert.match(turn,/无需等对方索要表情/)
+  assert.match(turn,/仅私聊/);assert.match(turn,/群聊不应用/)
+  assert.doesNotMatch(turn,/九岁|哥哥|莫殇|强制发图/)
+ }
+ assert.doesNotMatch(renderConversationTurn({...card,stickersEnabled:false},1),/partner_stickers|stickerId/)
+ assert.match(renderConversationTurn({...card,shortVoiceReplies:false},1),/partner_stickers/)
+})
 
 test('a short role needs no biography, motivation, examples or world setup', () => {
   const card = normalizeCharacterCard({ enabled: true, roleText: '- 说话坦率。\n- 被夸会嘴硬，正事认真。' })
@@ -70,7 +86,9 @@ test('turn guidance works without a memory service, combines consecutive message
   config.companion = {...companion,characterCard:{...companion.characterCard,enabled:false}}
   config.revision = '2'
   await runtime.prepareConversationContext(agent,signal)
-  assert.equal(sections.size,0)
+  assert.equal(sections.size,1,'factual clock remains when character styling is disabled')
+  assert.match([...sections.values()][0].text,/交流时间/)
+  assert.doesNotMatch([...sections.values()][0].text,/连续发了 2 条/)
   assert.equal(session.snapshotEvents().length,2,'guidance must not rewrite stored session history')
 })
 

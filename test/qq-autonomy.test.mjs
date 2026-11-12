@@ -21,14 +21,15 @@ test('explicit calling and validated reply relationships take precedence over se
  assert.equal(scoreGroupReply(input('你好',{otherMention:true,mentioned:true}),context).reply,true)
  assert.equal(routeGroupReply(input('弟弟人呢？'),{...context,owner:false}),undefined,'relationship terms never prove ownership')
 })
-test('recent real conversation accepts arbitrary followups without semantic calls or random draws',async()=>{
+test('recent conversation keeps substantive followups but leaves closing acknowledgements quiet',async()=>{
  let calls=0;const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return undefined})
  const first=input('小明？');gate.observe('c',first);assert.equal(await gate.shouldReply('c',first,companion,signal()),true);gate.replied('c',first,'刚刚回来了')
- for(const text of ['哇 太棒了','然后呢','我都没说那个','好的','😀','That is awesome!','え、すごいね']){
+ for(const text of ['哇 太棒了','然后呢','我都没说那个','😀','That is awesome!','え、すごいね']){
   const e=input(text);gate.observe('c',e);assert.equal(await gate.shouldReply('c',e,companion,signal()),true,text)
   assert.equal(gate.status('c').route,'continuation')
  }
- assert.equal(calls,0)
+ assert.equal(await gate.shouldReply('c',input('好的'),companion,signal()),false)
+ assert.equal(calls,6)
 })
 test('another speaker does not erase a thread or inherit it; channels, groups and expiry are separate',async()=>{
  let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return undefined})
@@ -37,7 +38,7 @@ test('another speaker does not erase a thread or inherit it; channels, groups an
  const follow=input('太棒了');gate.observe('c',follow);await gate.shouldReply('c',follow,companion,signal());assert.equal(gate.status('c').route,'continuation')
  await gate.shouldReply('other-channel',follow,companion,signal());assert.equal(gate.status('other-channel').route,'fallback')
  await gate.shouldReply('c',input('太棒了',{groupId:'87654321'}),companion,signal());assert.equal(gate.status('c').route,'fallback')
- now+=CONVERSATION_WINDOW_MS;await gate.shouldReply('c',follow,companion,signal());assert.equal(gate.status('c').route,'fallback');assert.equal(calls,4)
+ now+=CONVERSATION_WINDOW_MS;await gate.shouldReply('c',follow,companion,signal());assert.equal(gate.status('c').route,'fallback');assert.equal(calls,5)
 })
 test('only delivery establishes continuity, redirect and explicit stopping close the correct thread',async()=>{
  const gate=new QqGroupAutonomy(forbidden,()=>context.now,unavailable)
@@ -50,17 +51,20 @@ test('only delivery establishes continuity, redirect and explicit stopping close
  const stop=input('不用回复了');gate.observe('c',stop);assert.equal(await gate.shouldReply('c',stop,companion,signal()),false)
  gate.replied('c',stop,'');await gate.shouldReply('c',follow,companion,signal());assert.equal(gate.status('c').route,'fallback')
 })
-test('uncertain semantics and outages fail open; only clear negative classifications reject new conversation',()=>{
- for(const semantic of [undefined,{label:'other',confidence:.6,margin:.3},{label:'close',confidence:.8,margin:.15},{label:'address',confidence:.8,margin:.5},{label:'engage',confidence:.8,margin:.5}]){
-  assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic}).reply,true)
+test('uncertain new group chatter stays quiet; direct requests and genuine continuations remain reachable',()=>{
+ for(const semantic of [undefined,{label:'other',confidence:.6,margin:.3},{label:'close',confidence:.8,margin:.15},{label:'engage',confidence:.5,margin:.2}]){
+  assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic}).reply,false)
+  assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic,recent:{at:context.now,text:'看什么'}}).reply,true)
  }
- for(const label of ['other','close','background'])assert.equal(scoreGroupReply(input('普通消息'),{...context,semantic:{label,confidence:.9,margin:.6}}).reply,false)
- assert.equal(scoreGroupReply(input('好的'),context).reply,false)
- assert.equal(scoreGroupReply(input('好的'),{...context,recent:{at:context.now,text:'你来了吗'}}).reply,true)
+ for(const label of ['address','engage'])assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic:{label,confidence:.8,margin:.5}}).reply,true)
+ for(const label of ['other','close','background'])for(const recent of [undefined,{at:context.now,text:'你好'}])assert.equal(scoreGroupReply(input('普通消息'),{...context,recent,semantic:{label,confidence:.9,margin:.6}}).reply,false)
+ assert.equal(scoreGroupReply(input('好的'),{...context,recent:{at:context.now,text:'你来了吗'}}).reply,false)
+ assert.equal(scoreGroupReply(input('不用回复了',{mentioned:true}),context).reply,false)
 })
-test('all admitted messages are evaluated even while classifier is unavailable; cancellation remains cancellation',async()=>{
+test('classifier outage does not admit every group line; explicit requests and cancellation remain intact',async()=>{
  const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{throw Error('service down')})
- assert.equal(await gate.shouldReply('c',input('我来了'),companion,signal()),true)
+ assert.equal(await gate.shouldReply('c',input('我来了'),companion,signal()),false)
+ assert.equal(await gate.shouldReply('c',input('小明帮我看看'),companion,signal()),true)
  const controller=new AbortController();controller.abort()
  await assert.rejects(gate.shouldReply('c',event,companion,controller.signal))
  const lateController=new AbortController(),late=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{lateController.abort();return undefined})

@@ -36,6 +36,7 @@ export function renderConversationTurn(card: CharacterCard | undefined, consecut
     !autonomous && consecutiveUserMessages > 1 ? `【本轮输入】对方连续发了 ${consecutiveUserMessages} 条消息，合并为本轮输入。` : '',
     card.exclusivePrompt?'':renderExpressionPreferences(card),
     card.exclusivePrompt?renderVoicePreference(card):'',
+    card.exclusivePrompt?renderStickerDeliveryPreference(card):'',
     !card.exclusivePrompt&&card.chatStyle?.trim() ? `【此伙伴的聊天偏好】\n${card.chatStyle.trim()}` : '',
   ].filter(Boolean).join('\n')
 }
@@ -43,7 +44,14 @@ export function renderConversationTurn(card: CharacterCard | undefined, consecut
 /** Stable transport settings, without selecting emotions, jokes, verbosity or sticker frequency. */
 export function renderVoicePreference(card?: CharacterCard): string {
   return card?.length==='short'&&card.shortVoiceReplies===true
-    ? '【用户选择的语音偏好】仅私聊短句优先语音，长句用文字。群聊不应用“尽量语音”偏好，默认文字，不因这项设置自行改用语音；群聊明确需要语音时仍可调用已授权语音能力。每条是半句到两句的简短口语时，尽量使用当前渠道已配置且已授权的语音工具，直接合成当前人物写好的台词；较长解释、链接、代码、清单和需要回看的内容用文字或附件，不为凑语音把长内容拆成许多语音条。partner_chat_say 和 partner_chat_reply 默认 delivery=auto，自动按此偏好使用当前渠道已选音色，无需先发文字再另找语音工具；不猜音色。当前明确要求文字、安静或需要回看的内容设 delivery=text；原文使用 preserveText。语音未配置或明确失败可改文字，发送结果未知则先核对，不能重复发送。messages 已分好的多条短句会依次发成独立语音，不拼成一条；仍想继续说时用 continueTurn:true 或 partner_chat_say。成功语音不再复述同义文字。任务前需要登记动作时仍先按任务工具约定处理，不绕过前置回执。'
+    ? '【用户选择的语音偏好】先按人物与场景选择表达形式；这项偏好只决定口语用语音还是文字，不要求每次都说话或取代表情包。仅私聊短句优先语音，长句用文字。群聊不应用“尽量语音”偏好，默认文字，不因这项设置自行改用语音；群聊明确需要语音时仍可调用已授权语音能力。已选择用话表达且每条是半句到两句的简短口语时，尽量使用当前渠道已配置且已授权的语音工具，直接合成当前人物写好的台词；较长解释、链接、代码、清单和需要回看的内容用文字或附件，不为凑语音把长内容拆成许多语音条。partner_chat_say 和 partner_chat_reply 默认 delivery=auto，自动按此偏好使用当前渠道已选音色，无需先发文字再另找语音工具；不猜音色。当前明确要求文字、安静或需要回看的内容设 delivery=text；原文使用 preserveText。语音未配置或明确失败可改文字，发送结果未知则先核对，不能重复发送。messages 已分好的多条短句会依次发成独立语音，不拼成一条；仍想继续说时用 continueTurn:true 或 partner_chat_say。成功语音不再复述同义文字。任务前需要登记动作时仍先按任务工具约定处理，不绕过前置回执。'
+    : ''
+}
+
+/** Keep enabled media operations available in exclusive-persona mode, without prescribing a persona or frequency. */
+export function renderStickerDeliveryPreference(card?: CharacterCard): string {
+  return card?.enabled&&card.stickersEnabled
+    ? '【图片表情投递】表情包已开启。先按当前人物与场景决定用话还是图片表情，短句语音偏好只转换已经选择说出口的话，不取代图片表达。无需等对方索要表情；是否使用仍由当前人物决定，不设每轮或每隔几轮必发。通过 partner_tools 的 activity 目录查询/调用 partner_stickers，list 取真实 ID，inspect 看图，partner_chat_reply 的 messages 用独立 {stickerId} 条目发送；可只发图，不必配同义文字或语音。关键词无结果可省略 query 浏览收藏，不能把没搜到当成库里没有。想用语音再配图时，先用 continueTurn:true 接话再发图，勿提前结束。'
     : ''
 }
 
@@ -58,7 +66,7 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
       ? '分段回复已开启：messages 的每个 text 条目是一条独立消息；换行不等于独立投递。' + (usesShortDeliveryPolicy(card) ? SEGMENTED_CHAT_GUIDANCE : '条数由内容决定，无最低条数要求。')
       : '分段回复未开启：文字只用一条，表情可独立一条。',
     card.stickersEnabled
-      ? '表情包已开启：partner_stickers 通过 partner_tools 的 activity（自主活动）目录查询和调用，list 默认查图片表情包，省略 query 浏览收藏，inspect 预览；partner_chat_reply 使用查询返回的 stickerId 发送，每次最多两张。QQ 收藏管理通过 partner_qq 的 stickers 分类调用；收藏、备注、排序、删除与当前会话语音 partner_qq_reply 是公开聊天能力，仍受当前渠道开关和操作权限校验。收藏与发送是不同操作，文字承诺不代表执行成功。人格里的图片表情包偏好对应真实图片，颜文字和 QQ 小黄脸是另外的表达方式；按人格和当前场景选择；人物偏好图片表情时，把贴切的收藏图当作实际接话方式，而不只在自主活动里翻看。一个表情能表达时可只发图，不先写一段同义解释；查询失败或没合适的再用文字。'
+      ? renderStickerDeliveryPreference(card)+' 每次最多两张；人物里的图片表情包偏好对应真实图片，不用颜文字或 QQ 小黄脸代替。收藏、备注、排序和删除通过 partner_qq 的 stickers 分类，属于公开聊天能力，仍受当前渠道开关和权限校验；收藏与发送是不同操作，承诺不算执行。'
       : '表情包未开启：不查找或提交表情。',
     '内部任务和心跳使用各自任务协议，不调用聊天终结工具。',
   ].join('\n')

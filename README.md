@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/%40lemoncat7%2Fdsh-partner)](https://www.npmjs.com/package/@lemoncat7/dsh-partner)
 
-当前版本：[2.25.0 更新说明](docs/releases/2.25.0.md)。
+当前版本：[2.25.9 更新说明](docs/releases/2.25.9.md)。
 
 ## 功能
 
@@ -19,7 +19,7 @@
 
 ## 安装
 
-当前插件版本 **2.25.0**，支持 DeepSeek Harness **0.2.2-rc.1**（宿主仍为 RC），需要 Node.js **>=24.9.0**。其他宿主版本请先查阅[兼容说明](docs/compatibility-0.2.2-rc.1.md)；此版本不适用于旧版宿主。
+当前版本 **2.25.11**，支持 DeepSeek Harness **0.2.2-rc.1 / 0.2.2-rc.2**，需要 Node.js **>=24.9.0**。rc2 隔离验证结果见[兼容说明](docs/compatibility-0.2.2-rc.2.md)。本版制品包含上述兼容声明。
 
 ```bash
 dsh plugin --profile web add @lemoncat7/dsh-partner@latest
@@ -55,6 +55,6 @@ QQ 接入说明见 [QQ 渠道（SnowLuma / OneBot v11）](docs/qq-channel.md)：
 短句接话在中途发言、工具前告知与最终答复共用篇幅提醒；每阶段每次输入最多提醒一次，明确要求详细/原文可展开，不截断正文。人物口吻继续来自角色配置，不内置年龄、称呼或口头禅。详见 [版本说明](docs/releases/2.23.38.md)。
 
 
-## DSH 0.2.2-rc.1
+## DSH 0.2.2 兼容性
 
-2.24.0-rc.9 支持 DSH 0.2.2-rc.1，要求 Node.js >=24.9.0。[兼容说明](docs/compatibility-0.2.2-rc.1.md)。
+当前版本 **2.25.11**，支持 DeepSeek Harness **0.2.2-rc.1 / 0.2.2-rc.2**，需要 Node.js **>=24.9.0**。rc2 隔离验证结果见[兼容说明](docs/compatibility-0.2.2-rc.2.md)。本版制品包含上述兼容声明。

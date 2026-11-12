@@ -23,33 +23,29 @@ function directAddress(text:string,name:string):boolean {
  const tail=text.slice(name.length)
  return !tail||/^[\s,，:：!！?？、]/u.test(tail)||/^(?:你|人呢|在吗|在不在|出来|来一下|帮我|帮忙|能不能|可以|会不会)/u.test(tail)
 }
-/** Strong routing facts run before semantics. No random draw in a live conversation. */
+/** Strong routing facts run before semantics; recent conversation is context, not a promise to answer every line. */
 export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore|undefined {
  const text=event.text.trim(),group=event.qqGroup
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string):ReplyScore=>({reply,route,score:reply?100:0,probability:reply?1:0,reasons:[reason]})
+ if(conversationEnded(text))return decide(false,'closing','用户明确结束或暂停接话')
  if(group?.mentioned)return decide(true,'direct','明确 @ 伙伴')
  if(group?.replyTo==='self')return decide(true,'direct','引用伙伴已确认发送的消息')
  if(group?.otherMention||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
- if(conversationEnded(text))return decide(false,'closing','用户明确结束或暂停接话')
  if(!group?.hasReply&&directAddress(text,context.name.trim()))return decide(true,'direct','直接叫到角色名字')
  if(context.owner&&!group?.hasReply&&(context.addresses??[]).some(name=>directAddress(text,name)))return decide(true,'direct','归属账号使用关系称呼呼唤')
- // A successful delivered reply establishes one speaker's thread; another speaker does not erase it.
- if(activeConversation(context))return decide(true,'continuation','接续与此人的对话，不逐条抽签')
+ if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
  return undefined
 }
 export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore {
  const routed=routeGroupReply(event,context);if(routed)return routed
  const text=event.text.trim(),semantic=context.semantic
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
- // Closing acknowledgements only suppress a NEW conversation, never an ongoing exchange.
- if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','独立确认语，没有正在接续的对话')
  if(semantic){
   const score=Math.round(semantic.confidence*100)
-  if(['address','engage'].includes(semantic.label)&&semantic.confidence>=.38)return decide(true,'semantic','本地语义识别为呼唤或交流',score)
-  // An uncertain classification must never become a hard rejection. Guests also get this fallback.
+  if(['address','engage'].includes(semantic.label)&&semantic.confidence>=.65&&semantic.margin>=.15)return decide(true,'semantic','本地语义识别为呼唤或交流',score)
   if(semantic.confidence>=.72&&semantic.margin>=.35&&['other','close','background'].includes(semantic.label))return decide(false,'semantic',`本地语义明确识别为 ${semantic.label}`,score)
  }
- if(event.media?.length)return decide(true,'fallback','附件交给回复模型结合上下文判断')
- if(text)return decide(true,'fallback',semantic?'语义归属不确定，交给回复模型判断':'本地语义暂不可用，保留消息进入回复流程')
+ if(activeConversation(context)&&(text||event.media?.length))return decide(true,'continuation','结合正在进行的对话判断是否需要接话，不强制逐条回答')
+ if(text||event.media?.length)return decide(false,'fallback',semantic?'没有明确接话依据，继续旁听':'本地语义暂不可用且未被呼唤，继续旁听')
  return decide(false,'fallback','空消息')
 }

@@ -1,3 +1,5 @@
+import {qqSettings} from './channels/qq/settings.js'
+import {renderStickerCandidates} from './chat/sticker-context.js'
 import {TtsService} from './voice/service.js'
 import {TtsCredentials} from './voice/credentials.js'
 import {voiceReplyTool} from './voice/tool.js'
@@ -169,7 +171,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     executor.setMcpTools(id => mcp.definitions(id))
     const channelActivities=createChannelActivities((provider,error)=>ctx.logger.warn(`dsh-partner activity provider ${provider}: ${String(error)}`))
     ctx.provide('dshPartnerChannelActivities',channelActivities)
-    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities)
+    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone)
     const sleep = new SleepService(ctx, store, memory, { busy: (id, exceptSessionId) => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation' && (!exceptSessionId || a.sessionId !== exceptSessionId)), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
     agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
@@ -208,6 +210,16 @@ export function apply(context: Context, config: PartnerConfig): void {
       qqCatalogs.set(key,{at:Date.now(),faces});if(qqCatalogs.size>100)qqCatalogs.delete(qqCatalogs.keys().next().value!)
       try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
     }))
+    agents.setStickerContext(async(route,query,signal)=>{
+      const state=store.snapshot(),channel=state.channels.find(c=>c.id===route.channelId&&c.enabled&&c.companionId===route.companionId)
+      if(channel?.platform!=='qq'||!qqSettings(channel.qq).imagesEnabled)return ''
+      const scoped=AbortSignal.any([signal,AbortSignal.timeout(1500)])
+      // Directory failure must not block chat. Existing QQ catalogue cache coalesces refreshes.
+      let abort:()=>void=()=>{}
+      const timeout=new Promise<never>((_,reject)=>{abort=()=>reject(scoped.reason);scoped.addEventListener('abort',abort,{once:true});if(scoped.aborted)abort()})
+      try {return renderStickerCandidates(await Promise.race([stickerAdapters.forRoute(route,state.channels).list(route.companionId,'',scoped,'image'),timeout]),query)}
+      finally {scoped.removeEventListener('abort',abort)}
+    })
     const bilibili = new BilibiliService(store)
     composer.setChatToolFactory(id => [voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))

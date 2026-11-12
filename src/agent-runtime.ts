@@ -1,4 +1,6 @@
+import {renderConversationTime} from './character/conversation-time.js'
 import {taskFollowup,renderTaskFollowup} from './chat/task-followup.js'
+import {pendingGroupInput,GROUP_INPUT_PENDING} from './channels/qq/pending-input.js'
 import {sendPreferredVoice} from './chat/preferred-voice.js'
 import { nativePresentation } from './compat/native-presentation.js'
 import { renderHabits, habitScope } from './character/habits.js'
@@ -201,6 +203,7 @@ export class PartnerAgentRuntime {
     private readonly concerns?: PartnerConcernStore,
     private readonly composer?: PartnerAgentComposer,
     private readonly channelActivities:ChannelActivityRegistry=createChannelActivities(),
+    private readonly timeZone:string='Asia/Shanghai',
   ) {
     this.configurations = new SessionConfigurationIndex(store)
     const preparations:Array<()=>void>=[]
@@ -1048,8 +1051,11 @@ export class PartnerAgentRuntime {
     return presentationChanged
   }
 
+  private stickerContext?: (route:ChannelSession,query:string,signal:AbortSignal)=>Promise<string>
+  setStickerContext(provider:(route:ChannelSession,query:string,signal:AbortSignal)=>Promise<string>):void {this.stickerContext=provider}
   private readonly replyPresentations = new Map<Agent, () => void>()
   private readonly contextRevisions = new WeakMap<Agent, string>()
+  private readonly admittedInputTimes = new WeakMap<UserMessage,number>()
   private readonly admittedInputs = new WeakMap<Agent, readonly UserMessage[]>()
 
   /** Projection only: the host commits admitted input after prompt preparation. */
@@ -1059,8 +1065,13 @@ export class PartnerAgentRuntime {
     if (!pending.length) return events
     const committed = new Set(events.flatMap(e => e.type === 'user/message' ? [e.data.id] : []))
     return [...events, ...pending.filter(m => !committed.has(m.id)).map((data, index) => ({
-      type: 'user/message' as const, data, seq: (agent.session.seq + index + 1) as SessionEvent['seq'], time: Date.now(), surfaceOp: 'append' as const,
+      type: 'user/message' as const, data, seq: (agent.session.seq + index + 1) as SessionEvent['seq'], time: this.admittedInputTime(data), surfaceOp: 'append' as const,
     }))]
+  }
+  private admittedInputTime(message:UserMessage):number {
+    let at=this.admittedInputTimes.get(message)
+    if(at===undefined){at=Date.now();this.admittedInputTimes.set(message,at)}
+    return at
   }
   private async prepareConversationContext(agent: Agent, signal: AbortSignal): Promise<boolean> {
     const config = this.configurations.forSession(agent.session.id)
@@ -1075,12 +1086,6 @@ export class PartnerAgentRuntime {
     const messages = [...committedMessages, ...(this.admittedInputs?.get(agent) ?? []).filter(m => !committedIds.has(m.id))]
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
     const query = last && last.role === 'user' ? conversationRecallQuery(textContent(last.content), !!relationEvents) : ''
-    if (!identityRelation && !relationshipTextForIdentity(companion) && (!this.memory || !companion.automation.memory.enabled) && !companion.characterCard?.enabled && !renderSleepContext(companion, route.id) && !personaReferenceRequested(query)) {
-      this.characterContexts.get(agent.session.id)?.()
-      this.characterContexts.delete(agent.session.id)
-      this.contextRevisions.delete(agent)
-      return false
-    }
     const events=relationEvents ?? this.inputEvents(agent)
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
@@ -1090,7 +1095,10 @@ export class PartnerAgentRuntime {
     const replyContinuity = renderReplyContinuity(agent.session.id, events, state.sessions)
     const habitOrigin=questionOrigin(agent.session.id,events,state.sessions)??state.sessions.find(r=>r.kind==='local'&&r.sessionId===agent.session.id&&r.companionId===companion.id)
     const habitContext=renderHabits(companion,habitOrigin?habitScope(habitOrigin):undefined)
-    const revision = `${habitContext}:${createHash('sha256').update(replyContinuity+taskContext).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
+    const timeContext=renderConversationTime(agent.session.id,events,state.sessions,this.timeZone)
+    const stickerRoute=autonomous&&origin?.type==='user/message'?state.sessions.find(r=>r.sessionId===agent.session.id&&r.idleContactState?.messageId===origin.data.id):questionOrigin(agent.session.id,events,state.sessions)
+    const stickerContext=stickerRoute&&access.sendTools&&companion.characterCard?.enabled&&companion.characterCard.stickersEnabled===true?await this.stickerContext?.(stickerRoute,query,signal).catch(()=> '')??'':''
+    const revision = `${stickerContext}:${timeContext}:${habitContext}:${createHash('sha256').update(replyContinuity+taskContext).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
     if (this.contextRevisions.get(agent) === revision) return false
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
@@ -1107,6 +1115,8 @@ export class PartnerAgentRuntime {
       renderIdentityRelationship(companion, identityRelation ? { channel: 'qq', matched: identityRelation.matched } : { channel: 'default' }),
       renderAffection(companion,affectionAudience),
       habitContext,
+      timeContext,
+      stickerContext,
       renderActivityJournal(activityJournalRecall(state.companions?.find(c=>c.id===companion.id)??companion,agent.session.id,affectionAudience&&!questionOrigin(agent.session.id,events,state.sessions)?.userId.startsWith('group:'),agent.session.snapshotEvents?.()??[],3)),
       renderCharacterContext(companion.characterCard, query, relationshipAllowed ? story : undefined),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
@@ -1315,6 +1325,7 @@ export class PartnerAgentRuntime {
     const detachCompletionTools=agent.ctx.on('tools/pre-execute',async(exec,next)=>{
       const decision=await next()
       if(exec.agent!==agent||decision.kind!=='allow')return decision
+      if(pendingGroupInput(this.store.snapshot(),agent,session.id))return {kind:'deny',reason:GROUP_INPUT_PENDING}
       const reason=completion.deny(exec.name,exec.arguments)
       return reason?{kind:'deny',reason}:decision
     })
