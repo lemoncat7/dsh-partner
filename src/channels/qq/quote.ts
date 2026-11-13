@@ -1,6 +1,6 @@
 import type {DirectMessage} from '../direct/transport.js'
 import type {DirectMedia} from '../direct/media.js'
-import {qqId} from './message.js'
+import {qqId,qqMediaPart} from './message.js'
 
 export interface QqQuote {id:string;text:string;media:DirectMedia[];senderId?:string}
 /** Resolve only one structured reply, within the current account's conversation.
@@ -21,14 +21,14 @@ export async function resolveQqQuote(event:DirectMessage,accountId:string,read:(
   else if(raw.message_type!=='private'||!(sender===event.sender&&(raw.target_id===undefined||String(raw.target_id)===accountId)||sender===accountId&&String(raw.target_id)===event.sender)){unavailable();return}
   const text:string[]=[],media:DirectMedia[]=[]
   if(typeof raw.message==='string')text.push(raw.message.slice(0,4000))
-  else if(Array.isArray(raw.message))for(const part of raw.message.slice(0,64)){
+  else if(Array.isArray(raw.message))for(const [index,part] of raw.message.slice(0,64).entries()){
    const d=part?.data??{}
    if(part?.type==='text'&&typeof d.text==='string')text.push(d.text.slice(0,4000))
    else if(part?.type==='face')text.push(`[QQ 表情 ${String(d.id??'').slice(0,20)}]`)
    else if(part?.type==='at')text.push(`[@${String(d.qq??'').slice(0,20)}]`)
    else if(['image','record','video','file'].includes(part?.type)){
     text.push(`[引用${({image:'图片',record:'语音',video:'视频',file:'文件'} as Record<string,string>)[part.type]}]`)
-    if(media.length<4&&typeof d.url==='string')media.push({source:d.url,...(typeof d.name==='string'?{name:d.name}:{}),...(typeof d.file_size==='number'?{size:d.file_size}:{})})
+    if(media.length<4)media.push(qqMediaPart(part,{messageId:number,index,senderId:sender})!)
    }else if(part?.type==='reply')text.push('[原消息另含引用，未展开]')
   }
   if(!text.length&&!media.length)text.push('[原消息没有可展示的文字或附件]')

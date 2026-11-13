@@ -93,3 +93,13 @@ test('rejected empty end and directory calls are reply control, not submitted wo
  assert.match(f.guard.deny('partner_chat_say',{text:'再画一次',beforeTools:true}),/不能重复/)
  for(const name of ['partner_agreement','partner_channel_access','partner_stickers'])assert.equal(replyCompletionState([start(),user(),call(name,{action:'list'}),answer('')]).phase,'execute')
 })
+
+
+test('MCP discovery permits execution recovery, but an actual MCP call cannot replay',()=>{
+ const events=[start(),user(),call('partner_mcp',{action:'describe',server:'doc',tool:'read'}),result({parameters:{}}),answer('')],f=fixture(events)
+ assert.equal(replyCompletionState(events).phase,'execute');f.stop()
+ assert.equal(f.guard.deny('partner_mcp',{action:'call',server:'doc',tool:'read'}),undefined)
+ events.push(call('partner_mcp',{action:'call',server:'doc',tool:'read'},'work'),result({},'work'),answer(''));f.stop()
+ assert.match(f.guard.deny('partner_mcp',{action:'call',server:'doc',tool:'read'}),/不能重复/)
+ assert.equal(f.guard.deny('partner_mcp',{action:'list'}),undefined)
+})

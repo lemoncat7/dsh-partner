@@ -270,3 +270,49 @@ test('API failure preserves safe protocol diagnostics and does not reflect serve
  const c=new OneBotConnection(s.url,'');t.after(()=>c.close())
  await assert.rejects(c.call('send_poke',{}),error=>{assert.match(error.message,/OIDB 1002.*0xed3_1.*Process_Nudge failed/);assert.ok(!/secret|private.invalid/.test(error.message));return true})
 })
+
+test('group upload notices enter polling and share a receipt with the corresponding file-only message',async t=>{
+ const s=await server(t),policy={...groupSettings,autonomousGroupIds:[group]}
+ const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:'',qq:policy},'secret',{accountId:bot,peerId:''});t.after(()=>api.close())
+ await api.validate()
+ const notice={post_type:'notice',notice_type:'group_upload',self_id:Number(bot),group_id:Number(group),user_id:Number(peer),time:123456,file:{id:'file-id',name:'workflow.json',size:20,busid:102}}
+ s.connections[0].ws.send(JSON.stringify(notice))
+ const batch=await api.poll(undefined,AbortSignal.timeout(3000),100),m=batch.messages[0]
+ assert.equal(m.media[0].fileId,'file-id');assert.equal(m.media[0].name,'workflow.json');assert.equal(m.media[0].busid,102)
+ const duplicate=oneBotMessage({...event(),message_type:'group',group_id:Number(group),time:notice.time,message:[{type:'file',data:{file_id:'file-id',name:'workflow.json'}}]},bot,'',policy)
+ assert.equal(m.id,duplicate.id)
+ for(const extra of [{self_id:123},{group_id:123},{user_id:Number(bot)},{file:{id:''}},{time:0}])assert.equal(oneBotMessage({...notice,...extra},bot,'',policy),undefined)
+})
+
+test('missing file URLs resolve in their original authorized group or private chat and download real bytes',async t=>{
+ let revoked=false
+ const s=await server(t,r=>{
+  if(r.action==='get_group_list')return [{group_id:Number(group)}]
+  if(r.action==='get_group_member_info')return {group_id:Number(group),user_id:Number(peer)}
+  if(['get_group_file_url','get_private_file_url'].includes(r.action))return {url:'https://gzc-download.ftn.qq.com/workflow'}
+ }),downloads=[]
+ t.mock.method(globalThis,'fetch',async(url,options)=>{downloads.push({url:String(url),options});return new Response('{"nodes":[]}',{headers:{'content-type':'application/json'}})})
+ for(const isGroup of [false,true]){
+  const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:isGroup?`group:${group}`:peer,qq:groupSettings},'secret',{accountId:bot,peerId:isGroup?groupUser:peer});t.after(()=>api.close())
+  const m=oneBotMessage(isGroup?groupEvent({message:[{type:'at',data:{qq:bot}},{type:'file',data:{file_id:'f',file_hash:'h',name:'workflow.json',busid:102}}]}):event({message:[{type:'file',data:{file_id:'f',file_hash:'h',name:'workflow.json'}}]}),bot,'',groupSettings)
+  const result=await api.receiveAttachments(m,AbortSignal.timeout(3000),()=>!revoked)
+  assert.equal(result[0].name,'workflow.json');assert.equal(Buffer.from(result[0].data).toString(),'{"nodes":[]}')
+  const request=s.requests.findLast(r=>r.action===(isGroup?'get_group_file_url':'get_private_file_url'))
+  assert.equal(request.params.file_id,'f');assert.equal(request.params[isGroup?'group_id':'user_id'],Number(isGroup?group:peer))
+  if(!isGroup)assert.equal(request.params.file_hash,'h')
+ }
+ assert.equal(downloads.length,2);assert.ok(downloads.every(d=>d.options.headers===undefined&&d.options.redirect==='error'))
+})
+
+test('video URLs refresh from verified original messages; foreign rooms, arbitrary URLs and revoke are rejected',async t=>{
+ let mode='ok',downloads=0
+ const s=await server(t,r=>r.action==='get_msg'?{message_id:-123,message_type:'private',sender:{user_id:mode==='foreign'?11223344:Number(peer)},message:[{type:'video',data:{url:mode==='unsafe'?'http://127.0.0.1/secret':'https://multimedia.nt.qq.com.cn/video'}}]}:undefined)
+ t.mock.method(globalThis,'fetch',async()=>{downloads++;return new Response(Buffer.from('video-bytes'),{headers:{'content-type':'video/mp4'}})})
+ const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:peer,qq:groupSettings},'secret',{accountId:bot,peerId:peer});t.after(()=>api.close())
+ const m=oneBotMessage(event({message:[{type:'video',data:{url:''}}]}),bot)
+ const files=await api.receiveAttachments(m,AbortSignal.timeout(3000),()=>true)
+ assert.equal(files[0].kind,'file');assert.equal(files[0].name,'QQ视频.mp4');assert.equal(files[0].mediaType,'video/mp4');assert.equal(Buffer.from(files[0].data).toString(),'video-bytes')
+ for(const value of ['foreign','unsafe']){mode=value;await assert.rejects(api.receiveAttachments(m,AbortSignal.timeout(3000),()=>true))}
+ await assert.rejects(api.receiveAttachments(m,AbortSignal.timeout(3000),()=>false),/授权/)
+ assert.equal(downloads,1)
+})

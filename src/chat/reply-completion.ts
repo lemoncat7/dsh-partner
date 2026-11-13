@@ -18,7 +18,7 @@ function call(name:string,args:unknown):{name:string;args:Record<string,any>} {
   return {name,args:input}
 }
 function discovery(name:string,args:Record<string,any>):boolean {
-  return name==='partner_tools'&&['list','describe','load','unload'].includes(args.action)
+  return name==='partner_tools'&&['list','describe','load','unload'].includes(args.action)||name==='partner_mcp'&&['list','describe'].includes(args.action)
 }
 const replyControl=new Set(['partner_chat_progress','partner_chat_say','partner_chat_reply','partner_agreement','partner_channel_access','partner_stickers'])
 export interface ReplyCompletionState { userId:string; phase:'complete'|'execute'|'settle'; files:string[]; deliveries:string[] }

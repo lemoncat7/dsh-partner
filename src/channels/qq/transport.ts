@@ -1,6 +1,7 @@
 import { qqGroupPeer, qqSettings } from './settings.js'
 import { OneBotConnection, OneBotError } from './connection.js'
 import { oneBotMessage, qqId } from './message.js'
+import type {DirectMedia} from '../direct/media.js'
 import type { DirectBatch, DirectConfig, DirectMessage } from '../direct/transport.js'
 import { imageType, readOutboundMedia } from '../direct/media.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName, type PartnerInboundAttachment, type PartnerOutboundAttachment } from '../../channel-message.js'
@@ -130,7 +131,22 @@ export class OneBotTransport {
       if (!allowed()) throw Error('渠道或联系人授权已撤销')
       await this.recipient(message.sender, signal)
       if (ref.size !== undefined && (!Number.isSafeInteger(ref.size) || ref.size < 0 || ref.size > maxBytes - total)) throw Error('QQ 附件超过大小限制')
-      const response = await fetch(qqMediaUrl(ref.source), {signal, redirect:'error'})
+      let source=ref.source
+      if(!source&&ref.kind==='file'&&ref.fileId){
+        const group=qqGroupPeer(message.sender)
+        const resolved=await this.connection.call(group?'get_group_file_url':'get_private_file_url',group?{group_id:Number(group.groupId),file_id:ref.fileId,...(ref.busid!==undefined?{busid:ref.busid}:{})}:{user_id:Number(message.sender),file_id:ref.fileId,file_hash:ref.fileHash??''},signal)
+        if(!allowed())throw Error('渠道或联系人授权已撤销')
+        if(typeof resolved?.url!=='string'||!resolved.url)throw Error('QQ 文件下载地址暂不可用')
+        source=resolved.url
+      }
+      let refreshed=false
+      if(!source&&ref.qq&&ref.kind!=='file'){source=await this.refreshMedia(message,ref,signal,allowed);refreshed=true}
+      let response = await fetch(qqMediaUrl(source), {signal, redirect:'error'})
+      if([403,404].includes(response.status)&&ref.qq&&ref.kind!=='file'&&!refreshed){
+        await response.body?.cancel()
+        source=await this.refreshMedia(message,ref,signal,allowed)
+        response=await fetch(qqMediaUrl(source),{signal,redirect:'error'})
+      }
       if (!response.ok || !response.body || Number(response.headers.get('content-length')) > maxBytes - total) {
         await response.body?.cancel(); throw Error('QQ 附件无法下载或超过大小限制')
       }
@@ -143,8 +159,22 @@ export class OneBotTransport {
       if (!allowed()) throw Error('渠道或联系人授权已撤销')
       const data = Buffer.concat(chunks), type = imageType(data)
       const rawType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''
-      result.push({data, name:safeMediaName(ref.name ?? '', type ? 'QQ图片.'+type.split('/')[1] : 'QQ附件.bin'), kind:type?'image':'file', mediaType:type ?? (/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(rawType)?rawType:'application/octet-stream')})
+      const fallbackType=ref.kind==='video'?'video/mp4':'application/octet-stream'
+      result.push({data, name:safeMediaName(ref.name ?? '', type ? 'QQ图片.'+type.split('/')[1] : ref.kind==='video'?'QQ视频.mp4':'QQ附件.bin'), kind:type?'image':'file', mediaType:type ?? (/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(rawType)&&rawType!=='application/octet-stream'?rawType:fallbackType)})
     }
     return result
+  }
+
+  private async refreshMedia(message:DirectMessage,ref:DirectMedia,signal:AbortSignal,allowed:()=>boolean):Promise<string>{
+    if(!allowed())throw Error('渠道或联系人授权已撤销')
+    const origin=ref.qq!
+    const raw=await this.connection.call('get_msg',{message_id:origin.messageId},signal)
+    if(!allowed())throw Error('渠道或联系人授权已撤销')
+    const group=qqGroupPeer(message.sender),sender=qqId(raw?.sender?.user_id??raw?.user_id)
+    const sameRoom=group?raw?.message_type==='group'&&String(raw.group_id)===group.groupId:raw?.message_type==='private'&&(sender===message.sender&&(raw.target_id===undefined||String(raw.target_id)===this.expected?.accountId)||sender===this.expected?.accountId&&String(raw.target_id)===message.sender)
+    if(String(raw?.message_id)!==String(origin.messageId)||sender!==origin.senderId||!sameRoom)throw Error('无法核对附件原消息所属会话')
+    const segment=raw.message?.[origin.index]
+    if(segment?.type!==ref.kind||typeof segment.data?.url!=='string'||!segment.data.url)throw Error('QQ 原消息未返回可下载附件地址')
+    return segment.data.url
   }
 }

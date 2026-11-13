@@ -1,7 +1,7 @@
 services:
   partner-attention:
     build: .
-    image: dsh-partner-attention:2.21.3
+    image: dsh-partner-attention:2.26.3
     restart: unless-stopped
     init: true
     cpus: 1.0

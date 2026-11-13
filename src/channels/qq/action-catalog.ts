@@ -60,7 +60,7 @@ export const QQ_ACTIONS:readonly QqAction[] = [
   "id": "fetch_custom_face_detail",
   "category": "stickers",
   "title": "获取自定义表情详情",
-  "description": "获取自定义表情详情",
+  "description": "分页获取收藏的 emoji_id、stickerId 和标签；顶层 offset/limit 翻页（默认12，最多24），params.count 为上游读取范围（最多200）。预览图片用 partner_stickers inspect。",
   "effect": "read",
   "schema": {
     "type": "object",
@@ -117,7 +117,7 @@ export const QQ_ACTIONS:readonly QqAction[] = [
         "type": "string",
         "default": "",
         "maxLength": 80,
-        "description": "简短名称和情绪关键词，例如 得意 开心 嘿嘿，便于以后按场景检索"
+        "description": "简短情绪或场景标签，用空格或逗号分隔，例如 得意 开心 嘿嘿；会自动更新上下文标签，便于按需检索"
       }
     },
     "required": [
@@ -1234,7 +1234,7 @@ export const QQ_ACTIONS:readonly QqAction[] = [
     "id": "get_group_member_info",
     "category": "groups",
     "title": "获取群成员信息",
-    "description": "获取群成员信息",
+    "description": "获取群成员信息；level 是成员活跃等级，title 是群主设置的成员专属头衔，两者不同。此接口不返回整套群等级称号配置。",
     "effect": "read",
     "schema": {
       "type": "object",
@@ -1451,8 +1451,8 @@ export const QQ_ACTIONS:readonly QqAction[] = [
   {
     "id": "set_group_special_title",
     "category": "groups",
-    "title": "设置群头衔",
-    "description": "设置群头衔",
+    "title": "设置成员专属头衔",
+    "description": "给指定群成员设置专属头衔，special_title 为空字符串时清除；需要当前 QQ 账号具备群主权限，以平台返回为准。这不是群活跃等级称号，不能用来修改全群按等级显示的称号。修改等级称号需要渠道另行提供对应接口，不能用此操作代替。",
     "effect": "write",
     "schema": {
       "type": "object",

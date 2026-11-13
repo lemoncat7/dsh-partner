@@ -75,3 +75,10 @@ test('image publication requires explicit capability, login, and nonempty images
  f.c.accountId='123';f.c.bilibili={privateActions:true,enabledActions:['image_dynamic']};
  await assert.rejects(f.service.call(f.c.id,'image_dynamic',{image_paths:[]},signal(),()=>{}));assert.equal(f.calls.length,0);
 });
+
+test('activity catalogue separates public discovery from logged-in interaction and revocation removes private metadata',()=>{
+ const f=fixture();f.c.accountId='123';f.c.bilibili={privateActions:true,autonomousActions:true,enabledActions:['search','share_link','dynamic','comment']}
+ const list=()=>biliActivityProvider.discover({channel:f.c,sessions:[],companionId:'c'})
+ for(const a of list())for(const op of a.operations)assert.equal(a.visibility,['search','share_link'].includes(op)?'public':'private')
+ f.c.bilibili.privateActions=false;assert.ok(list().every(a=>a.visibility==='public'))
+})

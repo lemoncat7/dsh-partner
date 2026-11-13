@@ -1725,3 +1725,6 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .dsh-partner-channel-category::after{content:"";height:1px;background:var(--partner-separator);flex:1;min-width:24px}
 .dsh-partner-channel-category:first-child{margin-top:0}
 .dsh-partner-tts-service{flex-wrap:wrap}
+
+.dsh-partner-browser-hint { color: var(--partner-text-secondary); font-size: 13px; line-height: 1.7; }
+.dsh-partner-browser-success { color: var(--partner-success); font-size: 13px; line-height: 1.6; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--partner-success) 8%, transparent); }

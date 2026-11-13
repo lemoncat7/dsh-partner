@@ -84,7 +84,7 @@ test('guest conversation cannot indirectly create or cancel executable concerns 
 
 test('default adapter preserves local and other channel tools, QQ uses its own account policy',()=>{
  const f=fixture();f.send(f.guest)
- assert.deepEqual(resolveToolAccess({agent:f.agent,state:f.state}).allowedTools,['partner_send_attachment','partner_bilibili','partner_tools','partner_channel_access','partner_chat_reply','partner_stickers','partner_qq','partner_voice_reply','partner_qq_reply','partner_memory_recall','partner_agreement','partner_chat_say','partner_chat_progress'])
+ assert.deepEqual(resolveToolAccess({agent:f.agent,state:f.state}).allowedTools,['partner_browser','partner_send_attachment','partner_bilibili','partner_tools','partner_channel_access','partner_chat_reply','partner_stickers','partner_qq','partner_voice_reply','partner_qq_reply','partner_memory_recall','partner_agreement','partner_chat_say','partner_chat_progress'])
  for(const platform of ['weixin','matrix','mattermost']){f.state.channels[0].platform=platform;assert.equal(resolveToolAccess({agent:f.agent,state:f.state}).sendTools,true)}
  f.state.channels=[];assert.equal(resolveToolAccess({agent:f.agent,state:f.state}).sendTools,true)
 })

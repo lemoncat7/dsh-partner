@@ -328,3 +328,31 @@ test('public group artifact delivery is discoverable and callable, with live too
  assert.equal((await f.call('partner_send_attachment')).value.dispatch.isError,false);assert.equal(sent,1)
  allowed=false;assert.equal((await f.call('partner_send_attachment')).isError,true);assert.equal(sent,1)
 })
+
+test('public browser is discoverable and callable from guest group conversations, with live tool revocation preserved',async t=>{
+ const f=fixture(t);let sent=0,allowed=true
+ f.state.channels=[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
+ const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'发来生成的图片'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ f.state.sessions.push({id:'guest',kind:'channel',companionId:'c',sessionId:f.agent.session.id,channelId:'qq',userId:'group:99887766:22334455',inboundMessageIds:[m.id]})
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_browser',async()=>{sent++;return {channel:'sent'}}),allowed:()=>allowed}]))
+ t.after(installToolAccessGuard(f.root.tools,f.store))
+ assert.equal((await f.invoke('partner_tools',{action:'describe',name:'partner_browser'})).isError,false)
+ assert.equal((await f.call('partner_browser')).value.dispatch.isError,false);assert.equal(sent,1)
+ allowed=false;assert.equal((await f.call('partner_browser')).isError,true);assert.equal(sent,1)
+})
+
+test('platform aliases resolve without dumping MCP or unrelated tools; targeted operation describe uses original checks',async t=>{
+ const {bilibiliTool}=await import('../lib/channels/bilibili/tools.js')
+ const f=fixture(t);let calls=0
+ const channel={id:'b',companionId:'c',platform:'bilibili',enabled:true,bilibili:{autonomousActions:true,privateActions:false,enabledActions:['search']}}
+ f.state.channels=[channel]
+ const tool=bilibiliTool('c',f.store,{call:async()=>{calls++;throw Error('must not execute during describe')}})
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool,allowed:()=>true},{tool:{...definition('partner_qq'),description:'QQ API'},allowed:()=>true}]))
+ for(const query of ['b站','B 站','哔哩哔哩','bilibili','视频字幕'])assert.equal((await f.invoke('partner_tools',{action:'list',query})).value.tools[0].name,'partner_bilibili')
+ for(const query of ['QQ空间','qzone','说说'])assert.equal((await f.invoke('partner_tools',{action:'list',query})).value.tools[0].name,'partner_qq')
+ const r=await f.invoke('partner_tools',{action:'describe',name:'partner_bilibili',operation:'search'})
+ assert.equal(r.value.dispatch.isError,false);assert.equal(r.value.dispatch.value.channelId,'b');assert.deepEqual(r.value.dispatch.value.schema.required,['keyword']);assert.equal(calls,0)
+ channel.bilibili.enabledActions=[]
+ const denied=await f.invoke('partner_tools',{action:'describe',name:'partner_bilibili',operation:'search'});assert.equal(denied.value.dispatch.isError,true);assert.equal(calls,0)
+ assert.equal((await f.invoke('partner_tools',{action:'call',name:'partner_bilibili',operation:'search',argumentsJson:'{}'})).isError,true)
+})

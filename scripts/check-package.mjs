@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Script } from 'node:vm'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,13 +16,20 @@ const { stdout } = await exec('tar', ['-tzf', archive], { maxBuffer: 8 * 1024 * 
 const paths = stdout.trim().split('\n')
 assert.ok(paths.every(path => path.startsWith('package/') && !path.split('/').includes('..')))
 assert.ok(!paths.some(path => path.startsWith('package/resources/skills/novel-game-creation/upstream/examples/')), 'Optional example projects leaked into npm package')
-for (const file of ['lib/client.js', 'lib/client.pendant.js', 'lib/pendant-renderer.js', 'lib/index.js', 'cordis.patch.yml']) {
+for (const file of ['lib/client.browser.js', 'lib/browser/service.js', 'lib/browser/cdp.js', 'lib/client.js', 'lib/client.pendant.js', 'lib/pendant-renderer.js', 'lib/index.js', 'cordis.patch.yml']) {
   assert.ok(paths.includes('package/' + file), `Missing runtime file: ${file}`)
 }
 const root = await mkdtemp(join(tmpdir(), 'partner-package-check-'))
 try {
   await exec('tar', ['-xzf', archive, '-C', root])
   const packageRoot = join(root, 'package')
+  // Host loads these as classic scripts. A later tsc run can silently overwrite
+  // the bundled entry with ESM while leaving every expected filename present.
+  for (const file of (await readdir(join(packageRoot,'lib'))).filter(name => /^client(?:\.[\w-]+)*\.js$/.test(name))) {
+    const source=await readFile(join(packageRoot,'lib',file),'utf8')
+    new Script(source,{filename:file})
+    assert.ok(source.includes('window.__ModuleLoader__.load('), `Unbundled client asset: ${file}`)
+  }
   const { loadBuiltinResources } = await import(pathToFileURL(join(packageRoot, 'lib/skills/builtin-resources.js')).href)
   const { BUILTIN_SKILLS } = await import(pathToFileURL(join(packageRoot, 'lib/skills/builtin.js')).href)
   const bundles = [...new Set([...BUILTIN_SKILLS.values()].map(skill => skill.resourceBundle).filter(Boolean))].sort()

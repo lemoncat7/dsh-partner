@@ -30,9 +30,9 @@ export function collectActivityJournal(sessionId:string,events:readonly SessionE
       if(ok && (chat?.delivered===true || meta?.kind==='partner-attachment-delivered-v1')) entry.sharing='confirmed'
       else if(chat && !chat.silent && entry.sharing!=='confirmed') entry.sharing='pending'
       if(chat){const text=chat.parts.filter(p=>p.type==='text').map(p=>p.type==='text'?p.text:'').join(' ');if(text)entry.sharedText=text.slice(0,300)}
-      if(['partner_tools','partner_channel_access','partner_activity_finish'].includes(name))continue
+      if(['partner_tools','partner_mcp','partner_channel_access','partner_activity_finish'].includes(name))continue
       let label=name
-      try{const args=(typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments) as Record<string,unknown>;const operation=name==='partner_qq'&&args.action==='call'?args.operation:args.action;if(typeof operation==='string'&&/^[a-zA-Z0-9_-]{1,60}$/.test(operation))label+=':'+operation}catch{}
+      try{const args=(typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments) as Record<string,unknown>;const operation=['partner_qq','partner_bilibili'].includes(name)&&args.action==='call'?args.operation:args.action;if(typeof operation==='string'&&/^[a-zA-Z0-9_-]{1,60}$/.test(operation))label+=':'+operation}catch{}
       entry.tools.push({name:label.slice(0,100),ok})
       if(ok&&['write','write_file','edit','edit_file'].includes(name))try {
         const args=(typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments) as Record<string,unknown>,path=args.file_path??args.path
@@ -48,7 +48,14 @@ export function collectActivityJournal(sessionId:string,events:readonly SessionE
 }
 export function mergeActivityJournal(c:Companion,records:ActivityJournalEntry[]):boolean {
   const old=c.activityJournal??[],known=new Set(old.map(r=>r.sessionId+':'+r.id))
-  const repairs=records.filter(r=>old.some(o=>o.sessionId===r.sessionId&&o.id===r.id&&o.sharing===undefined));
+  // Repair operation labels from raw completed events, preserving later delivery receipts.
+  const repairs=records.flatMap(r=>{
+    const previous=old.find(o=>o.sessionId===r.sessionId&&o.id===r.id)
+    if(!previous)return []
+    if(previous.sharing===undefined)return [r]
+    if(JSON.stringify(previous.tools)!==JSON.stringify(r.tools))return [{...previous,tools:r.tools}]
+    return []
+  });
   const fresh=records.filter(r=>!known.has(r.sessionId+':'+r.id))
   if(!fresh.length&&!repairs.length)return false
   c.activityJournal=[...old.map(o=>repairs.find(r=>r.sessionId===o.sessionId&&r.id===o.id)??o),...fresh].sort((a,b)=>a.at-b.at).slice(-40)

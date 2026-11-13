@@ -24,5 +24,11 @@ export function qqFaceCatalog(value:unknown):QqFace[] {
 
 export function qqCustomCatalog(value:unknown):QqFace[] {
  if(!Array.isArray(value))return []
- return value.slice(0,200).filter(e=>typeof e?.emoji_id==='string'&&e.emoji_id.length>0&&e.emoji_id.length<=512&&!/[\x00-\x1f]/.test(e.emoji_id)).map((e,i)=>({kind:'custom',nativeId:e.emoji_id,id:createHash('sha256').update(e.emoji_id).digest('hex').slice(0,32),name:String(e.desc||`收藏表情 ${i+1}`).slice(0,80),category:'QQ 收藏表情',tags:e.desc?[String(e.desc).slice(0,80)]:[],...(typeof e.url==='string'&&validEmojiPreview(e.url)?{image:e.url}:{})}))
+ return value.slice(0,200).filter(e=>typeof e?.emoji_id==='string'&&e.emoji_id.length>0&&e.emoji_id.length<=512&&!/[\x00-\x1f]/.test(e.emoji_id)).map((e,i)=>({kind:'custom',nativeId:e.emoji_id,id:createHash('sha256').update(e.emoji_id).digest('hex').slice(0,32),name:String(e.desc||`收藏表情 ${i+1}`).slice(0,80),category:'QQ 收藏表情',tags:qqStickerTags(e.desc),...(typeof e.url==='string'&&validEmojiPreview(e.url)?{image:e.url}:{})}))
+}
+
+/** QQ stores user tags in desc. Accept existing whitespace/comma-separated notes. */
+export function qqStickerTags(value:unknown):string[] {
+ if(typeof value!=='string')return []
+ return [...new Set(value.slice(0,80).split(/[\s,，、;；|]+/u).map(t=>t.trim()).filter(t=>t&&!/^(?:https?:|www\.|qq-custom-|qq-face-)/i.test(t)&&!/[\x00-\x1f]/u.test(t)))]
 }

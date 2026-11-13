@@ -84,7 +84,7 @@ export class OneBotConnection {
             this.pending.delete(data.echo)
             if (data.status === 'ok' && data.retcode === 0) pending.resolve(data.data)
             else pending.reject(new OneBotApiError(data.retcode, data.wording ?? data.message))
-          } else if ((data.post_type === 'message' && ['private','group'].includes(data.message_type)) || (data.post_type === 'notice' && data.notice_type === 'notify' && data.sub_type === 'poke')) {
+          } else if ((data.post_type === 'message' && ['private','group'].includes(data.message_type)) || (data.post_type === 'notice' && (data.notice_type === 'group_upload' || data.notice_type === 'notify' && data.sub_type === 'poke'))) {
             if (this.events.length >= 500) {
               this.fault = new OneBotError('QQ 消息积压超过 500 条，请检查处理状态后重新启用渠道', false)
               socket.close(); this.wake?.(); return

@@ -60,3 +60,21 @@ test('blocked exit cannot invent provider rejection, use an old error or quote a
  assert.throws(()=>validateTaskStop([...events,error,user('new',8)],proof),/不存在/)
  assert.throws(()=>validateTaskStop([...events,{...error,data:{message:{toolCallId:'real',isError:false,content:[{type:'text',text:'success'}]}}}],{...proof,excerpt:'success'}),/不存在/)
 })
+
+
+test('MCP service discovery does not discharge declared work; completed call does',()=>{
+ const mcp=(action,id)=>({type:'tool/call',seq:5,data:{name:'partner_mcp',callId:id,arguments:JSON.stringify({action,server:'doc',tool:'read'})}})
+ const events=[start,user(),say(['partner_mcp']),mcp('list','list'),result('list'),mcp('describe','schema'),result('schema'),final]
+ assert.deepEqual(pendingActions(events),['partner_mcp'])
+ assert.equal(replyCompletionState(events).phase,'execute')
+ events.push(mcp('call','work'));assert.deepEqual(pendingActions(events),['partner_mcp'])
+ events.push(result('work'));assert.deepEqual(pendingActions(events),[])
+})
+
+
+test('platform shortcut parameter discovery cannot satisfy the promised platform action',()=>{
+ const events=[start,user(),say(['partner_bilibili']),{type:'tool/ptc-dispatch',seq:5,data:{name:'partner_bilibili',arguments:JSON.stringify({action:'describe',operation:'search'}),isError:false}}]
+ assert.deepEqual(pendingActions(events),['partner_bilibili'])
+ events.push({type:'tool/ptc-dispatch',seq:6,data:{name:'partner_bilibili',arguments:JSON.stringify({action:'call',operation:'search'}),isError:false}})
+ assert.deepEqual(pendingActions(events),[])
+})

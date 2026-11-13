@@ -35,7 +35,7 @@ export function pendingActions(events:readonly SessionEvent[]):string[] {
     if(e.type!=='tool/call'&&e.type!=='tool/ptc-dispatch')continue
     if(e.type==='tool/call'&&!finished.has(e.data.callId))continue
     const c=actualAction(e.data.name,e.data.arguments)
-    if(c.name==='partner_tools'||['partner_chat_say','partner_chat_reply','partner_chat_progress'].includes(c.name))continue
+    if(c.name==='partner_tools'||c.name==='partner_mcp'&&c.args.action!=='call'||['partner_bilibili','partner_qq'].includes(c.name)&&c.args.action==='describe'||['partner_chat_say','partner_chat_reply','partner_chat_progress'].includes(c.name))continue
     pending.delete(c.name)
     if(needsTaskPreamble(c.name,c.args))pending.delete('*')
   }

@@ -49,5 +49,5 @@ export function groupBurstEvent(events:readonly DirectMessage[],text:string):Dir
   const first=events[0]!
   if(!first.qqGroup)return first
   const self=events.find(e=>e.qqGroup?.replyTo==='self')
-  return {...first,text,qqGroup:{...first.qqGroup,mentioned:events.some(e=>e.qqGroup?.mentioned),...(self?{replyTo:'self' as const,hasReply:true}:{})}}
+  return {...first,text,media:events.flatMap(e=>e.media??[]),qqGroup:{...first.qqGroup,mentioned:events.some(e=>e.qqGroup?.mentioned),...(self?{replyTo:'self' as const,hasReply:true}:{})}}
 }

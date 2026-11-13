@@ -2,7 +2,7 @@ import type { DirectMessage } from '../direct/transport.js'
 import type { AttentionPrediction } from './attention-classifier.js'
 
 export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[]; route:'direct'|'continuation'|'semantic'|'fallback'|'other'|'closing'|'opportunity' }
-export interface ReplyScoreContext { name:string; owner:boolean; affection:number; recent?:{at:number;text:string}; now:number; seed:string; addresses?:readonly string[]; semantic?:AttentionPrediction; quickContinuation?:boolean; otherConversation?:boolean }
+export interface ReplyScoreContext { name:string; owner:boolean; affection:number; recent?:{at:number;text:string}; now:number; seed:string; addresses?:readonly string[]; semantic?:AttentionPrediction; quickContinuation?:boolean; otherConversation?:boolean; groupRecent?:{at:number;text:string} }
 const normalized=(text:string)=>text.slice(0,1200).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'').slice(0,160)
 export function topicSimilarity(left:string,right:string):number {
  const grams=(text:string)=>{const chars=Array.from(normalized(text)),out=new Set<string>();for(let i=1;i<chars.length;i++)out.add(chars[i-1]!+chars[i]!);return out}
@@ -11,6 +11,7 @@ export function topicSimilarity(left:string,right:string):number {
  return 2*common/(a.size+b.size)
 }
 export const CONVERSATION_WINDOW_MS=5*60_000
+export const GROUP_CONVERSATION_WINDOW_MS=3*60_000
 export function activeConversation(context:ReplyScoreContext):boolean {
  const age=context.recent?context.now-context.recent.at:Infinity
  return age>=0&&age<CONVERSATION_WINDOW_MS
@@ -33,8 +34,9 @@ export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  if(group?.otherMention||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
  if(!group?.hasReply&&directAddress(text,context.name.trim()))return decide(true,'direct','直接叫到角色名字')
  if(context.owner&&!group?.hasReply&&(context.addresses??[]).some(name=>directAddress(text,name)))return decide(true,'direct','归属账号使用关系称呼呼唤')
- if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
+ if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了|晚安|拜拜|下次聊|先走了)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
  if(!event.media?.length&&/^[\s\p{P}\p{S}]+$/u.test(text)&&!activeConversation(context))return decide(false,'fallback','孤立标点或符号，没有明确对话对象')
+ if(/(?:大家|各位|你们).{0,16}(?:觉得|怎么看|谁会|能不能|来看看|帮忙)|(?:有没有人|有人(?:知道|会|能|懂))/u.test(text))return decide(true,'opportunity','面向全群的询问或交流邀请，进入接话判断')
  if(context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员刚收到回复，连续补充直接接入当前对话')
  return undefined
 }
@@ -44,14 +46,24 @@ export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
  if(semantic){
   const score=Math.round(semantic.confidence*100)
-  if(['address','engage'].includes(semantic.label)&&semantic.confidence>=.65&&semantic.margin>=.15){
+  const groupAge=context.groupRecent?context.now-context.groupRecent.at:Infinity
+  const strongNegative=['other','close','background'].includes(semantic.label)&&semantic.confidence>=.72&&semantic.margin>=.35
+  if(groupAge>=0&&groupAge<GROUP_CONVERSATION_WINDOW_MS&&!strongNegative&&(semantic.contextSimilarity??0)>=.45){
+   return decide(true,'continuation','伙伴已参与本群话题，其他成员的相关补充按共同续聊处理',score)
+  }
+  const clear=semantic.confidence>=.65&&semantic.margin>=.15||semantic.confidence>=.58&&semantic.margin>=.2
+  const related=semantic.confidence>=.48&&semantic.margin>=.12&&(semantic.contextSimilarity??0)>=.4
+  if(['address','engage'].includes(semantic.label)&&(clear||related)){
    if(context.otherConversation&&!activeConversation(context)&&!/大家|各位|有没有人|有人(?:知道|会|能)|你们(?:觉得|怎么看)/u.test(text)){
     // A chance to join shared chatter, not an obligation to answer every participant.
     let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
-    const probability=.45,reply=(hash>>>0)/4294967296<probability
+    const probability=.65,reply=(hash>>>0)/4294967296<probability
     return {reply,route:'opportunity',score,probability,reasons:[reply?'本地语义发现可交流内容，选择进入自然接话判断':'有接话机会，本次选择旁听']}
    }
-   return decide(true,'semantic','本地语义识别为呼唤或交流',score)
+   return decide(true,'semantic',clear?'本地语义识别为呼唤或交流':'结合近期群聊话题，识别到接话机会',score)
+  }
+  if(['close','background'].includes(semantic.label)&&!(semantic.confidence>=.72&&semantic.margin>=.35)&&(semantic.contextSimilarity??0)>=.6){
+   return {reply:true,route:'opportunity',score,probability:1,reasons:['单句意图不确定，但与近期群聊高度相关，交给当前对话判断']}
   }
   if(semantic.confidence>=.72&&semantic.margin>=.35&&['other','close','background'].includes(semantic.label))return decide(false,'semantic',`本地语义明确识别为 ${semantic.label}`,score)
  }

@@ -86,3 +86,12 @@ for(const platform of ['weixin','matrix','mattermost'])test('shared TTS appears 
  assert.ok(activities().some(a=>a.tool==='partner_voice_reply'))
  channel.tts.enabled=false;assert.ok(activities().find(a=>a.tool==='partner_voice_reply').operations.includes('send_file'))
 })
+
+test('space publishing and collection writes expose the correct optional activity entrypoints',()=>{
+ const s=fixture(),q=s.channels.find(c=>c.id==='q');q.qq={autonomousActions:true,enabledActions:['send_qzone_msg','add_custom_face','modify_custom_face']}
+ const a=createChannelActivities().describe(s,'c').flatMap(p=>p.activities)
+ const space=a.find(a=>a.id==='space.private'),stickers=a.find(a=>a.id==='stickers.public')
+ assert.equal(space.tool,'partner_qq');assert.match(space.description,/最近聊天/);assert.match(space.description,/不必先做出作品/)
+ assert.equal(stickers.tool,'partner_qq');assert.match(stickers.description,/modify_custom_face/);assert.match(stickers.description,/安静结束/)
+ q.qq.autonomousActions=false;assert.ok(!createChannelActivities().describe(s,'c').flatMap(p=>p.activities).some(a=>a.id==='space.private'))
+})

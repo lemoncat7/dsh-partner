@@ -1,3 +1,5 @@
+import {renderBrowserContext} from './browser/context.js'
+import {isPartnerMcpOperation} from './mcp/tool-entry.js'
 import {chatReplyFromEvent} from './chat/protocol.js'
 import {deliveredAttachment} from './attachments/delivery-receipt.js'
 import {taskTool,type GroupTaskFocus} from './channels/qq/task-focus.js'
@@ -198,12 +200,15 @@ export class PartnerAgentRuntime {
   private readonly autonomousAssemblyContexts = new WeakSet<object>()
   private readonly rebuildingAssemblies = new WeakSet<object>()
   private readonly configurations: SessionConfigurationIndex
+  private browserContexts?:Map<string,{agent:Agent;text:string;dispose:()=>void}>
   private readonly characterContexts = new Map<string, () => void>()
   private readonly preparedTurns = new WeakMap<Agent, number>()
   private readonly observationJobs = new Map<string, number>()
   private readonly agentSetupJobs = new Map<string, number>()
   private readonly sessionRecoveryJobs = new SessionRecoveryJobs<Agent>()
   private closed = false
+  private stickerTagsContext?: (route:ChannelSession,signal:AbortSignal)=>Promise<string>
+  setStickerTagsContext(provider:(route:ChannelSession,signal:AbortSignal)=>Promise<string>):void {this.stickerTagsContext=provider}
   private questionAnswerer: PartnerQuestionAnswerer | undefined
 
   constructor(
@@ -259,6 +264,7 @@ export class PartnerAgentRuntime {
         const enforce = (presentation: typeof _assembly) => {
           const assembly={...presentation,tools:'tools' in presentation ? (presentation as import('@deepseek-ai/dsh-system-prompt').PromptAssembly).tools : context.agent!.ctx.tools.schemas(context.agent,context.toolSet)}
           const configuration=this.configurations.forSession(context.agent!.session.id)
+          if(configuration)assembly.tools=assembly.tools.filter(tool=>!isPartnerMcpOperation(this.store,configuration.companion.id,tool.name))
           const project = (value: import('@deepseek-ai/dsh-system-prompt').PromptAssembly) => configuration ? projectConversationPrompt(projectAgreements(value,this.store.snapshot(),configuration.companion.id,context.agent!.session.id,this.inputEvents(context.agent!)), context.agent!, {
             roleEnabled: configuration.companion.characterCard?.enabled === true,
             exclusive: configuration.companion.characterCard?.exclusivePrompt === true,
@@ -315,6 +321,7 @@ export class PartnerAgentRuntime {
         this.admittedInputs.delete(agent)
         this.characterContexts.get(agent.session.id)?.()
         this.characterContexts.delete(agent.session.id)
+        this.browserContexts?.get(agent.session.id)?.dispose();this.browserContexts?.delete(agent.session.id)
         this.contextRevisions.delete(agent)
         const restored = this.restoredCompositions.get(agent.session.id)
         if (restored?.agent !== agent) return
@@ -1035,12 +1042,13 @@ export class PartnerAgentRuntime {
     signal.throwIfAborted()
     const access = resolveToolAccess({agent, state:this.store.snapshot(), ...(this.admittedInputs.get(agent)?.length ? {events:this.inputEvents(agent)} : {})})
     let presentationChanged = false
-    const stableNative=configuration.companion.toolDiscovery||!!access.allowedTools
+    const stableNative=configuration.companion.toolDiscovery||configuration.companion.capabilities.includes('mcp')||!!access.allowedTools
     if (stableNative && !this.replyPresentations.has(agent) && (typeof agent.ctx.tools?.setExecutor === 'function' || typeof (agent.ctx.tools as unknown as {presentAs?:unknown})?.presentAs === 'function')) {
       this.replyPresentations.set(agent, nativePresentation(agent.ctx, tools => {
         const current=this.configurations.forSession(agent.session.id)
         const access=resolveToolAccess({agent,state:this.store.snapshot(),...(this.admittedInputs.get(agent)?.length?{events:this.inputEvents(agent)}:{})})
         return tools.filter(tool=>{
+          if(current&&isPartnerMcpOperation(this.store,current.companion.id,tool.name))return false
           if(current?.companion.toolDiscovery&&!PARTNER_TOOL_ENTRIES.some(name=>name===tool.name)&&isPartnerDiscoveryTool(this.store,current.companion.id,tool.name))return false
           return !current||['partner_tools','partner_channel_access','partner_memory_recall'].includes(tool.name)||channelToolAllowed(this.store,current.companion.id,tool.name,access)
         })
@@ -1065,8 +1073,6 @@ export class PartnerAgentRuntime {
     return presentationChanged
   }
 
-  private stickerContext?: (route:ChannelSession,query:string,signal:AbortSignal)=>Promise<string>
-  setStickerContext(provider:(route:ChannelSession,query:string,signal:AbortSignal)=>Promise<string>):void {this.stickerContext=provider}
   private readonly replyPresentations = new Map<Agent, () => void>()
   private readonly contextRevisions = new WeakMap<Agent, string>()
   private conversationClocks?: WeakMap<Agent, {originId:string|undefined;at:number}>
@@ -1104,8 +1110,18 @@ export class PartnerAgentRuntime {
     const events=relationEvents ?? this.inputEvents(agent)
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
+    const stickerRoute=autonomous&&origin?.type==='user/message' ? state.sessions.find(r=>r.sessionId===agent.session.id&&r.idleContactState?.messageId===origin.data.id) : questionOrigin(agent.session.id,events,state.sessions)
+    const stickerTags=companion.characterCard?.enabled&&companion.characterCard.stickersEnabled&&stickerRoute ? await this.stickerTagsContext?.(stickerRoute,signal).catch(()=> '')??'' : ''
     const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
     const access = resolveToolAccess({agent, state, events})
+    const browserContext=access.sendTools&&(!access.allowedTools||access.allowedTools.includes('partner_browser'))?renderBrowserContext(companion.id,agent.session.id,events,state,companion.browser,query):''
+    const previousBrowser=this.browserContexts?.get(agent.session.id)
+    const browserChanged=previousBrowser?previousBrowser.agent!==agent||previousBrowser.text!==browserContext:!!browserContext
+    if(browserChanged){
+      signal.throwIfAborted();previousBrowser?.dispose()
+      if(browserContext)(this.browserContexts??=new Map()).set(agent.session.id,{agent,text:browserContext,dispose:agent.ctx.systemPrompt.context({name:'partner-browser-state',order:-4,text:browserContext,interpolate:false,required:true})})
+      else this.browserContexts?.delete(agent.session.id)
+    }
     const taskContext=renderTaskFollowup(taskFollowup(state,companion.id,agent.session.id,events))
     const replyContinuity = renderReplyContinuity(agent.session.id, events, state.sessions)
     const habitOrigin=questionOrigin(agent.session.id,events,state.sessions)??state.sessions.find(r=>r.kind==='local'&&r.sessionId===agent.session.id&&r.companionId===companion.id)
@@ -1116,10 +1132,8 @@ export class PartnerAgentRuntime {
     let clock=clocks.get(agent)
     if(!clock||clock.originId!==originId||now<clock.at||now-clock.at>=60_000){clock={originId,at:now};clocks.set(agent,clock)}
     const timeContext=renderConversationTime(agent.session.id,events,state.sessions,this.timeZone,clock.at)
-    const stickerRoute=autonomous&&origin?.type==='user/message'?state.sessions.find(r=>r.sessionId===agent.session.id&&r.idleContactState?.messageId===origin.data.id):questionOrigin(agent.session.id,events,state.sessions)
-    const stickerContext=stickerRoute&&access.sendTools&&companion.characterCard?.enabled&&companion.characterCard.stickersEnabled===true?await this.stickerContext?.(stickerRoute,query,signal).catch(()=> '')??'':''
-    const revision = `${stickerContext}:${timeContext}:${habitContext}:${createHash('sha256').update(replyContinuity+taskContext).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
-    if (this.contextRevisions.get(agent) === revision) return false
+    const revision = `${stickerTags}:${timeContext}:${habitContext}:${createHash('sha256').update(replyContinuity+taskContext).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
+    if (this.contextRevisions.get(agent) === revision) return browserChanged
     const scope = conversationMemoryScope(route, this.store.snapshot().sessions)
     const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
     const recall = companion.automation.memory.enabled ? await this.memory?.recallContext(companion.id, scope, autonomous ? '' : query, 4, { includeHistory: !companion.characterCard?.enabled }) : undefined
@@ -1136,7 +1150,7 @@ export class PartnerAgentRuntime {
       renderAffection(companion,affectionAudience),
       habitContext,
       timeContext,
-      stickerContext,
+      stickerTags,
       renderActivityJournal(activityJournalRecall(state.companions?.find(c=>c.id===companion.id)??companion,agent.session.id,affectionAudience&&!questionOrigin(agent.session.id,events,state.sessions)?.userId.startsWith('group:'),agent.session.snapshotEvents?.()??[],3)),
       renderCharacterContext(companion.characterCard, query, relationshipAllowed ? story : undefined),
       recalled ? renderMemory(recalled.relevant, recalled.connections, recalled.scenes, recalled.history) : '',
@@ -1282,6 +1296,8 @@ export class PartnerAgentRuntime {
     for (const restored of this.restoredCompositions.values()) restored.dispose()
     for (const dispose of this.characterContexts.values()) dispose()
     this.characterContexts.clear()
+    for(const row of this.browserContexts?.values()??[])row.dispose()
+    this.browserContexts?.clear()
     this.restoredCompositions.clear()
     this.restoredCompositionJobs.clear()
     await Promise.all([...this.handles.values()].map(handle => handle.dispose().catch(() => {})))
@@ -1297,6 +1313,7 @@ export class PartnerAgentRuntime {
   private async releaseRestoredComposition(sessionId: string): Promise<void> {
     this.characterContexts.get(sessionId)?.()
     this.characterContexts.delete(sessionId)
+    this.browserContexts?.get(sessionId)?.dispose();this.browserContexts?.delete(sessionId)
     await this.restoredCompositionJobs.get(sessionId)?.catch(() => {})
     const restored = this.restoredCompositions.get(sessionId)
     if (restored) this.preparedTurns.delete(restored.agent)

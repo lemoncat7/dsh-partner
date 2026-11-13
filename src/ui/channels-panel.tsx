@@ -1,3 +1,4 @@
+import {BrowserSettings} from './browser-settings-loader.js'
 import {TtsSettings} from './tts-settings-loader.js'
 import {BilibiliSettings} from './bilibili-settings.js'
 import {QqConnectionGuide} from './qq-connection-guide.js'
@@ -25,6 +26,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   const [fixedPlatform,setFixedPlatform]=useState(false)
   const [configuring,setConfiguring]=useState<string>()
   const [ttsEdit,setTtsEdit]=useState({dirty:false,busy:false}),[discardTts,setDiscardTts]=useState(false)
+  const [browserEdit,setBrowserEdit]=useState({dirty:false,busy:false}),[discardBrowser,setDiscardBrowser]=useState(false)
   const qqEdit=useRef({dirty:false,busy:false})
   const [discardQq,setDiscardQq]=useState(false)
   const closeAdd=()=>{setAdding(false);setToken('');setPassword('');setMfaToken('')}
@@ -42,7 +44,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   })
   return <div id="dsh-partner-channels" className="dsh-partner-form is-channel dsh-partner-channels">
     <div className="dsh-partner-channel-toolbar">
-      <SectionHeading eyebrow="CHANNELS" title="我的渠道" detail="按类型管理消息、通知与通用语音服务。" />
+      <SectionHeading eyebrow="CHANNELS" title="我的渠道" detail="按类型管理消息、通知、语音与浏览器。" />
       <button type="button" onClick={()=>openAdd()}>添加渠道</button>
     </div>
     {!adding&&feedback&&<p role="status">{feedback}</p>}
@@ -100,9 +102,12 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
       {channel.idleDelivery&&<div className="dsh-partner-channel-inline-notice" role="status"><strong>主动联系投递</strong><p>{channel.idleDelivery}</p></div>}
       {channel.lastError&&<div className="dsh-partner-channel-inline-notice" role="status" aria-atomic="true"><strong>{channel.runtimeStatus==='running'?'会话提示':'连接提示'}</strong><p>{channel.lastError}</p></div>}
     </div>)}
-    <h3 className="dsh-partner-channel-category">TTS</h3>
+    <h3 className="dsh-partner-channel-category">通用</h3>
     <div className="dsh-partner-channel-row"><span><strong>通用 TTS</strong><small>统一管理语音服务、音色与试听 · 多个消息渠道共用</small></span><button type="button" aria-label="配置通用 TTS" onClick={()=>setConfiguring('tts')}>配置</button></div>
+    <div className="dsh-partner-channel-row"><span><strong>浏览器</strong><small>连接 Chrome / Chromium · CDP 公开能力与自主活动</small></span><button type="button" aria-label="配置浏览器" onClick={()=>setConfiguring('browser')}>配置</button></div>
     </div>
+    {configuring==='browser'&&<WorkspaceDialog title="浏览器" detail="通过 CDP 连接现有浏览器，查看网页并操作页面。" close={()=>{if(browserEdit.busy)return;if(browserEdit.dirty){setDiscardBrowser(true);return}setConfiguring(undefined)}}><BrowserSettings companionId={companion.id} onChanged={onChanged} onEdit={setBrowserEdit}/></WorkspaceDialog>}
+    {discardBrowser&&<DiscardChangesDialog keepEditing={()=>setDiscardBrowser(false)} discard={()=>{setDiscardBrowser(false);setConfiguring(undefined)}}/>}
     {configuring==='tts'&&<WorkspaceDialog title="通用 TTS" detail="配置语音服务，再分配给需要使用的消息渠道。" close={()=>{if(ttsEdit.busy)return;if(ttsEdit.dirty){setDiscardTts(true);return}setConfiguring(undefined)}}><TtsSettings companionId={companion.id} channels={channels} onChanged={onChanged} onEdit={setTtsEdit}/></WorkspaceDialog>}
     {discardTts&&<DiscardChangesDialog keepEditing={()=>setDiscardTts(false)} discard={()=>{setDiscardTts(false);setConfiguring(undefined)}}/>}
 

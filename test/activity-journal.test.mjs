@@ -93,3 +93,26 @@ test('explicit activity recall searches retained older entries rather than the l
  assert.deepEqual(activityJournalRecall(c,'s',false,[],8,'卡比'),[])
  assert.equal(activityJournalRecall(c,'s',true,[],3).length,3,'automatic context stays bounded')
 })
+
+test('B site native and dispatched calls retain exact operation without argument contents',()=>{
+ const e=events();e[2].data.name='partner_bilibili';e[2].data.arguments=JSON.stringify({action:'call',operation:'comments',params:{text:'PRIVATE'}})
+ e.splice(-1,0,{type:'tool/ptc-dispatch',data:{name:'partner_bilibili',arguments:JSON.stringify({action:'call',operation:'comment',params:{text:'PRIVATE'}}),isError:false}})
+ const r=collectActivityJournal('s',e)[0]
+ assert.ok(r.tools.some(t=>t.name==='partner_bilibili:comments'))
+ assert.ok(r.tools.some(t=>t.name==='partner_bilibili:comment'))
+ assert.doesNotMatch(JSON.stringify(r),/PRIVATE/)
+ const old={...r,sharing:'confirmed',summary:'preserve this',tools:[{name:'partner_bilibili:call',ok:true}]},c={activityJournal:[old]}
+ assert.equal(mergeActivityJournal(c,[r]),true);assert.equal(c.activityJournal[0].sharing,'confirmed');assert.equal(c.activityJournal[0].summary,'preserve this')
+ assert.deepEqual(c.activityJournal[0].tools,r.tools);assert.equal(mergeActivityJournal(c,[r]),false)
+})
+
+
+test('MCP activity records real nested operations once, without wrapper discovery or calls',()=>{
+ const e=events();e.splice(2,e.length-3,
+ {type:'tool/call',data:{callId:'list',name:'partner_mcp',arguments:'{"action":"list"}'}},
+ {type:'tool/result',data:{message:{toolCallId:'list',isError:false}}},
+ {type:'tool/call',data:{callId:'work',name:'partner_mcp',arguments:'{"action":"call"}'}},
+ {type:'tool/ptc-dispatch',data:{name:'mcp__read_audit',arguments:'{}',isError:false}},
+ {type:'tool/result',data:{message:{toolCallId:'work',isError:false}}})
+ assert.deepEqual(collectActivityJournal('s',e)[0].tools,[{name:'mcp__read_audit',ok:true}])
+})

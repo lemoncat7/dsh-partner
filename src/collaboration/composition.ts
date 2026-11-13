@@ -1,3 +1,4 @@
+import {installMcpEntry} from '../mcp/tool-entry.js'
 import {trackPartnerTools} from '../execution/tool-ownership.js'
 import { habitTool } from '../character/habit-tool.js'
 import { thoughtTool } from '../character/thought-tool.js'
@@ -86,7 +87,7 @@ export class PartnerAgentComposition {
       add(thoughtTool(companion.id, this.store))
       add(habitTool(companion.id, this.store))
       add(idleActivityFinishTool(companion.id, this.store))
-      for (const tool of this.mcp?.definitions(companion.id) ?? []) register(tool, 'mcp')
+      if(this.mcp&&companion.capabilities.includes('mcp'))disposers.push(installMcpEntry(ctx.tools,companion.id,this.store,this.mcp))
       if (this.attachmentToolFactory) add(this.attachmentToolFactory(companion.id))
       for (const tool of this.chatToolFactory?.(companion.id) ?? []) add(tool)
       if (this.avatarToolFactory) add(this.avatarToolFactory(companion.id))
@@ -107,6 +108,7 @@ export class PartnerAgentComposition {
         text:[companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '伙伴能力通过当前工具调用。工作流程可用 partner_workflow 查询，Skill 使用 partner_skill 加载；权限以实际校验为准。',
           '实际调查、排障与多步操作直接在当前会话调用工具，当前人物自己写开场、中途和结果；只有明确后台任务或已有看板、委派沿用对应任务。操作流程在 describe 中按需读取，工具目录不代表已经完成调查。工作结果约束事实，回复语气仍由当前角色与关系决定。',
           companion.idleContact?.enabled ? '自主活动已开启。你可以按自己的意图继续行动，也可以结束；如想在本轮之后再继续，可按需查询 partner_thoughts，用 plan 留下下一步意图、会话和等待时间。没有安排就按空闲频率唤起，不因回复完成自动追加一轮。真实结果、用户新消息与停止要求优先；不必每轮计划或汇报计划。' : '',
+          companion.capabilities.includes('mcp') ? '伙伴挂载的 MCP 服务通过独立 partner_mcp 入口按服务发现与调用，不经 partner_tools；原 mcp__ 名称是内部操作标识，不是顶层入口。' : '',
           renderEnabledSkills(companion,enabledSkills),
           `当前伙伴 id：${companion.id}。授权伙伴目录通过 partner_collaborate directory 查询；流程说明通过 partner_tools describe 或 partner_workflow inspect 按需读取。`,
         ].filter(Boolean).join('\n\n'),

@@ -1,5 +1,6 @@
 import {qqSettings} from './channels/qq/settings.js'
-import {renderStickerCandidates} from './chat/sticker-context.js'
+import {BrowserService} from './browser/service.js'
+import {browserTool} from './browser/tool.js'
 import {TtsService} from './voice/service.js'
 import {TtsCredentials} from './voice/credentials.js'
 import {voiceReplyTool} from './voice/tool.js'
@@ -65,6 +66,8 @@ import { openSharedAttachmentStorage } from './attachments/shared-storage.js'
 import { StickerLibrary } from './chat/stickers.js'
 import { StickerAdapters } from './chat/sticker-adapter.js'
 import { qqStickerAdapter } from './channels/qq/sticker-adapter.js'
+import {renderStickerTags} from './chat/sticker-context.js'
+import {QqStickerCache} from './channels/qq/sticker-cache.js'
 import type { QqFace } from './channels/qq/catalog.js'
 import { chatTools } from './chat/tools.js'
 import { attachmentTool } from './attachments/tool.js'
@@ -115,6 +118,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     const credentials = new PartnerCredentialVault(ctx.credentials)
     const tts=new TtsService(store,new TtsCredentials(ctx.credentials),join(dirname(resolved.statePath),'tts-audio'))
     await tts.recover()
+    const browser=new BrowserService(store)
+    ctx.effect(()=>()=>browser.close(),'dsh-partner.browser')
     const push = new PushService(store, new PushCredentials(ctx.credentials), message => ctx.logger.warn(`dsh-partner push: ${message}`))
     const pushObserver = new PushObserver(store, push, () => ctx.logger.warn('dsh-partner: 推送通知入队失败，请检查通知队列'))
     ctx.effect(() => async () => { await pushObserver.close(); await push.close() }, 'dsh-partner.push')
@@ -169,7 +174,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const mcp = new McpService(store, new McpCredentials(ctx.credentials))
     composer.setMcpService(mcp)
     executor.setMcpTools(id => mcp.definitions(id))
-    const channelActivities=createChannelActivities((provider,error)=>ctx.logger.warn(`dsh-partner activity provider ${provider}: ${String(error)}`))
+    const channelActivities=createChannelActivities((provider,error)=>ctx.logger.warn(`dsh-partner activity provider ${provider}: ${String(error)}`),()=>store.snapshot())
     ctx.provide('dshPartnerChannelActivities',channelActivities)
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone)
     const sleep = new SleepService(ctx, store, memory, { busy: (id, exceptSessionId) => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation' && (!exceptSessionId || a.sessionId !== exceptSessionId)), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
@@ -202,26 +207,22 @@ export function apply(context: Context, config: PartnerConfig): void {
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     const stickers = new StickerLibrary(layout.privateRoot)
     const stickerAdapters=new StickerAdapters(stickers)
-    const qqCatalogs=new Map<string,{at:number;faces:Promise<QqFace[]>}>()
-    stickerAdapters.register('qq',channel=>qqStickerAdapter(channel,stickerAdapters.fallback,async()=>{
-      const key=channel.id+':'+channel.updatedAt,cached=qqCatalogs.get(key)
-      if(cached&&Date.now()-cached.at<300000)return cached.faces
-      const faces=channels.qqDirectory(channel.id,'stickers').then(value=>(value as {faces:QqFace[]}).faces)
-      qqCatalogs.set(key,{at:Date.now(),faces});if(qqCatalogs.size>100)qqCatalogs.delete(qqCatalogs.keys().next().value!)
-      try{return await faces}catch(error){qqCatalogs.delete(key);throw error}
-    }))
-    agents.setStickerContext(async(route,query,signal)=>{
-      const state=store.snapshot(),channel=state.channels.find(c=>c.id===route.channelId&&c.enabled&&c.companionId===route.companionId)
-      if(channel?.platform!=='qq'||!qqSettings(channel.qq).imagesEnabled)return ''
-      const scoped=AbortSignal.any([signal,AbortSignal.timeout(1500)])
-      // Directory failure must not block chat. Existing QQ catalogue cache coalesces refreshes.
-      let abort:()=>void=()=>{}
-      const timeout=new Promise<never>((_,reject)=>{abort=()=>reject(scoped.reason);scoped.addEventListener('abort',abort,{once:true});if(scoped.aborted)abort()})
-      try {return renderStickerCandidates(await Promise.race([stickerAdapters.forRoute(route,state.channels).list(route.companionId,'',scoped,'image'),timeout]),query)}
-      finally {scoped.removeEventListener('abort',abort)}
+    const qqCatalogs=new QqStickerCache(async(id,kind)=>(await channels.qqDirectory(id,kind==='image'?'stickers':'faces') as {faces:QqFace[]}).faces)
+    stickerAdapters.register('qq',channel=>qqStickerAdapter(channel,stickerAdapters.fallback,kind=>qqCatalogs.get(channel.id,channel.updatedAt,kind)))
+    agents.setStickerTagsContext(async(route,signal)=>{
+      const state=store.snapshot(),channel=state.channels.find(c=>c.id===route.channelId&&c.companionId===route.companionId&&c.enabled)
+      if(!channel||channel.platform!=='qq'||!qqSettings(channel.qq).imagesEnabled)return ''
+      let timer:ReturnType<typeof setTimeout>|undefined
+      try {
+        const items=await Promise.race([stickerAdapters.forRoute(route,state.channels).list(route.companionId,'',signal,'image'),new Promise<[]>(resolve=>{timer=setTimeout(()=>resolve([]),1500)})])
+        const latest=store.snapshot().channels.find(c=>c.id===channel.id)
+        if(!latest?.enabled||latest.updatedAt!==channel.updatedAt)return ''
+        signal.throwIfAborted()
+        return renderStickerTags(items)
+      }finally{if(timer)clearTimeout(timer)}
     })
     const bilibili = new BilibiliService(store)
-    composer.setChatToolFactory(id => [voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>{for(const key of qqCatalogs.keys())if(key.startsWith(channelId+':'))qqCatalogs.delete(key)}),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
+    composer.setChatToolFactory(id => [browserTool(id,store,browser,ctx),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>qqCatalogs.invalidate(channelId)),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -274,7 +275,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili, tts })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili, tts, browser })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)

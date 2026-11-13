@@ -269,3 +269,12 @@ test('channel activity excludes background work and follows actual shared-sessio
  events.push({type:'user/message',data:{id:'browser-input',source:{kind:'user'}}})
  assert.deepEqual(runtime.companionActivity('c','qq'),[])
 })
+
+test('collection detail returns bounded pages without URLs, while preserving real modification IDs',async()=>{
+ const f=fixture();f.setResponse(Array.from({length:80},(_,i)=>({emoji_id:'real-'+i,desc:'开心 标签'+i,url:'https://example.com/long-private-url'})))
+ const get=offset=>f.tool.execute({action:'call',operation:'fetch_custom_face_detail',params:{count:200},offset},f.exec)
+ const first=await get(0);assert.equal(first.result.items.length,12);assert.equal(first.result.total,80);assert.equal(first.result.nextOffset,12)
+ const tail=await get(72);assert.equal(tail.result.items.at(-1).emoji_id,'real-79');assert.equal(tail.result.nextOffset,null)
+ assert.ok(tail.result.items.at(-1).stickerId.startsWith('qq-custom-'));assert.doesNotMatch(JSON.stringify(tail),/example.com/)
+ const count=f.requests.length;await assert.rejects(f.tool.execute({action:'call',operation:'fetch_custom_face_detail',limit:25},f.exec));assert.equal(f.requests.length,count)
+})

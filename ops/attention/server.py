@@ -12,7 +12,7 @@ class Handler(BaseHTTPRequestHandler):
         try:self.wfile.write(body)
         except (BrokenPipeError,ConnectionResetError):pass
     def do_GET(self):
-        self.send_json(200 if self.path=='/health' else 404,{'ready':True,'version':1})
+        self.send_json(200 if self.path=='/health' else 404,{'ready':True,'version':2})
     def do_POST(self):
         if self.path!='/classify':return self.send_json(404,{'error':'not found'})
         try:
@@ -21,7 +21,9 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.settimeout(2)
             data=json.loads(self.rfile.read(length));text=data.get('text')
             if not isinstance(text,str) or not text.strip() or len(text)>1200:return self.send_json(400,{'error':'invalid text'})
-            start=time.perf_counter();result=model.classify(text)
+            context=data.get('context',[])
+            if not isinstance(context,list) or len(context)>4 or any(not isinstance(t,str) or len(t)>48 for t in context):return self.send_json(400,{'error':'invalid context'})
+            start=time.perf_counter();result=model.classify(text,context)
             self.send_json(200,{**result,'elapsedMs':round((time.perf_counter()-start)*1000,2)})
         except (ValueError,TimeoutError,UnicodeError):self.send_json(400,{'error':'invalid request'})
         except Exception:self.send_json(500,{'error':'classification failed'})

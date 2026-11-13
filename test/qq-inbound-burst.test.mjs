@@ -62,3 +62,8 @@ test('same-poll image caption grouping does not erase a change of addressee or q
  for(const group of groups)f.bursts.enqueue(group,async(messages,ready)=>{seen.push(messages.map(m=>m.id));ready()})
  await f.dispatcher.drain();assert.deepEqual(seen,[['image'],['other'],['quote']])
 })
+
+test('classifier sees later pictures in a text-first burst without losing original media',()=>{
+ const a=event('caption','看看'),b={...event('picture',''),media:[{kind:'image',source:'picture'}]}
+ const merged=groupBurstEvent([a,b],'看看');assert.deepEqual(merged.media,b.media);assert.equal(a.media,undefined)
+})

@@ -9,6 +9,8 @@ export interface ChannelActivity {
   visibility: 'public' | 'private'
   description: string
   operations?: readonly string[]
+  /** Optional read-only ways to discover new material; never a publish/retry instruction. */
+  discoveryOperations?: readonly string[]
 }
 export interface ChannelActivityContext {
   channel: Readonly<WeixinChannel>
@@ -57,8 +59,9 @@ export class ChannelActivityRegistry {
               typeof a.title !== 'string' || !a.title.trim() || a.title.length > 100 || typeof a.description !== 'string' || a.description.length > 1000 ||
               !['public','private'].includes(a.visibility) || typeof a.tool !== 'string' || !/^[a-zA-Z0-9_.:-]{1,150}$/.test(a.tool) ||
               (a.operations !== undefined && (!Array.isArray(a.operations) || a.operations.length > 256 || a.operations.some((op: unknown) => typeof op !== 'string' || !/^[a-zA-Z0-9_.:-]{1,150}$/.test(op))))) throw Error('Invalid channel activity metadata')
+            if(a.discoveryOperations!==undefined && (!Array.isArray(a.discoveryOperations)||a.discoveryOperations.length>8||a.discoveryOperations.some((op:unknown)=>typeof op!=='string'||!a.operations?.includes(op))))throw Error('Invalid discovery operations')
             ids.add(a.id)
-            return {id:a.id,title:a.title,tool:a.tool,visibility:a.visibility,description:a.description,...(a.operations ? {operations:[...a.operations]} : {})}
+            return {id:a.id,title:a.title,tool:a.tool,visibility:a.visibility,description:a.description,...(a.operations ? {operations:[...a.operations]} : {}),...(a.discoveryOperations?.length?{discoveryOperations:[...new Set<string>(a.discoveryOperations)]}:{})}
           })
           if (activities.length) result.push({channelId:channel.id,platform,provider:provider.id,activities})
         } catch (error) { this.onError(provider.id, error) }

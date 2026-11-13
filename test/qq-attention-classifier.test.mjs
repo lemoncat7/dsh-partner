@@ -46,3 +46,14 @@ test('slow local classification has a short budget and does not stall the next m
  const next=performance.now();assert.equal(await classify('后续补充',signal()),undefined)
  assert.ok(performance.now()-next<100);assert.equal(calls,1)
 })
+
+test('context is bounded separately from current intent, optional similarity is validated, and legacy responses still work',async t=>{
+ let n=0
+ const classify=await fixture(t,(req,res)=>{let body='';req.on('data',d=>body+=d);req.on('end',()=>{
+  const data=JSON.parse(body);assert.equal(data.text,'当前消息');assert.equal(data.context.length,4);assert.ok(data.context.every(t=>t.length<=48))
+  res.end(JSON.stringify({label:'engage',confidence:.55,margin:.2,...(n++===0?{contextSimilarity:.7}:{contextSimilarity:2})}))
+ })})
+ const context=Array.from({length:10},(_,i)=>String(i)+'x'.repeat(300))
+ assert.equal((await classify('当前消息',signal(),context)).contextSimilarity,.7)
+ assert.equal((await classify('当前消息',signal(),context)).contextSimilarity,undefined)
+})

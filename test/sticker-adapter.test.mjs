@@ -89,3 +89,18 @@ test('sticker tool defaults to image search, preserves explicit all and honors d
  state.companions[0].characterCard.stickersEnabled=false
  await assert.rejects(tool.execute({action:'list'},exec),/未开启/)
 })
+
+test('autonomous lookup follows activity route and supports model-facing pages beyond 48 items',async()=>{
+ const {chatTools}=await import('../lib/chat/tools.js')
+ const channels=[{...channel,id:'old'},{...channel,id:'target',accountId:'87654321'}]
+ const routes=channels.map((c,i)=>({id:'r'+i,channelId:c.id,companionId:'c',kind:'channel',sessionId:'s',inboundMessageIds:i?[]:['u'],...(i?{idleContactState:{messageId:'idle'}}:{})}))
+ const state={channels,sessions:routes,companions:[{id:'c',characterCard:{enabled:true,stickersEnabled:true}}]}
+ const events=[{type:'user/message',data:{id:'u',source:{kind:'user'}}},{type:'user/message',data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}}]
+ const adapters=new StickerAdapters(library)
+ adapters.register('qq',c=>qqStickerAdapter(c,adapters.fallback,async()=>{assert.equal(c.id,'target');return qqCustomCatalog(Array.from({length:80},(_,i)=>({emoji_id:'id'+i,desc:'开心'})))}))
+ const tool=chatTools('c',{snapshot:()=>state,isCompanionRemoving:()=>false},library,{}, {},'',adapters)[0]
+ const exec={signal:new AbortController().signal,agent:{session:{id:'s',snapshotEvents:()=>events}}}
+ const page=JSON.parse((await tool.execute({action:'list',query:'开心',offset:72},exec)).content[0].text)
+ assert.equal(page.total,80);assert.equal(page.items.length,8);assert.equal(page.nextOffset,null)
+ assert.deepEqual(page.items[0].tags,['开心'])
+})

@@ -1,4 +1,5 @@
 import { enforceThoughtBudget } from './character/thought-budget.js'
+import {validateBrowserConfig} from './browser/domain.js'
 import {validateTtsState} from './voice/validation.js'
 import { validateHabits } from './character/habits.js'
 import { validateAgreements } from './chat/agreements.js'
@@ -309,6 +310,7 @@ function validateState(value: unknown): asserts value is PartnerState {
   validateMcpState(state)
   validatePushState(state)
   validateTtsState(state)
+  for(const c of state.companions??[])if(c.browser!==undefined)validateBrowserConfig(c.browser)
   for (const companion of state.companions!) {
     validateAgreements(companion.temporaryAgreements)
     if(companion.idleContact){

@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type AttentionLabel = 'address' | 'engage' | 'other' | 'close' | 'background'
-export interface AttentionPrediction { label:AttentionLabel; confidence:number; margin:number }
-export type AttentionClassifier = (text:string,signal:AbortSignal)=>Promise<AttentionPrediction|undefined>
+export interface AttentionPrediction { label:AttentionLabel; confidence:number; margin:number; contextSimilarity?:number }
+export type AttentionClassifier = (text:string,signal:AbortSignal,context?:readonly string[])=>Promise<AttentionPrediction|undefined>
 const labels:readonly string[]=['address','engage','other','close','background']
 
 /** Optional local CPU service. Configuration belongs to the host, never chat or identity text. */
@@ -17,19 +17,20 @@ export function localAttentionClassifier():AttentionClassifier {
   if(!value)return undefined
   try{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)return undefined;return new URL('/classify',url).href}catch{return undefined}
  }
- return async(text,signal)=>{
+ return async(text,signal,context=[])=>{
   signal.throwIfAborted()
   if(!text.trim()||active>=4||Date.now()<retryAt)return undefined
   const url=await(endpoint??=configured());if(!url)return undefined
   signal.throwIfAborted();if(active>=4)return undefined
   active++
   try{
-   const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(450)])})
+   const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.slice(0,1200),context:context.slice(-4).map(t=>t.slice(0,48))}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(450)])})
    if(!response.ok)throw Error('classification unavailable')
    const raw=await response.text();if(raw.length>4096)throw Error('oversized classification')
    const value=JSON.parse(raw)
    if(!labels.includes(value.label)||![value.confidence,value.margin].every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1))throw Error('invalid classification')
-   return {label:value.label,confidence:value.confidence,margin:value.margin}
+   const contextSimilarity=typeof value.contextSimilarity==='number'&&Number.isFinite(value.contextSimilarity)&&value.contextSimilarity>=0&&value.contextSimilarity<=1?value.contextSimilarity:undefined
+   return {label:value.label,confidence:value.confidence,margin:value.margin,...(contextSimilarity!==undefined?{contextSimilarity}:{})}
   }catch(error){signal.throwIfAborted();retryAt=Date.now()+30000;return undefined}finally{active--}
  }
 }

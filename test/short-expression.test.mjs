@@ -29,7 +29,7 @@ test('ordinary short reply over twenty characters preserves facts and finishes w
 test('segmented chat shares short-bubble rules with optional expression generation',()=>{
  const card={enabled:true,segmentedReplies:true,length:'short'}
  for(const prompt of [renderChatDeliveryGuidance(card),renderExpressionPreferences(card)]){
-  assert.match(prompt,/半句到两句/);assert.match(prompt,/所有中英文标点符号合计最多三个/);assert.match(prompt,/连续标点逐个计数/);assert.match(prompt,/允许超过三条消息/);assert.match(prompt,/代码、逐字引用、列表、完整文档/)
+  assert.match(prompt,/半句到两句/);assert.match(prompt,/所有中英文标点符号合计最多一个/);assert.match(prompt,/连续标点逐个计数/);assert.match(prompt,/允许超过三条消息/);assert.match(prompt,/代码、逐字引用、列表、完整文档/)
  }
 })
 
@@ -37,7 +37,7 @@ test('segmented chat shares short-bubble rules with optional expression generati
 test('other reply rhythms do not inherit the short-conversation bubble limits',()=>{
  for(const length of ['natural','rich']){
   const card={enabled:true,segmentedReplies:true,length}
-  assert.doesNotMatch(renderChatDeliveryGuidance(card),/半句到两句|合计最多三个/)
-  assert.doesNotMatch(renderExpressionPreferences(card),/半句到两句|合计最多三个/)
+  assert.doesNotMatch(renderChatDeliveryGuidance(card),/半句到两句|合计最多一个/)
+  assert.doesNotMatch(renderExpressionPreferences(card),/半句到两句|合计最多一个/)
  }
 })

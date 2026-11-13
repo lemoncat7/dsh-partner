@@ -214,14 +214,49 @@ test('time and real sticker context survive exclusive persona, stay origin scope
  const route={id:'qq-owner',kind:'channel',channelId:'qq',sessionId:f.agent.session.id,companionId:f.config.companion.id,userId:'12345678',inboundMessageIds:[]}
  const state={sessions:[f.config.route,route],channels:[{id:'qq',enabled:true,platform:'qq',companionId:f.config.companion.id}]}
  f.runtime.store.snapshot=()=>state
- const seen=[];f.runtime.setStickerContext(async r=>{seen.push(r.id);return 'ACTUAL_QQ_CATALOG'})
+ let tags='ACTUAL_QQ_TAGS';const seen=[];f.runtime.setStickerTagsContext(async r=>{seen.push(r.id);return tags})
  f.input('嗨');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
  const raw=JSON.stringify(f.agent.session.snapshotEvents())
  await f.runtime.prepareConversationContext(f.agent,signal)
- assert.match(f.contexts.values().next().value.text,/交流时间/);assert.match(f.contexts.values().next().value.text,/ACTUAL_QQ_CATALOG/)
+ assert.match(f.contexts.values().next().value.text,/交流时间/);assert.match(f.contexts.values().next().value.text,/ACTUAL_QQ_TAGS/)
  assert.equal(f.contexts.values().next().value.required,true);assert.equal(JSON.stringify(f.agent.session.snapshotEvents()),raw)
+ tags='UPDATED_TAGS';await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.values().next().value.text,/UPDATED_TAGS/);assert.doesNotMatch(f.contexts.values().next().value.text,/ACTUAL_QQ_TAGS/)
+ tags='';await f.runtime.prepareConversationContext(f.agent,signal);assert.doesNotMatch(f.contexts.values().next().value.text,/UPDATED_TAGS/)
+ assert.equal(JSON.stringify(f.agent.session.snapshotEvents()),raw);seen.length=0
  f.input('浏览器说话');await f.runtime.prepareConversationContext(f.agent,signal)
- assert.doesNotMatch(f.contexts.values().next().value.text,/ACTUAL_QQ_CATALOG/);assert.deepEqual(seen,['qq-owner'])
+ assert.doesNotMatch(f.contexts.values().next().value.text,/ACTUAL_QQ_TAGS/);assert.deepEqual(seen,[])
  f.config.companion.characterCard.stickersEnabled=false;f.input('不发表情');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
- await f.runtime.prepareConversationContext(f.agent,signal);assert.deepEqual(seen,['qq-owner'])
+ await f.runtime.prepareConversationContext(f.agent,signal);assert.deepEqual(seen,[])
+})
+
+test('autonomous sticker tags follow the actual activity target instead of previous chat',async()=>{
+ const f=fixture(false),signal=new AbortController().signal
+ f.config.companion.characterCard.stickersEnabled=true
+ const a={id:'a',userId:'12345678',kind:'channel',channelId:'qa',sessionId:f.agent.session.id,companionId:f.config.companion.id,inboundMessageIds:[]}
+ const b={...a,id:'b',channelId:'qb',inboundMessageIds:[]}
+ f.runtime.store.snapshot=()=>({sessions:[f.config.route,a,b]})
+ f.runtime.setStickerTagsContext(async r=>r.id==='a'?'TAGS_A':'TAGS_B')
+ f.input('hello');a.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
+ await f.runtime.prepareConversationContext(f.agent,signal);assert.match(f.contexts.values().next().value.text,/TAGS_A/)
+ f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'自主活动'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}),{surfaceOp:'append'})
+ b.idleContactState={messageId:f.agent.session.snapshotEvents().at(-1).data.id}
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.values().next().value.text,/TAGS_B/);assert.doesNotMatch(f.contexts.values().next().value.text,/TAGS_A/)
+})
+
+
+test('browser facts refresh as a separate bounded context without recalling memory on every browser step',async()=>{
+ const f=fixture(),signal=new AbortController().signal
+ f.config.companion.browser={enabled:true,autonomous:true,endpoint:'http://chrome:9222/',externalUrl:'https://help.test/',updatedAt:1}
+ f.input('刚才网页呢');await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.get('partner-browser-state').text,/https:\/\/help.test/)
+ const recalled=f.calls.length
+ const {observeBrowserChange}=await import('../lib/browser/observation.js')
+ f.agent.session.append('tool/ptc-dispatch',{name:'partner_browser',arguments:'{}',rootCallId:'r',parentCallId:'r',subCallId:'r:capability',isError:false,content:[],meta:{kind:'partner-browser-v1',owner:f.config.companion.id,scope:'owner',callId:'r:capability',action:'open',observation:observeBrowserChange(f.config.companion.browser.endpoint,'open','t',[],[{id:'t',title:'2048',url:'https://game.test/'}])}})
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.get('partner-browser-state').text,/2048/);assert.equal(f.calls.length,recalled)
+ f.config.companion.browser.enabled=false
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.equal(f.contexts.has('partner-browser-state'),false)
 })

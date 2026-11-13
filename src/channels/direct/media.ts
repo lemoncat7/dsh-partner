@@ -4,7 +4,7 @@ import { open } from 'node:fs/promises'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName, type PartnerInboundAttachment, type PartnerOutboundAttachment } from '../../channel-message.js'
 import type { DirectConfig } from './transport.js'
 
-export interface DirectMedia { source: string; name?: string; mediaType?: string; size?: number; encrypted?: boolean }
+export interface DirectMedia { source: string; kind?: 'image' | 'record' | 'video' | 'file'; fileId?: string; fileHash?: string; busid?: number; qq?: {messageId:number;index:number;senderId:string}; name?: string; mediaType?: string; size?: number; encrypted?: boolean }
 export const DIRECT_MEDIA_MAX_COUNT = 8
 type Guard = () => Promise<void>
 

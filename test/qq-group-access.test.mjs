@@ -300,3 +300,64 @@ test('first segment failure is not a sent reply and leaves no finished suppressi
  await assert.rejects(f.handle(),/投递失败/)
  assert.equal(f.manager.groupReplyWindows.active.size,0);assert.equal(f.manager.groupReplyWindows.recent.size,0)
 })
+
+test('silently observed image is attached to a later caption, without downloading bystander pictures or repeating it',async()=>{
+ const f=fixture(),downloads=[]
+ f.manager.groupAutonomy.shouldReply=async(_c,e)=>!!e.text
+ f.api.receiveAttachments=async e=>{downloads.push(e.id);return [{kind:'image',name:'prior.png',data:Buffer.from('image'),mediaType:'image/png'}]}
+ const picture={...f.event,id:'prior-picture',text:'',timestamp:Date.now()-2000,qqGroup:{...f.event.qqGroup,mentioned:false},media:[{kind:'image',source:'https://gchat.qpic.cn/a'}]}
+ await f.handle(picture);assert.equal(f.inputs.length,0);assert.deepEqual(downloads,[])
+ await f.handle({...f.event,id:'caption',text:'这张图怎么样',timestamp:Date.now()})
+ assert.deepEqual(downloads,['prior-picture']);assert.equal(f.inputs[0][3].attachments.length,1)
+ assert.match(f.inputs[0][3].text,/补附同一发言人/);assert.match(f.inputs[0][3].text,/这张图怎么样/)
+ await f.handle({...f.event,id:'next',text:'再说两句'});assert.equal(f.inputs[1][3].attachments.length,0)
+ assert.ok(f.state.recentReceipts.includes('qq:prior-picture'))
+})
+test('historical image failure keeps caption; revoked access does not admit it; cancellation propagates',async()=>{
+ for(const mode of ['failure','revoked','cancelled']){
+  const f=fixture(),controller=new AbortController()
+  f.manager.groupAutonomy.shouldReply=async(_c,e)=>!!e.text
+  const picture={...f.event,id:'pic',text:'',timestamp:Date.now()-1000,media:[{kind:'image',source:'https://gchat.qpic.cn/a'}]}
+  await f.handle(picture)
+  f.api.receiveAttachments=async()=>{if(mode==='revoked')f.channel.qq.groupReplies=false;if(mode==='cancelled')controller.abort();throw Error('expired')}
+  const e={...f.event,id:'caption',text:'看这张图'}
+  const pending=f.manager.handleDirect(f.channel,f.api,e,controller.signal)
+  if(mode==='failure'){await pending;assert.equal(f.inputs.length,1);assert.match(f.inputs[0][3].text,/先前附件未能读取/);assert.equal(f.inputs[0][3].attachments.length,0)}
+  else {await assert.rejects(pending);assert.equal(f.inputs.length,0)}
+ }
+})
+test('whole text/image burst downloads originals once, not again as historical images',async()=>{
+ for(const imageFirst of [true,false]){
+  const f=fixture(),downloads=[]
+  f.api.receiveAttachments=async e=>{downloads.push(e.id);return [{kind:'image',name:'a.png',data:Buffer.from('a')}]}
+  const p={...f.event,id:'p',text:'',media:[{kind:'image',source:'https://gchat.qpic.cn/a'}]},c={...f.event,id:'caption',text:'帮我看看'}
+  const batch=imageFirst?[p,c]:[c,p]
+  await f.manager.handleDirect(f.channel,f.api,batch[0],new AbortController().signal,batch)
+  assert.deepEqual(downloads,['p']);assert.equal(f.inputs[0][3].attachments.length,1)
+ }
+})
+
+test('silently observed file or video is attached to the later same-speaker explanation',async()=>{
+ for(const kind of ['file','video']){
+  const f=fixture(),downloads=[]
+  f.manager.groupAutonomy.shouldReply=async(_c,e)=>!!e.text
+  f.api.receiveAttachments=async e=>{downloads.push(e.id);return [{kind:'file',name:kind==='file'?'workflow.json':'video.mp4',data:Buffer.from('bytes')}]}
+  await f.handle({...f.event,id:'prior-'+kind,text:'',timestamp:Date.now()-2000,media:[{kind,source:kind==='video'?'https://multimedia.nt.qq.com.cn/v':'',...(kind==='file'?{fileId:'f'}:{})}]})
+  assert.deepEqual(downloads,[])
+  await f.handle({...f.event,id:'followup',text:'帮我看看这个',timestamp:Date.now()})
+  assert.deepEqual(downloads,['prior-'+kind]);assert.equal(f.inputs[0][3].attachments.length,1);assert.match(f.inputs[0][3].text,/先前附件资料/)
+ }
+})
+
+test('real group intake gives the next participant shared-conversation guidance after confirmed delivery',async()=>{
+ const f=fixture();f.state.companions[0].characterCard={enabled:true}
+ f.manager.groupAutonomy=new QqGroupAutonomy({},()=>Date.now(),async()=>({label:'engage',confidence:.41,margin:.21,contextSimilarity:.71}))
+ await f.handle({...f.event,text:'来聊这个话题'})
+ const b={...f.event,id:'second-participant',sender:'group:99887766:33445678',text:'我也觉得刚才这个很有意思',qqGroup:{...f.event.qqGroup,userId:'33445678',mentioned:false}}
+ await f.handle(b)
+ assert.equal(f.inputs.length,2);assert.equal(f.sent.length,2)
+ const prompt=f.inputs[1][3].text
+ assert.match(prompt,/参与状态（真实发送记录）/);assert.match(prompt,/其他成员顺着话题/)
+ assert.doesNotMatch(prompt,/别人之间的交流安静旁听/);assert.match(prompt,/明确发给其他人的消息/)
+ assert.equal(f.manager.groupAutonomy.status('qq').route,'continuation')
+})

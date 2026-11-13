@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.25.16",
+  "version": "2.26.10",
   "description": "Long-lived AI companions with QQ, WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -31,6 +31,16 @@
     }
   },
   "files": [
+    "docs/releases/2.26.8.md",
+    "docs/releases/2.26.7.md",
+    "docs/releases/2.26.6.md",
+    "docs/releases/2.26.5.md",
+    "docs/releases/2.26.4.md",
+    "docs/releases/2.26.3.md",
+    "docs/releases/2.26.2.md",
+    "docs/releases/2.26.1.md",
+    "docs/releases/2.26.0.md",
+    "docs/browser.md",
     "docs/releases/2.25.16.md",
     "docs/releases/2.25.15.md",
     "docs/releases/2.25.9.md",
@@ -235,7 +245,10 @@
     "docs/releases/2.25.11.md",
     "docs/releases/2.25.12.md",
     "docs/releases/2.25.13.md",
-    "docs/releases/2.25.14.md"
+    "docs/releases/2.25.14.md",
+    "docs/host-compatibility-policy.md",
+    "docs/releases/2.26.9.md",
+    "docs/releases/2.26.10.md"
   ],
   "dsh": {
     "bundle": {
@@ -255,8 +268,7 @@
     }
   },
   "engines": {
-    "node": ">=24.9.0",
-    "dsh": "=0.2.2-rc.1 || =0.2.2-rc.2"
+    "node": ">=24.9.0"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
@@ -273,25 +285,26 @@
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "mdast-util-to-markdown": "2.1.2",
-    "micromark-extension-gfm": "3.0.0"
+    "micromark-extension-gfm": "3.0.0",
+    "ws": "8.22.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
-    "@deepseek-ai/dsh-agent": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-agent-default-model": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-agent-preset-registry": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-attachment": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-scope": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-session": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-user-questions": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-workspace": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-tool-executor-native": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-tool-executor-ptc": "^0.2.2-rc.1"
+    "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-agent-default-model": "*",
+    "@deepseek-ai/dsh-agent-preset-registry": "*",
+    "@deepseek-ai/dsh-attachment": "*",
+    "@deepseek-ai/dsh-credentials": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-scope": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-system-prompt": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-user-questions": "*",
+    "@deepseek-ai/dsh-workspace": "*",
+    "@deepseek-ai/dsh-tool-executor-native": "*",
+    "@deepseek-ai/dsh-tool-executor-ptc": "*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
@@ -334,7 +347,6 @@
     "react-dom": "18.3.1",
     "three": "0.185.1",
     "typescript": "^5.9.3",
-    "ws": "^8.22.0",
     "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
     "@deepseek-ai/dsh-tool-executor-ptc": "0.2.2-rc.1",
     "@types/react-dom": "18.3.7"

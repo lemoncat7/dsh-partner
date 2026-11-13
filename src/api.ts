@@ -1,4 +1,5 @@
 import {withActivityDeliveries} from './character/activity-summary.js'
+import {dispatchBrowserApi} from './api/features/browser-api.js'
 import {dispatchTtsApi} from './api/features/tts-api.js'
 import type {TtsService} from './voice/service.js'
 import { habitBaseline, habitData } from './character/habits.js'
@@ -58,6 +59,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  browser?:import('./browser/service.js').BrowserService
   tts?:TtsService
   bilibili?: import('./channels/bilibili/service.js').BilibiliService
   sleep?: import('./character/sleep-service.js').SleepService
@@ -110,6 +112,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if (runtime.browser && await dispatchBrowserApi(req,res,segments,runtime.browser)) return
   if (runtime.tts && await dispatchTtsApi(req,res,segments,runtime.tts)) return
   if (runtime.push && await dispatchPushApi(req, res, segments, runtime.push)) return
   if (runtime.mcp && await dispatchMcpApi(req, res, segments, runtime.mcp)) return
