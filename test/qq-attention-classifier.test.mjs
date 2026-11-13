@@ -37,3 +37,12 @@ test('aborted classification is not converted into a decision to reply',async t=
  while(!entered)await new Promise(r=>setTimeout(r,5))
  controller.abort();await assert.rejects(pending)
 })
+
+test('slow local classification has a short budget and does not stall the next message',async t=>{
+ let calls=0
+ const classify=await fixture(t,()=>{calls++})
+ const start=performance.now();assert.equal(await classify('需要判断的群聊',signal()),undefined)
+ assert.ok(performance.now()-start<1000,'classification must finish below the old 1.2s timeout')
+ const next=performance.now();assert.equal(await classify('后续补充',signal()),undefined)
+ assert.ok(performance.now()-next<100);assert.equal(calls,1)
+})

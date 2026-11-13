@@ -62,7 +62,7 @@ test('QQ adapter lists only authorized abilities, changes identity without chang
  const defs=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply','partner_memory_recall'].map(name=>definition(name,async()=>{calls++;return {ok:true}}))
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,defs.map(tool=>({tool,allowed:()=>true}))))
  t.after(f.scope.ctx.tools.register(definition('host_private')))
- t.after(installToolAccessGuard(f.root.tools,()=>f.state))
+ t.after(installToolAccessGuard(f.root.tools,f.store))
  f.state.channels=[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
  for(const [id,userId] of [['owner','12345678'],['guest','22345678']])f.state.sessions.push({id,kind:'channel',channelId:'qq',userId,companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[]})
  const send=id=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'hello'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'});f.state.sessions.find(s=>s.id===id).inboundMessageIds.push(m.id)}
@@ -74,7 +74,8 @@ test('QQ adapter lists only authorized abilities, changes identity without chang
  assert.equal((await f.invoke('partner_tools',{action:'describe',name:'host_private'})).isError,true)
  assert.equal((await f.call('partner_chat_reply')).value.dispatch.isError,false)
  send('owner');assert.equal((await f.invoke('host_private')).isError,false)
- f.state.channels[0].qq.identityBinding.qqIds=[];assert.equal((await f.invoke('host_private')).isError,true)
+ f.state.channels[0].qq.identityBinding.qqIds=[];assert.equal((await f.invoke('host_private')).isError,false)
+ assert.equal((await f.invoke('partner_identity')).isError,true)
  assert.deepEqual(f.root.tools.schemas(f.agent),before);assert.equal(calls,2)
 })
 test('gateway preserves validation, cancellation, additional context and terminal reply metadata',async t=>{
@@ -175,8 +176,9 @@ test('other plugin entries remain native and cannot be listed or invoked through
  assert.equal(calls,1)
 })
 
-test('image discovery never invents unavailable tools or exposes them to QQ chat-only identities',async t=>{
+test('external images remain outside partner discovery while QQ guests can use their host-authorized entry',async t=>{
  const f=fixture(t)
+ t.after(installToolAccessGuard(f.root.tools,f.store))
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[]))
  assert.deepEqual((await f.invoke('partner_tools',{action:'list',query:'生图'})).value.tools,[])
  t.after(f.scope.ctx.tools.register({...definition('generate_image'),description:'Generate images'}))
@@ -186,6 +188,9 @@ test('image discovery never invents unavailable tools or exposes them to QQ chat
  f.state.sessions.push({id:'guest',kind:'channel',channelId:'qq',userId:'22345678',companionId:'c',sessionId:f.agent.session.id,inboundMessageIds:[message.id]})
  assert.deepEqual((await f.invoke('partner_tools',{action:'list',query:'生图'})).value.tools,[])
  assert.equal((await f.call('generate_image')).isError,true)
+ assert.equal((await f.invoke('generate_image')).isError,false)
+ f.scope.ctx.tools.guard(e=>e.name==='generate_image'?'host approval denied':undefined)
+ assert.equal((await f.invoke('generate_image')).isError,true)
 })
 
 test('missing tools are distinguished from revoked permissions',async t=>{
@@ -310,4 +315,16 @@ test('voice is nested under activity while revocation still blocks execution',as
  assert.equal((await f.call('partner_voice_reply')).isError,true)
  assert.equal((await f.invoke('partner_tools',{action:'list',category:'activity'})).value.total,0)
  assert.equal(calls,1)
+})
+
+test('public group artifact delivery is discoverable and callable, with live tool revocation preserved',async t=>{
+ const f=fixture(t);let sent=0,allowed=true
+ f.state.channels=[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]
+ const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'发来生成的图片'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ f.state.sessions.push({id:'guest',kind:'channel',companionId:'c',sessionId:f.agent.session.id,channelId:'qq',userId:'group:99887766:22334455',inboundMessageIds:[m.id]})
+ t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,[{tool:definition('partner_send_attachment',async()=>{sent++;return {channel:'sent'}}),allowed:()=>allowed}]))
+ t.after(installToolAccessGuard(f.root.tools,f.store))
+ assert.equal((await f.invoke('partner_tools',{action:'describe',name:'partner_send_attachment'})).isError,false)
+ assert.equal((await f.call('partner_send_attachment')).value.dispatch.isError,false);assert.equal(sent,1)
+ allowed=false;assert.equal((await f.call('partner_send_attachment')).isError,true);assert.equal(sent,1)
 })

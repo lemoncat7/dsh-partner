@@ -147,3 +147,14 @@ test('ordinary and autonomous expression context contains no work delivery proce
   assert.match(text,/具体角色说明和本轮用户要求优先/)
  }
 })
+
+test('exclusive persona keeps chosen message segmentation in runtime context without inserting a persona',()=>{
+ const card=normalizeCharacterCard({enabled:true,exclusivePrompt:true,roleText:'由用户独立设置的人物',length:'short',segmentedReplies:true})
+ for(const autonomous of [false,true]){
+  const text=renderConversationTurn(card,1,autonomous)
+  assert.match(text,/用户选择的消息分段/);assert.match(text,/半句到两句/)
+  assert.match(text,/continueTurn:true/);assert.match(text,/不是整轮只能回一句/)
+  assert.doesNotMatch(text,/由用户独立设置的人物|撒娇|咿呀|哥哥|小孩/)
+ }
+ assert.doesNotMatch(renderConversationTurn({...card,segmentedReplies:false},1),/用户选择的消息分段/)
+})

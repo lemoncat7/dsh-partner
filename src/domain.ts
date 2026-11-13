@@ -261,6 +261,7 @@ export interface ChannelView extends WeixinChannel {
   runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
   activity?: {kind:string;label:string;sessionId?:string}[]
   groupDecision?: {at:number;groupId:string;reason:string}
+  groupDecisions?: import('./channels/qq/autonomy.js').GroupDecision[]
   qqLatency?: import('./channels/qq/latency.js').QqLatencySample[]
   idleDelivery?: string
   lastError?: string

@@ -51,3 +51,14 @@ test('only pending verified user input from the same group speaker holds old too
  for(const edit of [()=>agent.inbox.nextStep=[],()=>agent.inbox.nextStep=[{id:'other',source:{kind:'user'}}],()=>agent.inbox.nextStep=[{id:'new',source:{kind:'plugin:test'}}]]){edit();assert.equal(pendingGroupInput(state,agent,'r'),false)}
  agent.inbox.nextStep=[{id:'new',source:{kind:'user'}}];state.sessions[0].userId='22345678';assert.equal(pendingGroupInput(state,agent,'r'),false)
 })
+
+test('same-poll image caption grouping does not erase a change of addressee or quoted target',async()=>{
+ const {groupDirectMessages}=await import('../lib/channels/direct/inbound-batch.js')
+ const a={...event('image'),timestamp:1000,media:[{source:'image'}]}
+ const b={...event('other','给你看看'),timestamp:1100,qqGroup:{...event('other').qqGroup,otherMention:true}}
+ const c={...event('quote','就是这张'),timestamp:1200,qqGroup:{...event('quote').qqGroup,replyToId:'quote-id'}}
+ const groups=groupDirectMessages([a,b,c]);assert.deepEqual(groups.map(g=>g.map(m=>m.id)),[['image'],['other'],['quote']])
+ const f=fixture(),seen=[]
+ for(const group of groups)f.bursts.enqueue(group,async(messages,ready)=>{seen.push(messages.map(m=>m.id));ready()})
+ await f.dispatcher.drain();assert.deepEqual(seen,[['image'],['other'],['quote']])
+})

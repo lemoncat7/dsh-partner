@@ -8,7 +8,7 @@ export class QqGroupBursts {
   private readonly pending=new Map<string,Burst>()
   private readonly ids=new Set<string>()
   constructor(private readonly dispatcher:DirectDispatcher,private readonly signal:AbortSignal,
-    private readonly quietMs=1200,private readonly maxMs=4000) {
+    private readonly quietMs=600,private readonly maxMs=2400) {
     signal.addEventListener('abort',()=>{this.pending.clear();this.ids.clear()},{once:true})
   }
   has(id:string):boolean { return this.ids.has(id) }

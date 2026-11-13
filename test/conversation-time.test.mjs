@@ -32,3 +32,11 @@ test('browser input in a shared session cannot inherit timestamps whose channel 
  const text=render([user('expired-channel-id',now-2*hour),user('browser',now)])
  assert.doesNotMatch(text,/2 小时|上一条消息/)
 })
+
+test('rapid followups preserve second-level gaps while long absences change the rhythm context',()=>{
+ const rapid=render([user('a1',now-8000),user('a2',now-2000)])
+ assert.match(rapid,/两条消息间隔 6 秒/);assert.match(rapid,/短时间连续接话/)
+ assert.match(rapid,/00:29:58/);assert.doesNotMatch(rapid,/不足 1 分钟/)
+ const delayed=render([user('a1',now-3*hour),user('a2',now)])
+ assert.match(delayed,/明显间隔/);assert.doesNotMatch(delayed,/短时间连续接话/)
+})

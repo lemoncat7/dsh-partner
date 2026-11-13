@@ -18,6 +18,8 @@ export function groupDirectMessages(messages: readonly DirectMessage[], defaultT
     const first = burst[0], previous = burst.at(-1)
     if (first && previous && (burst.length >= MAX_GROUP_EVENTS || message.sender !== first.sender
       || (message.targetId ?? defaultTarget) !== (first.targetId ?? defaultTarget)
+      || Boolean(message.qqGroup)!==Boolean(first.qqGroup)
+      || message.qqGroup&&first.qqGroup&&(Boolean(message.qqGroup.otherMention)!==Boolean(first.qqGroup.otherMention)||message.qqGroup.replyToId!==first.qqGroup.replyToId)
       || !Number.isFinite(message.timestamp) || !Number.isFinite(first.timestamp)
       || message.timestamp! < previous.timestamp! || message.timestamp! - first.timestamp! > GROUP_WINDOW_MS)) flush()
     burst.push(message)

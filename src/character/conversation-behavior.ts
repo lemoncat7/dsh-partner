@@ -35,6 +35,7 @@ export function renderConversationTurn(card: CharacterCard | undefined, consecut
     autonomous ? '【本轮来源】系统自主活动，不是用户新消息；无需发送消息时可调用 partner_activity_finish 安静结束。' : '',
     !autonomous && consecutiveUserMessages > 1 ? `【本轮输入】对方连续发了 ${consecutiveUserMessages} 条消息，合并为本轮输入。` : '',
     card.exclusivePrompt?'':renderExpressionPreferences(card),
+    card.exclusivePrompt&&card.segmentedReplies?'【用户选择的消息分段】messages 中每个 text 条目是一条消息；换行不等于分条。想先接一句再继续说时，用 partner_chat_say 或 continueTurn:true；已经想好的几条可一次放入 messages。新消息优先，不重复已送达内容。'+(usesShortDeliveryPolicy(card)?SEGMENTED_CHAT_GUIDANCE:'条数随内容决定，不凑条数。'):'',
     card.exclusivePrompt?renderVoicePreference(card):'',
     card.exclusivePrompt?renderStickerDeliveryPreference(card):'',
     !card.exclusivePrompt&&card.chatStyle?.trim() ? `【此伙伴的聊天偏好】\n${card.chatStyle.trim()}` : '',

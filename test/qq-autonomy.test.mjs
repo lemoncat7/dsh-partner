@@ -29,7 +29,7 @@ test('recent conversation keeps substantive followups but leaves closing acknowl
   assert.equal(gate.status('c').route,'continuation')
  }
  assert.equal(await gate.shouldReply('c',input('好的'),companion,signal()),false)
- assert.equal(calls,6)
+ assert.equal(calls,0,'immediate same-speaker followups do not await another classification')
 })
 test('another speaker does not erase a thread or inherit it; channels, groups and expiry are separate',async()=>{
  let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return undefined})
@@ -73,8 +73,8 @@ test('classifier outage does not admit every group line; explicit requests and c
 test('bounded observations exclude the current and later events from the context of a queued message',()=>{
  const gate=new QqGroupAutonomy(forbidden,()=>context.now,unavailable)
  for(let i=0;i<100;i++)gate.observe('c',input('message-'+i,{},String(i)))
- const context=JSON.parse(gate.context('c',input('message-98',{},'98')))
- assert.equal(context.length,16);assert.equal(context.at(-1).text,'message-97')
+ const rows=JSON.parse(gate.context('c',input('message-98',{},'98')))
+ assert.equal(rows.length,16);assert.equal(rows.at(-1).text,'message-97')
 })
 
 test('shared sleep stops an ongoing hot group thread before semantic classification',async()=>{
@@ -86,4 +86,66 @@ test('shared sleep stops an ongoing hot group thread before semantic classificat
  assert.equal(await gate.shouldReply('c',input('醒醒',{mentioned:true}),sleeping,signal()),true)
  sleeping.sleepState.episode.wokeAt=context.now
  assert.equal(await gate.shouldReply('c',input('然后呢'),sleeping,signal()),true)
+})
+
+test('human exchanges retain selective chime-in opportunities while direct invitations bypass the spontaneous interval',async()=>{
+ let now=context.now,calls=0
+ const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return {label:'engage',confidence:.95,margin:.9}})
+ gate.observe('c',input('上线了已经',{userId:'33445678'},'other'))
+ now+=2000
+ let chosen
+ for(let i=0;i<100;i++){
+  const chatter=input('这话听起来怪怪的',{},'candidate-'+i);gate.observe('c',chatter)
+  if(await gate.shouldReply('c',chatter,companion,signal())){chosen=chatter;break}
+ }
+ assert.ok(chosen,'human-to-human chatter is no longer categorically rejected')
+ assert.equal(gate.status('c').route,'opportunity');assert.ok(calls>0)
+ const before=calls,mention=input('帮我看看',{mentioned:true});gate.observe('c',mention)
+ assert.equal(await gate.shouldReply('c',mention,companion,signal()),true);assert.equal(calls,before)
+ assert.equal(await gate.shouldReply('c',input('？'),companion,signal()),false);assert.equal(calls,before)
+ const invitation=input('大家怎么看这个更新');gate.observe('c',invitation)
+ assert.equal(await gate.shouldReply('c',invitation,companion,signal()),false,'unsolicited admissions cannot accumulate while earlier work waits')
+ now+=21000
+ assert.equal(await gate.shouldReply('c',invitation,companion,signal()),true)
+})
+
+test('semantic chime-ins are optional, room-limited, and never override explicit other-person addressing',async()=>{
+ const labels={label:'engage',confidence:.95,margin:.9},shared={...context,otherConversation:true,semantic:labels}
+ const decisions=Array.from({length:200},(_,i)=>scoreGroupReply(input('这个透视也太离谱了'),{...shared,seed:'room-message-'+i}))
+ assert.ok(decisions.some(r=>r.reply));assert.ok(decisions.some(r=>!r.reply));assert.ok(decisions.every(r=>r.route==='opportunity'))
+ assert.equal(scoreGroupReply(input('这个透视也太离谱了',{otherMention:true}),shared).reply,false)
+ assert.equal(scoreGroupReply(input('普通消息'),{...shared,semantic:{label:'other',confidence:.95,margin:.8}}).reply,false)
+ let now=context.now
+ const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>labels)
+ const e=input('大家觉得怎么样');gate.observe('a',e);assert.equal(await gate.shouldReply('a',e,companion,signal()),true)
+ const second=input('还有一个大家来看看',{},'second');gate.observe('a',second);assert.equal(await gate.shouldReply('a',second,companion,signal()),false)
+ gate.observe('b',second);assert.equal(await gate.shouldReply('b',second,companion,signal()),true)
+ const another=input('大家来看看',{groupId:'87654321'},'another');gate.observe('a',another);assert.equal(await gate.shouldReply('a',another,companion,signal()),true)
+ now+=20000;assert.equal(await gate.shouldReply('a',second,companion,signal()),true)
+})
+
+test('room history includes factual seconds and delivered partner turns, and expires stale chatter',()=>{
+ let now=context.now;const gate=new QqGroupAutonomy(forbidden,()=>now,unavailable)
+ const first={...input('小明？',{},'first'),timestamp:now-5000};gate.observe('c',first)
+ gate.replied('c',first,'我刚看见')
+ now+=2000;const next={...input('然后呢',{},'next'),timestamp:now};gate.observe('c',next)
+ const rows=JSON.parse(gate.context('c',next))
+ assert.equal(rows[0].ageSeconds,7);assert.equal(rows[1].ageSeconds,2)
+ assert.equal(rows[1].kind,'partner');assert.equal(rows[1].text,'我刚看见')
+ assert.ok(!rows.some(r=>r.text==='然后呢'))
+ now+=11*60000;const later=input('新话题',{},'later');gate.observe('c',later)
+ assert.deepEqual(JSON.parse(gate.context('c',later)),[])
+})
+
+test('fast followups stop after redirects and cancellation; decision history is bounded metadata only',async()=>{
+ let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return undefined})
+ const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'你好')
+ now+=2000;const follow=input('前面那张呢');gate.observe('c',follow)
+ assert.equal(await gate.shouldReply('c',follow,companion,signal()),true);assert.equal(calls,0)
+ const stop=input('你们先聊，不用回我');gate.observe('c',stop)
+ assert.equal(await gate.shouldReply('c',stop,companion,signal()),false)
+ assert.equal(await gate.shouldReply('c',follow,companion,signal()),false)
+ for(let i=0;i<45;i++)gate.record('c',input('private text',{},String(i)),'旁听')
+ const history=gate.history('c');assert.equal(history.length,40);assert.equal(history.at(-1).messageId,'44')
+ assert.ok(!JSON.stringify(history).includes('private text'));history.length=0;assert.equal(gate.history('c').length,40)
 })

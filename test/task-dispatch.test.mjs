@@ -1,3 +1,4 @@
+import {isPartnerOwnedTool} from '../lib/execution/tool-ownership.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -48,6 +49,9 @@ test('running an inline planning Skill never forks away from companion board too
   assert.match(result.instructions, /先提交调研与验证任务/)
   assert.equal(result.runId, undefined)
   assert.ok(tools.has('partner_task_board'))
+  assert.equal(isPartnerOwnedTool(store,'companion-default','partner_task_board'),true)
+  dispose()
+  assert.equal(isPartnerOwnedTool(store,'companion-default','partner_task_board'),false)
 })
 
 test('planning upgrade preserves bindings, refreshes next-turn configuration and exposes metadata and loads the installed policy on demand', async t => {

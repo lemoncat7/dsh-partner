@@ -177,6 +177,7 @@ test('QQ polling merges a speaker burst and steers subsequent additions even wit
  const f=fixture(),controller=new AbortController(),seen=[]
  f.manager.ctx.settings={get:()=> 'queue'}
  let polls=0,release,secondSent=false
+ f.agents.groupReplyFocus=()=>seen.length?{userId:f.peer,startedAt:Date.now()-10000,working:true}:undefined
  const end=new Promise(r=>release=r)
  t.after(()=>{controller.abort();release()})
  f.agents.reply=async(_c,_channel,_sender,input,updates)=>{
@@ -201,4 +202,101 @@ test('QQ polling merges a speaker burst and steers subsequent additions even wit
  assert.equal(seen.length,2);assert.match(seen[0].text,/帮我看看[\s\S]*还有这条/);assert.equal(seen[0].attachments.length,1)
  assert.match(seen[1].text,/等等先别做/)
  for(const id of ['one','two','three'])assert.ok(f.state.recentReceipts.includes('qq:'+id))
+})
+
+test('busy group task ignores a flood without steering, queuing replies or loading attachments',async()=>{
+ const f=fixture();let steers=0,downloads=0,judgments=0
+ f.agents.groupReplyFocus=()=>({userId:f.peer,startedAt:Date.now()-60000,working:true})
+ f.agents.steer=async()=>{steers++;return true}
+ f.api.receiveAttachments=async()=>{downloads++;return []}
+ f.manager.groupAutonomy.shouldReply=async()=>{judgments++;return true}
+ for(let i=0;i<120;i++){
+  const e={...f.event,id:'noise-'+i,sender:i%2?f.peer:'group:99887766:33445566',text:['？','干活中不会发消息的','他好像真去','表情包还挺好用'][i%4],media:i%3?[]:[{source:'https://invalid.test/img'}],qqGroup:{...f.event.qqGroup,userId:i%2?'22345678':'33445566',mentioned:false}}
+  await f.manager.handleDirect(f.channel,f.api,e,new AbortController().signal,[e],()=>{},'steer')
+ }
+ assert.equal(steers,0);assert.equal(downloads,0);assert.equal(judgments,0);assert.equal(f.inputs.length,0);assert.deepEqual(f.sent,[])
+ assert.match(f.manager.groupAutonomy.status('qq').reason,/仅旁听/)
+})
+
+test('busy group task queues explicit requests but lets its author cancel without waiting for them',async()=>{
+ const f=fixture();let release,started
+ const waiting=new Promise(r=>{release=r}),ready=new Promise(r=>{started=r}),steered=[]
+ f.agents.groupReplyFocus=()=>({userId:f.peer,startedAt:Date.now()-60000,working:true})
+ f.agents.steer=async(...args)=>{steered.push(args[3].text);return true}
+ f.agents.reply=async()=>{started();await waiting;return {text:'',attachments:[],chatParts:[]}}
+ const e={...f.event,id:'next',sender:'group:99887766:33445566',text:'也帮我查一下',qqGroup:{...f.event.qqGroup,userId:'33445566'}}
+ const queued=f.manager.handleDirect(f.channel,f.api,e,new AbortController().signal,[e],()=>{},'steer')
+ await ready
+ for(const [id,text] of [['change','改成写实画风'],['cancel','停一下']]){
+  const e={...f.event,id,text,qqGroup:{...f.event.qqGroup,mentioned:false}}
+  await f.manager.handleDirect(f.channel,f.api,e,new AbortController().signal,[e],()=>{},'steer')
+ }
+ assert.equal(steered.length,2);assert.match(steered[0],/改成写实/);assert.match(steered[1],/停一下/)
+ release();await queued;assert.deepEqual(f.sent,[])
+})
+
+test('task starting during classification rechecks admission before steering',async()=>{
+ const f=fixture();let busy=false
+ f.agents.groupReplyFocus=()=>busy?{userId:f.peer,startedAt:Date.now()-60000,working:true}:undefined
+ f.manager.groupAutonomy.shouldReply=async()=>{busy=true;return true}
+ f.agents.steer=async()=>{throw Error('noise must not enter inbox')}
+ const e={...f.event,text:'他好像真去',qqGroup:{...f.event.qqGroup,mentioned:false}}
+ await f.manager.handleDirect(f.channel,f.api,e,new AbortController().signal,[e],()=>{},'steer')
+ assert.deepEqual(f.inputs,[]);assert.deepEqual(f.sent,[])
+})
+
+test('busy admission reads the current words rather than treating quoted text as task control',async()=>{
+ const f=fixture(),steered=[]
+ f.agents.groupReplyFocus=()=>({userId:f.peer,startedAt:Date.now()-60000,working:true})
+ f.agents.steer=async(...args)=>{steered.push(args[3].text);return true}
+ const quote={text:'取消任务',media:[]}
+ const noise={...f.event,id:'quoted-noise',text:'他说了这句',qqQuote:quote,qqGroup:{...f.event.qqGroup,mentioned:false}}
+ await f.manager.handleDirect(f.channel,f.api,noise,new AbortController().signal,[noise],()=>{},'steer')
+ assert.equal(steered.length,0);assert.equal(f.inputs.length,0)
+ const control={...noise,id:'quoted-control',text:'停一下',qqQuote:{text:'原先的工作',media:[]},qqGroup:{...noise.qqGroup,replyTo:'self'}}
+ await f.manager.handleDirect(f.channel,f.api,control,new AbortController().signal,[control],()=>{},'steer')
+ assert.equal(steered.length,1);assert.match(steered[0],/停一下/)
+})
+
+test('a cancellation at the end of a merged burst is not hidden by its opening chatter',async()=>{
+ const f=fixture(),steered=[]
+ f.agents.groupReplyFocus=()=>({userId:f.peer,startedAt:Date.now()-60000,working:true})
+ f.agents.steer=async(...args)=>{steered.push(args[3].text);return true}
+ const first={...f.event,id:'aside',text:'？',qqGroup:{...f.event.qqGroup,mentioned:false}}
+ const last={...first,id:'stop',text:'取消任务'}
+ await f.manager.handleDirect(f.channel,f.api,first,new AbortController().signal,[first,last],()=>{},'steer')
+ assert.equal(steered.length,1);assert.match(steered[0],/取消任务/);assert.deepEqual(f.sent,[])
+})
+
+test('first confirmed segment closes same-speaker admission until the reply finishes, including buffered input',{timeout:10000},async()=>{
+ const f=fixture();let release,secondReady,steers=0,replies=0
+ const second=new Promise(r=>secondReady=r),finish=new Promise(r=>release=r)
+ const api=Object.create(DirectTransport.prototype);api.config={platform:'qq',targetId:f.target}
+ api.sendText=async(_peer,text)=>{f.sent.push(text);if(text==='第二段'){secondReady();await finish}}
+ f.manager.directTransports.set('qq',{forTarget:()=>api})
+ f.agents.steer=async()=>{steers++;return false}
+ f.manager.groupAutonomy.shouldReply=async()=>true
+ f.agents.reply=async(_c,_ch,_u,_m,progress)=>{replies++;progress('working');return replies===1?{text:'',attachments:[],chatParts:[{type:'text',text:'第一段'},{type:'text',text:'第二段'}]}:{text:'新的回复',attachments:[]}}
+ const first={...f.event,id:'first-segments',receivedAt:Date.now()}
+ const pending=f.manager.handleDirect(f.channel,f.api,first,new AbortController().signal,[first],()=>{},'steer')
+ await second
+ const receivedAt=Date.now()
+ const noise={...f.event,id:'during-segments',receivedAt,text:'还有一点随口说的',qqGroup:{...f.event.qqGroup,mentioned:false}}
+ await f.manager.handleDirect(f.channel,f.api,noise,new AbortController().signal,[noise],()=>{},'steer')
+ assert.equal(replies,1);assert.equal(steers,1,'only the first request tried an idle steer')
+ release();await pending
+ const buffered={...noise,id:'already-buffered',receivedAt}
+ await f.manager.handleDirect(f.channel,f.api,buffered,new AbortController().signal,[buffered],()=>{},'steer')
+ assert.equal(replies,1);assert.equal(f.manager.groupReplyWindows.active.size,0)
+ const fresh={...noise,id:'fresh-after',receivedAt:Date.now()+1,text:'现在另聊一件事'}
+ await f.manager.handleDirect(f.channel,f.api,fresh,new AbortController().signal,[fresh],()=>{},'steer')
+ assert.equal(replies,2);assert.equal(f.sent.at(-1).text,'新的回复')
+})
+
+test('first segment failure is not a sent reply and leaves no finished suppression window',async()=>{
+ const f=fixture(),api=Object.create(DirectTransport.prototype);api.config={platform:'qq',targetId:f.target};api.sendText=async()=>{throw Error('not delivered')}
+ f.manager.directTransports.set('qq',{forTarget:()=>api})
+ f.agents.reply=async(_c,_ch,_u,_m,progress)=>{progress('working');return {text:'',attachments:[],chatParts:[{type:'text',text:'未送达'}]}}
+ await assert.rejects(f.handle(),/投递失败/)
+ assert.equal(f.manager.groupReplyWindows.active.size,0);assert.equal(f.manager.groupReplyWindows.recent.size,0)
 })

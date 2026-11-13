@@ -1,3 +1,4 @@
+import {trackPartnerTools} from '../lib/execution/tool-ownership.js'
 import {native,ptc,modeFor} from './runtime-022.mjs'
 import {defineContentToolFixture} from './runtime-022.mjs'
 import {dispatchTool} from '../lib/compat/tool-dispatch.js'
@@ -35,7 +36,11 @@ async function fixture(t, composer, mode = 'native') {
     agents: { get: id => id === agent.session.id ? agent : undefined },
     workspaceRegistry: { archivedSessionIds: [], async create() { return { async attachSession() {} } } },
   })
-  const runtime = new PartnerAgentRuntime(ctx, store, directory, undefined, undefined, undefined, composer)
+  const runtime = new PartnerAgentRuntime(ctx, store, directory, undefined, undefined, undefined, composer && {async compose(ctx,companion){
+    const dispose=await composer.compose(ctx,companion)
+    const release=trackPartnerTools(store,companion.id,['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply','partner_schedule'].filter(name=>ctx.tools.get(name,agent)))
+    return ()=>{dispose();release()}
+  }})
   t.after(async () => { await runtime.close(); await scope.dispose(); await rm(directory, { recursive: true, force: true }) })
   const assemble = async () => {const signal=new AbortController().signal;await runtime.prepareAgentAssembly(agent,signal);return root.systemPrompt.assemble({agent,scope:agent,signal})}
   return { root, agent, store, runtime, assemble }
@@ -130,7 +135,7 @@ test('legacy check text is not promoted into completion criteria or linked to Go
 })
 
 
-test('QQ guest assembly exposes reply tools only and owner/local restores existing tools',async t=>{
+test('QQ guest assembly keeps external tools while limiting partner private tools',async t=>{
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
  const f=await fixture(t,{async compose(ctx){const ds=['host_tool','partner_identity','ssh_exec','partner_chat_reply','partner_stickers','partner_qq_reply'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return ()=>ds.forEach(d=>d())}})
  f.agent.session=Session.create('session-assembly')
@@ -141,9 +146,9 @@ test('QQ guest assembly exposes reply tools only and owner/local restores existi
   for(const [id,userId] of [['owner','12345678'],['guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId,lastMessageAt:1,inboundMessageIds:[]})
  })
  const send=async id=>{const m=createUserMessage({content:[{type:'text',text:'请执行'}],source:{kind:'user'}});f.agent.session.append('user/message',m,{surfaceOp:'append'});if(id)await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id));return f.assemble()}
- assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['host_tool','partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers','ssh_exec'])
  assert.equal((await send('owner')).tools.length,7)
- assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers'])
+ assert.deepEqual((await send('guest')).tools.map(t=>t.name).sort(),['host_tool','partner_chat_reply','partner_memory_recall','partner_qq_reply','partner_stickers','ssh_exec'])
  assert.equal((await send()).tools.length,7)
 })
 
@@ -192,33 +197,39 @@ for(const mode of ['native','ptc'])test(`public recall and gateway assembly pres
  assert.equal(compositions,1)
 })
 
-test('partner discovery preserves external entries and their protocols without widening QQ permissions',async t=>{
+for(const mode of ['native','ptc'])for(const discovery of [false,true])test(`external entries keep host permissions under ${mode}, discovery=${discovery}`,async t=>{
  const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
  let calls=0
  const f=await fixture(t,{async compose(ctx){
   const dispose=['generate_image','image_gen.imagegen','ssh','knowledge','write'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>{calls++;return [{type:'text',text:'image created'}]}})))
   return ()=>dispose.forEach(fn=>fn())
- }})
+ }},mode)
  f.root.systemPrompt.section({name:'tool:write',order:20,text:'External write policy stays with write.'})
  f.agent.session=Session.create('image-entry-permissions')
  await f.store.update(s=>{
-  s.companions[0].toolDiscovery=true;s.sessions[0].sessionId=f.agent.session.id
+  s.companions[0].toolDiscovery=discovery;s.sessions[0].sessionId=f.agent.session.id
   s.channels.push({id:'qq-image',platform:'qq',companionId:s.companions[0].id,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}})
-  for(const [id,userId] of [['image-owner','12345678'],['image-guest','22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq-image',userId,lastMessageAt:1,inboundMessageIds:[]})
+  for(const [id,userId] of [['image-owner','12345678'],['image-guest','group:99887766:22345678']])s.sessions.push({id,companionId:s.companions[0].id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq-image',userId,lastMessageAt:1,inboundMessageIds:[]})
  })
  for(const id of ['image-owner','image-guest','image-owner']){
   const m=createUserMessage({content:[{type:'text',text:'draw a tree'}],source:{kind:'user'}})
   f.agent.session.append('user/message',m,{surfaceOp:'append'})
   await f.store.update(s=>s.sessions.find(r=>r.id===id).inboundMessageIds.push(m.id))
   const a=await f.assemble()
-  if(id==='image-owner')assert.ok(a.sections.some(s=>s.name==='tool:write'&&s.text==='External write policy stays with write.'))
-  for(const name of ['ssh','knowledge','write'])assert.equal(a.tools.some(t=>t.name===name),id==='image-owner')
-  assert.equal(a.tools.some(t=>t.name==='image_gen.imagegen'),id==='image-owner')
-  assert.equal(a.tools.some(t=>t.name==='generate_image'),id==='image-owner','external plugin entries must retain their native visibility')
+  if(mode==='native'||discovery||id==='image-guest')assert.ok(a.sections.some(s=>s.name==='tool:write'&&s.text==='External write policy stays with write.'))
+  if(mode==='ptc'&&!discovery&&id==='image-owner'){assert.ok(a.tools.some(t=>t.name==='run_code'))}
+  else {
+  for(const name of ['ssh','knowledge','write'])assert.equal(a.tools.some(t=>t.name===name),true)
+  assert.equal(a.tools.some(t=>t.name==='image_gen.imagegen'),true)
+  assert.equal(a.tools.some(t=>t.name==='generate_image'),true,'external plugin entries must retain their native visibility')
+  }
   const result=await dispatchTool(f.root.tools, {agent:f.agent,name:'image_gen.imagegen',callId:id,arguments:{},signal:new AbortController().signal})
-  assert.equal(Boolean(result.isError),id==='image-guest')
+  assert.equal(Boolean(result.isError),false)
  }
- assert.equal(calls,2,'guest cannot bypass the channel guard using the alias')
+ assert.equal(calls,3,'guest also uses the external native entry')
+ f.agent.ctx.tools.guard(e=>e.name==='image_gen.imagegen'?'external plugin denied':undefined)
+ assert.equal((await dispatchTool(f.root.tools,{agent:f.agent,name:'image_gen.imagegen',callId:'denied',arguments:{},signal:new AbortController().signal})).isError,true)
+ assert.equal(calls,3)
 })
 
 // The host snapshots providers before pre-step, then appends the accepted inbox.

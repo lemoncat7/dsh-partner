@@ -43,6 +43,7 @@ export interface ChannelView {
   createdAt: number; updatedAt: number; runtimeStatus: 'stopped' | 'starting' | 'running' | 'error'
   activity?: {kind:string;label:string;sessionId?:string}[]
   groupDecision?: {at:number;groupId:string;reason:string}
+  groupDecisions?: import('./channels/qq/autonomy.js').GroupDecision[]
   idleDelivery?: string
   lastError?: string; credentialConfigured: boolean
 }

@@ -1,3 +1,4 @@
+import {trackGlobalPartnerTools} from './execution/tool-ownership.js'
 import { concernResourcesSchema, validateConcernResources } from './concern-resources.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -30,8 +31,9 @@ export function registerPartnerConcernTool(ctx: ConcernToolContext, store: Partn
   const when=({agent}:{agent:Agent})=>{const state=store.snapshot();return state.sessions.some(s=>s.sessionId===agent.session.id&&state.companions.some(c=>c.id===s.companionId))}
   const disposeManagement = ctx.tools.register(concernManagementTool(store, concerns),{when})
   const disposeTool = ctx.tools.register(concernSuggestionTool(store, concerns, new ConcernTurnSubmissionGate()),{when})
+  const disposeOwnership = trackGlobalPartnerTools(store, [TOOL_NAME, 'partner_concerns'])
   const disposeVisibility = installVisibility(ctx, store)
-  return () => { disposeVisibility(); disposeTool(); disposeManagement() }
+  return () => { disposeVisibility(); disposeTool(); disposeManagement(); disposeOwnership() }
 }
 
 function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStore, submissions: ConcernTurnSubmissionGate): ToolDefinition {

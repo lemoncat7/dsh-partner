@@ -1,3 +1,5 @@
+import {GroupReplyWindows} from './qq/reply-window.js'
+import {groupTaskInput} from './qq/task-focus.js'
 import type { ReplyProgress } from '../execution/reply-progress.js'
 import {resolveQqQuote,quotedMessageText} from './qq/quote.js'
 import { AuthoredProgress } from './authored-progress.js'
@@ -76,7 +78,6 @@ export class ChannelManager {
   private qqNames = new Map<string,{name:string;expires:number}>()
   private readonly qqLatency=new QqLatencyHistory()
   private readonly groupAutonomy:QqGroupAutonomy
-  private readonly pendingGroupReplies=new Map<string,number>()
   private notificationShutdown = new AbortController()
   private readonly tasks = new Map<string, { controller: AbortController; task: Promise<void> }>()
   private readonly runtime = new Map<string, RuntimeState>()
@@ -84,6 +85,7 @@ export class ChannelManager {
   private readonly operations = new Map<string, Set<Promise<void>>>()
   private readonly directTransports = new Map<string, DirectTransport>()
   private readonly directDispatchers = new Map<string, DirectDispatcher>()
+  private readonly groupReplyWindows=new GroupReplyWindows()
   private readonly directReplyProgress = new Map<string, ReplyProgressController>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private readonly outboundQueues = new Map<string, Promise<void>>()
@@ -215,6 +217,7 @@ export class ChannelManager {
         ...(runtime.lastError ? { lastError: runtime.lastError } : {}),
         credentialConfigured: channel.platform==='bilibili'?true:await this.credentials.configured(channel.id),
         ...(this.groupAutonomy.status(channel.id)?{groupDecision:this.groupAutonomy.status(channel.id)!}:{}),
+        ...(channel.platform==='qq'?{groupDecisions:this.groupAutonomy.history(channel.id)}:{}),
         ...this.idleDeliveryStatus(channel.id),
         activity:this.agents.companionActivity?.(channel.companionId,channel.id)??[],
       }
@@ -590,18 +593,20 @@ export class ChannelManager {
     const channel=state.channels.find(c=>c.id===channelId),pair=state.pairings.find(p=>p.channelId===channelId&&p.userId===userId)
     if(!route||!channel||route.companionId!==channel.companionId||this.store.isCompanionRemoving(route.companionId)||channel.accountId!==source.accountId||(channel.direct?.baseUrl??'')!==source.baseUrl||directReplyTarget(state,channelId,userId)!==source.targetId)throw new Error('原始会话、账号或房间已变更，保留回复等待处理，不转发其他渠道')
   }
-  private async sendChatReply(channel:WeixinChannel,userId:string,receipt:string,reply:PartnerReply,first?:(text:string)=>Promise<void>,targetId?:string):Promise<void> {
+  private async sendChatReply(channel:WeixinChannel,userId:string,receipt:string,reply:PartnerReply,first?:(text:string)=>Promise<void>,targetId?:string,onSent?:()=>void):Promise<void> {
     const state=this.store.snapshot(),route=state.sessions.find(s=>s.channelId===channel.id&&s.userId===userId&&s.companionId===channel.companionId)
     if(!route)throw new Error('聊天来源会话已移除')
     if(reply.chatOriginRouteId!==undefined&&reply.chatOriginRouteId!==route.id)throw new Error('回复属于其他输入来源，仅保留在网页历史，不向当前渠道转发')
     const payload:PartnerReply={...reply,directSource:{routeId:route.id,sessionId:route.sessionId,accountId:channel.accountId,baseUrl:channel.direct?.baseUrl??'',targetId:targetId??(directReplyTarget(state,channel.id,userId))}}
     await this.notificationDelivery.deliver(`chat:${receipt}`,channel.companionId,()=>[{channelId:channel.id,userId}],payload,async(target,frozen,part)=>{
       this.checkChatSource(target.channelId,target.userId,frozen)
-      await this.sendNotificationTarget(target.channelId,target.userId,frozen,(index,perform)=>part(index,()=>{
+      await this.sendNotificationTarget(target.channelId,target.userId,frozen,(index,perform)=>part(index,async()=>{
         this.notificationShutdown.signal.throwIfAborted()
         this.checkChatSource(target.channelId,target.userId,frozen)
         const firstPart=replyDeliveryParts(frozen)[0]
-        return index===0&&first&&firstPart?.type==='text'?first(firstPart.text):perform()
+        await (index===0&&first&&firstPart?.type==='text'?first(firstPart.text):perform())
+        const deliveredPart=replyDeliveryParts(frozen)[index]
+        if(deliveredPart&&(deliveredPart.type!=='text'||deliveredPart.text.trim()))onSent?.()
       }))
     })
   }
@@ -1004,12 +1009,25 @@ export class ChannelManager {
     const rawText=events.map(quotedMessageText).filter(Boolean).join('\n\n')
     if(event.qqGroup)event=groupBurstEvent(events,rawText)
     let text=event.qqGroup?`[QQ 群 ${event.qqGroup.groupId} · 发言人 ${event.qqGroup.senderName}（${event.qqGroup.userId}）${event.qqGroup.autonomous&&!event.qqGroup.mentioned?' · 自主接话':''}]\n${rawText}`:rawText
+    if(event.qqGroup){
+      const now=Date.now(),times=events.map(item=>{const at=item.timestamp??item.receivedAt;return typeof at==='number'&&Number.isFinite(at)&&at>0&&at<=now?at:undefined})
+      text=`群聊输入时序（渠道记录）：${JSON.stringify({count:events.length,observedAt:new Date(now).toISOString(),messages:times.map((at,index)=>({index:index+1,...(at?{at:new Date(at).toISOString(),ageSeconds:Math.floor((now-at)/1000)}:{timeUnknown:true})}))})}。同一批的补充合起来理解；按真实间隔接话，不把历史背景当作刚发生。\n\n${text}`
+    }
     const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     for(const item of events)this.groupAutonomy.observe(channel.id,item)
     if(event.qqGroup && isSleeping(requiredCompanion(this.store,channel.companionId)) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self'){this.groupAutonomy.record(channel.id,event,'伙伴正在睡眠，暂停群聊自主接话');await this.rememberReceipts(receipts);return}
-    const groupReplyKey=JSON.stringify([channel.id,event.sender])
-    const continuingGroup=event.qqGroup&&!event.qqGroup.otherMention&&event.qqGroup.replyTo!=='other'&&this.pendingGroupReplies.has(groupReplyKey)
-    if(event.qqGroup?.autonomous&&!continuingGroup) {
+    const focusDecision=()=>{
+      const task=this.agents.groupReplyFocus?.(channel.id,event.sender),name=requiredCompanion(this.store,channel.companionId).name??''
+      // Quote bodies are background; a later cancellation in the same burst is still current input.
+      const decisions=events.map(item=>groupTaskInput(item,this.groupReplyWindows.focus(channel.id,item,task),name))
+      return decisions.includes('steer')?'steer':decisions.includes('queue')?'queue':decisions.includes('normal')?'normal':'observe'
+    }
+    let focus=event.qqGroup?focusDecision():'normal'
+    const observeBusy=async()=>{this.groupAutonomy.record(channel.id,event,'正在执行任务或本轮已有消息送达，本条普通群聊仅旁听，不插入或排队补答');if(timing)timing.outcome='silent';await this.rememberReceipts(receipts)}
+    if(focus==='observe'){await observeBusy();return}
+    if(focus==='queue')mode='queue'
+    if(focus==='steer')mode='steer'
+    if(event.qqGroup?.autonomous&&focus==='normal') {
       // Recheck current access: a queued event may outlive whitelist removal.
       if(!groupAccess){this.groupAutonomy.record(channel.id,event,'发言账号尚未审批，本条不接话');await this.rememberReceipts(receipts);return}
       const decisionStarted=Date.now()
@@ -1049,6 +1067,8 @@ export class ChannelManager {
         const progress=progressTransport?new ReplyProgressController(progressTransport,allowed,signal):undefined
         const authored=!event.qqGroup?new AuthoredProgress(text=>api.sendText(event.sender,text,undefined,signal),allowed,signal,8):undefined
         const progressKey=JSON.stringify([channel.id,event.targetId||api.config?.targetId||'',event.sender])
+        let replyWindow:ReturnType<GroupReplyWindows['begin']>|undefined
+        const sentPart=()=>this.groupReplyWindows.sent(replyWindow)
         try {
         const attachments:PartnerInboundAttachment[]=[]
         try {
@@ -1077,6 +1097,16 @@ export class ChannelManager {
         }
         if(!allowed())throw new Error('渠道或联系人授权已撤销')
         const sessionTitle=channel.platform==='qq'?await this.qqSessionName(channel,api,event,signal):undefined
+        // Classification and media downloads can outlive the task transition. Recheck before admitting input.
+        if(event.qqGroup){
+          focus=focusDecision()
+          if(focus==='observe'){await observeBusy();return}
+          if(focus==='queue')mode='queue'
+          if(focus==='steer'){
+            mode='steer'
+            text='当前任务发起人的补充或控制：合并到正在执行的目标；明确取消时停止，修改时仅调整未完成部分，已完成的工具和交付不要重复。\n\n'+text
+          }
+        }
         const settleProgress=mode==='steer'?this.directReplyProgress.get(progressKey)?.prepareInput():undefined
         let inserted=false
         try { if(mode==='steer')inserted=await this.agents.steer(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})}) }
@@ -1090,19 +1120,21 @@ export class ChannelManager {
         progress?.start()
         if(progress)this.directReplyProgress.set(progressKey,progress)
         const agentStarted=Date.now()
-        const updates:ReplyProgress=Object.assign(progress?.update??authored?.update??(()=>{}),{
+        const updates:ReplyProgress=Object.assign((stage:Parameters<ReplyProgress>[0])=>{
+          if(event.qqGroup&&stage==='working'&&!replyWindow)replyWindow=this.groupReplyWindows.begin(channel.id,event.sender,event.receivedAt??Date.now())
+          ;(progress?.update??authored?.update)?.(stage)
+        },{
+          groupFocus:(value:{working:boolean;sentAt?:number})=>{if(replyWindow){replyWindow.working ||= value.working;if(value.sentAt!==undefined)replyWindow.sentAt??=value.sentAt}},
           ...(authored?{acknowledge:authored.update.acknowledge!}:{}),
           sendChat:async(parts:import('../chat/protocol.js').ChatPart[],routeId:string,key:string)=>{
             signal.throwIfAborted();if(!allowed())throw Error('渠道授权已变化，中途消息未发送')
-            await this.sendChatReply(channel,event.sender,key,{text:'',attachments:[],chatParts:parts,chatOriginRouteId:routeId})
+            await this.sendChatReply(channel,event.sender,key,{text:'',attachments:[],chatParts:parts,chatOriginRouteId:routeId},undefined,undefined,sentPart)
           },
         })
-        if(event.qqGroup)this.pendingGroupReplies.set(groupReplyKey,(this.pendingGroupReplies.get(groupReplyKey)??0)+1)
-        const pendingReply=Promise.resolve().then(()=>this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},updates)).finally(()=>{
-          if(event.qqGroup){const left=(this.pendingGroupReplies.get(groupReplyKey)??1)-1;if(left)this.pendingGroupReplies.set(groupReplyKey,left);else this.pendingGroupReplies.delete(groupReplyKey)}
-        })
+        const pendingReply=Promise.resolve().then(()=>this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})},updates))
         prepared()
         const reply=await pendingReply.finally(()=>authored?.finish())
+        if(reply.alreadyDelivered)sentPart()
         const replyReady=Date.now()
         if(timing){timing.agentMs=replyReady-agentStarted;const detail=getReplyTiming(reply);if(detail)timing.agent=detail}
         signal.throwIfAborted()
@@ -1113,7 +1145,7 @@ export class ChannelManager {
           if(reply.alreadyDelivered){
             await this.rememberReceipts(receipts)
             if(reply.postReplySource)await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
-            if(event.qqGroup)this.groupAutonomy.replied(channel.id,event,'[语音回复]')
+            if(event.qqGroup)this.groupAutonomy.replied(channel.id,event)
           }
           if(timing)timing.outcome=reply.alreadyDelivered?'replied':'silent'
           return
@@ -1121,14 +1153,16 @@ export class ChannelManager {
         if(reply.chatParts){
           const first=reply.chatParts[0]
           if(progress&&first?.type!=='text')await progress.completeWithoutReply()
-          await this.sendChatReply(channel,event.sender,receipts.join('|'),reply,progress&&first?.type==='text'?text=>progress.finish(text):undefined,event.targetId||channel.direct?.targetId)
+          await this.sendChatReply(channel,event.sender,receipts.join('|'),reply,progress&&first?.type==='text'?text=>progress.finish(text):undefined,event.targetId||channel.direct?.targetId,sentPart)
         } else {
         const replyText=reply.text || (reply.attachments.length?'已生成附件，正在发送。':'')
         if(progress)await progress.finish(replyText)
         else await api.sendText(event.sender,replyText,undefined,signal)
+        if(replyText.trim())sentPart()
         for(const attachment of reply.attachments){
           if(!allowed())throw new Error('渠道或联系人授权已撤销')
           await api.sendAttachment(event.sender,attachment,undefined,signal,allowed)
+          sentPart()
         }
         }
         if(reply.postReplySource && (reply.text.trim() || reply.attachments.length || reply.chatParts?.length)) await this.agents.replyDelivered(reply.postReplySource).catch(error=>this.ctx.logger.warn(`主动延续登记失败：${String(error)}`))
@@ -1140,6 +1174,7 @@ export class ChannelManager {
           if(allowed()&&!signal.aborted)await api.sendText(event.sender,'本次消息处理或附件传输未完成，请在 DSH 查看错误。附件接收失败时未交给伙伴执行；请检查文件大小后重新发送。',undefined,signal).catch(()=>{})
           throw error
         } finally {
+          this.groupReplyWindows.finish(replyWindow)
           if(progress&&this.directReplyProgress.get(progressKey)===progress)this.directReplyProgress.delete(progressKey)
         }
       }

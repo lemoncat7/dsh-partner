@@ -69,3 +69,58 @@ test('QQ input during silent autonomous work starts an owned reply and delivers 
  assert.equal(scope.ctx.tools.get('partner_chat_progress',agent),undefined)
  assert.equal(scope.ctx.tools.get('partner_chat_say',agent),undefined)
 })
+
+for(const deliveredKind of ['none','voice','attachment'])test(`a group work turn completes under 100 unrelated messages without extra turns (${deliveredKind})`,{timeout:10000},async t=>{
+ const root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
+ const session=Session.create('group-focus'),scope=createScope(root),started=deferred(),finish=deferred(),sent=[]
+ const companion={id:'c',name:'伙伴'},peer='group:11223344:22334455'
+ const channel={id:'qq',platform:'qq',accountId:'12345678',companionId:'c',enabled:true,direct:{baseUrl:'ws://unused',targetId:''},qq:{groupReplies:true,groupIds:['11223344'],autonomousGroupIds:['11223344']}}
+ const route={id:'r',kind:'channel',channelId:'qq',userId:peer,companionId:'c',sessionId:session.id,qqSessionMode:'separate',inboundMessageIds:[],cwd:'/tmp'}
+ const state={companions:[companion],channels:[channel],sessions:[route],pairings:[],recentReceipts:[]}
+ const store={snapshot:()=>state,subscribe:()=>()=>{},update:async f=>{f(state);return state},isCompanionRemoving:()=>false}
+ let work=Promise.resolve(),turns=0,steers=0,tools=0
+ const agent={session,ctx:scope.ctx,status:'idle',inbox:{nextStep:[]},whenIdle:()=>work,inject:()=>{},steer:()=>{steers++}}
+ const listeners=new Set()
+ const ctx={tools:root.tools,on:(name,fn)=>{if(name==='session/event')listeners.add(fn);return ()=>listeners.delete(fn)},agents:{get:()=>agent},logger:{info(){},warn(){}}}
+ const runtime=new PartnerAgentRuntime(ctx,store,'/tmp')
+ runtime.ensureSession=async()=>route;runtime.ensureAgent=async()=>agent;runtime.cancelPostReply=async()=>{}
+ runtime.persistInbound=async(_r,m)=>({query:m.text,content:[{type:'text',text:m.text}]})
+ runtime.replyDelivered=async()=>{}
+ const append=(type,data,opts)=>{session.append(type,data,opts);const e=session.snapshotEvents().at(-1);for(const fn of listeners)fn(session,e)}
+ t.after(scope.ctx.tools.register({name:'generate_image',description:'test',parameters:{type:'object',properties:{}},output:{schema:{type:'object'},render:()=>[]},execute:async()=>{tools++;return {ok:true}}}))
+ agent.followup=m=>{
+  turns++;agent.status='running';append('turn/start',{turn:1});append('user/message',m,{surfaceOp:'append'})
+  work=(async()=>{
+   // Only successful, correctly routed transport receipts close the unsent chat window.
+   const receipt=(isError,originRouteId)=>({message:{id:'voice',role:'tool',source:{kind:'tool',callId:'voice'},toolCallId:'voice',isError,content:[]},meta:{kind:'partner-chat-v1',parts:[],delivered:true,deliveryKind:'voice',originRouteId}})
+   append('tool/result',receipt(true,route.id),{surfaceOp:'append'})
+   // Probe the observer with a foreign receipt; it is not part of this conversation's replay.
+   for(const listener of listeners)listener(session,{type:'tool/result',seq:session.seq,time:Date.now(),data:receipt(false,'other-route')})
+   assert.equal(runtime.groupReplyFocus('qq',peer).sentAt,undefined)
+   append('tool/call',{name:'generate_image',callId:'gen',arguments:'{}'})
+   assert.equal(runtime.groupReplyFocus('qq',peer).working,true)
+   started.resolve();await finish.promise
+   const result=await dispatchTool(root.tools,{name:'generate_image',arguments:{},agent,callId:'gen',signal:new AbortController().signal})
+   assert.equal(result.isError,false)
+   append('tool/result',{message:{id:'out',role:'tool',source:{kind:'tool',callId:'gen'},toolCallId:'gen',content:[],isError:false}},{surfaceOp:'append'})
+   if(deliveredKind==='voice')append('tool/result',receipt(false,route.id),{surfaceOp:'append'})
+   if(deliveredKind==='attachment')append('tool/result',{message:{id:'attachment',role:'tool',source:{kind:'tool',callId:'attachment'},toolCallId:'attachment',isError:false,content:[]},meta:{kind:'partner-attachment-delivered-v1',originRouteId:route.id}},{surfaceOp:'append'})
+   if(deliveredKind!=='none')assert.equal(typeof runtime.groupReplyFocus('qq',peer).sentAt,'number')
+   append('assistant/message',{message:{role:'assistant',content:[{type:'text',text:'完成'}]}},{surfaceOp:'append'})
+   append('turn/end',{turn:1,reason:{kind:'completed'}});agent.status='idle'
+  })()
+ }
+ const manager=new ChannelManager({logger:ctx.logger},store,{},runtime,'/tmp')
+ const api={config:channel.direct,sendText:async(_p,text)=>sent.push(text)}
+ const event={id:'start',sender:peer,targetId:'group:11223344',text:'画个风景',qqGroup:{groupId:'11223344',userId:'22334455',senderName:'成员',mentioned:true,autonomous:true}}
+ const pending=manager.handleDirect(channel,api,event,new AbortController().signal,[event],()=>{},'steer')
+ await started.promise
+ for(let i=0;i<100;i++){
+  const e={...event,id:'flood-'+i,text:i%2?'他好像真去':'？',qqGroup:{...event.qqGroup,mentioned:false}}
+  await manager.handleDirect(channel,api,e,new AbortController().signal,[e],()=>{},'steer')
+ }
+ assert.equal(steers,0);assert.equal(turns,1)
+ finish.resolve();await pending
+ assert.equal(tools,1);assert.equal(turns,1);assert.deepEqual(sent,deliveredKind==='voice'?[]:['完成'])
+ assert.equal(runtime.groupReplyFocus('qq',peer),undefined);assert.equal(runtime.channelReplyFocus.size,0);assert.equal(listeners.size,0)
+})

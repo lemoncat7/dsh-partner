@@ -24,7 +24,7 @@ export function localAttentionClassifier():AttentionClassifier {
   signal.throwIfAborted();if(active>=4)return undefined
   active++
   try{
-   const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(1200)])})
+   const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(450)])})
    if(!response.ok)throw Error('classification unavailable')
    const raw=await response.text();if(raw.length>4096)throw Error('oversized classification')
    const value=JSON.parse(raw)

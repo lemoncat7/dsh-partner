@@ -1,3 +1,4 @@
+import {trackPartnerTools} from '../execution/tool-ownership.js'
 import { habitTool } from '../character/habit-tool.js'
 import { thoughtTool } from '../character/thought-tool.js'
 import { affectionTool } from '../character/affection-tool.js'
@@ -68,7 +69,7 @@ export class PartnerAgentComposition {
         return original.execute(args,exec)
       }}
       if(companion.toolDiscovery)catalog.push({tool,allowed,protocol:()=>protocol(tool.name)})
-      else disposers.push(ctx.tools.register(tool))
+      else {disposers.push(trackPartnerTools(this.store,companion.id,[tool.name]));disposers.push(ctx.tools.register(tool))}
     }
     const register = (tool: ToolDefinition, capability: CompanionCapability): void => {
       add({ ...tool, execute: async (args, execution) => {

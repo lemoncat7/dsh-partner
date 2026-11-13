@@ -5,6 +5,7 @@ import type {ToolDefinition,ToolRuntime,ToolRunContext,ToolExecutionResult} from
 import {ToolCallId} from '@deepseek-ai/dsh-llm'
 import {scopeTarget} from '@deepseek-ai/dsh-scope'
 import type {PartnerStore} from '../store.js'
+import {trackPartnerTools} from '../execution/tool-ownership.js'
 import {resolveToolAccess} from '../execution/tool-access-adapter.js'
 import {discoveredToolProtocol} from '../character/prompt-projection.js'
 
@@ -56,6 +57,7 @@ export const TOOL_DISCOVERY_PROMPT=AGREEMENT_GUIDANCE+'\n'+'partner_channel_acce
  * so the normal DSH execution pipeline owns validation, policy and cancellation. */
 export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:PartnerStore,entries:DiscoverableTool[]):()=>void {
  const disposers:Array<()=>void>=[]
+ disposers.push(trackPartnerTools(store,owner,[...entries.map(entry=>entry.tool.name),'partner_tools','partner_channel_access']))
  const registrations=ownedTools.get(store)??new Map<string,Map<object,Set<string>>>()
  ownedTools.set(store,registrations)
  const scopes=registrations.get(owner)??new Map<object,Set<string>>()
@@ -81,7 +83,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
   return result.dispatch?[...result.dispatch.content,...(result.failureReceipt?[{type:'text' as const,text:JSON.stringify({taskEvidence:{kind:result.failureReceipt.kind,callId:result.failureReceipt.callId,excerpt:result.failureReceipt.excerpt},toolName:result.failureReceipt.toolName,notice:'这是本次实际失败的工具回执，可用于结束失败任务。callId 是工具调用编号，不是服务报错中的 request ID；不要重试来获取证据。'})}]:[])]:[{type:'text' as const,text:JSON.stringify(value)}]
  }
  const unavailable=(name:string|undefined,exec:ToolRunContext)=>new Error(name&&!entries.some(entry=>entry.tool.name===name)&&runtime.get(name,exec.agent)
-  ? '此工具不属于伙伴插件，请使用其自身提供的入口，不经 partner_tools 转调；权限仍以当前渠道为准。'
+  ? '此工具不属于伙伴插件，请使用其自身提供的入口，不经 partner_tools 转调；权限由宿主会话与该插件自身校验。'
   : !name||!runtime.get(name,exec.agent)
   ? '工具在当前执行上下文中未注册或已结束，请重新查询目录。这不表示账号没有权限，不要据此要求用户更换账号或授权。'
   : '当前渠道未授权此能力或能力已撤回，请查询 partner_channel_access 核实当前能力。')
@@ -103,7 +105,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
  }
  try {
   for(const entry of entries)disposers.push(runtime.register({...entry.tool,execute:async(args,exec)=>{if(!entry.allowed())throw Error('能力已撤回');return entry.tool.execute(args,exec)}}))
-  disposers.push(runtime.register({name:'partner_channel_access',description:'查询真实渠道与当前发言账号的能力权限。默认适配器沿用已有授权；QQ 普通成员提供回复、表情发送与收藏整理、语音、真正群 @ 提及、已开启的戳一戳、本会话回忆、已开启的当前会话消息表情回应与群信息查询，归属账号与可信自主任务可使用已授权能力。不接受自报账号，不改变权限。返回的能力通过 partner_tools 调用。',
+  disposers.push(runtime.register({name:'partner_channel_access',description:'查询真实渠道与当前发言账号的能力权限。默认适配器沿用已有授权；QQ 普通成员提供回复、本会话工具产物与回复文档的附件交付、表情发送与收藏整理、语音、真正群 @ 提及、已开启的戳一戳、本会话回忆、已开启的当前会话消息表情回应与群信息查询，归属账号与可信自主任务可使用已授权能力。不接受自报账号，不改变权限。返回的能力通过 partner_tools 调用。',
    parameters:{type:'object',properties:{category:{type:'string'},query:{type:'string',maxLength:80},offset:{type:'integer',minimum:0}},additionalProperties:false},output:{schema:{type:'object'},render},presentCall:()=>({card:'generic',title:'当前渠道能力'}),
    async execute(raw,exec){
     guard(exec)
@@ -117,7 +119,7 @@ export function installToolDiscovery(runtime:ToolRuntime,owner:string,store:Part
     const filtered=args.category||query||args.offset!==undefined
     const found=all.filter(t=>(!args.category||category(t.name)===args.category)&&(!query||toolSearchMatches(t,query)))
     return {scope:access.allowedTools?'chat-only':'authorized',
-     scopeMeaning:'这是当前入口的权限快照，不是可行性调查；缺少专用工具不证明无法通过现有工具实现，也不改变历史权限。',
+     scopeMeaning:'这是伙伴插件自身能力的权限快照，不涵盖其他插件或宿主工具；不是可行性调查；缺少专用工具不证明无法通过现有工具实现，也不改变历史权限。',
      categories:GROUPS.map(g=>({id:g.id,title:g.title,count:all.filter(t=>category(t.name)===g.id).length})).filter(g=>g.count),
      total:filtered?found.length:all.length,
      ...(filtered?{tools:found.slice(offset,offset+12).map(visible),nextOffset:offset+12<found.length?offset+12:null}:{}),
