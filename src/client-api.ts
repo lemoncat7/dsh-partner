@@ -9,6 +9,9 @@ export interface AutomationView {
 }
 export interface CompanionView {
   activityJournal?: import('./character/activity-journal.js').ActivityJournalEntry[]
+  activityInterest?: import('./character/activity-decision.js').ActivityInterest
+  interestWakeHistory?: number[]
+  activityDecision?: import('./character/activity-decision.js').ActivityDecision
   activityPlan?: import('./character/activity-plan.js').ActivityPlan
   thoughts?: import('./character/thoughts.js').CompanionThought[]
   interactionReview?: import('./character/interaction-review.js').InteractionReviewState

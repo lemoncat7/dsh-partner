@@ -76,7 +76,7 @@ test('turn guidance works without a memory service, combines consecutive message
   const agent = { session, ctx: { systemPrompt: { context: value => { sections.set(value.name,value); return () => sections.delete(value.name) } } } }
   const runtime = Object.create(PartnerAgentRuntime.prototype)
   const config = { companion, route: { kind:'local', sessionId: session.id, companionId:companion.id, userId:'local', channelId:'local:'+companion.id }, revision:'1' }
-  Object.assign(runtime, { configurations: { forSession: () => config }, store: { snapshot: () => ({sessions:[config.route]}) }, contextRevisions:new WeakMap(), characterContexts:new Map() })
+  Object.assign(runtime, { channelActivities:{describe:()=>[]},configurations: { forSession: () => config }, store: { snapshot: () => ({sessions:[config.route],companions:[config.companion],channels:[]}) }, contextRevisions:new WeakMap(), characterContexts:new Map() })
   const signal = new AbortController().signal
   assert.equal(await runtime.prepareConversationContext(agent,signal),true)
   assert.equal(sections.size,1)

@@ -76,7 +76,7 @@ test('MCP grant and refreshed tool generation register on the next real pre-step
   assert.equal(registered.has(added), true)
   const old = registered.get(first)
   await mcp.bind(companion.id, id, false)
-  await assert.rejects(old.execute({}, { signal: new AbortController().signal }), /撤回/)
+  await assert.rejects(old.execute({}, { signal: new AbortController().signal }), /撤回|未授权/)
   await step(4)
   assert.equal(registered.has(first), false)
   assert.equal(registered.has(added), false)

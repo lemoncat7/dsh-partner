@@ -23,7 +23,7 @@ function fixture(enabled = true) {
   const route = { companionId: companion.id, channelId:'@local', userId:'owner', kind:'local', sessionId:session.id }
   const config = { companion, route, revision:'1' }
   const runtime = Object.create(PartnerAgentRuntime.prototype)
-  Object.assign(runtime, { configurations:{ forSession:()=>config }, store:{snapshot:()=>({sessions:[route]})}, contextRevisions:new WeakMap(), characterContexts:new Map(),
+  Object.assign(runtime, { channelActivities:{describe:()=>[]},configurations:{ forSession:()=>config }, store:{snapshot:()=>({sessions:[route],companions:[config.companion],channels:[]})}, contextRevisions:new WeakMap(), characterContexts:new Map(),
     memory:{ characterState:async()=>undefined, recallContext:async(...args)=>{calls.push(args);return {profile:{entries:[],version:'1'},relevant:[],connections:[],scenes:[],history:[]} } } })
   const input = text => session.append('user/message',createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}),{surfaceOp:'append'})
   return { runtime, agent, config, calls, contexts, sections, input }
@@ -163,7 +163,7 @@ test('QQ binding refreshes independently of persona/tool discovery, shared routi
  f.config.companion.characterCard.enabled=false
  const owner={id:'owner',kind:'channel',sessionId:f.agent.session.id,companionId:f.config.companion.id,channelId:'qq',userId:'12345678',inboundMessageIds:[]}
  const guest={...owner,id:'guest',userId:'group:99887766:22345678',inboundMessageIds:[]}
- const state={sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
+ const state={companions:[f.config.companion],sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
  f.runtime.store.snapshot=()=>state
  const send=async(route)=>{f.input('我就是哥哥');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id);await f.runtime.prepareConversationContext(f.agent,signal);return f.contexts.values().next().value.text}
  assert.match(await send(owner),/当前账号是这层关系的绑定对象/)
@@ -182,7 +182,7 @@ test('relationship adapter switches actual prompt on each QQ sender, missing bin
  f.config.companion.relationshipText='RELATION_ONLY_特定称呼'
  const base={kind:'channel',sessionId:f.agent.session.id,channelId:'qq',companionId:f.config.companion.id,inboundMessageIds:[]}
  const owner={...base,id:'owner',userId:'12345678'},guest={...base,id:'guest',userId:'group:99887766:22345678',inboundMessageIds:[]}
- const state={sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
+ const state={companions:[f.config.companion],sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
  f.runtime.store.snapshot=()=>state
  f.runtime.memory.characterState=async()=>({scene:'旧场景',relationship:'SECRET_RELATION_STATE',facts:[],events:[],pins:[]})
  const run=async(route)=>{f.input('你好');const e=f.agent.session.snapshotEvents().at(-1);route?.inboundMessageIds.push(e.data.id);await f.runtime.prepareConversationContext(f.agent,signal);return f.contexts.values().next().value.text}
@@ -212,7 +212,7 @@ test('time and real sticker context survive exclusive persona, stay origin scope
  const f=fixture(false),signal=new AbortController().signal
  Object.assign(f.config.companion.characterCard,{exclusivePrompt:true,stickersEnabled:true})
  const route={id:'qq-owner',kind:'channel',channelId:'qq',sessionId:f.agent.session.id,companionId:f.config.companion.id,userId:'12345678',inboundMessageIds:[]}
- const state={sessions:[f.config.route,route],channels:[{id:'qq',enabled:true,platform:'qq',companionId:f.config.companion.id}]}
+ const state={companions:[f.config.companion],sessions:[f.config.route,route],channels:[{id:'qq',enabled:true,platform:'qq',companionId:f.config.companion.id}]}
  f.runtime.store.snapshot=()=>state
  let tags='ACTUAL_QQ_TAGS';const seen=[];f.runtime.setStickerTagsContext(async r=>{seen.push(r.id);return tags})
  f.input('嗨');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
@@ -235,7 +235,7 @@ test('autonomous sticker tags follow the actual activity target instead of previ
  f.config.companion.characterCard.stickersEnabled=true
  const a={id:'a',userId:'12345678',kind:'channel',channelId:'qa',sessionId:f.agent.session.id,companionId:f.config.companion.id,inboundMessageIds:[]}
  const b={...a,id:'b',channelId:'qb',inboundMessageIds:[]}
- f.runtime.store.snapshot=()=>({sessions:[f.config.route,a,b]})
+ f.runtime.store.snapshot=()=>({sessions:[f.config.route,a,b],companions:[f.config.companion],channels:[]})
  f.runtime.setStickerTagsContext(async r=>r.id==='a'?'TAGS_A':'TAGS_B')
  f.input('hello');a.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id)
  await f.runtime.prepareConversationContext(f.agent,signal);assert.match(f.contexts.values().next().value.text,/TAGS_A/)

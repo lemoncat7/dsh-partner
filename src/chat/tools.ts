@@ -1,4 +1,5 @@
-import {taskFollowup,checkTaskReview,TASK_REVIEW_SCHEMA,TASK_FOLLOWUP_GUIDANCE} from './task-followup.js'
+import {NEXT_ACTIVITY_SCHEMA,INTEREST_SCHEMA,saveNextActivity,saveTurnInterest} from '../character/activity-decision.js'
+import {taskFollowup,checkTaskReview,TASK_REVIEW_SCHEMA} from './task-followup.js'
 import {sendPreferredVoice,REPLY_DELIVERY_SCHEMA,type ReplyDeliveryOptions} from './preferred-voice.js'
 import {stickerPage,stickerPageBounds} from './sticker-context.js'
 import { renderPersonaDelivery, type PersonaDeliveryAudit } from './persona-delivery.js'
@@ -78,11 +79,11 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       return {content:[{type:'text',text:JSON.stringify(item)},{type:'image',attachment}]}
     },
   },{
-    name:'partner_chat_reply',description:`选择文字或图片表情且开启分段回复或表情包时，聊天最终回复通过本工具发送并结束回合，不把聊天正文放在工具外的普通最终回复中。先按人物与场景决定用话或图片表情；语音偏好只改变口语的投递方式，不要求用话替代图片。可只发已查询的 stickerId，无需配同义语音或文字。delivery 默认 auto：仅私聊短句优先语音开启时，本入口自动通过语音工具发送合适的短句；群聊默认文字，不应用此偏好；需要文字或安静时设 delivery:text。语音成功不补同义文字。向当前会话发送已经按人物与关系设定写好的消息。${TASK_FOLLOWUP_GUIDANCE} messages 按顺序包含 text 或已查询到的 stickerId；每个 text 是一条消息；分段开启时按自然停顿分条，已想好的多条一次填入 messages，自动语音也保留每条边界；${SEGMENTED_CHAT_GUIDANCE}分段关闭时文字只用一条，文字须完整放入工具参数。默认结束回合；continueTurn:true 发送后继续接话或操作。有具体联想、共同兴趣或新发现时可自然再接着说，不必总等下一问或用问题结尾；没有新内容就结束，不凑条数。已告知的工具任务仍须实际执行。已送达且没有新话时允许按当前场景规则用空 messages 收尾；仅任务前告知不能代替结果答复。发送成功后不重复相同内容。
+    name:'partner_chat_reply',description:`选择文字或图片表情且开启分段回复或表情包时，聊天最终回复通过本工具发送并结束回合，不把聊天正文放在工具外的普通最终回复中。先按人物与场景决定用话或图片表情；语音偏好只改变口语的投递方式，不要求用话替代图片。可只发已查询的 stickerId，无需配同义语音或文字。delivery 默认 auto：仅私聊短句优先语音开启时，本入口自动通过语音工具发送合适的短句；群聊默认文字，不应用此偏好；需要文字或安静时设 delivery:text。语音成功不补同义文字。向当前会话发送已经按人物与关系设定写好的消息。messages 按顺序包含 text 或已查询到的 stickerId；每个 text 是一条消息；分段开启时按自然停顿分条，已想好的多条一次填入 messages，自动语音也保留每条边界；${SEGMENTED_CHAT_GUIDANCE}分段关闭时文字只用一条，文字须完整放入工具参数。收尾用 interest 记录此刻仍有兴趣、已经满足或对方明确要求安静；这与本轮答完是两件事。nextActivity 仅在有具体后续安排时填写，不以 none 代替兴趣状态。选择过程不发给用户。默认结束回合；continueTurn:true 发送后继续接话或操作。有具体联想、共同兴趣或新发现时可自然再接着说，不必总等下一问或用问题结尾；没有新内容就结束，不凑条数。已告知的工具任务仍须实际执行。已送达且没有新话时允许按当前场景规则用空 messages 收尾；仅任务前告知不能代替结果答复。发送成功后不重复相同内容。
 直接在 messages 写按当前人物说的正文，不另交模型转述。未知、失败及尚未执行不能说成成功。
 图片、音频与文件通过 partner_send_attachment 交付，文字不能代替附件或发送本地 Markdown 图片地址。短句模式长任务先交付报告，聊天正文总计最多 180 字；明确要求详细、不要附件或附件失败可用 inlineDetails:true。用户指定原文可用 preserveText:true。
 表情使用 partner_stickers 或收藏工具返回的真实 ID；上下文只提供可检索标签，不含图片 ID，已查到的 ID 无需重复查询；QQ 优先渠道收藏表情，没有合适的可只发文字。工具只规定交付协议，称呼、语气、亲疏、句式和闲聊节奏遵循当前人物及关系设定。`,
-    parameters:{type:'object',properties:{taskReview:TASK_REVIEW_SCHEMA,delivery:REPLY_DELIVERY_SCHEMA,continueTurn:{type:'boolean',description:'true：立即发送中途文字或表情，然后继续当前回合；默认 false：最终收尾。'},taskEvidence:{type:'object',additionalProperties:false,required:['kind'],properties:{kind:{type:'string',enum:['not_executed','tool_error'],description:'未调用或模型自己不能执行用 not_executed，不能说成外部服务拒绝；真实工具失败用 tool_error。'},callId:{type:'string',maxLength:300},excerpt:{type:'string',maxLength:500,description:'实际工具错误返回的原文片段，必须与 callId 对应。'}},description:'taskDisposition=blocked 时必填，区分未执行与有证据的工具失败；不得虚构回执。'},taskDisposition:{type:'string',enum:['blocked'],description:'本轮已告知的动作无法继续（取消、权限或条件限制）时明确结束，不能声称完成。'},taskReason:{type:'string',minLength:1,maxLength:300,description:'未执行动作的具体原因；同时在 messages 按人格说明未完成。'},inlineDetails:{type:'boolean',description:'仅当用户本轮明确要求详细、原文、不要附件，或附件能力不可用/投递失败而必须在正文交付时设为 true；短句模式普通长回复应先交付文档，不用此字段绕过节奏。'},preserveText:{type:'boolean',description:'用户要求原文、逐字引用或固定文本时为 true；不用于省略工作。'},messages:{type:'array',minItems:0,maxItems:8,items:{type:'object',properties:{text:{type:'string',maxLength:6000},stickerId:{type:'string',description:'图片表情包 ID，来自 partner_stickers 或收藏工具的真实返回；可以只发送这一条而不配文字。'}},additionalProperties:false}}},additionalProperties:false},
+    parameters:{type:'object',properties:{interest:INTEREST_SCHEMA,nextActivity:NEXT_ACTIVITY_SCHEMA,taskReview:TASK_REVIEW_SCHEMA,delivery:REPLY_DELIVERY_SCHEMA,continueTurn:{type:'boolean',description:'true：立即发送中途文字或表情，然后继续当前回合；默认 false：最终收尾。'},taskEvidence:{type:'object',additionalProperties:false,required:['kind'],properties:{kind:{type:'string',enum:['not_executed','tool_error'],description:'未调用或模型自己不能执行用 not_executed，不能说成外部服务拒绝；真实工具失败用 tool_error。'},callId:{type:'string',maxLength:300},excerpt:{type:'string',maxLength:500,description:'实际工具错误返回的原文片段，必须与 callId 对应。'}},description:'taskDisposition=blocked 时必填，区分未执行与有证据的工具失败；不得虚构回执。'},taskDisposition:{type:'string',enum:['blocked'],description:'本轮已告知的动作无法继续（取消、权限或条件限制）时明确结束，不能声称完成。'},taskReason:{type:'string',minLength:1,maxLength:300,description:'未执行动作的具体原因；同时在 messages 按人格说明未完成。'},inlineDetails:{type:'boolean',description:'仅当用户本轮明确要求详细、原文、不要附件，或附件能力不可用/投递失败而必须在正文交付时设为 true；短句模式普通长回复应先交付文档，不用此字段绕过节奏。'},preserveText:{type:'boolean',description:'用户要求原文、逐字引用或固定文本时为 true；不用于省略工作。'},messages:{type:'array',minItems:0,maxItems:8,items:{type:'object',properties:{text:{type:'string',maxLength:6000},stickerId:{type:'string',description:'图片表情包 ID，来自 partner_stickers 或收藏工具的真实返回；可以只发送这一条而不配文字。'}},additionalProperties:false}}},additionalProperties:false},
     output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:(value as {deliveryKind?:string;delivered?:boolean}).deliveryKind==='voice'&&(value as {delivered?:boolean}).delivered?'语音已确认发送，不重复发送同义文字。':(value as unknown as {parts:ChatPart[]}).parts.map(p=>p.type==='text'?p.text:`[表情：${p.type==='emoji'?p.emoji.label:p.label}]`).join('\n\n')}],presentationMeta:(_args,value)=>value},
     presentCall:()=>({card:'generic',title:'回复'}),
     async execute(raw,exec){
@@ -96,6 +97,9 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))
       if(!origin||isInternalTaskNotice(origin))throw new Error('内部任务或自动执行不能用聊天回复结束；请按原任务协议交付')
       const continuing=(raw as {continueTurn?:boolean}).continueTurn===true
+      const nextActivity=(raw as {nextActivity?:unknown}).nextActivity
+      if(continuing&&nextActivity!==undefined&&(nextActivity as {kind?:unknown})?.kind!=='none')throw Error('nextActivity 只在本轮最终回复选择；仍在本轮继续用 continueTurn')
+      const saveNext=async()=>{await saveNextActivity(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),nextActivity,exec.signal);await saveTurnInterest(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),(raw as {interest?:unknown}).interest,exec.signal)}
       if(continuing&&(raw as {taskDisposition?:unknown}).taskDisposition!==undefined)throw Error('中途接话不提交任务结束状态')
       if (!continuing && (raw as {inlineDetails?: boolean}).inlineDetails !== true) {
         const reports = workExpressionEvidence(events, currentStart).reports
@@ -124,12 +128,12 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       if(disposition.taskDisposition==='blocked'&&(!disposition.taskReason?.trim()||!disposition.messages?.some(p=>p.text?.trim())))throw Error('无法继续时需 taskReason 具体原因和 messages 中对用户的说明，不能静默结束或声称完成。')
       const stopEvidence=disposition.taskDisposition==='blocked'?validateTaskStop(events,disposition.taskEvidence):undefined
       if(!continuing&&missing.length&&disposition.taskDisposition!=='blocked')throw Error(pendingActionNotice(missing))
-      const taskReview=continuing?undefined:checkTaskReview(taskFollowup(state,owner,agent.session.id,events),(raw as {taskReview?:unknown}).taskReview)
+      const taskReview=checkTaskReview(taskFollowup(state,owner,agent.session.id,events),(raw as {taskReview?:unknown}).taskReview,{continuing})
       const reviewMeta=taskReview?{taskReview}:{}
       const messages=(raw as {messages?:unknown})?.messages
       if(!continuing&&(raw as {workReply?:unknown}).workReply===undefined&&(raw as {expression?:unknown}).expression===undefined&&Array.isArray(messages)&&messages.length===0){
         const audience=questionOrigin(agent.session.id,events,state.sessions)
-        if(hasCurrentSpeech(events)&&audience){exec.signal.throwIfAborted();exec.concludeTurn();return {kind:'partner-chat-v1',...reviewMeta,parts:[],delivered:true,deliveryKind:'text',originRouteId:audience.id}}
+        if(hasCurrentSpeech(events)&&audience){exec.signal.throwIfAborted();await saveNext();exec.concludeTurn();return {kind:'partner-chat-v1',...reviewMeta,parts:[],delivered:true,deliveryKind:'text',originRouteId:audience.id}}
         if(hasTaskPreamble(events))throw Error('当前只完成了任务前动作告知，不能用空消息结束。若工作尚未执行，继续调用实际工具；若已有结果，交付或按事实答复。不要重复动作告知，也不要把本提示当成回复正文。')
         const channel=state.channels.find(c=>c.id===audience?.channelId)
         const peer=qqGroupPeer(audience?.userId??'')
@@ -174,6 +178,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       if((input.some(p=>'stickerId'in p)&&!latest.stickersEnabled)||(input.filter(p=>'text'in p).length>1&&!latest.segmentedReplies))throw new Error('聊天方式已变更，请按新设置回复')
       exec.signal.throwIfAborted()
       authored.validate?.()
+      if(!continuing)await saveNext()
       const voice=await sendPreferredVoice(owner,store,exec,parts.map(p=>p.type==='text'?{text:p.text}:{}),raw as ReplyDeliveryOptions)
       if(voice){if(!continuing)exec.concludeTurn();return {...voice,...reviewMeta,intermediate:continuing,...(disposition.taskDisposition==='blocked'?{taskDisposition:'blocked',taskEvidence:stopEvidence}:{}),...(personaDelivery?{personaDelivery}:{})}}
       if(continuing){
@@ -182,7 +187,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
           if(!target||!canFinishIdleActivity(owner,active,agent.session.id,agent.session.snapshotEvents())||!idleSender)throw Error('当前自主活动不支持中途发送或来源已变化，未发送')
           const receipt='idle-intermediate:'+createHash('sha256').update(JSON.stringify([agent.session.id,origin.data.id,parts])).digest('hex')
           await idleSender(agent.session.id,parts,target.id,receipt,exec.signal)
-          return {kind:'partner-chat-v1',parts,intermediate:true,delivered:true,inputMessageId:origin.data.id,originRouteId:target.id}
+          return {kind:'partner-chat-v1',...reviewMeta,parts,intermediate:true,delivered:true,inputMessageId:origin.data.id,originRouteId:target.id}
         }
         const originRouteId=questionOrigin(agent.session.id,events,state.sessions)?.id
         if(!originRouteId||origin.type!=='user/message'||origin.data.source.kind!=='user')throw Error('中途消息需要当前用户会话来源')
@@ -190,7 +195,7 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
         if(currentInput?.type!=='user/message'||currentInput.data.id!==origin.data.id)throw Error('输入已变化，旧中途消息未发送，请先处理新输入')
         const receipt='intermediate:'+createHash('sha256').update(JSON.stringify([agent.session.id,origin.data.id,parts])).digest('hex')
         await deliverIntermediate(agent,parts,originRouteId,receipt)
-        return {kind:'partner-chat-v1',parts,intermediate:true,delivered:true,...(authored.audit?{workExpression:authored.audit}:{}),...(personaDelivery?{personaDelivery}:{}),inputMessageId:origin.data.id,originRouteId}
+        return {kind:'partner-chat-v1',...reviewMeta,parts,intermediate:true,delivered:true,...(authored.audit?{workExpression:authored.audit}:{}),...(personaDelivery?{personaDelivery}:{}),inputMessageId:origin.data.id,originRouteId}
       }
       exec.concludeTurn()
       return {kind:'partner-chat-v1',...reviewMeta,parts,...(disposition.taskDisposition==='blocked'?{taskDisposition:'blocked',taskEvidence:stopEvidence}:{}),originRouteId:questionOrigin(agent.session.id,events,state.sessions)?.id??null,...(authored.audit?{workExpression:authored.audit}:{}),...(personaDelivery?{personaDelivery}:{})}

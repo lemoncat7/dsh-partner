@@ -31,6 +31,9 @@ function ActivityRecords({ companionId }: { companionId: string }): JSX.Element 
   }, [companionId, revision])
   const companion = snapshot?.companions.find(c => c.id === companionId)
   const plan = companion?.activityPlan
+  const decision=companion?.activityDecision
+  const interest=companion?.activityInterest
+  const intentionKind=(kind?:string)=>(({continue:'继续接话',topic:'另开话题',task:'推进事情',explore:'浏览探索',social:'空间或平台互动',none:'暂不继续'} as Record<string,string>)[kind??'']??'自主选择')
   const journal = [...(companion?.activityJournal ?? [])].reverse()
   const stats = summarizeActivities(journal)
   const thoughts = [...(companion?.thoughts ?? [])].sort((a, b) => b.updatedAt - a.updatedAt)
@@ -64,7 +67,9 @@ function ActivityRecords({ companionId }: { companionId: string }): JSX.Element 
     {error && <p role="alert" className="dsh-partner-inline-error">{error}{snapshot ? '（暂时显示上次读取的记录）' : ''}</p>}
     {!snapshot && loading && <p role="status" className="dsh-partner-activity-empty">正在读取活动记录…</p>}
     {snapshot && view === 'activities' && <>
-      {plan && plan.status !== 'cancelled' && <div className="dsh-partner-activity-plan"><small>下一步 · {{ waiting: '等本轮结束', pending: '等待唤起', claimed: '已唤起' }[plan.status]}</small><p>{plan.intention}</p><small>{label(plan.targetRouteId)}{plan.status === 'pending' ? ` · ${date(plan.dueAt)}` : ''}</small></div>}
+      {interest&&<details className="dsh-partner-activity-footnote"><summary>交流状态 · {{engaged:'仍有兴趣',settled:'先告一段落',quiet:'暂停打扰'}[interest.state]}</summary><p>{interest.focus}</p><p>{interest.detail}</p><small>{date(interest.at)} · {label(interest.routeId)} · 兴趣机会每小时最多 2 次，唤起不代表必须发消息</small></details>}
+      {plan && plan.status !== 'cancelled' && <div className="dsh-partner-activity-plan"><small>下一步 · {intentionKind(plan.kind)} · {{ waiting: '等本轮结束', pending: '等待唤起', claimed: '已唤起' }[plan.status]}</small><p>{plan.intention}</p><small>{label(plan.targetRouteId)}{plan.status === 'pending' ? ` · ${date(plan.dueAt)}` : ''}</small></div>}
+      {decision&&<details className="dsh-partner-activity-footnote"><summary>最近一次后续选择 · {intentionKind(decision.kind)}</summary><p>{decision.reason}</p><p>{decision.detail}</p><small>{date(decision.at)} · {label(decision.routeId)} · 选择不等于执行或发送成功</small></details>}
       <div className="dsh-partner-activity-overview"><span>确认发送 <b>{stats.confirmed}</b></span><span>待确认 <b>{stats.pending}</b></span><span data-warning={stats.failed > 0}>含失败操作 <b>{stats.failed}</b></span></div>
       {!journal.length && <p className="dsh-partner-activity-empty">还没有自主活动。唤起后也可以选择安静待着。</p>}
       <div aria-label="活动时间线">{journal.slice(0, visible).map(a => <details key={a.sessionId + ':' + a.id} className="dsh-partner-activity-row">

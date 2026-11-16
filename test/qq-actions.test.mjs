@@ -278,3 +278,16 @@ test('collection detail returns bounded pages without URLs, while preserving rea
  assert.ok(tail.result.items.at(-1).stickerId.startsWith('qq-custom-'));assert.doesNotMatch(JSON.stringify(tail),/example.com/)
  const count=f.requests.length;await assert.rejects(f.tool.execute({action:'call',operation:'fetch_custom_face_detail',limit:25},f.exec));assert.equal(f.requests.length,count)
 })
+
+test('operation discovery gives a complete wrapper template for collection and tagging',async()=>{
+ const f=fixture()
+ for(const operation of ['add_custom_face','modify_custom_face']){
+  const described=await f.tool.execute({action:'describe',operation},f.exec)
+  assert.equal(described.callTemplate.name,'partner_qq');assert.equal(described.callTemplate.action,'call')
+  assert.deepEqual(JSON.parse(described.callTemplate.argumentsJson),{action:'call',channelId:'qq',operation,params:{}})
+  assert.equal(described.parameters,QQ_ACTION_MAP.get(operation).schema)
+ }
+ assert.equal(f.requests.length,0)
+ f.channel.qq.enabledActions=[]
+ await assert.rejects(f.tool.execute({action:'describe',operation:'add_custom_face'},f.exec))
+})

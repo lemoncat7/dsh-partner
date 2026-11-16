@@ -1,4 +1,3 @@
-import {renderTaskFollowup,type TaskFollowup} from './task-followup.js'
 import {failedTaskPreamble,FAILED_PREAMBLE_NOTICE} from '../execution/task-preamble.js'
 import { pendingActions, pendingActionNotice } from './action-obligation.js'
 import { deliveredAttachment } from '../attachments/delivery-receipt.js'
@@ -53,28 +52,26 @@ export function replyCompletionState(events:readonly SessionEvent[], inspectOnly
   }
   return state
 }
-export const INCOMPLETE_REPLY='本次请求未完成：模型连续未完成答复或已告知的动作。已执行的操作不会自动重做，请查看本次执行记录后再决定是否重试。'
+export const INCOMPLETE_REPLY='哎呀，这次卡住啦，没能答完。先到会话里看看进度，再戳我继续吧～'
 /** Same-turn recovery with a bounded request budget and a settlement-only tool gate. */
 export class ReplyCompletionGuard {
   private userId=''
   private attempts=0
   private settling:ReplyCompletionState|undefined
   failed=false
-  constructor(private readonly agent:Agent,private readonly active:()=>boolean,private readonly taskContext?:()=>TaskFollowup|undefined){}
+  constructor(private readonly agent:Agent,private readonly active:()=>boolean){}
   stop=({agent,signal}:{agent:Agent;signal:AbortSignal}):void=>{
     if(agent!==this.agent||signal.aborted||!this.active())return
-    const events=agent.session.snapshotEvents(),context=this.taskContext?.()
-    const needsReview=context&&!events.some(e=>chatReplyFromEvent(e)?.taskReview?.inputId===context.inputId)
+    const events=agent.session.snapshotEvents()
     let state=replyCompletionState(events)
-    if(needsReview)state={userId:context.inputId,phase:'execute',files:[],deliveries:[]}
     if(!state||state.phase==='complete')return
     if(state.userId!==this.userId){this.userId=state.userId;this.attempts=0;this.settling=undefined}
     if(this.attempts>=2){this.failed=true;throw Error(INCOMPLETE_REPLY)}
     this.attempts++
     const pending=pendingActions(agent.session.snapshotEvents())
     this.settling=state.phase==='settle'?state:undefined
-    const action=needsReview?renderTaskFollowup(context):failedTaskPreamble(agent.session.snapshotEvents())?FAILED_PREAMBLE_NOTICE:pending.length?'仅继续尚未调用的承诺动作，已调用的操作不得重做；若已有失败或无法继续，按事实结束。':state.phase==='execute'?'还没有实际工作提交。继续处理当前用户请求，工具目录与参数说明不等于执行；需要工作就实际调用，不能执行就按事实答复。':'已提交过实际工作。只根据现有工具回执交付或答复，不重新执行或猜测成功。成功生成的文件可通过附件工具交付；发送失败只能按原 deliveryId 重试。其他失败或状态不明请按事实简短说明。'
-    agent.steer(createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'当前请求答复完整性检查'},content:[{type:'text',text:`${pending.length?pendingActionNotice(pending):''} ${needsReview?'当前任务接续尚未核对；先处理用户对前轮任务的纠正，再提交 taskReview。已有结果按回执使用，不重复执行。':'当前请求尚无最终答复或已确认交付，不能以空正文结束。'}${action} 已送达的前置回应不要重复。以上仅是内部执行检查，不是对用户的回复稿；不要向用户复述回执、空答复、恢复或工具目录等内部流程。需要答复时沿用当前人格，只说实际结果或具体阻碍，不用空泛道歉代替尚可执行的工作。此恢复留在当前用户回合，不交给自主活动。`}]}))
+    const action=failedTaskPreamble(agent.session.snapshotEvents())?FAILED_PREAMBLE_NOTICE:pending.length?'仅继续尚未调用的承诺动作，已调用的操作不得重做；若已有失败或无法继续，按事实结束。':state.phase==='execute'?'还没有实际工作提交。继续处理当前用户请求，工具目录与参数说明不等于执行；需要工作就实际调用，不能执行就按事实答复。':'已提交过实际工作。只根据现有工具回执交付或答复，不重新执行或猜测成功。成功生成的文件可通过附件工具交付；发送失败只能按原 deliveryId 重试。其他失败或状态不明请按事实简短说明。'
+    agent.steer(createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'当前请求答复完整性检查'},content:[{type:'text',text:`${pending.length?pendingActionNotice(pending):''} 当前请求尚无最终答复或已确认交付，不能以空正文结束。${action} 已送达的前置回应不要重复。以上仅是内部执行检查，不是对用户的回复稿；不要向用户复述回执、空答复、恢复或工具目录等内部流程。需要答复时沿用当前人格，只说实际结果或具体阻碍，不用空泛道歉代替尚可执行的工作。此恢复留在当前用户回合，不交给自主活动。`}]}))
   }
   deny(name:string,args:unknown):string|undefined {
     if(!this.settling||!this.active())return

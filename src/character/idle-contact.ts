@@ -19,7 +19,9 @@ export interface IdleContactPolicy {
   selfRefinement?: boolean
 }
 export interface IdleContactState {
-  kind?: 'post-reply' | 'thought' | 'autonomous'
+  kind?: 'post-reply' | 'thought' | 'autonomous' | 'continuous'
+  continuousTaskId?:string
+  continuousRevision?:number
   planId?: string
   planSnapshot?: import('./activity-plan.js').ActivityPlan
   cancelled?: boolean

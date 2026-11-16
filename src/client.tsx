@@ -1,4 +1,5 @@
 import { registerWorkProgressCards } from './execution/work-progress-card.js'
+import {ContinuousPanel} from './ui/continuous-panel.js'
 import { CompanionVitals } from './ui/companion-vitals.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -63,7 +64,7 @@ const STYLE_ID = `${PLUGIN_ID}/client`
 const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}\n${biliCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
-type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns'
+type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns' | 'continuous'
 import { WorkspaceGroupLinks, WorkspaceGroupTabs, GeneralSettingsPanel, workspaceGroup, type WorkspacePage } from './ui/workspace-navigation.js'
 type View = CompanionTab | WorkspacePage
 
@@ -213,6 +214,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             <TabButton active={view === 'weixin'} onClick={() => setView('weixin')} icon={<IconLinkOutline16 size={16}/>}>渠道</TabButton>
             <TabButton active={view === 'memory'} onClick={() => setView('memory')} icon={<IconDataOutline16 size={16} />}>记忆</TabButton>
             <TabButton active={view === 'concerns'} onClick={() => setView('concerns')} icon={<IconBrowseOutline16 size={16} />}>持续关注</TabButton>
+            <TabButton active={view === 'continuous'} onClick={() => setView('continuous')} icon={<IconBrowseOutline16 size={16} />}>持续任务</TabButton>
           </nav>
           <div className="dsh-partner-stage-scroll">
             {notice && <p className="dsh-partner-inline-notice" role="status">{notice}</p>}
@@ -222,6 +224,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
             {view === 'weixin' && <ChannelsPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} weixin={<WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />} />}
             {view === 'memory' && <MemoryPanel key={selected.id} companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
             {view === 'concerns' && <ConcernPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} />}
+            {view === 'continuous' && <ContinuousPanel key={selected.id} companionId={selected.id} />}
           </div>
         </>}
         {error && <p className="dsh-partner-error" role="alert">{error}</p>}

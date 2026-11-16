@@ -35,18 +35,18 @@ test('private voice uses synthesized media only and never sends to the source gr
  assert.deepEqual(f.requests[1].params.message,[{type:'record',data:{file:'https://gchat.qpic.cn/voice/test.amr'}}])
  for(const args of [{action:'voice',text:'x',file:'/etc/passwd'},{action:'voice',text:'x',user_id:12345678},{action:'call',operation:'send_qzone_msg'}])await assert.rejects(f.tool.execute(args,f.exec))
 })
-test('native voice cannot finish a recent task correction without review, but may honor cancellation',async()=>{
+for(const review of [false,true])test('native voice final task disposition is checked before sending: '+review,async()=>{
  const f=fixture(true),session=f.exec.agent.session,taskInputId=f.state.sessions[0].inboundMessageIds[0]
  session.append('tool/call',{callId:'work',name:'bash',arguments:'{}'})
  session.append('tool/result',{message:{toolCallId:'work',isError:false,content:[{type:'text',text:'done'}]}},{surfaceOp:'append'})
  const message=createUserMessage({content:[{type:'text',text:'不用了，先停下'}],source:{kind:'user'}})
  session.append('user/message',message,{surfaceOp:'append'});f.state.sessions[0].inboundMessageIds.push(message.id)
- await assert.rejects(f.tool.execute({action:'voice',text:'对，应该换个方法'},f.exec),/taskReview/)
- assert.equal(f.requests.length,0);assert.equal(f.concluded(),0)
- const args={action:'voice',text:'好，先停下',taskReview:{taskInputId,kind:'cancelled',reason:'当前用户明确停止任务'}}
+ const args={action:'voice',text:'好，先停下',...(review?{taskReview:{taskInputId,kind:'cancelled',reason:'当前用户明确停止任务'}}:{})}
+ if(!review){await assert.rejects(f.tool.execute(args,f.exec),/taskReview/);assert.equal(f.requests.length,0);return}
  const result=await f.tool.execute(args,f.exec)
- assert.equal(result.status,'confirmed');assert.equal(result.taskReview.inputId,message.id)
- assert.equal(f.tool.output.presentationMeta(args,result).taskReview.kind,'cancelled')
+ assert.equal(result.status,'confirmed');if(review)assert.equal(result.taskReview.inputId,message.id)
+ if(review)assert.equal(f.tool.output.presentationMeta(args,result).taskReview.kind,'cancelled')
+ else assert.equal(result.taskReview,undefined)
 })
 test('chat voice revocation, unknown origins and off-switch fail before any API call',async()=>{
  for(const edit of [f=>f.state.channels[0].qq.replyVoiceEnabled=false,f=>f.state.pairings[0].status='blocked',f=>f.state.sessions[0].inboundMessageIds=[]]){
@@ -92,7 +92,7 @@ test('confirmed voice projects as delivered, including unified dispatch and dupl
   assert.equal(f.tool.output.presentationMeta({action:'voices'},{voices:[]}),null)
   assert.equal(f.tool.output.presentationMeta(args,{status:'unknown',originRouteId:'r'}),null)
   result.data.meta=undefined
-  assert.match((await prepareChannelReply(channelReplyPartsAfter(events,0),'/tmp')).text,/未生成/)
+  assert.equal((await prepareChannelReply(channelReplyPartsAfter(events,0),'/tmp')).text,'')
  }
 })
 

@@ -120,3 +120,23 @@ test('silent independent work needs no synthetic chat delivery to continue',asyn
  const f=fixture();autonomousSource(f);f.events.splice(-2,1)
  await f.runtime.continueCompletedActivity('c');assert.equal(f.companion.activityPlan.status,'pending')
 })
+
+test('a future plan does not freeze unrelated free activity once normal idle time is due',async()=>{
+ const f=fixture();f.companion.idleContact.routeId='r';const p=plan(f,240);await f.runtime.replyDelivered(f.source)
+ f.route.lastMessageAt=Date.now()-3*3600000;f.events[0].time=f.route.lastMessageAt
+ await f.runtime.idleContact('c');assert.equal(f.followed.length,1);assert.equal(f.companion.activityPlan.id,p.id);assert.equal(f.companion.activityPlan.status,'pending');assert.equal(f.route.idleContactState.planId,undefined)
+})
+
+for(const outcome of ['recovered','retryable','uncertain'])test('ordinary follow-up reconciles durable delivery: '+outcome,async()=>{
+ const f=fixture();plan(f);f.events.unshift({type:'turn/start',seq:0,data:{turn:1}})
+ f.events.push({type:'turn/end',seq:2,time:Date.now(),data:{turn:1,reason:{kind:'completed'}}})
+ f.state.notificationDeliveries=[{reply:{postReplySource:f.source},targets:[{lastError:'timeout',retrySafe:outcome==='retryable'}],...(outcome==='recovered'?{completedAt:Date.now()}:{})}]
+ await f.runtime.continueCompletedActivity('c')
+ assert.equal(f.companion.activityPlan.status,{recovered:'pending',retryable:'waiting',uncertain:'cancelled'}[outcome])
+})
+test('another conversation delivery cannot acknowledge an ordinary follow-up',async()=>{
+ const f=fixture();plan(f);f.events.unshift({type:'turn/start',seq:0,data:{turn:1}})
+ f.events.push({type:'turn/end',seq:2,time:Date.now(),data:{turn:1,reason:{kind:'completed'}}})
+ f.state.notificationDeliveries=[{reply:{postReplySource:{...f.source,routeId:'other'}},targets:[],completedAt:Date.now()}]
+ await f.runtime.continueCompletedActivity('c');assert.equal(f.companion.activityPlan.status,'waiting')
+})

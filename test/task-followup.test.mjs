@@ -15,9 +15,9 @@ function fixture(){
  const context=()=>taskFollowup(state,'c','s',events)
  return {events,state,add,user,result,chat,context}
 }
-test('correction gets original goal and actual work; summary alone cannot finish',()=>{
+test('recent work is optional context; claimed progress still needs real evidence',()=>{
  const f=fixture(),c=f.context();assert.equal(c.taskInputId,'old');assert.match(c.request,/加快反应速度/);assert.deepEqual(c.currentResults,[])
- assert.throws(()=>checkTaskReview(c,undefined),/尚未发送/)
+ assert.equal(checkTaskReview(c,undefined),undefined)
  assert.throws(()=>checkTaskReview(c,{taskInputId:'old',kind:'completed',reason:'知道应该先看局面',callId:'old-work'}),/本轮实际/)
  f.result('directory','partner_tools',{action:'describe',name:'bash'})
  assert.throws(()=>checkTaskReview(f.context(),{taskInputId:'old',kind:'completed',reason:'查过工具',callId:'directory'}),/本轮实际/)
@@ -29,7 +29,7 @@ for(const kind of ['discussion','cancelled','unrelated'])test('explicit '+kind+'
  const f=fixture();const r=checkTaskReview(f.context(),{taskInputId:'old',kind,reason:'依当前用户意图处理'})
  assert.equal(r.kind,kind)
  f.chat('new-reply',{taskReview:r,transportCallId:'nested-voice'});f.add('turn/end',{reason:{kind:'completed'}});f.add('turn/start',{turn:3});f.user('next','再说一句')
- if(kind==='discussion')assert.equal(f.context().taskInputId,'old');else assert.equal(f.context(),undefined)
+ assert.equal(f.context(),undefined)
 })
 test('later progress preserves original task across input turns and voice parent receipts',()=>{
  const f=fixture();f.result('check','bash')
@@ -68,14 +68,57 @@ test('same-session other peers, groups, autonomous and expired work do not inher
  }
 })
 test('exclusive persona mode keeps task request in runtime context, outside rolling chat messages',()=>{
- const f=fixture(),text=renderTaskFollowup(f.context()),contexts=[{name:'partner-conversation-memory',text}]
+ const f=fixture();assert.match(renderTaskFollowup(f.context()),/近期任务/);f.result('current-check','bash')
+ const text=renderTaskFollowup(f.context()),contexts=[{name:'partner-conversation-memory',text}]
  const assembly=projectConversationPrompt({sections:[{name:'partner-identity',text:'自定义人格'}],contexts,tools:[]},{},{roleEnabled:true,exclusive:true,discovery:true})
- assert.deepEqual(assembly.contexts,contexts);assert.match(assembly.contexts[0].text,/加快反应速度/);assert.match(text,/纠正或补充/)
+ assert.deepEqual(assembly.contexts,contexts);assert.match(assembly.contexts[0].text,/加快反应速度/);assert.match(text,/纠正或延续/)
 })
-test('plain final prose receives bounded same-turn recovery without dispatching tools itself',()=>{
+test('ordinary final prose after work never starts a task-review recovery',()=>{
  const f=fixture(),steered=[];f.add('assistant/message',{message:{role:'assistant',content:[{type:'text',text:'对，只按得快不等于会玩'}]}})
  const agent={session:{snapshotEvents:()=>f.events},steer:m=>steered.push(m)}
- const guard=new ReplyCompletionGuard(agent,()=>true,f.context),input={agent,signal:new AbortController().signal}
- guard.stop(input);assert.equal(steered.length,1);assert.match(steered[0].content[0].text,/taskReview/);assert.equal(guard.deny('bash',{}),undefined)
- guard.stop(input);assert.equal(steered.length,2);assert.throws(()=>guard.stop(input),/本次请求未完成/)
+ const guard=new ReplyCompletionGuard(agent,()=>true),input={agent,signal:new AbortController().signal}
+ guard.stop(input);guard.stop(input);guard.stop(input)
+ assert.equal(steered.length,0);assert.equal(guard.failed,false)
+})
+for(const text of ['没关系的','倒也合理','哈哈 你又看岔啦'])test('a conversational answer retires recent work: '+text,()=>{
+ const f=fixture();assert.ok(f.context());f.chat('new-reply')
+ f.add('turn/end',{reason:{kind:'completed'}});f.add('turn/start',{turn:3});f.user('next',text)
+ assert.equal(f.context(),undefined)
+})
+test('completed review without new work cannot resurrect an old task',()=>{
+ const f=fixture();f.chat('new-reply',{taskReview:{inputId:'new',taskInputId:'old',request:'old request',kind:'completed',reason:'legacy review'}})
+ f.add('turn/end',{reason:{kind:'completed'}});f.add('turn/start',{turn:3});f.user('next','没关系')
+ assert.equal(f.context(),undefined)
+})
+test('real work after a completed review remains available for a correction',()=>{
+ const f=fixture();f.result('fix','bash')
+ f.chat('new-reply',{taskReview:checkTaskReview(f.context(),{taskInputId:'old',kind:'completed',reason:'已修正',callId:'fix'})})
+ f.add('turn/end',{reason:{kind:'completed'}});f.add('turn/start',{turn:3});f.user('next','第二张也换掉')
+ assert.equal(f.context().results[0].callId,'fix')
+})
+
+test('idle turns between correction inputs preserve the user goal and exclude autonomous evidence',()=>{
+ const f=fixture();const pos=f.events.findIndex(e=>e.type==='user/message'&&e.data.id==='new')
+ f.events.splice(pos-1,0,{type:'user/message',seq:20,time:Date.now(),data:{id:'idle',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE},content:[]}},{type:'tool/call',seq:21,time:Date.now(),data:{callId:'idle-op',name:'bash',arguments:'{}'}},{type:'tool/result',seq:22,time:Date.now(),data:{message:{toolCallId:'idle-op',content:[]}}})
+ const task=f.context();assert.equal(task.taskInputId,'old');assert.deepEqual(task.results.map(r=>r.callId),['old-work'])
+ assert.throws(()=>checkTaskReview(task,undefined,{continuing:false}),/最终回复尚未发送/)
+ const repair={taskInputId:'old',kind:'repair',reason:'用户指出原成果遗漏',remaining:'取回已有参考并修正原成果'}
+ assert.throws(()=>checkTaskReview(task,repair,{continuing:false}),/不能最终收尾/)
+ const receipt=checkTaskReview(task,repair,{continuing:true});f.chat('repair',{intermediate:true,taskReview:receipt})
+ f.add('turn/end',{reason:{kind:'aborted'}});f.add('turn/start',{turn:3});f.user('next','对呀 好不开心')
+ assert.equal(f.context().pending,repair.remaining);assert.equal(f.context().taskInputId,'old')
+ assert.match(renderTaskFollowup(f.context()),/取回已有参考/)
+})
+test('inspection cannot close a previous execution goal; completed repairs can',()=>{
+ const f=fixture();f.result('inspected','read')
+ const review={taskInputId:'old',kind:'completed',reason:'查出原因了',callId:'inspected'}
+ assert.throws(()=>checkTaskReview(f.context(),review,{continuing:false}),/查明原因/)
+ assert.equal(checkTaskReview(f.context(),{taskInputId:'old',kind:'discussion',reason:'用户明确只问原因'},{continuing:false}).kind,'discussion')
+ f.result('fixed','generate_image');assert.equal(checkTaskReview(f.context(),{...review,callId:'fixed',reason:'已按纠正完成'},{continuing:false}).kind,'completed')
+})
+test('progress continues in the same turn while a genuine blocker can end it',()=>{
+ const f=fixture();f.result('checked','read');const review={taskInputId:'old',kind:'progress',reason:'已查到来源',remaining:'继续修正',callId:'checked'}
+ assert.throws(()=>checkTaskReview(f.context(),review,{continuing:false}),/不能最终收尾/)
+ assert.equal(checkTaskReview(f.context(),review,{continuing:true}).remaining,'继续修正')
+ assert.equal(checkTaskReview(f.context(),{taskInputId:'old',kind:'blocked',reason:'缺少访问凭据 无法读取原文件',remaining:'取得原文件'},{continuing:false}).kind,'blocked')
 })

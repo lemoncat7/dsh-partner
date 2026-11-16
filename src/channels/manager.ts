@@ -1058,7 +1058,7 @@ export class ChannelManager {
       await api.sendText(event.sender,`配对码：${pairingCode}\n请在「伙伴 → 渠道 → 配置」核对该码并批准联系人，然后重新发送消息。未批准前不会交给伙伴处理。`,undefined,signal)
     } else if(groupAccess||pairing?.status==='approved') {
       await this.markInbound(channel.id,event.sender,receipts)
-      if(!text&&!mediaCount)await api.sendText(event.sender,'消息类型暂不支持；可发送文字、图片、文件、音频或视频。',undefined,signal)
+      if(!text&&!mediaCount){if(!event.qqGroup)await api.sendText(event.sender,'消息类型暂不支持；可发送文字、图片、文件、音频或视频。',undefined,signal)}
       else {
         // Claim before starting tools. A delivery failure must not execute the same
         // user command twice on reconnect; its result remains in the DSH session.
@@ -1087,7 +1087,8 @@ export class ChannelManager {
         catch(error){
           await progress?.fail()
           if(signal.aborted||!allowed())throw error
-          await api.sendText(event.sender,'附件接收失败，未交给伙伴执行。请确认附件可下载、单条消息不超过 8 个附件且总大小不超过 64 MB，再重新发送。加密附件暂不支持。',undefined,signal)
+          this.ctx.logger?.warn?.(`dsh-partner: inbound attachment failed: ${error instanceof Error?error.message:String(error)}`)
+          if(!event.qqGroup)await api.sendText(event.sender,'附件没接稳，这次未交给伙伴执行呢。检查一下文件能否下载、有没有超过 8 个或总共 64 MB，再发我一次吧～',undefined,signal)
           return
         }
         for(const item of events)if(item.qqQuote?.media.length){
@@ -1168,6 +1169,13 @@ export class ChannelManager {
         signal.throwIfAborted()
         const current=this.store.snapshot()
         if(!allowed())throw new Error('渠道或联系人授权已撤销，取消回复')
+        if(event.qqGroup&&reply.failureNotice){
+          await progress?.completeWithoutReply()
+          await this.rememberReceipts(receipts)
+          this.ctx.logger?.warn?.('dsh-partner: exhausted reply recovery; group failure notice suppressed')
+          if(timing)timing.outcome='failed'
+          return
+        }
         if(reply.chatParts?.length===0&&!reply.text.trim()&&!reply.attachments.length){
           await progress?.completeWithoutReply()
           if(reply.alreadyDelivered){
@@ -1199,7 +1207,7 @@ export class ChannelManager {
         if(channel.platform==='qq')this.ctx.logger?.info?.(`[qq-latency] ${JSON.stringify({stage:'reply',agentMs:replyReady-agentStarted,sendMs:Date.now()-replyReady})}`)
         } catch(error) {
           await progress?.fail()
-          if(allowed()&&!signal.aborted)await api.sendText(event.sender,'本次消息处理或附件传输未完成，请在 DSH 查看错误。附件接收失败时未交给伙伴执行；请检查文件大小后重新发送。',undefined,signal).catch(()=>{})
+          if(!event.qqGroup&&allowed()&&!signal.aborted)await api.sendText(event.sender,'哎呀，这次处理或传输卡了一下，没能完成。先到会话里看看进度，再戳我继续吧～',undefined,signal).catch(()=>{})
           throw error
         } finally {
           this.groupReplyWindows.finish(replyWindow)

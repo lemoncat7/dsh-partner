@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {QqGroupAutonomy,SPONTANEOUS_INTERVAL_MS} from '../lib/channels/qq/autonomy.js'
+import {QqGroupAutonomy,SPONTANEOUS_INTERVAL_MS,QUIET_CONVERSATION_WINDOW_MS} from '../lib/channels/qq/autonomy.js'
 import {scoreGroupReply,routeGroupReply,CONVERSATION_WINDOW_MS} from '../lib/channels/qq/reply-rules.js'
 const event={id:'one',sender:'group:12345678:22345678',text:'小明你怎么看？',qqGroup:{groupId:'12345678',userId:'22345678',senderName:'朋友',autonomous:true,mentioned:false}}
 const companion={name:'小明',relationshipText:'用户是哥哥，角色是弟弟'}
@@ -11,7 +11,7 @@ const unavailable=async()=>undefined
 const input=(text,group={},id=text)=>({...event,id,text,qqGroup:{...event.qqGroup,...group}})
 
 test('explicit calling and validated reply relationships take precedence over semantics',()=>{
- for(const text of ['小明？','小明你怎么看','弟弟 弟弟','弟弟人呢？']){
+ for(const text of ['小明？','小明你怎么看','小明。出来聊聊']){
   const result=scoreGroupReply(input(text),context);assert.equal(result.reply,true,text);assert.equal(result.route,'direct')
  }
  assert.equal(routeGroupReply(input('小明天去不去'),context),undefined)
@@ -19,7 +19,7 @@ test('explicit calling and validated reply relationships take precedence over se
  assert.equal(scoreGroupReply(input('小明？',{replyTo:'other',hasReply:true}),context).reply,false)
  assert.equal(scoreGroupReply(input('嗯',{replyTo:'self',hasReply:true}),context).route,'direct')
  assert.equal(scoreGroupReply(input('你好',{otherMention:true,mentioned:true}),context).reply,true)
- assert.equal(routeGroupReply(input('弟弟人呢？'),{...context,owner:false}),undefined,'relationship terms never prove ownership')
+ assert.equal(routeGroupReply(input('弟弟人呢？'),context),undefined,'relationship terms are not hardcoded routing aliases')
 })
 test('recent conversation keeps substantive followups but leaves closing acknowledgements quiet',async()=>{
  let calls=0;const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return undefined})
@@ -223,4 +223,35 @@ test('shared participation never overrides other-person targets, stops, strong n
  for(const e of [input('不用回复'),input('好的'),input('晚安'),input('显卡',{otherMention:true}),input('显卡',{replyTo:'other'})])assert.equal(scoreGroupReply(e,c).reply,false)
  for(const label of ['other','background','close'])assert.equal(scoreGroupReply(input('普通消息'),{...c,semantic:{label,confidence:.9,margin:.6,contextSimilarity:.9}}).reply,false)
  assert.equal(scoreGroupReply(input('不相关的新话题'),{...c,semantic:{...c.semantic,contextSimilarity:.1}}).reply,false)
+})
+
+test('moderate separated positive intent passes, while unsupported low scores stay quiet',()=>{
+ for(const [text,label,confidence,margin] of [['绳子断了','engage',.543657,.355339],['弟弟。出来吐槽几句','address',.568769,.372488],['你别装没看见啊','engage',.549,.339]])assert.equal(scoreGroupReply(input(text),{...context,semantic:{label,confidence,margin}}).reply,true)
+ assert.equal(scoreGroupReply(input('史诗级削弱'),{...context,semantic:{label:'close',confidence:.4618,margin:.1151,contextSimilarity:.3416}}).reply,true)
+ assert.equal(scoreGroupReply(input('无关联的附和'),{...context,semantic:{label:'close',confidence:.4618,margin:.1151,contextSimilarity:.1}}).reply,false)
+})
+test('a quiet room retains a relevant reply after 32 minutes without assuming every new message is a continuation',async()=>{
+ let now=context.now,prediction={label:'address',confidence:.403,margin:.12,contextSimilarity:.508},seen
+ const gate=new QqGroupAutonomy(forbidden,()=>now,async(t,s,c)=>{seen=c;return prediction})
+ const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'给大家一个亿 但每花一块钱就得当众喵一声')
+ now+=32*60000;const next=input('那你喵起来',{},'quiet');gate.observe('c',next)
+ assert.equal(await gate.shouldReply('c',next,companion,signal()),true);assert.equal(gate.status('c').route,'continuation')
+ assert.ok(seen.some(s=>s.includes('喵')));assert.ok(JSON.parse(gate.context('c',next)).some(r=>r.kind==='partner'&&r.ageSeconds===1920))
+ assert.match(gate.guidance('c',next),/1920 秒前/)
+ prediction={...prediction,contextSimilarity:.1};assert.equal(await gate.shouldReply('c',next,companion,signal()),false)
+})
+test('quiet continuity expires, cannot cross rooms, and intervening traffic survives observation TTL pruning',async()=>{
+ for(const mode of ['intervening','expired','other-room','quoted-other','strong-negative']){
+  let now=context.now;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>({label:mode==='strong-negative'?'other':'address',confidence:mode==='strong-negative'?.95:.403,margin:mode==='strong-negative'?.8:.12,contextSimilarity:.7}))
+  const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'刚聊的笑话')
+  if(mode==='intervening'){now+=60000;gate.observe('c',input('后来已经聊了别的话题',{userId:'99887766'},'intervening'))}
+  now+=mode==='expired'?QUIET_CONVERSATION_WINDOW_MS:32*60000
+  const next=input('那你呢',mode==='quoted-other'?{replyTo:'other'}:mode==='other-room'?{groupId:'99887766'}:{},'next');gate.observe('c',next)
+  assert.equal(await gate.shouldReply('c',next,companion,signal()),false,mode)
+ }
+})
+test('unavailable classifications carry diagnostics without turning failure into a semantic rejection',async()=>{
+ const gate=new QqGroupAutonomy(forbidden,()=>context.now,async(t,s,c,report)=>{report({status:'timeout',attempts:2,retryAfterMs:1000})})
+ const e=input('路过的话');gate.observe('c',e);await gate.shouldReply('c',e,companion,signal())
+ assert.equal(gate.status('c').classification.status,'timeout');assert.match(gate.status('c').reason,/请求超时/);assert.equal(gate.status('c').semantic,undefined)
 })

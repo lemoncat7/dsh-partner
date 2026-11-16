@@ -1,5 +1,6 @@
 import {withActivityDeliveries} from './character/activity-summary.js'
 import {dispatchBrowserApi} from './api/features/browser-api.js'
+import {dispatchContinuousApi} from './api/features/continuous-api.js'
 import {dispatchTtsApi} from './api/features/tts-api.js'
 import type {TtsService} from './voice/service.js'
 import { habitBaseline, habitData } from './character/habits.js'
@@ -59,6 +60,7 @@ function loginCache(store:PartnerStore):DirectLoginCache {
 }
 
 interface ApiRuntime {
+  continuous?:import('./continuous/service.js').ContinuousService
   browser?:import('./browser/service.js').BrowserService
   tts?:TtsService
   bilibili?: import('./channels/bilibili/service.js').BilibiliService
@@ -113,6 +115,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
   if (runtime.browser && await dispatchBrowserApi(req,res,segments,runtime.browser)) return
+  if (runtime.continuous && runtime.browser && await dispatchContinuousApi(req,res,segments,runtime.continuous,runtime.store,runtime.browser)) return
   if (runtime.tts && await dispatchTtsApi(req,res,segments,runtime.tts)) return
   if (runtime.push && await dispatchPushApi(req, res, segments, runtime.push)) return
   if (runtime.mcp && await dispatchMcpApi(req, res, segments, runtime.mcp)) return
@@ -615,7 +618,7 @@ async function snapshot(runtime: ApiRuntime): Promise<{
     ...(item.broken ? { broken: item.broken } : {}),
   }))).catch(() => [])
   const sessions = state.sessions.map(item => ({ ...item, archived: runtime.agents.isArchived(item) }))
-  return { companionActivity:companionActivityView(runtime), companions: state.companions.map(c=>withActivityDeliveries(c,state.notificationDeliveries??[])), channels: await runtime.channels.views(), pushChannels: runtime.push?.views() ?? [], pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
+  return { companionActivity:companionActivityView(runtime), companions: state.companions.map(c=>{const {continuous,...view}=c;return withActivityDeliveries(view,state.notificationDeliveries??[])}), channels: await runtime.channels.views(), pushChannels: runtime.push?.views() ?? [], pairings: state.pairings, sessions, heartbeatStates: state.heartbeatStates, presets }
 }
 
 function localDay(now: number): string { const date = new Date(now); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }

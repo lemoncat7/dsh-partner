@@ -13,6 +13,10 @@ export type { CompanionCapability } from './capabilities.js'
 export type PairingStatus = 'pending' | 'approved' | 'blocked'
 
 export interface Companion {
+  activityInterest?: import('./character/activity-decision.js').ActivityInterest
+  interestWakeHistory?: number[]
+  activityDecision?: import('./character/activity-decision.js').ActivityDecision
+  continuous?: import('./continuous/domain.js').ContinuousState
   browser?: import('./browser/domain.js').BrowserConfig
   ttsProfiles?: import('./voice/domain.js').TtsProfile[]
   activityJournal?: import('./character/activity-journal.js').ActivityJournalEntry[]

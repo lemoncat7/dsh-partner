@@ -3,6 +3,7 @@ import {validateBrowserConfig} from './browser/domain.js'
 import {validateTtsState} from './voice/validation.js'
 import { validateHabits } from './character/habits.js'
 import { validateAgreements } from './chat/agreements.js'
+import {validateContinuous} from './continuous/domain.js'
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -313,6 +314,7 @@ function validateState(value: unknown): asserts value is PartnerState {
   for(const c of state.companions??[])if(c.browser!==undefined)validateBrowserConfig(c.browser)
   for (const companion of state.companions!) {
     validateAgreements(companion.temporaryAgreements)
+    validateContinuous(companion.continuous)
     if(companion.idleContact){
       if(companion.idleContact.habitsEnabled===undefined&&companion.idleContact.selfRefinement!==undefined)companion.idleContact.habitsEnabled=companion.idleContact.selfRefinement
       delete companion.idleContact.selfRefinement
@@ -320,7 +322,10 @@ function validateState(value: unknown): asserts value is PartnerState {
     }
     validateHabits(companion)
     if(companion.activityJournal!==undefined&&(!Array.isArray(companion.activityJournal)||companion.activityJournal.length>40||companion.activityJournal.some(a=>!a||typeof a.id!=='string'||typeof a.sessionId!=='string'||!Number.isFinite(a.at)||typeof a.summary!=='string'||a.summary.length>600||typeof a.silent!=='boolean'||(a.sharing!==undefined&&!['confirmed','pending','none'].includes(a.sharing))||(a.sharedText!==undefined&&(typeof a.sharedText!=='string'||a.sharedText.length>300))||!Array.isArray(a.tools)||a.tools.length>24||a.tools.some(t=>typeof t.name!=='string'||t.name.length>100||typeof t.ok!=='boolean')||!Array.isArray(a.artifacts)||a.artifacts.length>4||a.artifacts.some(p=>typeof p!=='string'||p.length>500))))throw Error('invalid activity journal')
-    if (companion.activityPlan) { const p=companion.activityPlan; if(!['waiting','pending','claimed','cancelled'].includes(p.status)||!Number.isFinite(p.dueAt)||!Number.isFinite(p.createdAt)||!Number.isFinite(p.policyRevision)||typeof p.autonomous!=='boolean'||['id','sourceRouteId','sourceSessionId','sourceInputId','targetRouteId','targetSessionId','intention'].some(k=>typeof (p as unknown as Record<string,unknown>)[k]!=='string')||p.intention.length>300) throw Error('invalid activity plan') }
+    if(companion.interestWakeHistory&&(!Array.isArray(companion.interestWakeHistory)||companion.interestWakeHistory.length>2||companion.interestWakeHistory.some(at=>!Number.isFinite(at))))throw Error('invalid interest wake history')
+    if(companion.activityInterest){const i=companion.activityInterest;if(!['engaged','settled','quiet'].includes(i.state)||!['continue','topic','task','explore','social'].includes(i.kind)||['at','expiresAt','policyRevision'].some(k=>!Number.isFinite((i as unknown as Record<string,unknown>)[k]))||['focus','routeId','sessionId','sourceInputId','userMessageId','detail'].some(k=>typeof (i as unknown as Record<string,unknown>)[k]!=='string')||i.focus.length>200||i.detail.length>300)throw Error('invalid activity interest')}
+    if(companion.activityDecision){const d=companion.activityDecision;if(!Number.isFinite(d.at)||typeof d.routeId!=='string'||!['continue','topic','task','explore','social','none'].includes(d.kind)||!['scheduled','declined','none'].includes(d.outcome)||typeof d.reason!=='string'||d.reason.length>300||typeof d.detail!=='string'||d.detail.length>300)throw Error('invalid activity decision')}
+    if (companion.activityPlan) { const p=companion.activityPlan; if(p.trigger!==undefined&&p.trigger!=='interest'||p.expiresAt!==undefined&&!Number.isFinite(p.expiresAt))throw Error('invalid interest plan'); if(p.depth!==undefined&&(!Number.isInteger(p.depth)||p.depth<1||p.depth>3)||p.kind!==undefined&&!['continue','topic','task','explore','social'].includes(p.kind))throw Error('invalid activity plan choice'); if(!['waiting','pending','claimed','cancelled'].includes(p.status)||!Number.isFinite(p.dueAt)||!Number.isFinite(p.createdAt)||!Number.isFinite(p.policyRevision)||typeof p.autonomous!=='boolean'||['id','sourceRouteId','sourceSessionId','sourceInputId','targetRouteId','targetSessionId','intention'].some(k=>typeof (p as unknown as Record<string,unknown>)[k]!=='string')||p.intention.length>300) throw Error('invalid activity plan') }
     if (companion.thoughts !== undefined && (!Array.isArray(companion.thoughts) || companion.thoughts.length>64 || companion.thoughts.some(t=>!t || typeof t.id!=='string' || typeof t.text!=='string' || t.text.length>300 || typeof t.why!=='string' || t.why.length>300 || !Array.isArray(t.sourceRouteIds) || t.sourceRouteIds.some(id=>typeof id!=='string') || typeof t.targetRouteId!=='string' || !['open','done','dismissed'].includes(t.status) || !Number.isFinite(t.createdAt) || !Number.isFinite(t.sourceAt) || !Number.isFinite(t.updatedAt) || !Number.isInteger(t.attempts) || t.attempts<0))) throw Error('invalid companion thoughts')
     if (companion.interactionReview !== undefined) {
       const review=companion.interactionReview

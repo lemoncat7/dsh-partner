@@ -42,3 +42,15 @@ test('collection mutations invalidate shared tags, stay channel isolated and lat
  const fresh=await race.get('qq',1,'image');release(Error('old failed'));await assert.rejects(old)
  assert.equal(await race.get('qq',1,'image'),fresh);assert.equal(n,2)
 })
+
+// Exclusive persona mode must expose collection as well as delivery.
+import {renderConversationTurn,renderChatDeliveryGuidance} from '../lib/character/conversation-behavior.js'
+test('both persona modes can discover collection from an incoming image without a fixed collection quota',()=>{
+ for(const exclusivePrompt of [true,false]){
+  const card={enabled:true,stickersEnabled:true,exclusivePrompt}
+  const text=exclusivePrompt?renderConversationTurn(card,1):renderChatDeliveryGuidance(card)
+  assert.match(text,/partner_qq/);assert.match(text,/add_custom_face/);assert.match(text,/params.file/)
+  assert.match(text,/原文件/);assert.match(text,/modify_custom_face/);assert.match(text,/是否收藏按人格/)
+ }
+ assert.doesNotMatch(renderConversationTurn({enabled:true,exclusivePrompt:true,stickersEnabled:false},1),/add_custom_face/)
+})

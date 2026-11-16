@@ -3,12 +3,12 @@ import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
 import {localAttentionClassifier} from '../lib/channels/qq/attention-classifier.js'
 const signal=()=>new AbortController().signal
-async function fixture(t,handler){
+async function fixture(t,handler,now){
  const previous=process.env.DSH_PARTNER_ATTENTION_URL
  const server=createServer(handler);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  process.env.DSH_PARTNER_ATTENTION_URL=`http://127.0.0.1:${server.address().port}`
  t.after(()=>{if(previous===undefined)delete process.env.DSH_PARTNER_ATTENTION_URL;else process.env.DSH_PARTNER_ATTENTION_URL=previous;server.closeAllConnections();server.close()})
- return localAttentionClassifier()
+ return localAttentionClassifier(now)
 }
 test('local classifier bounds text, validates output and never follows a redirect',async t=>{
  let mode='good',calls=0
@@ -18,8 +18,11 @@ test('local classifier bounds text, validates output and never follows a redirec
   else {res.writeHead(302,{Location:'http://127.0.0.1:1/private'});res.end()}
  })})
  assert.deepEqual(await classify('x'.repeat(2000),signal()),{label:'engage',confidence:.8,margin:.6})
+ const beforeRedirect=calls
  mode='redirect';assert.equal(await classify('hello',signal()),undefined)
- assert.equal(await classify('retry',signal()),undefined);assert.equal(calls,2,'failures open circuit instead of repeatedly stalling messages')
+ assert.ok(calls>beforeRedirect&&calls<=beforeRedirect+2,'redirect fails within the bounded attempt budget')
+ const afterRedirect=calls
+ assert.equal(await classify('retry',signal()),undefined);assert.equal(calls,afterRedirect,'failures open circuit instead of repeatedly stalling messages')
 })
 test('four classifications run independently; overflow falls back without waiting',async t=>{
  const responses=[]
@@ -44,7 +47,7 @@ test('slow local classification has a short budget and does not stall the next m
  const start=performance.now();assert.equal(await classify('需要判断的群聊',signal()),undefined)
  assert.ok(performance.now()-start<1000,'classification must finish below the old 1.2s timeout')
  const next=performance.now();assert.equal(await classify('后续补充',signal()),undefined)
- assert.ok(performance.now()-next<100);assert.equal(calls,1)
+ assert.ok(performance.now()-next<100);assert.equal(calls,2)
 })
 
 test('context is bounded separately from current intent, optional similarity is validated, and legacy responses still work',async t=>{
@@ -56,4 +59,19 @@ test('context is bounded separately from current intent, optional similarity is 
  const context=Array.from({length:10},(_,i)=>String(i)+'x'.repeat(300))
  assert.equal((await classify('当前消息',signal(),context)).contextSimilarity,.7)
  assert.equal((await classify('当前消息',signal(),context)).contextSimilarity,undefined)
+})
+
+test('a transient dropped connection is retried once and success clears the outage state',async t=>{
+ let calls=0,diagnostic
+ const classify=await fixture(t,(req,res)=>{calls++;if(calls===1)req.socket.destroy();else res.end(JSON.stringify({label:'address',confidence:.6,margin:.3}))})
+ assert.equal((await classify('继续接话',signal(),[],d=>{diagnostic=d})).label,'address')
+ assert.deepEqual(diagnostic,{status:'ok',attempts:2});assert.equal(calls,2)
+ assert.ok(await classify('下一条',signal()));assert.equal(calls,3)
+})
+test('one failed request does not disable recognition for thirty seconds; retry backoff is bounded',async t=>{
+ let now=1000,calls=0,good=false,diagnostic
+ const classify=await fixture(t,(_req,res)=>{calls++;if(good)res.end(JSON.stringify({label:'engage',confidence:.7,margin:.4}));else {res.writeHead(503);res.end() }},()=>now)
+ assert.equal(await classify('第一条',signal(),[],d=>{diagnostic=d}),undefined);assert.equal(diagnostic.retryAfterMs,1000)
+ await classify('紧接着',signal(),[],d=>{diagnostic=d});assert.equal(diagnostic.status,'backoff');assert.equal(calls,1)
+ now+=1000;good=true;assert.ok(await classify('恢复后',signal(),[],d=>{diagnostic=d}));assert.equal(diagnostic.status,'ok');assert.equal(calls,2)
 })

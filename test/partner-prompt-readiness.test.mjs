@@ -29,7 +29,8 @@ async function fixture(t, composer, mode = 'native') {
   agent.ctx = scope.ctx
   const store = await PartnerStore.open(join(directory, 'state.json'))
   await store.update(s => {
-    s.companions[0].capabilities = ['schedules', 'mcp']
+    // A mounted MCP intentionally selects native presentation; PTC fixtures must not enable it.
+    s.companions[0].capabilities = mode==='ptc'?['schedules']:['schedules', 'mcp']
     s.sessions.push({ id: 'route', companionId: s.companions[0].id, sessionId: agent.session.id, kind: 'local', channelId: '@local', userId: 'owner', lastMessageAt: 1 })
   })
   const ctx = root.extend({
@@ -435,4 +436,42 @@ test('exclusive role uses a single static section while tools and contexts survi
  const off=await f.assemble();assert.ok(off.sections.some(s=>s.name==='other-plugin-static'));assert.ok(off.tools.some(t=>t.name==='still_available'))
  await f.store.update(s=>{s.companions[0].characterCard.exclusivePrompt=true;s.companions[0].characterCard.enabled=false})
  const disabled=await f.assemble();assert.ok(disabled.sections.some(s=>s.name==='other-plugin-static'))
+})
+
+test('continuous wake assembles the same identity and conversation time, and a user interruption restores normal tools',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const {ContinuousService}=await import('../lib/continuous/service.js')
+ const f=await fixture(t,{async compose(ctx){const ds=['partner_chat_reply','partner_activity_finish','host_tool'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return ()=>ds.forEach(d=>d())}})
+ f.agent.session=Session.create('session-assembly');f.agent.status='idle'
+ await f.store.update(s=>{const c=s.companions[0];c.instructions='测试角色有自己的语气与爱好';c.browser={enabled:true,autonomous:true,updatedAt:1,endpoint:'http://browser.test/'};s.sessions[0].sessionId=f.agent.session.id})
+ const message=createUserMessage({content:[{type:'text',text:'一起看这场文字直播吧'}],source:{kind:'user'}})
+ f.agent.session.append('user/message',message,{surfaceOp:'append'})
+ const ordinary=await f.assemble(),owner=f.store.snapshot().companions[0].id
+ const service=new ContinuousService(f.store,{run:async()=>({value:{url:'https://example.test/live',blocks:['真实的文字直播内容 基线']}})},{busy:()=>false,wake:()=>false,cancel:()=>{},warn:()=>{},review:()=>{throw Error('not called')}})
+ f.runtime.setContinuousService(service)
+ const task=await service.create(owner,{routeId:'route',tabId:'test-tab',title:'一起看',instruction:'根据新内容自然接话',until:'整场结束'},'一起看这场文字直播吧')
+ f.agent.followup=m=>f.agent.session.append('user/message',m,{surfaceOp:'append'})
+ assert.equal(await f.runtime.wakeContinuous(owner,{...task,lastEvent:'新增的真实内容'}),true)
+ assert.ok(f.runtime.continuousClaim(f.agent.session.id),'claim before assembly')
+ const automatic=await f.assemble()
+ assert.ok(f.runtime.continuousClaim(f.agent.session.id),'claim after assembly')
+ assert.deepEqual(automatic.sections.find(s=>s.name==='partner-identity'),ordinary.sections.find(s=>s.name==='partner-identity'))
+ assert.match(JSON.stringify(automatic.contexts),/交流时间/);assert.match(JSON.stringify(automatic.contexts),/当前会话持续任务/)
+ assert.ok(automatic.tools.some(t=>t.name==='partner_chat_reply'))
+ assert.ok(!automatic.tools.some(t=>t.name==='host_tool'))
+ f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'先帮我做另一件事'}],source:{kind:'user'}}),{surfaceOp:'append'})
+ assert.equal(f.runtime.continuousClaim(f.agent.session.id),undefined)
+ assert.ok((await f.assemble()).tools.some(t=>t.name==='host_tool'))
+})
+
+test('native owner schema asks for a private activity choice and turning it off restores optional schema',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm'),{chatTools}=await import('../lib/chat/tools.js')
+ let stored
+ const f=await fixture(t,{async compose(ctx,c){return ctx.tools.register(chatTools(c.id,stored,{},{},ctx,'').find(t=>t.name==='partner_chat_reply'))}});stored=f.store
+ f.agent.session=Session.create('session-assembly')
+ await f.store.update(s=>{const c=s.companions[0];c.characterCard=normalizeCharacterCard({enabled:true,exclusivePrompt:true,roleText:'当前用户选择的人物'});c.idleContact={enabled:true,routeId:'route',idleMinutes:120};s.sessions[0].sessionId=f.agent.session.id})
+ f.agent.session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'刚才那件事还挺好玩的'}]}),{surfaceOp:'append'})
+ const on=await f.assemble();assert.ok(on.tools.find(t=>t.name==='partner_chat_reply').parameters.required.includes('interest'));assert.match(JSON.stringify(on.contexts),/本轮说完之后的交流状态/)
+ await f.store.update(s=>{s.companions[0].idleContact.enabled=false})
+ const off=await f.assemble();assert.ok(!off.tools.find(t=>t.name==='partner_chat_reply').parameters.required?.includes('interest'));assert.doesNotMatch(JSON.stringify(off.contexts),/本轮说完之后的交流状态/)
 })

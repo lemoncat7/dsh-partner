@@ -1,3 +1,4 @@
+import {NEXT_ACTIVITY_SCHEMA,INTEREST_SCHEMA,saveNextActivity,saveTurnInterest} from './activity-decision.js'
 import {createHash} from 'node:crypto'
 import { activityPolicyCurrent } from './post-reply.js'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -29,8 +30,8 @@ export function canFinishIdleActivity(owner:string,state:PartnerState,sessionId:
 export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefinition {
   return {
     name:'partner_activity_finish',
-    description:'安静结束系统唤起的自主活动。已做完探索、创作、整理、互动等活动，或此刻决定休息时调用；不发送聊天正文。若这次经历让你还想继续、分享或找人一起玩，可选填 nextThought 留下自己的后续念头，下一次自主活动会读到；不要求每次都填写。仅限当前自主活动，不可用来跳过用户消息或工作任务。需要聊天则遵循当前人格与分段设置使用 partner_chat_reply；无需分段或聊天工具不可用时可用正常最终回复。',
-    parameters:{type:'object',properties:{reason:{type:'string',maxLength:300},nextThought:{type:'string',minLength:1,maxLength:300}},required:['reason'],additionalProperties:false},
+    description:'安静结束系统唤起的自主活动。已做完探索、创作、整理、互动等活动，或此刻决定休息时调用；不发送聊天正文。若这次经历让你还想继续、分享或找人一起玩，可选填 nextThought 留下自己的后续念头，下一次自主活动会读到；不要求每次都填写。收尾用 interest 记录仍有兴趣、满足或对方要求安静；nextActivity 只记录具体的后续安排，不以 none 代替兴趣状态，和普通回复使用相同入口；nextThought 只是念头不等于安排。仅限当前自主活动，不可用来跳过用户消息或工作任务。需要聊天则遵循当前人格与分段设置使用 partner_chat_reply；无需分段或聊天工具不可用时可用正常最终回复。',
+    parameters:{type:'object',properties:{interest:INTEREST_SCHEMA,nextActivity:NEXT_ACTIVITY_SCHEMA,reason:{type:'string',maxLength:300},nextThought:{type:'string',minLength:1,maxLength:300}},required:['reason'],additionalProperties:false},
     output:{schema:{type:'object'},render:()=>[{type:'text',text:'本次自主活动已结束，不发送聊天正文。'}],presentationMeta:(_args,value)=>value},
     presentCall:()=>({card:'generic',title:'自主活动结束'}),
     async execute(raw,exec){
@@ -55,6 +56,8 @@ export function idleActivityFinishTool(owner:string,store:PartnerStore):ToolDefi
           if(thoughts.length>64){const settled=thoughts.findIndex(t=>t.status!=='open');thoughts.splice(settled<0?0:settled,1)}
         })
       }
+      await saveNextActivity(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),(raw as {nextActivity?:unknown}).nextActivity,exec.signal)
+      await saveTurnInterest(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),(raw as {interest?:unknown}).interest,exec.signal)
       exec.concludeTurn()
       return {kind:'partner-activity-silent-v1',reason:reason.trim(),messageId:notice.type==='user/message'?notice.data.id:''}
     },

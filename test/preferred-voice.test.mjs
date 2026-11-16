@@ -9,6 +9,7 @@ import {createScope} from '@deepseek-ai/dsh-scope'
 import {Session} from '@deepseek-ai/dsh-session'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
 import {installToolDiscovery} from '../lib/collaboration/tool-discovery.js'
+import {taskFollowup} from '../lib/chat/task-followup.js'
 import {dispatchTool} from '../lib/compat/tool-dispatch.js'
 import {sendPreferredVoice,shortSpokenText} from '../lib/chat/preferred-voice.js'
 import {installLiveSpeech} from '../lib/chat/live-speech.js'
@@ -34,7 +35,7 @@ async function fixture(t,options={}){
  t.after(installTaskPreamble(agent,async()=>assert.fail('separate prelude'),()=>true,()=>true,true))
  t.after(scope.ctx.tools.register(chatTools('c',store,{},{},ctx,'/unused',options.adapters)[1]))
  t.after(scope.ctx.tools.register({name:'generate_image',description:'image',parameters:{type:'object'},output:{schema:{type:'object'},render:()=>[]},execute:async()=>({ok:true})}))
- const user=()=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'画个漫画'}]});agent.session.append('user/message',m,{surfaceOp:'append'});state.sessions[0].inboundMessageIds.push(m.id)}
+ const user=(text='画个漫画')=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text}]});agent.session.append('user/message',m,{surfaceOp:'append'});state.sessions[0].inboundMessageIds.push(m.id)}
  agent.session.append('turn/start',{turn:1});user()
  let seq=0
  const call=async(name,args={})=>{const callId='voice-'+seq++;agent.session.append('tool/call',{name,arguments:JSON.stringify(args),callId});const result=await dispatchTool(ctx.tools,{name,arguments:args,agent,signal:new AbortController().signal,callId});agent.session.append('tool/result',JSON.parse(JSON.stringify({message:{role:'tool',source:{kind:'tool',callId},toolCallId:callId,content:result.content,isError:result.isError},meta:result.meta})),{surfaceOp:'append'});return result}
@@ -168,19 +169,29 @@ test('unknown second voice stops the batch without resending confirmed first par
 })
 
 
-test('task correction is checked before any speech; discussion can stop and later chat is free',async t=>{
+for(const directVoice of [false,true])test('one internal unrelated decision retires recent work without changing normal speech: '+directVoice,async t=>{
  const f=await fixture(t)
- const old=f.agent.session.snapshotEvents().find(e=>e.type==='user/message').data.id
  await f.call('partner_chat_say',{text:'我来画',beforeTools:true,expectedTools:['generate_image']})
  await f.call('generate_image');await f.call('partner_chat_reply',{messages:[{text:'画好了'}]})
- f.agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}});f.agent.session.append('turn/start',{turn:2});f.user()
+ f.agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}});f.agent.session.append('turn/start',{turn:2});f.user('好看哈哈')
+ const taskReview={taskInputId:taskFollowup(f.state,'c',f.agent.session.id,f.agent.session.snapshotEvents()).taskInputId,kind:'unrelated',reason:'只是普通应和 没有要求继续工作'}
  const before=f.sent.length
- const wrong=await f.call('partner_chat_reply',{messages:[{text:'对，应该先理解再做'}]})
- assert.equal(wrong.isError,true);assert.equal(f.sent.length,before);assert.ok(!wrong.concludesTurn)
- const rawVoice=await f.call('partner_tools',{action:'call',name:'partner_voice_reply',argumentsJson:JSON.stringify({action:'speak',text:'对，你说得对'})})
- assert.match(JSON.stringify(rawVoice),/taskReview/);assert.equal(f.sent.length,before)
- const done=await f.call('partner_chat_reply',{messages:[{text:'这次只聊怎么做'}],taskReview:{taskInputId:old,kind:'unrelated',reason:'当前用户已经换话题'}})
- assert.equal(done.isError,false,JSON.stringify(done));assert.equal(done.meta.taskReview.kind,'unrelated');assert.equal(f.sent.length,before+1)
+ const done=directVoice?await f.call('partner_tools',{action:'call',name:'partner_voice_reply',argumentsJson:JSON.stringify({action:'speak',text:'嘿嘿 那我放心啦',taskReview})}):await f.call('partner_chat_reply',{messages:[{text:'嘿嘿 那我放心啦'}],taskReview})
+ assert.equal(done.isError,false,JSON.stringify(done));assert.equal(f.sent.length,before+1)
  f.agent.session.append('turn/end',{turn:2,reason:{kind:'completed'}});f.agent.session.append('turn/start',{turn:3});f.user()
  assert.equal((await f.call('partner_chat_reply',{messages:[{text:'好呀'}]})).isError,false)
+})
+
+for(const voice of [false,true])test('repair receipt survives actual intermediate delivery without scheduling an interest wake: '+voice,async t=>{
+ const f=await fixture(t)
+ await f.call('partner_chat_say',{text:'我来画',beforeTools:true,expectedTools:['generate_image']})
+ await f.call('generate_image');await f.call('partner_chat_reply',{messages:[{text:'画好了'}]})
+ f.agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}});f.agent.session.append('turn/start',{turn:2});f.user('没用我们的参考图嘛')
+ const task=taskFollowup(f.state,'c',f.agent.session.id,f.agent.session.snapshotEvents())
+ if(!voice){const {installIntermediateDelivery}=await import('../lib/chat/intermediate-delivery.js');t.after(installIntermediateDelivery(f.agent,async()=>{}))}
+ const r=await f.call('partner_chat_reply',{delivery:voice?'auto':'text',messages:[{text:'我把参考找回来重画'}],continueTurn:true,taskReview:{taskInputId:task.taskInputId,kind:'repair',reason:'原成果遗漏参考',remaining:'找到双方参考后重画并交付'}})
+ assert.equal(r.isError,false,JSON.stringify(r));assert.ok(!r.concludesTurn);assert.equal(r.meta.taskReview.kind,'repair');assert.equal(f.state.companions[0].activityPlan,undefined)
+ f.agent.session.append('turn/end',{turn:2,reason:{kind:'aborted'}});f.agent.session.append('turn/start',{turn:3});f.user('对呀 好不开心')
+ const next=taskFollowup(f.state,'c',f.agent.session.id,f.agent.session.snapshotEvents())
+ assert.equal(next.taskInputId,task.taskInputId);assert.match(next.pending,/重画并交付/);assert.deepEqual(next.goalTools,['generate_image'])
 })

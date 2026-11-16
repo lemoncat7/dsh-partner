@@ -53,6 +53,10 @@ export function postReplyCurrent(state: PartnerState, companion: Companion, rout
 }
 /** Shared by generation, delivery and tool dispatch; revocation takes effect immediately. */
 export function activityPolicyCurrent(state: PartnerState, companion: Companion, route: ChannelSession, now = Date.now(), allowSleeping = false): boolean {
+  if(route.idleContactState?.kind==='continuous'){
+    const claim=route.idleContactState,t=companion.continuous?.tasks.find(t=>t.id===claim.continuousTaskId)
+    return !!t&&t.status==='running'&&t.revision===claim.continuousRevision&&t.sessionId===route.sessionId&&t.routeId===route.id&&!claim.cancelled&&companion.browser?.enabled===true&&companion.browser.autonomous===true&&companion.browser.updatedAt===t.browserRevision&&idleContactRouteAllowed(state,companion,route.id)&&(allowSleeping||!isSleeping(companion,now))
+  }
   if (!companion.idleContact?.enabled) return false
   if(route.idleContactState?.kind==='autonomous'){
     const claim=route.idleContactState

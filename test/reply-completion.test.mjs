@@ -58,7 +58,20 @@ test('a confirmed file with no prose suppresses fallback and does not swallow la
  const final=await prepareChannelReply(channelReplyPartsAfter([...base,answer('画好了'),end],0),'/unused')
  assert.equal(final.text,'画好了')
  const failed={...receipt(),data:{...receipt().data,message:{isError:true}}}
- assert.match((await prepareChannelReply(channelReplyPartsAfter([start(),user(),failed,end],0),'/unused')).text,/未生成/)
+ assert.equal((await prepareChannelReply(channelReplyPartsAfter([start(),user(),failed,end],0),'/unused')).text,'')
+})
+
+test('failed attempts stay silent through recovery; final results and exhausted recovery remain deliverable',async()=>{
+ const events=[start(),user(),answer('尚未完成的尝试'),{...end,data:{reason:{kind:'failed'}}}]
+ const project=()=>prepareChannelReply(channelReplyPartsAfter(events,0),'/unused')
+ assert.equal((await project()).text,'')
+ events.push({type:'turn/start',seq:8,data:{turn:2}},{...user(),seq:9},{...answer('已经恢复，处理好了'),seq:10},{...end,seq:11})
+ assert.equal((await project()).text,'已经恢复，处理好了')
+ const f=fixture([start(),user(),answer('')])
+ f.stop();assert.equal(f.guard.failed,false)
+ assert.equal((await prepareChannelReply({text:'',referenceTexts:[]},'/unused')).text,'')
+ f.stop();assert.throws(f.stop,new RegExp(INCOMPLETE_REPLY));assert.equal(f.guard.failed,true)
+ assert.equal((await prepareChannelReply({text:INCOMPLETE_REPLY,referenceTexts:[]},'/unused')).text,INCOMPLETE_REPLY)
 })
 
 test('reasoning plus empty text after action acknowledgement still recovers in the same user turn',()=>{

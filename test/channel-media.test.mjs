@@ -180,7 +180,7 @@ test('missing, malformed and escaping sandbox references fail visibly without gu
     assert.doesNotMatch(reply.text, /sandbox:/)
   }
   const fallback = await prepareChannelReply({ text: '', referenceTexts: [] }, root)
-  assert.match(fallback.text, /未生成可发送的最终答复/)
+  assert.equal(fallback.text, '')
   await writeFile(join(root, 'good.png'), 'png')
   const recovered = await extractOutboundAttachments('[损坏](%XX.png)\n[有效](good.png)', root)
   assert.deepEqual(recovered.map(file => file.name), ['good.png'])

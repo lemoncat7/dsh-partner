@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.26.10",
+  "version": "2.27.5",
   "description": "Long-lived AI companions with QQ, WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -248,7 +248,16 @@
     "docs/releases/2.25.14.md",
     "docs/host-compatibility-policy.md",
     "docs/releases/2.26.9.md",
-    "docs/releases/2.26.10.md"
+    "docs/releases/2.26.10.md",
+    "docs/releases/2.26.11.md",
+    "docs/releases/2.26.12.md",
+    "docs/releases/2.27.0.md",
+    "docs/continuous-tasks.md",
+    "docs/releases/2.27.1.md",
+    "docs/releases/2.27.2.md",
+    "docs/releases/2.27.3.md",
+    "docs/releases/2.27.4.md",
+    "docs/releases/2.27.5.md"
   ],
   "dsh": {
     "bundle": {

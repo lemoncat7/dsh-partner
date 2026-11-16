@@ -22,6 +22,8 @@ export interface PartnerOutboundAttachment {
 }
 
 export interface PartnerReply {
+  /** Terminal execution notice; group chats suppress these system messages. */
+  failureNotice?: boolean
   /** A tool already delivered the reply to the channel (for example QQ voice). */
   alreadyDelivered?: boolean
   /** Internal provenance, armed only after confirmed channel delivery. */

@@ -40,6 +40,28 @@ test('a new group member receives normal text without any pairing request; close
  await f.handle({id:'private',sender:'22345678',targetId:'22345678',text:'请回复'})
  assert.equal(f.inputs.length,1);assert.deepEqual(f.sent,[]);assert.deepEqual(f.state.pairings,[])
 })
+test('group execution failures stay silent while private chat receives a friendly terminal notice',async()=>{
+ for(const group of [true,false]){
+  const f=fixture()
+  if(!group){f.channel.qq.privateReplies=true;f.state.pairings.push({channelId:'qq',userId:'22345678',status:'approved'})}
+  const event=group?f.event:{id:'private-failure',sender:'22345678',targetId:'22345678',text:'帮我处理'}
+  f.setReply({text:'哎呀，这次卡住啦，没能答完。',attachments:[],failureNotice:true})
+  await f.handle(event)
+  assert.equal(f.sent.length,group?0:1)
+  if(!group)assert.match(f.sent[0].text,/哎呀/)
+  f.sent.length=0
+  f.agents.reply=async()=>{throw Error('upstream request failed')}
+  await assert.rejects(f.handle({...event,id:'exception'}),/upstream request failed/)
+  assert.equal(f.sent.length,group?0:1)
+  if(!group)assert.match(f.sent[0].text,/哎呀/)
+ }
+})
+test('group attachment reception failures stay silent and never start the agent',async()=>{
+ const f=fixture()
+ f.api.receiveAttachments=async()=>{throw Error('download failed')}
+ await f.handle({...f.event,id:'bad-media',media:[{kind:'image',source:'https://invalid.test/a.png'}]})
+ assert.deepEqual(f.sent,[]);assert.deepEqual(f.inputs,[])
+})
 test('all unpaired whitelist members enter autonomous judgment, which may reply or remain silent',async()=>{
  for(const decision of [true,false]){
   const f=fixture();let judged=0

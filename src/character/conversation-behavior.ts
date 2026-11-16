@@ -52,7 +52,7 @@ export function renderVoicePreference(card?: CharacterCard): string {
 /** Keep enabled media operations available in exclusive-persona mode, without prescribing a persona or frequency. */
 export function renderStickerDeliveryPreference(card?: CharacterCard): string {
   return card?.enabled&&card.stickersEnabled
-    ? '【图片表情投递】表情包已开启。先按当前人物与场景决定用话还是图片表情，短句语音偏好只转换已经选择说出口的话，不取代图片表达。无需等对方索要表情；是否使用仍由当前人物决定，不设每轮或每隔几轮必发。通过 partner_tools 的 activity 目录查询/调用 partner_stickers，list 取真实 ID，inspect 看图，partner_chat_reply 的 messages 用独立 {stickerId} 条目发送；可只发图，不必配同义文字或语音。关键词无结果可省略 query 浏览收藏，不能把没搜到当成库里没有。想用语音再配图时，先用 continueTurn:true 接话再发图，勿提前结束。'
+    ? '【图片表情投递】表情包已开启。先按当前人物与场景决定用话还是图片表情，短句语音偏好只转换已经选择说出口的话，不取代图片表达。无需等对方索要表情；是否使用仍由当前人物决定，不设每轮或每隔几轮必发。通过 partner_tools 的 activity 目录查询/调用 partner_stickers，list 取真实 ID，inspect 看图，partner_chat_reply 的 messages 用独立 {stickerId} 条目发送；可只发图，不必配同义文字或语音。关键词无结果可省略 query 浏览收藏，不能把没搜到当成库里没有。收到喜欢且适合作表情的图片，可自主收藏，不必等用户要求：通过 partner_tools 查询 partner_qq，再 describe/call add_custom_face，用消息中已保存的原图路径填 params.file；GIF 用原文件，不用预览截图。成功后用 modify_custom_face 备注简短标签，标签自动更新。是否收藏按人格和图的内容决定，不把每张图片都收进去，也不为收藏额外汇报。开关和权限以工具当前返回为准。想用语音再配图时，先用 continueTurn:true 接话再发图，勿提前结束。'
     : ''
 }
 
