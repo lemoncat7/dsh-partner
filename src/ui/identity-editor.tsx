@@ -50,7 +50,7 @@ function IdentityEditorForm({ companion, onChanged }: Props): JSX.Element {
       if (alive.current) setError(`${committed ? '身份已保存，但刷新失败，无需重复保存：' : '保存失败：'}${errorMessage(reason)}`)
     } finally { locked.current = false; if (alive.current) setOperation(undefined) }
   }
-  return <form onInvalidCapture={event => { event.preventDefault(); const target = event.target as HTMLElement; const idle = Boolean(target.closest('[aria-label="闲时自主活动"]')); setSection(idle ? 'idle' : 'identity'); setError(idle ? '请选择自主活动的目标会话。' : '请填写基本身份中的名字和角色。'); requestAnimationFrame(() => target.focus()) }} id="dsh-partner-identity-editor" className="dsh-partner-form is-identity" aria-busy={operation !== undefined} onSubmit={event => { void submit(event) }}>
+  return <form onInvalidCapture={event => { event.preventDefault(); const target = event.target as HTMLElement; const idle = Boolean(target.closest('[aria-label="闲时自主活动"]')); const segment = Boolean(target.closest('.dsh-partner-segment-delay')); setSection(segment ? 'character' : idle ? 'idle' : 'identity'); setError(segment ? '随机间隔请输入 0～60 秒，最短不能大于最长。' : idle ? '请选择自主活动的目标会话。' : '请填写基本身份中的名字和角色。'); requestAnimationFrame(() => target.focus()) }} id="dsh-partner-identity-editor" className="dsh-partner-form is-identity" aria-busy={operation !== undefined} onSubmit={event => { void submit(event) }}>
     <Section eyebrow="IDENTITY" title="身份与角色" detail="页面与 AI 使用同一份设定。推荐在聊天中提出要求，让 AI 生成角色与关系；这里查看最新内容，也可直接修改保存。" />
     {dirty.current && companion.updatedAt !== revision.current && <p role="status" className="dsh-partner-character-hint">设定已被 AI 或其他页面更新。你的未保存编辑仍在，保存会进行版本校验；请先载入最新设定再修改，避免覆盖新内容。</p>}
     <section className="dsh-partner-identity-card" aria-label="身份配置">

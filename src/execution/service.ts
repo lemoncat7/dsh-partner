@@ -11,7 +11,6 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRuntime, ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
-import { appendBounded } from '../core/collections.js'
 import { AsyncSemaphore } from '../core/semaphore.js'
 import type { Companion } from '../domain.js'
 import type { PartnerStore } from '../store.js'
@@ -173,7 +172,12 @@ export class EphemeralExecutionService {
     await this.store.update(state => {
       if (run.status === 'running' && (this.store.isCompanionRemoving(run.ownerCompanionId) || !state.companions.some(item => item.id === run.ownerCompanionId))) throw new Error('伙伴正在删除或已不存在，不能启动临时任务')
       state.executionRuns = state.executionRuns.filter(item => item.id !== run.id)
-      appendBounded(state.executionRuns, structuredClone(run), 500)
+      state.executionRuns.push(structuredClone(run))
+      while(state.executionRuns.length>500){
+        const i=state.executionRuns.findIndex(r=>!r.background||!['queued','running'].includes(r.status)&&!(r.background.result&&!r.background.deliveredAt))
+        if(i<0)break
+        state.executionRuns.splice(i,1)
+      }
     })
   }
 }

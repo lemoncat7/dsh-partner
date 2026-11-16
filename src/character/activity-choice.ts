@@ -42,6 +42,6 @@ export function activityChoiceContext(companion:Companion,events:readonly Sessio
   }
   const selected=shortlist.map(({lastAt,...entry})=>({...entry,...(lastAt?{lastAttemptMinutesAgo:Math.floor((now-lastAt)/60_000)}:{})}))
   return '活动选择参考（最近七天内本会话最多十二轮已完成活动；分类可重叠，只按工具结果统计，未观察到不等于从未做过）：'+JSON.stringify({sampleRounds:rows.length,counts,unknownOperationRounds:unknownRounds,explorationOptions:selected})+
-    '\n先遵守明确的用户约定、当前状态和有时效的真实安排；自己的旧草稿、上轮活动和习惯不自动成为最高优先级。确有兴趣或进展可继续，若只是惯性重复，可从 explorationOptions 或完整目录挑一个符合人格与当前兴趣的方向，先浏览获得真实内容。选项按近期较少尝试排序，只是候选，不是轮流打卡、必做任务或发言配额；不合适可另选或休息。'+
+    '\n先遵守明确的用户约定、当前状态和有时效的真实安排；自己的旧草稿、上轮活动和习惯不自动成为最高优先级。确有兴趣或进展可继续，若只是惯性重复，可自然找对方聊一个基于共同兴趣的小话题，也可从 explorationOptions 或完整目录挑一个符合人格与当前兴趣的方向。聊天无需先浏览、检索或创作来取得资格。选项按近期较少尝试排序，只是候选，不是轮流打卡、必做任务或发言配额；不合适可另选或休息。'+
     '\n浏览、互动、公开发布和私聊分享分别决定。看到内容后，依据真实感受决定是否点赞、收藏、评论或分享，不把每次浏览都转成创作任务，也不要求必须有作品才交流。没有值得表达的内容可以结束；操作结果未知先核验，失败不因候选排序自动重试。不要复述此参考或把私人对话、私人草稿直接公开。'
 }

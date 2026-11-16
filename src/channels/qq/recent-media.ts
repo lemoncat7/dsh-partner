@@ -1,8 +1,10 @@
 import type {DirectMessage} from '../direct/transport.js'
 
-const TTL=120_000
+const TTL=10*60_000
+const FOLLOWUP_TTL=5*60_000
 const mentionsMedia=/(?:图|照片|截图|相片|这张|那张|上面|刚发|附件|文件|视频|工作流|json|image|picture|photo|screenshot|file|video)/iu
-/** Ephemeral references only. Bystander attachments are never downloaded or written to memory. */
+/** Keep the latest unsent batch through a natural pause before its caption.
+ * Ephemeral references only. Bystander attachments are never downloaded or written to memory. */
 export class QqRecentMedia {
  private readonly lanes=new Map<string,{at:number;messages:DirectMessage[]}>()
  constructor(private readonly now=()=>Date.now()){}
@@ -29,7 +31,7 @@ export class QqRecentMedia {
   if(!event.qqGroup||!event.text.trim()||events.some(e=>e.media?.length||e.qqReplyId||e.qqGroup?.hasReply||e.qqGroup?.otherMention||e.qqGroup?.replyTo==='other'))return []
   const entry=this.lanes.get(this.key(channel,event))
   const at=event.timestamp??event.receivedAt??this.now()
-  if(!entry||at<entry.at||at-entry.at>TTL||at-entry.at>30_000&&!mentionsMedia.test(event.text))return []
+  if(!entry||at<entry.at||at-entry.at>TTL||at-entry.at>FOLLOWUP_TTL&&!mentionsMedia.test(event.text))return []
   let remaining=4
   return entry.messages.filter(m=>!events.some(e=>e.id===m.id)).slice().reverse().map(m=>{
    const media=remaining>0?m.media!.slice(-remaining):[];remaining-=media.length

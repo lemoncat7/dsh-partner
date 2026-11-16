@@ -20,10 +20,10 @@ test('latest image burst is bounded, scoped, expires and is retired only when su
  assert.equal(cache.select('other',e,[e]).length,0)
  for(const changed of [{sender:'group:99887766:33445566'},{qqGroup:{groupId:'88776655',userId:'22345678'}},{timestamp:9000}])assert.equal(cache.select('c',caption(changed),[caption(changed)]).length,0)
  cache.submitted('c',selected);assert.equal(cache.select('c',e,[e]).length,0)
- cache.observe('c',pic());now=50000
+ cache.observe('c',pic());now=340000
  assert.equal(cache.select('c',caption({timestamp:now}),[caption()]).length,0)
  const reference=caption({timestamp:now,text:'刚才那张图是什么'});assert.equal(cache.select('c',reference,[reference]).length,1)
- now=131000;assert.equal(cache.select('c',reference,[reference]).length,0);assert.equal(cache.lanes.size,0)
+ now=611000;assert.equal(cache.select('c',reference,[reference]).length,0);assert.equal(cache.lanes.size,0)
 })
 test('current images, explicit quotes and redirected speech take precedence; original refs cannot mutate cache',()=>{
  const cache=new QqRecentMedia(()=>11000),p=pic();cache.observe('c',p);p.media[0].source='changed'
@@ -40,4 +40,14 @@ test('four-image cap does not leak omitted older pictures into following replies
  cache.observe('c',pic('old'));const old=cache.select('c',caption(),[caption()])
  now=12000;cache.observe('c',pic('new',{timestamp:10000}));cache.submitted('c',old)
  assert.deepEqual(cache.select('c',caption({timestamp:13000}),[caption()]).map(e=>e.id),['new'])
+})
+
+
+test('a same-speaker follow-up after three minutes receives pending media without image keywords',()=>{
+ let now=10000;const cache=new QqRecentMedia(()=>now);cache.observe('c',pic())
+ now+=198000
+ const followup=caption({timestamp:now,text:'弟弟 快diss他们'})
+ const chosen=cache.select('c',followup,[followup]);assert.equal(chosen.length,1)
+ const stranger={...followup,sender:'group:99887766:33445566'};assert.equal(cache.select('c',stranger,[stranger]).length,0)
+ cache.submitted('c',chosen);assert.equal(cache.select('c',followup,[followup]).length,0)
 })

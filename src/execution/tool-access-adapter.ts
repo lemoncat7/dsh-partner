@@ -43,13 +43,18 @@ export function channelToolAllowed(store: object, owner: string, name: string, a
 }
 
 /** Stale and nested partner calls still receive the same live channel check. */
-export function installToolAccessGuard(tools: ToolRuntime, store: Pick<PartnerStore, 'snapshot'>): () => void {
+interface LiveToolAccessIndex {
+  routesForSession(sessionId: string): readonly {companionId:string}[]
+  toolAccess(agent: Pick<Agent, 'session'>): ToolAccessDecision
+}
+export function installToolAccessGuard(tools: ToolRuntime, store: Pick<PartnerStore, 'snapshot'>, index?: LiveToolAccessIndex): () => void {
   return tools.guard(exec => {
     if (!exec.agent) return
-    const state = store.snapshot()
-    const owners = new Set(state.sessions.filter(route => route.sessionId === exec.agent!.session.id).map(route => route.companionId))
+    const state = index ? undefined : store.snapshot()
+    const routes = index ? index.routesForSession(exec.agent.session.id) : state!.sessions.filter(route => route.sessionId === exec.agent!.session.id)
+    const owners = new Set(routes.map(route => route.companionId))
     if (![...owners].some(owner => isPartnerOwnedTool(store, owner, exec.name))) return
-    const access = resolveToolAccess({ agent: exec.agent, state })
+    const access = index ? index.toolAccess(exec.agent) : resolveToolAccess({ agent: exec.agent, state: state! })
     if (!access.sendTools || (access.allowedTools && !access.allowedTools.includes(exec.name))) return access.denialReason ?? '当前渠道账号不能使用此伙伴能力'
   })
 }

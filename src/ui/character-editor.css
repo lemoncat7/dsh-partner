@@ -143,3 +143,9 @@
 .dsh-partner-persona-option > div { min-width: 0; display: grid; gap: 4px; }
 .dsh-partner-persona-option small { color: var(--partner-text-secondary); font-size: 12px; line-height: 1.4; }
 .dsh-partner-persona-option > button { flex: none; }
+
+.dsh-partner-segment-delay { display: grid; gap: 8px; padding-inline-start: 24px; }
+.dsh-partner-segment-delay > small { color: var(--partner-text-secondary); font-size: 12px; line-height: 1.5; }
+.dsh-partner-segment-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dsh-partner-segment-range > label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.dsh-partner-segment-range input { width: 76px; min-width: 0; }

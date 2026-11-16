@@ -17,3 +17,14 @@ test('unchanged updates avoid disk commits; queued changes stay durable and noti
  fail=true;await assert.rejects(store.update(s=>s.recentReceipts.push('lost')),/disk/);assert.deepEqual(store.snapshot().recentReceipts,['once'])
  fail=false;await store.update(s=>s.recentReceipts.push('retry'));assert.deepEqual(durable.recentReceipts,['once','retry'])
 })
+
+test('selected snapshots do not read unrelated history and remain detached from live authorization',async()=>{
+ const initial={schemaVersion:14,companions:[],channels:[],pairings:[],sessions:[],recentReceipts:[],heartbeatStates:[],skills:[],skillBindings:[],skillMarketSources:[],skillMarketNetwork:{},tasks:[],taskActivities:[],delegations:[],companionAccessGrants:[],schedules:[],executionRuns:[]}
+ const store=await PartnerStore.openSplit({read:async()=>initial,write:async()=>{}})
+ Object.defineProperty(store.state,'tasks',{get(){throw Error('unrelated history copied')},configurable:true,enumerable:true})
+ const selected=store.snapshot(['channels','pairings'])
+ assert.deepEqual(Object.keys(selected),['channels','pairings'])
+ selected.channels.push({id:'unauthorized'})
+ assert.deepEqual(store.snapshot(['channels']).channels,[])
+ assert.throws(()=>store.snapshot(),/unrelated history copied/)
+})

@@ -97,7 +97,7 @@ export class QqGroupAutonomy {
   const recent=this.groupRecent(channelId,event)??this.quietRecent(channelId,event)
   return renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined)
  }
- async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,_settings?:Partial<QqSettings>):Promise<boolean> {
+ async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,_settings?:Partial<QqSettings>,addressOnly=false):Promise<boolean> {
   signal.throwIfAborted()
   if(event.qqGroup && isSleeping(companion,this.now()) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self')return this.record(channelId,event,'伙伴正在睡眠，暂停群聊自主接话')
   if(!event.qqGroup?.autonomous)return true
@@ -121,6 +121,8 @@ export class QqGroupAutonomy {
    signal.throwIfAborted()
    result=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
   }
+  // Busy work still lets the local model recognize a call; only calls queue.
+  if(addressOnly&&result.route!=='direct'&&!(result.reply&&semantic?.label==='address'))result={...result,reply:false,probability:0,reasons:[...result.reasons,'任务执行期间普通群聊仅旁听，不插入或排队补答']}
   // Bound unsolicited admissions per room, including while an earlier reply is still queued.
   // Explicit addressing and an established speaker thread are not subject to this interval.
   if(result.reply&&!activeConversation(context)&&(result.route==='opportunity'||result.route==='semantic'&&semantic?.label==='engage')&&group){

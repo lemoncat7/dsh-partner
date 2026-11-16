@@ -42,6 +42,11 @@ export class DirectTransport implements ChannelSender {
   forTarget(targetId: string, expected: {accountId: string; peerId: string}, authorize?: () => void): DirectTransport {
     return new DirectTransport({...this.config,targetId},this.token,expected,authorize,this.qq?.connection)
   }
+  async withRecipientValidation(userId:string,signal:AbortSignal,send:()=>Promise<void>):Promise<void> {
+    this.authorize?.()
+    if(this.qq)await this.qq.withRecipientValidation(userId,signal,send)
+    else await send()
+  }
   close(): void { this.qq?.connection.close() }
 
 

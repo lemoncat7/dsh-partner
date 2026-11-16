@@ -8,6 +8,8 @@ export interface PartnerInboundAttachment {
 }
 
 export interface PartnerInboundMessage {
+  /** Internal admission facts; optional group chatter may be superseded before execution. */
+  groupReply?: { kind:'direct'|'ambient'; receivedAt:number }
   sessionTitle?: string
   text: string
   attachments: PartnerInboundAttachment[]

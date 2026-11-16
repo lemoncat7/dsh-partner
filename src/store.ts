@@ -58,8 +58,12 @@ export class PartnerStore {
     return new PartnerStore(path, state)
   }
 
-  snapshot(): PartnerState {
-    return structuredClone(this.state)
+  snapshot(): PartnerState
+  snapshot<K extends keyof PartnerState>(keys: readonly K[]): Pick<PartnerState, K>
+  snapshot(keys?: readonly (keyof PartnerState)[]): PartnerState | Partial<PartnerState> {
+    // Hot authorization reads need current configuration, not copies of every
+    // task, receipt and historical execution. Returned values stay detached.
+    return structuredClone(keys ? Object.fromEntries(keys.map(key => [key, this.state[key]])) : this.state)
   }
 
   isCompanionRemoving(id: string): boolean { return this.removingCompanions.has(id) }

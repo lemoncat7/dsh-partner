@@ -19,6 +19,7 @@ export function qqMediaUrl(source: string): URL {
 }
 
 export class OneBotTransport {
+  private validatedRecipient: string | undefined
   readonly connection: OneBotConnection
   constructor(readonly config: DirectConfig, token: string, private readonly expected?: {accountId: string; peerId: string}, connection?: OneBotConnection) {
     this.connection = connection ?? new OneBotConnection(config.baseUrl, token)
@@ -73,7 +74,17 @@ export class OneBotTransport {
     }
   }
 
+  /** Scoped to one target-bound reply transport; local authorization still runs per send. */
+  async withRecipientValidation(userId:string,signal:AbortSignal,send:()=>Promise<void>):Promise<void> {
+    await this.recipient(userId,signal)
+    const previous=this.validatedRecipient
+    this.validatedRecipient=userId
+    try { await send() } finally { this.validatedRecipient=previous }
+  }
+
   private async recipient(userId: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    if(this.validatedRecipient===userId)return
     const identity = await this.validate(signal)
     if(!qqGroupPeer(userId)&&!qqSettings(this.config.qq).privateReplies)throw new OneBotError('私聊回复已关闭',false)
     if (!this.config.targetId || identity.peerId !== userId) throw new OneBotError('QQ 消息接收人与已授权联系人不匹配', false)

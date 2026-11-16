@@ -475,3 +475,53 @@ test('native owner schema asks for a private activity choice and turning it off 
  await f.store.update(s=>{s.companions[0].idleContact.enabled=false})
  const off=await f.assemble();assert.ok(!off.tools.find(t=>t.name==='partner_chat_reply').parameters.required?.includes('interest'));assert.doesNotMatch(JSON.stringify(off.contexts),/本轮说完之后的交流状态/)
 })
+
+
+test('native presentation does not rescan session claims per tool and refreshes limits on the next assembly',async t=>{
+ const names=[...Array.from({length:100},(_,i)=>'fixture_external_'+i),'partner_chat_reply','partner_activity_finish']
+ const f=await fixture(t,{async compose(ctx){const stops=names.map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return()=>stops.reverse().forEach(stop=>stop())}})
+ await f.assemble()
+ let interestCalls=0,continuousCalls=0,limited=false,continuous=false
+ f.runtime.interestClaim=()=>{interestCalls++;return {counter:{steps:limited?3:0}}}
+ f.runtime.continuousClaim=()=>{continuousCalls++;return continuous?{}:undefined}
+ const normal=await f.assemble()
+ assert.ok(names.every(name=>normal.tools.some(tool=>tool.name===name)))
+ t.diagnostic(`102 tools: interest checks=${interestCalls}, continuous checks=${continuousCalls}`)
+ assert.ok(interestCalls<12,`interest checks grew with the tool list: ${interestCalls}`)
+ assert.ok(continuousCalls<12,`continuous checks grew with the tool list: ${continuousCalls}`)
+ limited=true
+ const restricted=await f.assemble()
+ assert.ok(!restricted.tools.some(tool=>tool.name.startsWith('fixture_external_')))
+ assert.ok(restricted.tools.some(tool=>tool.name==='partner_chat_reply'))
+ assert.ok(restricted.tools.some(tool=>tool.name==='partner_activity_finish'))
+ limited=false;continuous=true
+ assert.ok(!(await f.assemble()).tools.some(tool=>tool.name.startsWith('fixture_external_')))
+ continuous=false
+ assert.ok((await f.assemble()).tools.some(tool=>tool.name==='fixture_external_99'))
+})
+
+test('speaker changes select tools without re-registering and presentation does not clone full state',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ let compositions=0,disposals=0
+ const f=await fixture(t,{async compose(ctx){compositions++;const stops=['partner_identity','partner_chat_reply','external_image'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})));return()=>{disposals++;stops.forEach(stop=>stop())}}})
+ f.agent.session=Session.create('session-assembly')
+ await f.store.update(s=>{const c=s.companions[0];s.channels.push({id:'q',companionId:c.id,platform:'qq',qq:{identityBinding:{enabled:true,qqIds:['12345678']}}});s.sessions.push(...['12345678','22345678'].map(userId=>({id:userId,companionId:c.id,sessionId:f.agent.session.id,kind:'channel',channelId:'q',userId,inboundMessageIds:[]})))})
+ const send=async userId=>{const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'hello'}]});f.agent.session.append('user/message',m,{surfaceOp:'append'});await f.store.update(s=>s.sessions.find(r=>r.id===userId).inboundMessageIds.push(m.id));return f.assemble()}
+ assert.ok((await send('12345678')).tools.some(t=>t.name==='partner_identity'))
+ const before=compositions
+ assert.ok(!(await send('22345678')).tools.some(t=>t.name==='partner_identity'))
+ assert.ok((await send('12345678')).tools.some(t=>t.name==='partner_identity'))
+ assert.equal(compositions,before);assert.equal(disposals,0)
+ const snapshot=f.store.snapshot.bind(f.store);let fullCopies=0
+ f.store.snapshot=keys=>{if(!keys)fullCopies++;return snapshot(keys)}
+ // Exercise the actual executor provider, excluding unrelated prompt-memory assembly.
+ const {scopeOf}=await import('@deepseek-ai/dsh-scope')
+ const executor=f.agent.ctx.tools.selectExecutor(scopeOf(f.agent.ctx))
+ for(let i=0;i<5;i++)executor.describe(f.root.tools.definitions(f.agent))
+ assert.equal(fullCopies,0,'tool presentation must use committed configuration projections')
+ await f.store.update(s=>{s.channels[0].qq.identityBinding.qqIds=['22345678']})
+ assert.ok(!(await f.assemble()).tools.some(t=>t.name==='partner_identity'))
+ assert.equal(compositions,before);assert.equal(disposals,0)
+ const denied=await dispatchTool(f.root.tools,{name:'partner_identity',arguments:{},agent:f.agent,callId:'revoked-cached-view',signal:new AbortController().signal})
+ assert.equal(denied.isError,true,'a cached owner view cannot authorize a revoked account')
+})

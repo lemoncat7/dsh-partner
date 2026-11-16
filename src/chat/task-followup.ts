@@ -1,3 +1,4 @@
+import {backgroundHandoff} from '../execution/background-receipt.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerState } from '../domain.js'
 import { isIdleContactNotice } from '../character/idle-contact.js'
@@ -80,6 +81,7 @@ export function taskFollowup(state:PartnerState,owner:string,sessionId:string,al
     const tail=events.slice(i+1,end),allReplies=tail.map(chatReplyFromEvent),replies=allReplies.filter(r=>r&&!r.transportCallId)
     const review=allReplies.map(r=>r?.taskReview).reverse().find(r=>r?.inputId===e.data.id)
     if(review&&['cancelled','unrelated','discussion'].includes(review.kind))return
+    if(backgroundHandoff(tail))return
     const work=results(tail)
     const announced=replies.some(r=>r?.taskPreamble&&r.inputMessageId===e.data.id)
     if(announced||work.length||review&&['progress','repair','blocked'].includes(review.kind)){
@@ -118,7 +120,7 @@ export function checkTaskReview(task:TaskFollowup|undefined,raw:unknown,options?
 const inspection=(name:string)=>['read','glob','grep','rg','ls','read_image','web_search','web_fetch','partner_conversation_recall','partner_memory_recall'].includes(name)
 
 /** Only the immediate, same-audience task candidate changes presentation. */
-export function withTaskReviewSchema<T extends {name:string;parameters:unknown}>(tool:T,task:TaskFollowup|undefined):T{
+export function withTaskReviewSchema<T extends {name:string;parameters:unknown}>(tool:T,task:TaskFollowup|boolean|undefined):T{
  if(!task||tool.name!=='partner_chat_reply')return tool
  const schema=tool.parameters as Record<string,unknown>
  return {...tool,parameters:{...schema,required:[...new Set([...(Array.isArray(schema.required)?schema.required:[]),'taskReview'])]}}

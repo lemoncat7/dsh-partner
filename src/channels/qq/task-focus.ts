@@ -6,7 +6,7 @@ import {needsTaskPreamble} from '../../execution/task-preamble.js'
 export interface GroupTaskFocus {userId:string;startedAt:number;working:boolean;sentAt?:number}
 export function taskTool(name:string,args:unknown):boolean {
  const action=actualAction(name,args)
- return needsTaskPreamble(action.name,action.args)||action.name==='partner_chat_say'&&action.args.beforeTools===true||action.name==='partner_chat_progress'
+ return needsTaskPreamble(action.name,action.args)||action.name==='partner_chat_say'&&action.args.beforeTools===true||action.name==='partner_chat_reply'&&action.args.continueTurn===true||action.name==='partner_chat_progress'
 }
 /** Routing only: no model call, role text or durable conversation mutation. */
 export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefined,name:string,now=Date.now()):'normal'|'steer'|'queue'|'observe' {
@@ -22,8 +22,8 @@ export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefine
  if(focus.working)return addressed?'queue':'observe'
  // Another member may offer a new shared topic; use normal selective judgment, never steer their words into this speaker's reply.
  if(!owner)return addressed?'queue':'normal'
- // Before the first confirmed reply, keep joining the same speaker's chat fragments.
- // Once one part is sent, finish that reply instead of repeatedly reopening it.
- if(owner&&focus.sentAt===undefined&&(event.media?.length||text&&!/^[\s\p{P}\p{S}]+$/u.test(text)))return 'steer'
+ // During model generation, ordinary chatter updates the pending opportunity;
+ // it must not continually extend the active request. Already-sending parts remain interruptible.
+ if(owner&&(event.media?.length||text&&!/^[\s\p{P}\p{S}]+$/u.test(text)))return focus.sentAt!==undefined?'steer':'normal'
  return addressed?'queue':'observe'
 }

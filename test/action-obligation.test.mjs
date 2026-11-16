@@ -78,3 +78,12 @@ test('platform shortcut parameter discovery cannot satisfy the promised platform
  events.push({type:'tool/ptc-dispatch',seq:6,data:{name:'partner_bilibili',arguments:JSON.stringify({action:'call',operation:'search'}),isError:false}})
  assert.deepEqual(pendingActions(events),[])
 })
+
+test('only successful native handoff transfers promised work out of the foreground',()=>{
+ const handoff={type:'tool/call',seq:5,data:{name:'partner_background_task',callId:'bg',arguments:{action:'start'}}}
+ const receipt=error=>({type:'tool/result',seq:6,data:{message:{toolCallId:'bg',isError:error,content:[{type:'text',text:JSON.stringify({kind:'partner-background-v1',taskId:'background-id',status:'running'})}]}}})
+ const events=[start,user(),say(),handoff]
+ assert.deepEqual(pendingActions([...events,receipt(false)]),[])
+ assert.deepEqual(pendingActions([...events,receipt(true)]),['generate_image','partner_send_attachment'])
+ assert.deepEqual(pendingActions(events),['generate_image','partner_send_attachment'])
+})

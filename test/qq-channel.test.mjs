@@ -316,3 +316,22 @@ test('video URLs refresh from verified original messages; foreign rooms, arbitra
  await assert.rejects(api.receiveAttachments(m,AbortSignal.timeout(3000),()=>false),/授权/)
  assert.equal(downloads,1)
 })
+
+test('one segmented reply validates QQ recipient once and still checks every send; the next reply revalidates',async t=>{
+ let offline=false,allowed=true
+ const s=await server(t,r=>r.action==='get_status'&&offline?{online:false,good:false}:undefined)
+ const api=new DirectTransport({platform:'qq',baseUrl:s.url,targetId:peer},'secret',{accountId:bot,peerId:peer},()=>{if(!allowed)throw Error('revoked')})
+ t.after(()=>api.close())
+ const signal=AbortSignal.timeout(5000)
+ await api.withRecipientValidation(peer,signal,async()=>{
+  await api.sendText(peer,'first',undefined,signal)
+  await api.sendText(peer,'second',undefined,signal)
+  allowed=false;await assert.rejects(api.sendText(peer,'blocked',undefined,signal),/revoked/)
+ })
+ assert.equal(s.requests.filter(r=>r.action==='get_login_info').length,1)
+ assert.equal(s.requests.filter(r=>r.action==='get_friend_list').length,1)
+ assert.equal(s.requests.filter(r=>r.action==='send_private_msg').length,2)
+ allowed=true;offline=true
+ await assert.rejects(api.sendText(peer,'next reply',undefined,signal),/尚未上线/)
+ assert.equal(s.requests.filter(r=>r.action==='get_login_info').length,2)
+})

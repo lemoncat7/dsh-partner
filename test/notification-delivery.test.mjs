@@ -143,3 +143,18 @@ test('first payload and attempt commit atomically before sending without a secon
   await part(0,async()=>{})
  })
 })
+
+test('success cleanup is combined without delaying durable per-part acknowledgements',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'notification-finish-'));t.after(()=>rm(dir,{recursive:true,force:true}))
+ const path=join(dir,'state.json'),store=await PartnerStore.open(path);let updates=0
+ const update=store.update.bind(store);store.update=async fn=>{updates++;return update(fn)}
+ await new NotificationDelivery(store).deliver('parts','c',()=>[targets[0]],{text:'one',attachments:[{path:'/file',name:'file',kind:'file',mediaType:'text/plain'}]},async(target,reply,part)=>{
+  await part(0,async()=>{})
+  const durable=(await PartnerStore.open(path)).snapshot().notificationDeliveries[0]
+  assert.deepEqual(durable.targets[0].sentParts,[0]);assert.equal(durable.completedAt,undefined)
+  await part(1,async()=>{})
+ })
+ assert.equal(updates,4,'payload, two acknowledgements, one final commit')
+ const saved=(await PartnerStore.open(path)).snapshot().notificationDeliveries[0]
+ assert.deepEqual(saved.targets[0].sentParts,[0,1]);assert.ok(saved.completedAt);assert.equal(saved.reply.text,'')
+})

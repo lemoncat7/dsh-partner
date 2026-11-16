@@ -255,3 +255,19 @@ test('unavailable classifications carry diagnostics without turning failure into
  const e=input('路过的话');gate.observe('c',e);await gate.shouldReply('c',e,companion,signal())
  assert.equal(gate.status('c').classification.status,'timeout');assert.match(gate.status('c').reason,/请求超时/);assert.equal(gate.status('c').semantic,undefined)
 })
+
+test('model-recognized calls are never sampled out as casual interjections during other conversation',()=>{
+ for(const text of ['弟弟','小可爱','你人呢','过来一下'])for(let i=0;i<200;i++){
+  const result=scoreGroupReply(input(text),{...context,otherConversation:true,seed:'call-'+i,semantic:{label:'address',confidence:.55,margin:.31}})
+  assert.equal(result.reply,true,text+' seed='+i);assert.equal(result.probability,1);assert.equal(result.route,'semantic')
+ }
+ assert.equal(scoreGroupReply(input('弟弟',{otherMention:true}),{...context,semantic:{label:'address',confidence:.9,margin:.8}}).reply,false)
+})
+test('busy admission uses semantic calls without admitting engagement, background or classifier failures',async()=>{
+ for(const label of ['address','engage','background',undefined]){
+  let calls=0
+  const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return label?{label,confidence:.8,margin:.6}:undefined})
+  const e=input('一个未配置的叫法');gate.observe('c',e)
+  assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),label==='address');assert.equal(calls,1)
+ }
+})

@@ -11,6 +11,7 @@ export interface CharacterCard {
   chatStyle?: string
   shortVoiceReplies?: boolean
   segmentedReplies?: boolean
+  segmentDelay?: { enabled: boolean; minSeconds: number; maxSeconds: number }
   stickersEnabled?: boolean
   identity: string
   motivation: string
@@ -49,6 +50,13 @@ function list(value: unknown, label: string, max: number): unknown[] {
   if (!Array.isArray(value) || value.length > max) throw new Error(`${label}最多 ${max} 条`)
   return value
 }
+export function normalizeSegmentDelay(value: unknown): NonNullable<CharacterCard['segmentDelay']> {
+  const v = record(value)
+  if (typeof v.enabled !== 'boolean') throw Error('随机间隔须为开关值')
+  const { minSeconds, maxSeconds } = v
+  if (typeof minSeconds !== 'number' || typeof maxSeconds !== 'number' || !Number.isFinite(minSeconds) || !Number.isFinite(maxSeconds) || minSeconds < 0 || maxSeconds > 60 || minSeconds > maxSeconds) throw Error('随机间隔须为 0～60 秒，最短不能大于最长')
+  return { enabled: v.enabled, minSeconds, maxSeconds }
+}
 export function normalizeCharacterCard(value: unknown): CharacterCard {
   const v = record(value)
   if (v.schemaVersion !== undefined && v.schemaVersion !== 1) throw new Error('不支持的人格卡版本')
@@ -58,6 +66,7 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
   if(v.exclusivePrompt!==undefined&&typeof v.exclusivePrompt!=='boolean')throw Error('独占系统提示须为开关值')
   const card: CharacterCard = {
     schemaVersion: 1, enabled: v.enabled,
+    ...(v.segmentDelay !== undefined ? { segmentDelay: normalizeSegmentDelay(v.segmentDelay) } : {}),
     ...(v.shortVoiceReplies!==undefined?{shortVoiceReplies:v.shortVoiceReplies as boolean}:{}),
     ...(v.exclusivePrompt!==undefined?{exclusivePrompt:v.exclusivePrompt as boolean}:{}),
     ...(v.affectionEnabled !== undefined ? {affectionEnabled:v.affectionEnabled as boolean} : {}),

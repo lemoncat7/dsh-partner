@@ -13,17 +13,17 @@ test('work isolates ambient talk while explicit author corrections remain live',
  assert.equal(groupTaskInput(event('伙伴，另外查下这个'),focus,'伙伴',2000),'queue')
  assert.equal(groupTaskInput(event('补充一下'),undefined,'伙伴',2000),'normal')
 })
-test('unsent chat keeps joining fragments; confirmed reply closes admission and chat tools do not mark work',()=>{
+test('chat fragments remain steerable during segmented delivery and chat tools do not mark work',()=>{
  const chatting={...focus,working:false}
- assert.equal(groupTaskInput(event('蓝色的'),chatting,'伙伴',2000),'steer')
- assert.equal(groupTaskInput(event('再加点'),chatting,'伙伴',7000),'steer')
+ assert.equal(groupTaskInput(event('蓝色的'),chatting,'伙伴',2000),'normal')
+ assert.equal(groupTaskInput(event('再加点'),chatting,'伙伴',7000),'normal')
  assert.equal(groupTaskInput(event('？'),chatting,'伙伴',2000),'observe')
- assert.equal(groupTaskInput(event('还有一点'),{...chatting,sentAt:2000},'伙伴',3000),'observe')
+ assert.equal(groupTaskInput(event('还有一点'),{...chatting,sentAt:2000},'伙伴',3000),'steer')
  assert.equal(groupTaskInput(event('取消任务'),{...chatting,sentAt:2000},'伙伴',3000),'steer')
- assert.equal(groupTaskInput(event('还有个问题',{mentioned:true}),{...chatting,sentAt:2000},'伙伴',3000),'queue')
+ assert.equal(groupTaskInput(event('还有个问题',{mentioned:true}),{...chatting,sentAt:2000},'伙伴',3000),'steer')
  assert.equal(taskTool('partner_tools',{action:'call',name:'generate_image',argumentsJson:'{}'}),true)
  assert.equal(taskTool('partner_chat_say',{beforeTools:true}),true)
- assert.equal(taskTool('partner_chat_reply',{continueTurn:true}),false)
+ assert.equal(taskTool('partner_chat_reply',{continueTurn:true}),true)
  assert.equal(taskTool('partner_stickers',{action:'list'}),false)
 })
 test('runtime focus is isolated by room and channel and returns a copy',()=>{
@@ -40,5 +40,5 @@ test('other members can enter selective chat judgment, but never interrupt a wor
  const other={...event('这个透视也太离谱了'),sender:'group:12345678:99887766',qqGroup:{groupId:'12345678',userId:'99887766'}}
  assert.equal(groupTaskInput(other,{...focus,working:false,sentAt:1200},'伙伴',2000),'normal')
  assert.equal(groupTaskInput(other,focus,'伙伴',2000),'observe')
- assert.equal(groupTaskInput(event('又有一点'),{...focus,working:false,sentAt:1200},'伙伴',2000),'observe')
+ assert.equal(groupTaskInput(event('又有一点'),{...focus,working:false,sentAt:1200},'伙伴',2000),'steer')
 })

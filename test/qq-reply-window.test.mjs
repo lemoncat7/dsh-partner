@@ -1,17 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {GroupReplyWindows} from '../lib/channels/qq/reply-window.js'
+import {GroupReplyWindows,GroupReplyFreshness} from '../lib/channels/qq/reply-window.js'
 import {groupTaskInput} from '../lib/channels/qq/task-focus.js'
 const peer='group:12345678:22334455'
 const event=(at,extra={})=>({id:'m',sender:peer,receivedAt:at,text:'还有一点',qqGroup:{groupId:'12345678',userId:'22334455'},...extra})
-test('confirmed first part closes admission while final transport is still running; fresh next turn has no cooldown',()=>{
+test('confirmed first part remains interruptible; buffered chat is admitted after transport finishes',()=>{
  const windows=new GroupReplyWindows(),w=windows.begin('q',peer,1000)
  const route=e=>groupTaskInput(e,windows.focus('q',e,undefined,10000),'伙伴',10000)
- assert.equal(route(event(9000)),'steer','slow model does not discard supplements just because five seconds elapsed')
+ assert.equal(route(event(9000)),'normal','ordinary input queues while the model is generating instead of repeatedly steering it')
  windows.sent(w,10000)
- assert.equal(route(event(10001)),'observe')
+ assert.equal(route(event(10001)),'steer')
  windows.finish(w,11000)
- assert.equal(route(event(10999)),'observe','already-buffered chatter must not become a new reply')
+ assert.equal(route(event(10999)),'normal','supplements received during delivery must not be discarded after it finishes')
  assert.equal(route(event(11001)),'normal','no permanent or arbitrary cooldown')
  assert.equal(windows.focus('q',event(10999),undefined,700001),undefined)
 })
@@ -35,4 +35,25 @@ test('delivery windows stay isolated and clean up without deleting a newer in-fl
  windows.finish(b,2400);assert.equal(windows.active.size,0)
  for(let i=0;i<140;i++){const w=windows.begin('q','group:12345678:'+i,3000);windows.sent(w,3100);windows.finish(w,3200)}
  assert.equal(windows.recent.size,128)
+})
+
+test('slow conversation stays live until a newer input or delivered reply replaces it',()=>{
+ const f=new GroupReplyFreshness(),a=f.begin('q',peer,1000)
+ assert.equal(f.obsolete(a,120000),undefined,'elapsed time alone never discards a response')
+ const other=f.begin('q','group:12345678:33445566',2000)
+ assert.equal(f.obsolete(a,120000),undefined,'another speaker waiting is not proof the topic is obsolete')
+ f.sent(other);assert.equal(f.obsolete(a,120000),'newer-reply')
+ assert.equal(f.obsolete(a,20000),undefined,'fresh concurrent replies remain allowed')
+ const next=f.begin('q',peer,4000);assert.equal(f.obsolete(next,120000),undefined)
+ const update=f.begin('q',peer,5000);assert.equal(f.obsolete(next,120000),'newer-input')
+ const lateOld=f.begin('q',peer,3000);assert.equal(f.obsolete(update,120000),undefined,'late old input does not supersede newer source time')
+ assert.equal(f.obsolete(lateOld,120000),'newer-input')
+})
+test('freshness evidence is channel and group scoped, bounded and transient',()=>{
+ const f=new GroupReplyFreshness(),a=f.begin('q',peer,1000)
+ f.sent(f.begin('other',peer,5000));f.sent(f.begin('q','group:87654321:22334455',5000))
+ assert.equal(f.obsolete(a,90000),undefined)
+ for(let i=0;i<200;i++)f.sent(f.begin('channel-'+i,peer,10000+i))
+ assert.equal(f.latest.size,128);assert.equal(f.delivered.size,100)
+ assert.equal(new GroupReplyFreshness().obsolete(undefined,90000),undefined)
 })

@@ -1,3 +1,4 @@
+import {NativeBackgroundTasks} from './execution/native-background.js'
 import {installInterestLimit,recoverInterest} from './character/interest-runtime.js'
 import {qqSettings} from './channels/qq/settings.js'
 import {BrowserService} from './browser/service.js'
@@ -197,6 +198,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>channels.deliverBackgroundResult(run,reply))
     scheduler.continuations.configure({
       execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
       notify: entry => channels.notifyContinuation(entry),
@@ -238,7 +240,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       }finally{if(timer)clearTimeout(timer)}
     })
     const bilibili = new BilibiliService(store)
-    composer.setChatToolFactory(id => [continuousTool(id,store,continuous),browserTool(id,store,browser,ctx),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>qqCatalogs.invalidate(channelId)),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
+    composer.setChatToolFactory(id => [background.tool(id),continuousTool(id,store,continuous),browserTool(id,store,browser,ctx),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>qqCatalogs.invalidate(channelId)),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
     const requirementWorker = new RequirementWorker(store, requirements, {
@@ -298,6 +300,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     else ctx.logger.warn('dsh-partner: webServer is unavailable; companion management is disabled')
     await agents.reconcileQqSessions()
     if (resolved.autoStartChannels) await channels.startEnabled()
+    await background.recoverDeliveries()
     await push.start()
     sleep.start()
     continuous.start()
@@ -311,6 +314,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     function closeRuntime(removeApi=true):Promise<void> {
       if(removeApi)disposeApi?.()
       return closing ??= (async()=>{
+      await background.close()
       collaboration.beginShutdown()
       await continuous.close()
       disposeContinuousBudget()

@@ -1,3 +1,4 @@
+import { SegmentDelayFields } from './segment-delay-fields.js'
 import { ExclusivePromptToggle } from './exclusive-prompt-toggle.js'
 import { renderExclusiveIdentity } from '../character/domain.js'
 import { AffectionPanel } from './affection-panel.js'
@@ -94,14 +95,15 @@ function ChatFields({ card, onChange, companionId }: { card: CharacterCard; comp
     <div className="dsh-partner-conversation-summary"><strong>像聊天一样接话</strong><p>先给直接反应，说到点上就停。可以不同意、不知道或开玩笑；不固定追问、不把闲聊改成建议清单。认真求助时照常查证和执行。</p></div>
     <div className="dsh-partner-fields two"><Field label="闲聊节奏" hint="也控制任务回应：短句接话按人格简短接话，不汇总报告，长内容交付文档；自然模式摘要配附件；展开模式在正文说明。你的本轮明确要求优先。"><select value={card.length} onChange={e => onChange({ ...card, length: e.target.value as CharacterCard['length'] })}><option value="short">短句接话</option><option value="balanced">随话题自然调整</option><option value="rich">愿意展开聊</option></select></Field><label className="dsh-partner-character-check"><input type="checkbox" checked={card.narration} onChange={e => onChange({ ...card, narration: e.target.checked })} />允许少量动作描写</label></div>
     <div className="dsh-partner-chat-options">
-      <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>允许分段回复</strong><small>默认一句说完就停。确有新内容才另发一条，不凑条数、不刻意等待；长文和代码保持完整。</small></span></label>
+      <label><input type="checkbox" checked={card.segmentedReplies===true} onChange={e=>onChange({...card,segmentedReplies:e.target.checked})}/><span><strong>允许分段回复</strong><small>默认一句说完就停。确有新内容才另发一条，不凑条数；长文和代码保持完整。</small></span></label>
+      <SegmentDelayFields card={card} onChange={onChange}/>
       <label><input type="checkbox" checked={card.stickersEnabled===true} onChange={e=>onChange({...card,stickersEnabled:e.target.checked})}/><span><strong>表情包</strong><small>根据语境从表情库选图，作为单独消息发送。不支持表情的渠道会显示图片。</small></span></label>
     {card.length==='short'&&<label ><input type="checkbox" checked={card.shortVoiceReplies===true} onChange={e=>onChange({...card,shortVoiceReplies:e.target.checked})}/><span><strong>私聊短句优先语音，长句用文字</strong><small>仅私聊的简短口语尽量使用当前渠道已配置的语音；群聊默认文字，明确需要语音时仍可发送。长句、链接、代码和需要回看的内容用文字。你明确要求的方式优先，语音不可用时仍可文字回复。</small></span></label>}
       <button type="button" onClick={()=>setLibrary(true)}>管理表情库</button>
     </div>
     {library&&<StickerLibraryDialog companionId={companionId} close={()=>setLibrary(false)}/>}
     <Field label="额外聊天偏好（可选）" hint="例如：玩笑时直接接梗；认真说烦恼时先听，不急着给建议。留空使用默认聊天规则。"><textarea rows={4} maxLength={2000} value={card.chatStyle ?? ''} onChange={e => onChange({ ...card, chatStyle: e.target.value })} /></Field>
-    <p className="dsh-partner-character-hint">角色聊天保留已配置能力；QQ 未归属账号仅聊天，也不会主动延迟、潜水或省略应有的私聊回复。</p>
+    <p className="dsh-partner-character-hint">角色聊天保留已配置能力；分段间隔只影响后续消息的发送时间，不改变渠道授权或回复内容。</p>
   </div>
 }
 

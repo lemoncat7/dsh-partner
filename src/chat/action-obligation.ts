@@ -1,3 +1,4 @@
+import {backgroundHandoff} from '../execution/background-receipt.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { chatReplyFromEvent } from './protocol.js'
 import { needsTaskPreamble } from '../execution/task-preamble.js'
@@ -24,6 +25,7 @@ export function pendingActions(events:readonly SessionEvent[]):string[] {
   if(start<0)return []
   const user=events[start] as Extract<SessionEvent,{type:'user/message'}>
   const tail=events.slice(start+1)
+  if(backgroundHandoff(tail))return []
   const declared=new Set<string>(),pending=new Set<string>()
   const finished=new Set(tail.flatMap(e=>e.type==='tool/result'?[e.data.message.toolCallId]:[]))
   for(const e of tail){

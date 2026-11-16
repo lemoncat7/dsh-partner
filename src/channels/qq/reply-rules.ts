@@ -53,7 +53,7 @@ export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):R
   const clear=semantic.confidence>=.65&&semantic.margin>=.15||semantic.confidence>=.58&&semantic.margin>=.2||semantic.confidence>=.52&&semantic.margin>=.25
   const related=semantic.confidence>=.48&&semantic.margin>=.12&&(semantic.contextSimilarity??0)>=.4
   if(['address','engage'].includes(semantic.label)&&(clear||related)){
-   if(context.otherConversation&&!activeConversation(context)&&!/大家|各位|有没有人|有人(?:知道|会|能)|你们(?:觉得|怎么看)/u.test(text)){
+   if(semantic.label==='engage'&&context.otherConversation&&!activeConversation(context)&&!/大家|各位|有没有人|有人(?:知道|会|能)|你们(?:觉得|怎么看)/u.test(text)){
     // A chance to join shared chatter, not an obligation to answer every participant.
     let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
     const probability=.65,reply=(hash>>>0)/4294967296<probability

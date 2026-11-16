@@ -110,8 +110,11 @@ test('revoked catalogue entries and recursive gateway calls never execute',async
 test('discovery setting remains validated and participates in next-turn composition revision',()=>{
  assert.throws(()=>normalizeCompanionDraft({name:'角色',toolDiscovery:'yes'}))
  const c={...createDefaultCompanion(),toolDiscovery:false},state={companions:[c],sessions:[{sessionId:'s',companionId:c.id}],skillBindings:[],companionAccessGrants:[],skills:[]}
- const index=new SessionConfigurationIndex({snapshot:()=>state,subscribe:()=>()=>{}})
- const before=index.forSession('s').revision;c.toolDiscovery=true;assert.notEqual(index.forSession('s').revision,before);index.close()
+ let notify
+ const index=new SessionConfigurationIndex({snapshot:()=>structuredClone(state),subscribe:fn=>{notify=fn;return()=>{}}})
+ const before=index.forSession('s').revision;c.toolDiscovery=true
+ assert.equal(index.forSession('s').revision,before,'unsaved drafts do not invalidate committed configuration')
+ notify(structuredClone(state));assert.notEqual(index.forSession('s').revision,before);index.close()
 })
 
 test('partner entry routes knowledge and SSH envelopes without bypassing operation allowlists',async t=>{

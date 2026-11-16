@@ -1,4 +1,6 @@
-import {renderActivityDecisionContext,activityDecisionAvailable,withActivityChoiceSchema,interestWakes,INTEREST_LIMIT,quietInterest} from './character/activity-decision.js'
+import { createToolPresentationSelector, ToolPresentationFlag } from './execution/tool-presentation.js'
+import {renderActivityDecisionContext,activityDecisionAvailable,interestWakes,INTEREST_LIMIT,quietInterest} from './character/activity-decision.js'
+import {ReplyQueue} from './core/reply-queue.js'
 import {renderStickerOpportunity} from './chat/sticker-opportunity.js'
 import {renderBrowserContext} from './browser/context.js'
 import {isPartnerMcpOperation} from './mcp/tool-entry.js'
@@ -7,7 +9,7 @@ import {deliveredAttachment} from './attachments/delivery-receipt.js'
 import {taskTool,type GroupTaskFocus} from './channels/qq/task-focus.js'
 import {trackPartnerTools} from './execution/tool-ownership.js'
 import {renderConversationTime} from './character/conversation-time.js'
-import {taskFollowup,renderTaskFollowup,withTaskReviewSchema} from './chat/task-followup.js'
+import {taskFollowup,renderTaskFollowup} from './chat/task-followup.js'
 import {pendingGroupInput,GROUP_INPUT_PENDING} from './channels/qq/pending-input.js'
 import {sendPreferredVoice} from './chat/preferred-voice.js'
 import { nativePresentation } from './compat/native-presentation.js'
@@ -178,13 +180,15 @@ export class PartnerAgentRuntime {
   interestClaim(sessionId:string){
     const agent=this.restoredCompositions.get(sessionId)?.agent
     if(!agent)return
-    const state=this.store.snapshot(),events=this.inputEvents(agent),last=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)))
-    const route=state.sessions.find(r=>r.sessionId===sessionId&&r.idleContactState?.planSnapshot?.trigger==='interest'&&last?.type==='user/message'&&r.idleContactState.messageId===last.data.id)
-    const c=state.companions.find(c=>c.id===route?.companionId)
+    const routes=this.configurations.routesForSession(sessionId).filter(r=>r.idleContactState?.planSnapshot?.trigger==='interest')
+    if(!routes.length)return
+    const events=this.inputEvents(agent),last=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)))
+    const route=routes.find(r=>last?.type==='user/message'&&r.idleContactState?.messageId===last.data.id)
+    const c=route&&this.configurations.companion(route.companionId)
     if(!route||!c||last?.type!=='user/message')return
     let counter=this.interestRequests.get(agent)
     if(!counter||counter.messageId!==last.data.id){counter={messageId:last.data.id,steps:0};this.interestRequests.set(agent,counter)}
-    return {owner:c.id,messageId:last.data.id,counter,valid:activityPolicyCurrent(state,c,route)&&!route.idleContactState?.cancelled}
+    return {owner:c.id,messageId:last.data.id,counter,valid:this.configurations.activityCurrent(c,route)&&!route.idleContactState?.cancelled}
   }
   stopInterest(sessionId:string,messageId:string):void{
     const agent=this.restoredCompositions.get(sessionId)?.agent
@@ -206,7 +210,7 @@ export class PartnerAgentRuntime {
   continuousClaim(sessionId:string){
     let claim=this.continuousClaims.get(sessionId)
     if(!claim){
-      const state=this.store.snapshot(),route=state.sessions.find(r=>r.sessionId===sessionId&&r.idleContactState?.kind==='continuous'),task=state.companions.find(c=>c.id===route?.companionId)?.continuous?.tasks.find(t=>t.id===route?.idleContactState?.continuousTaskId),agent=this.restoredCompositions.get(sessionId)?.agent
+      const route=this.configurations.routesForSession(sessionId).find(r=>r.idleContactState?.kind==='continuous'),task=(route&&this.configurations.companion(route.companionId))?.continuous?.tasks.find(t=>t.id===route?.idleContactState?.continuousTaskId),agent=this.restoredCompositions.get(sessionId)?.agent
       if(!route||!task||!agent)return
       claim={owner:route.companionId,task:{...task,revision:route.idleContactState!.continuousRevision??-1},agent,messageId:route.idleContactState!.messageId,userMessageId:route.idleContactState!.userMessageId,steps:0}
       this.continuousClaims.set(sessionId,claim)
@@ -242,6 +246,7 @@ export class PartnerAgentRuntime {
   private readonly latestPostReplyInput = new Map<string,string>()
   private readonly handles = new Map<string, AgentHandle>()
   private readonly queues = new Map<string, Promise<void>>()
+  private readonly replyQueue = new ReplyQueue<PartnerReply>()
   private readonly replySlots = new AsyncSemaphore(6)
   private readonly heartbeatQueues = new Map<string, Promise<HeartbeatExecution>>()
   private readonly taskQueues = new Map<string, Promise<void>>()
@@ -315,7 +320,7 @@ export class PartnerAgentRuntime {
       if(memory?.rollingContextEnabled)rollConversationContext(agent.session,memory)
       return next()
     },{prepend:true}) : ()=>{}
-    this.disposeToolAuthority = typeof this.ctx.tools?.guard === 'function' ? installToolAccessGuard(this.ctx.tools, this.store) : (() => {})
+    this.disposeToolAuthority = typeof this.ctx.tools?.guard === 'function' ? installToolAccessGuard(this.ctx.tools, this.store, this.configurations) : (() => {})
     // Current hosts snapshot providers BEFORE agent/pre-step. Rebuild the first
     // assembly after installing scoped contributions; returning the old snapshot
     // would still omit tools for one request even though registration succeeded.
@@ -342,7 +347,7 @@ export class PartnerAgentRuntime {
           }
           if (this.autonomousAssemblyContexts.has(context)) return project(assembly)
           if(configuration?.companion.toolDiscovery){
-            const access=resolveToolAccess({agent:context.agent!,state:this.store.snapshot(),...(this.admittedInputs.get(context.agent!)?.length?{events:this.inputEvents(context.agent!)}:{})})
+            const access=this.configurations.toolAccess(context.agent!,this.admittedInputs.get(context.agent!)?.length?this.inputEvents(context.agent!):undefined)
             return project({...assembly,tools:assembly.tools.filter(tool=>{
               const entry=PARTNER_TOOL_ENTRIES.some(name=>name===tool.name)
               if(!entry&&isPartnerDiscoveryTool(this.store,configuration.companion.id,tool.name))return false
@@ -350,7 +355,7 @@ export class PartnerAgentRuntime {
               return query||channelToolAllowed(this.store,configuration.companion.id,tool.name,access)
             })})
           }
-          const access = resolveToolAccess({agent:context.agent!, state:this.store.snapshot(), ...(this.admittedInputs.get(context.agent!)?.length ? {events:this.inputEvents(context.agent!)} : {})})
+          const access = this.configurations.toolAccess(context.agent!,this.admittedInputs.get(context.agent!)?.length?this.inputEvents(context.agent!):undefined)
           return project({ ...assembly, tools: configuration ? assembly.tools.filter(tool => channelToolAllowed(this.store,configuration.companion.id,tool.name,access)) : assembly.tools })
         }
         // The outer assembly applies access and projection once. Re-projecting
@@ -568,12 +573,15 @@ export class PartnerAgentRuntime {
     const key = route.sessionId
     await this.cancelPostReply(companion.id, undefined, route.sessionId)
     const queuedAt=Date.now()
-    const previous = this.queues.get(key) ?? Promise.resolve()
-    let output: PartnerReply = { text: '', attachments: [] }
     reportProgress(progress,'queued')
-    const current = previous.catch(() => {}).then(async () => { output = await this.replySlots.use(() => this.drive(companion, channelId, userId, message, progress,queuedAt,route)) })
-    this.queues.set(key, current)
-    try { await current; return output } finally { if (this.queues.get(key) === current) this.queues.delete(key) }
+    const group=message.groupReply&&this.store.snapshot().channels.some(c=>c.id===channelId&&c.platform==='qq')&&userId.startsWith('group:')?message.groupReply:undefined
+    const silent=():PartnerReply=>({text:'',attachments:[],chatParts:[]})
+    const current=this.replyQueue.enqueue(key,group?.kind??'ordered',group?JSON.stringify([channelId,qqSessionTarget(userId)]):undefined,()=>this.replySlots.use(()=>{
+      if(group?.kind==='ambient'&&progress?.groupCurrent?.()===false)return Promise.resolve(silent())
+      return this.drive(companion,channelId,userId,message,progress,queuedAt,route)
+    }),silent)
+    const drained=this.replyQueue.idle(key);this.queues.set(key,drained)
+    try{return await current}finally{if(!this.replyQueue.busy(key)&&this.queues.get(key)===drained)this.queues.delete(key)}
   }
 
   async steer(companion: Companion, channelId: string, userId: string, message: PartnerInboundMessage): Promise<boolean> {
@@ -1123,22 +1131,18 @@ export class PartnerAgentRuntime {
     if (!configuration) return false
     if (this.store.isCompanionRemoving(configuration.companion.id)) throw new Error('伙伴正在删除，不能启动新轮次')
     signal.throwIfAborted()
-    const access = resolveToolAccess({agent, state:this.store.snapshot(), ...(this.admittedInputs.get(agent)?.length ? {events:this.inputEvents(agent)} : {})})
+    const access = this.configurations.toolAccess(agent, this.admittedInputs.get(agent)?.length ? this.inputEvents(agent) : undefined)
     let presentationChanged = false
     const stableNative=configuration.companion.toolDiscovery||configuration.companion.capabilities.includes('mcp')||!!access.allowedTools||!!this.continuousClaim(agent.session.id)
     if (stableNative && !this.replyPresentations.has(agent) && (typeof agent.ctx.tools?.setExecutor === 'function' || typeof (agent.ctx.tools as unknown as {presentAs?:unknown})?.presentAs === 'function')) {
+      const selectTools = createToolPresentationSelector(this.store)
       this.replyPresentations.set(agent, nativePresentation(agent.ctx, tools => {
-        const current=this.configurations.forSession(agent.session.id)
-        const access=resolveToolAccess({agent,state:this.store.snapshot(),...(this.admittedInputs.get(agent)?.length?{events:this.inputEvents(agent)}:{})})
-        const decisionRequired=!!current&&activityDecisionAvailable(this.store.snapshot(),current.companion,agent.session.id,this.inputEvents(agent))
-        const followup=current?taskFollowup(this.store.snapshot(),current.companion.id,agent.session.id,this.inputEvents(agent)):undefined
-        return tools.filter(tool=>{
-          if((this.interestClaim(agent.session.id)?.counter.steps??0)>=3&&!['partner_chat_reply','partner_activity_finish'].includes(tool.name))return false
-          if(this.continuousClaim(agent.session.id)&&!['partner_chat_reply','partner_activity_finish'].includes(tool.name))return false
-          if(current&&isPartnerMcpOperation(this.store,current.companion.id,tool.name))return false
-          if(current?.companion.toolDiscovery&&!PARTNER_TOOL_ENTRIES.some(name=>name===tool.name)&&isPartnerDiscoveryTool(this.store,current.companion.id,tool.name))return false
-          return !current||['partner_tools','partner_channel_access','partner_memory_recall'].includes(tool.name)||channelToolAllowed(this.store,current.companion.id,tool.name,access)
-        }).map(tool=>withTaskReviewSchema(withActivityChoiceSchema(tool,decisionRequired),followup))
+        const {current,access,decisionRequired,followup}=this.configurations.toolPresentation(agent,this.inputEvents(agent))
+        const flags=(current?.companion.toolDiscovery?ToolPresentationFlag.Discovery:0)
+          | ((this.interestClaim(agent.session.id)?.counter.steps??0)>=3||this.continuousClaim(agent.session.id)?ToolPresentationFlag.TerminalOnly:0)
+          | (decisionRequired?ToolPresentationFlag.ActivityChoice:0)
+          | (followup?ToolPresentationFlag.TaskReview:0)
+        return selectTools(tools,{owner:current?.companion.id,access,flags})
       })); presentationChanged = true
     } else if (!stableNative && this.replyPresentations.has(agent)) {
       this.replyPresentations.get(agent)!(); this.replyPresentations.delete(agent); presentationChanged = true
@@ -1435,7 +1439,7 @@ export class PartnerAgentRuntime {
     let directProgress=false
     const detach=this.ctx.on('session/event',(current,event)=>{
       if(current.id!==agent.session.id||event.seq<startSeq)return
-      if((event.type==='tool/call'||event.type==='tool/ptc-dispatch')&&taskTool(event.data.name,event.data.arguments)){const focus=this.channelReplyFocus.get(agent.session.id);if(focus)focus.working=true}
+      if((event.type==='tool/call'||event.type==='tool/ptc-dispatch')&&taskTool(event.data.name,event.data.arguments)){const focus=this.channelReplyFocus.get(agent.session.id);if(focus)focus.working=true;this.replyQueue.protect(agent.session.id)}
       const confirmed=chatReplyFromEvent(event)
       if(confirmed?.delivered&&confirmed.originRouteId===session.id||deliveredAttachment(event)===session.id){const focus=this.channelReplyFocus.get(agent.session.id);if(focus)focus.sentAt??=Date.now()}
       if(event.type==='tool/call'||event.type==='tool/result'||event.type==='tool/ptc-dispatch'){const focus=this.channelReplyFocus.get(agent.session.id);if(focus)progress?.groupFocus?.({...focus})}

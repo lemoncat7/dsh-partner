@@ -28,6 +28,33 @@ export class GroupReplyWindows {
   if(recent&&now-(recent.finishedAt??0)>600000){this.recent.delete(key);return}
   // Already-arrived input waiting in the burst/dispatch buffer belongs to the answered round.
   // Fresh messages after the round finishes are assessed normally, without a cooldown.
-  if(recent&&event.receivedAt!==undefined&&event.receivedAt>=recent.startedAt&&event.receivedAt<=(recent.finishedAt??0))return {...recent}
+  if(recent?.working&&event.receivedAt!==undefined&&event.receivedAt>=recent.startedAt&&event.receivedAt<=(recent.finishedAt??0))return {...recent}
+ }
+}
+
+interface ReplyOpportunity {channelId:string;userId:string;sourceAt:number;sequence:number}
+/** In-memory replacement evidence, independent of the active terminal/task lifecycle. */
+export class GroupReplyFreshness {
+ private sequence=0
+ private readonly latest=new Map<string,ReplyOpportunity>()
+ private readonly delivered=new Map<string,ReplyOpportunity>()
+ begin(channelId:string,userId:string,sourceAt:number):ReplyOpportunity {
+  const item={channelId,userId,sourceAt,sequence:++this.sequence},key=JSON.stringify([channelId,userId]),previous=this.latest.get(key)
+  if(!previous||sourceAt>=previous.sourceAt){this.latest.delete(key);this.latest.set(key,item)}
+  if(this.latest.size>128)this.latest.delete(this.latest.keys().next().value!)
+  return item
+ }
+ sent(item:ReplyOpportunity|undefined):void {
+  if(!item)return
+  const key=JSON.stringify([item.channelId,qqGroupPeer(item.userId)?.groupId]),previous=this.delivered.get(key)
+  if(!previous||item.sourceAt>=previous.sourceAt){this.delivered.delete(key);this.delivered.set(key,item)}
+  if(this.delivered.size>100)this.delivered.delete(this.delivered.keys().next().value!)
+ }
+ obsolete(item:ReplyOpportunity|undefined,now=Date.now()):'newer-input'|'newer-reply'|undefined {
+  if(!item||now-item.sourceAt<=30000)return
+  const next=this.latest.get(JSON.stringify([item.channelId,item.userId]))
+  if(next&&(next.sourceAt>item.sourceAt||next.sourceAt===item.sourceAt&&next.sequence>item.sequence))return 'newer-input'
+  const sent=this.delivered.get(JSON.stringify([item.channelId,qqGroupPeer(item.userId)?.groupId]))
+  if(sent&&sent.sequence!==item.sequence&&sent.sourceAt>item.sourceAt)return 'newer-reply'
  }
 }
