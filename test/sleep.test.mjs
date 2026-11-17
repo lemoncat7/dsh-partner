@@ -1,3 +1,4 @@
+import {normalizeCharacterCard} from '../lib/character/domain.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
@@ -15,7 +16,7 @@ async function fixture(t){
  const root=await mkdtemp(join(tmpdir(),'partner-sleep-'));t.after(()=>rm(root,{recursive:true,force:true}))
  const path=join(root,'state.json'),store=await PartnerStore.open(path),id=store.snapshot().companions[0].id
  let now=Date.now(),random=.9,busy=false,streamOverride
- await store.update(s=>{const c=s.companions[0];c.sleepPolicy={enabled:true,dreamsEnabled:true};c.sleepState={fatigue:{value:80,at:now},activityAt:now-3*HOUR};c.automation.memory.enabled=true;c.idleContact={...DEFAULT_IDLE_CONTACT,enabled:true,routeId:'r'};s.sessions=[{id:'r',kind:'local',channelId:'@local',userId:'owner',companionId:id,sessionId:'s',lastMessageAt:now-3*HOUR},{id:'foreign',kind:'local',channelId:'@local',userId:'other',companionId:'other',sessionId:'other-session',lastMessageAt:1}]})
+ await store.update(s=>{const c=s.companions[0];c.characterCard=normalizeCharacterCard({enabled:true,roleText:'睡眠与梦境测试角色'});c.sleepPolicy={enabled:true,dreamsEnabled:true};c.sleepState={fatigue:{value:80,at:now},activityAt:now-3*HOUR};c.automation.memory.enabled=true;c.idleContact={...DEFAULT_IDLE_CONTACT,enabled:true,routeId:'r'};s.sessions=[{id:'r',kind:'local',channelId:'@local',userId:'owner',companionId:id,sessionId:'s',lastMessageAt:now-3*HOUR},{id:'foreign',kind:'local',channelId:'@local',userId:'other',companionId:'other',sessionId:'other-session',lastMessageAt:1}]})
  const calls=[],memoryCalls=[],memories=[{id:'m1',status:'active',subject:'喜好',content:'喜欢安静的雨天'}]
  let result={narrative:'梦见雨滴变成了小灯。',feeling:'有点安心。',topic:'雨天'}
  const ctx={logger:{warn(){}},get:()=>({currentSelection:()=>({provider:'p',model:'m'})}),llm:{stream(input){calls.push(input);return streamOverride?streamOverride(input):(async function*(){yield {type:'text-delta',text:JSON.stringify(result)};yield {type:'finish',reason:{kind:'stop'}}})()}}}
@@ -192,4 +193,15 @@ test('tool sleep excludes its own session but refuses another active conversatio
  await f.service.onUserMessage('group-session',f.now(),'urgent',false,true)
  assert.equal(f.sleeping(),false)
  assert.match(renderSleepContext(f.c(),'r',undefined,f.now()),/清醒/)
+})
+
+
+test('a saved sleep episode cannot delay ordinary work after the role bundle is disabled',async t=>{
+ const f=await fixture(t)
+ await f.store.update(s=>{const c=s.companions[0];c.characterCard.enabled=false;c.sleepState.episode={id:'old',sleptAt:f.now(),wakeAt:f.now()+3600000,routeId:'r',dream:'none'}})
+ const before=f.c().sleepState
+ await f.service.onUserMessage('s',f.now(),'normal-work',true)
+ assert.deepEqual(f.c().sleepState,before,'normal work does not accumulate persona wake calls or fatigue')
+ assert.equal(f.store.runtimePolicy(f.id).companion.sleepPolicy.enabled,false)
+ assert.equal(f.calls.length,0)
 })

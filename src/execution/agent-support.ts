@@ -1,3 +1,4 @@
+import {resolveCompanionRuntimePolicy} from '../companions/runtime-policy.js'
 import { renderIdentityRelationship } from '../character/relationship-adapter.js'
 import { renderCharacterCore, renderExclusiveIdentity } from '../character/domain.js'
 import { renderConversationBehavior } from '../character/conversation-behavior.js'
@@ -7,6 +8,7 @@ import type { Companion } from '../domain.js'
 import { ATTACHMENT_PROTOCOL } from '../attachments/tool.js'
 
 export function renderPartnerPersona(companion: Companion, surface: 'conversation' | 'local' | 'heartbeat' | 'ephemeral' = 'conversation', includeRelationship = true): string {
+  companion=resolveCompanionRuntimePolicy(companion).companion
   if(companion.characterCard?.enabled&&companion.characterCard.exclusivePrompt&&(surface==='conversation'||surface==='local'))return [renderExclusiveIdentity({...companion,characterCard:companion.characterCard}),includeRelationship?renderIdentityRelationship(companion):''].filter(Boolean).join('\n\n')
   const capabilities = companion.capabilities.length > 0 ? companion.capabilities.join('、') : '由当前 Agent Preset 提供的基础能力'
   return [

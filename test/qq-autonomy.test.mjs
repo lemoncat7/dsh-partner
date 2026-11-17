@@ -271,3 +271,88 @@ test('busy admission uses semantic calls without admitting engagement, backgroun
   assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),label==='address');assert.equal(calls,1)
  }
 })
+
+test('a separated low-confidence call is admitted; a reference to another person is not a call',()=>{
+ const semantic={label:'address',confidence:.49314788287942196,margin:.27950781102531624}
+ assert.equal(scoreGroupReply(input('弟弟弟弟'),{...context,semantic}).reply,true)
+ assert.equal(scoreGroupReply(input('我弟弟今天放假'),{...context,semantic:{...semantic,scene:{label:'other',confidence:.85,margin:.7}}}).reply,false)
+ assert.equal(scoreGroupReply(input('我喊弟弟',{otherMention:true}),{...context,semantic}).reply,false)
+})
+test('social scenes create selective opportunities and use delivered topic or actual persona relevance',()=>{
+ for(const label of ['question','banter','share','topic']){
+  const semantic={label:'background',confidence:.4,margin:.08,scene:{label,confidence:.8,margin:.6}}
+  const decisions=Array.from({length:100},(_,i)=>scoreGroupReply(input('一段可以交流的新内容'),{...context,seed:'scene-'+i,otherConversation:true,semantic}))
+  assert.ok(decisions.some(d=>d.reply),label);assert.ok(decisions.some(d=>!d.reply),label)
+  const related=scoreGroupReply(input('一段可以交流的新内容'),{...context,otherConversation:true,semantic:{...semantic,replySimilarity:.5}})
+  assert.equal(related.reply,true,label);assert.equal(related.route,'continuation',label)
+  if(['share','banter'].includes(label)){
+   assert.equal(scoreGroupReply(input('新内容'),{...context,otherConversation:true,semantic}).probability,.25)
+   assert.equal(scoreGroupReply(input('新内容'),{...context,otherConversation:true,semantic:{...semantic,profileSimilarity:.6}}).probability,.65)
+  }
+ }
+ for(const label of ['close','other','background'])assert.equal(scoreGroupReply(input('新内容'),{...context,recent:{at:context.now-60000,text:'旧话题'},semantic:{label:'engage',confidence:.9,margin:.8,contextSimilarity:.9,scene:{label,confidence:.9,margin:.8}}}).reply,false,label)
+})
+test('social opportunities never queue behind busy work; recognized calls still do',async()=>{
+ for(const label of ['banter','share','question','topic','address']){
+  const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>({label:label==='address'?'address':'background',confidence:.8,margin:.6,scene:{label,confidence:.9,margin:.8},replySimilarity:.9}))
+  const e=input('一段新内容');gate.observe('c',e)
+  assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),label==='address',label)
+ }
+})
+test('semantic identity frame is current and relationship is scoped to the verified sender',async()=>{
+ const frames=[];const gate=new QqGroupAutonomy(forbidden,()=>context.now,async(_text,_signal,_context,_report,frame)=>{frames.push(frame);return {label:'background',confidence:.3,margin:.01}})
+ const identity={...companion,characterCard:{enabled:true},name:'新名字',role:'喜欢推理游戏',description:'爱开玩笑',relationshipText:'绑定账号是哥哥，自己是弟弟'}
+ const settings={identityBinding:{enabled:true,qqIds:['22345678']}}
+ const e=input('一些普通内容');gate.observe('c',e)
+ await gate.shouldReply('c',e,identity,signal(),settings)
+ await gate.shouldReply('c',input('一些普通内容',{userId:'33445678'}),identity,signal(),settings)
+ assert.equal(frames[0].profile[0],'新名字');assert.ok(frames[0].profile.includes(identity.relationshipText))
+ assert.ok(!frames[1].profile.includes(identity.relationshipText))
+ assert.ok(frames.every(f=>f.profile.length<=3&&f.profile.every(t=>t.length<=160)))
+})
+test('recognized scene is passed to generation only for that message; explicit targets remain authoritative',async()=>{
+ const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>({label:'engage',confidence:.8,margin:.7,scene:{label:'banter',confidence:.85,margin:.7}}))
+ const e=input('又说早睡结果熬夜');gate.observe('c',e);await gate.shouldReply('c',e,companion,signal())
+ assert.match(gate.guidance('c',e),/本轮本地场景线索：玩笑、接梗或吐槽/)
+ assert.doesNotMatch(gate.guidance('c',input('另一个消息')),/本轮本地场景线索/)
+ const other=input('新内容',{replyTo:'other',hasReply:true});gate.observe('c',other)
+ assert.equal(await gate.shouldReply('c',other,companion,signal()),false)
+})
+
+test('a call recognized by the scene head bypasses the casual interjection interval',async()=>{
+ let label='share';const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>({label:'engage',confidence:.9,margin:.8,scene:{label,confidence:.9,margin:.8},replySimilarity:.5}))
+ const first=input('大家觉得这个如何');gate.observe('c',first);assert.equal(await gate.shouldReply('c',first,companion,signal()),true)
+ label='address';const next=input('喂在不在');gate.observe('c',next)
+ assert.equal(await gate.shouldReply('c',next,companion,signal()),true)
+})
+
+
+test('actual contextual call is not vetoed by a moderately confident other-person scene, including the busy lane',async()=>{
+ const semantic={label:'address',confidence:.48606611574332986,margin:.17431895777286216,contextSimilarity:.6368050634380726,replySimilarity:.6368050634380726,scene:{label:'other',confidence:.5266644592651288,margin:.3483341396482804}}
+ assert.equal(scoreGroupReply(input('你又不在他那里， 把什么门'),{...context,semantic}).reply,true)
+ for(const group of [{otherMention:true},{replyTo:'other'}])assert.equal(scoreGroupReply(input('你又不在他那里， 把什么门',group),{...context,semantic}).reply,false)
+ const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>semantic),e=input('你又不在他那里， 把什么门');gate.observe('c',e)
+ assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),true)
+})
+
+
+test('persona-supported agreement admits the actual repeated call without requiring prior replies',async()=>{
+ const semantic={label:'address',confidence:.4788505692967512,margin:.23663710133781604,profileSimilarity:.6701513241060744,scene:{label:'address',confidence:.44913295794483965,margin:.2970202471576032}}
+ assert.equal(scoreGroupReply(input('弟弟 出来冒泡'),{...context,semantic}).reply,true)
+ const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>semantic)
+ for(const suffix of ['first','again']){const e={...input('弟弟 出来冒泡'),id:'call-'+suffix};gate.observe('c',e);assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),true)}
+ for(const group of [{otherMention:true},{replyTo:'other'}])assert.equal(scoreGroupReply(input('弟弟 出来冒泡',group),{...context,semantic}).reply,false)
+})
+test('reply-related continuations survive scene disagreement but recency alone does not bypass classification',()=>{
+ for(const label of ['other','close','background']){
+  const result=scoreGroupReply(input('你刚才那句是什么意思'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'},semantic:{label,confidence:.95,margin:.9,replySimilarity:.8,scene:{label,confidence:.95,margin:.9}}})
+  assert.equal(result.reply,true);assert.equal(result.route,'continuation')
+  assert.equal(scoreGroupReply(input('无关的新话题'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'},semantic:{label,confidence:.95,margin:.9,replySimilarity:.05,scene:{label,confidence:.95,margin:.9}}}).reply,false)
+ }
+ assert.equal(scoreGroupReply(input('不用回复了'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'}}).reply,false)
+})
+
+test('weak correlated address labels alone cannot admit unrelated chatter',()=>{
+ const semantic={label:'address',confidence:.28,margin:.01,scene:{label:'address',confidence:.2,margin:.01}}
+ assert.equal(scoreGroupReply(input('随便聊聊'),{...context,semantic}).reply,false)
+})

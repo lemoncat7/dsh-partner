@@ -1,3 +1,4 @@
+import {backgroundToolScope} from '../execution/background-scope.js'
 import type {Context} from '@deepseek-ai/cordis'
 import type {ToolDefinition} from '@deepseek-ai/dsh-tools'
 import type {PartnerStore} from '../store.js'
@@ -17,15 +18,15 @@ export function browserTool(owner:string, store:PartnerStore, service:BrowserSer
     },presentationMeta:(_args,value)=>(value as any).receipt??null},
     async execute(raw,exec) {
       const agent=exec.agent
-      const guard=()=>{exec.signal.throwIfAborted();if(!agent||store.isCompanionRemoving(owner)||!store.snapshot().sessions.some(r=>r.companionId===owner&&r.sessionId===agent.session.id))throw Error('当前会话不能使用此伙伴的浏览器')}
+      const guard=()=>{exec.signal.throwIfAborted();if(!agent||store.isCompanionRemoving(owner)||!store.snapshot().sessions.some(r=>r.companionId===owner&&r.sessionId===agent.session.id)&&!backgroundToolScope(store,owner,agent.session.id))throw Error('当前会话不能使用此伙伴的浏览器')}
       guard()
-      const events=agent!.session.snapshotEvents(),state=store.snapshot(),scope=browserAudience(owner,agent!.session.id,events,state),config=service.config(owner)
+      const events=agent!.session.snapshotEvents(),state=store.snapshot(),scope=backgroundToolScope(store,owner,agent!.session.id)?.browserScope??browserAudience(owner,agent!.session.id,events,state),config=service.config(owner)
       const last=events.filter(e=>e.type==='user/message').at(-1),input=raw as BrowserInput
       if(input.action==='recent'){
         if(!config?.enabled||last&&isIdleContactNotice(last)&&!config.autonomous)throw Error('浏览器能力未开启')
         return {source:'browser',records:recentBrowserReceipts(owner,scope,config,events,8),...(browserAssistance(config,scope)?{assistance:browserAssistance(config,scope)}:{}),notice:'这些是本会话已确认的近期工具操作，不是实时页面；页面可能改变，需要时 tabs/inspect 核对。没有记录不代表没有发生。'}
       }
-      const currentGuard=()=>{guard();if(browserAudience(owner,agent!.session.id,agent!.session.snapshotEvents(),store.snapshot())!==scope)throw Error('当前会话来源已变化，请重新核对浏览器操作')}
+      const currentGuard=()=>{guard();if((backgroundToolScope(store,owner,agent!.session.id)?.browserScope??browserAudience(owner,agent!.session.id,agent!.session.snapshotEvents(),store.snapshot()))!==scope)throw Error('当前会话来源已变化，请重新核对浏览器操作')}
       const result=await service.run(owner,input,exec.signal,currentGuard,!!last&&isIdleContactNotice(last))
       const receipt=result.browserObservation&&scope?{kind:'partner-browser-v1',owner,scope,callId:exec.callId,action:input.action,observation:result.browserObservation}:undefined
       currentGuard()

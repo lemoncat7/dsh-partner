@@ -31,4 +31,15 @@ class Tests(unittest.TestCase):
         with patch('classifier.time.monotonic',return_value=121):m.classify('new')
         self.assertEqual(len(m.cache),1)
 
+    def test_scene_and_profile_use_current_vector_without_contaminating_group_similarity(self):
+        m=self.fixture();m.scene={'labels':['share','other'],'weights':np.eye(2),'bias':np.zeros(2)}
+        result=m.classify('related current',['unrelated group'],{'profile':['related configured persona'],'partnerText':'related delivered reply'})
+        self.assertEqual(result['scene']['label'],'share')
+        self.assertEqual(result['contextSimilarity'],0)
+        self.assertEqual(result['profileSimilarity'],1)
+        self.assertEqual(result['replySimilarity'],1)
+        self.assertEqual(result['label'],'engage')
+        before=len(m.encoder.calls);m.classify('related current',['unrelated group'],{'profile':['related configured persona'],'partnerText':'related delivered reply'})
+        self.assertEqual(len(m.encoder.calls),before)
+
 if __name__=='__main__':unittest.main()

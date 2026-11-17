@@ -79,7 +79,7 @@ test('preserves and renews isolated companion sessions correctly', async () => {
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('creates and reuses a local companion conversation without a channel pairing', async () => {
+test('creates and reuses a local companion conversation without a channel pairing', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-partner-local-session-'))
   try {
     const store = await PartnerStore.open(join(directory, 'state.json'))
@@ -95,9 +95,11 @@ test('creates and reuses a local companion conversation without a channel pairin
         get() { return undefined },
       async resume({resumeSessionId}) { throw Object.assign(new Error('not persisted yet'), {name:'SessionPersistenceNotFoundError',sessionId:resumeSessionId}) },
         async create(options) {
-          const agentCtx = { get: name => name === 'agentPresets' ? { async mount() {} } : undefined, systemPrompt: { section() {} } }
+          const root=new Context();root.provide('agentPresets',{async mount(){}})
+          const scope=createScope(root,{}, {parent:{}});t.after(()=>scope.dispose())
+          const agentCtx = scope.ctx.extend({tools:{register:()=>()=>{}},systemPrompt:{section:()=>()=>{}}})
           await options.setup(agentCtx)
-          const agent = { status: 'idle', session: { id: options.sessionId, header: { cwd: options.meta.cwd }, events: [], seq: 0 } }
+          const agent = { ctx:agentCtx,status: 'idle', session: { snapshotEvents:()=>[],id: options.sessionId, header: { cwd: options.meta.cwd }, events: [], seq: 0 } }
           created.push(options.sessionId)
           return { agent, async dispose() {} }
         },
@@ -167,7 +169,7 @@ test('recomposes one recovered partner agent exactly once and releases its scope
     const runtime = new PartnerAgentRuntime(ctx, store, directory, undefined, undefined, undefined, composer)
     await runtime.prepareSession(route.id)
     await runtime.prepareSession(route.id)
-    assert.equal(composerRuns, 0)
+    assert.equal(composerRuns, 1,'restored tools must be ready before the first native tool snapshot')
     await runtime.prepareAgentTurn(agent, 1, new AbortController().signal)
     assert.equal(maintenanceRuns, 0)
     assert.equal(composerRuns, 1)

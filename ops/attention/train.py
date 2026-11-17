@@ -2,9 +2,9 @@
 import json, pathlib, argparse
 import numpy as np
 from encoder import Encoder
-p = argparse.ArgumentParser();p.add_argument('--model-dir', required=True);p.add_argument('--output', required=True);args = p.parse_args()
+p = argparse.ArgumentParser();p.add_argument('--model-dir', required=True);p.add_argument('--output', required=True);p.add_argument('--training', default='training.json');args = p.parse_args()
 root = pathlib.Path(__file__).parent
-rows = json.loads((root / 'training.json').read_text())
+rows = json.loads((root / args.training).read_text())
 labels = sorted({r['label'] for r in rows})
 encoder = Encoder(pathlib.Path(args.model_dir))
 x = np.concatenate([encoder.encode([r['text'] for r in rows[i:i+8]]) for i in range(0,len(rows),8)])

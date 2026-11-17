@@ -1,3 +1,4 @@
+import {runtimeSnapshot,runtimePolicy} from '../companions/runtime-policy.js'
 import { ReplyTurns, ReplySupersededError, type ReplyTurn } from './reply-turn.js'
 import {qqIdentityRelation} from './qq/identity-binding.js'
 import {routeGroupReply} from './qq/reply-rules.js'
@@ -141,7 +142,7 @@ export class ChannelManager {
         if(!current?.direct||current.updatedAt!==input.expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
         current.direct.baseUrl=config.baseUrl;current.updatedAt=Date.now()
       }) } catch(error){await this.credentials.write(channelId,previous);throw error}
-    } finally { if(this.store.snapshot().channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
+    } finally { if(runtimeSnapshot(this.store).channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
   }
 
   async updateQq(channelId:string,value:unknown,expectedUpdatedAt:number):Promise<void> {
@@ -156,7 +157,7 @@ export class ChannelManager {
       const current=state.channels.find(c=>c.id===channelId)
       if(!current||current.updatedAt!==expectedUpdatedAt)throw Error('配置已变化，请刷新后重试')
       current.qq=settings;current.updatedAt=Date.now()
-    }) } finally { if(this.store.snapshot().channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
+    }) } finally { if(runtimeSnapshot(this.store).channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
   }
 
   async qqDirectory(channelId:string,kind:'groups'|'friends'|'faces'|'stickers'):Promise<unknown> {
@@ -196,7 +197,7 @@ export class ChannelManager {
     const channel=requiredChannel(this.store,channelId)
     if(channel.platform!=='qq'||!channel.enabled)throw Error('QQ 渠道未启用')
     const guard=()=>{
-      const state=this.store.snapshot(),current=state.channels.find(c=>c.id===channelId)
+      const state=runtimeSnapshot(this.store),current=state.channels.find(c=>c.id===channelId)
       if(!current?.enabled||current.updatedAt!==channel.updatedAt||!channelReplyAllowed(state,channelId,userId))throw Error('渠道设置或接收人授权已变化')
     }
     guard()
@@ -216,7 +217,7 @@ export class ChannelManager {
   }
 
   async views(): Promise<ChannelView[]> {
-    return Promise.all(this.store.snapshot().channels.map(async channel => {
+    return Promise.all(runtimeSnapshot(this.store).channels.map(async channel => {
       const runtime = this.runtime.get(channel.id) ?? { status: 'stopped' as const }
       const {ttsReceipts: _ttsReceipts,...channelView}=channel
       return {
@@ -234,7 +235,7 @@ export class ChannelManager {
   }
 
   private idleDeliveryStatus(channelId:string):{idleDelivery?:string} {
-    const pending=(this.store.snapshot().notificationDeliveries??[]).filter(r=>r.targets.some(t=>t.channelId===channelId)&&r.id.includes('"idle:')).sort((a,b)=>b.createdAt-a.createdAt)[0]
+    const pending=(runtimeSnapshot(this.store).notificationDeliveries??[]).filter(r=>r.targets.some(t=>t.channelId===channelId)&&r.id.includes('"idle:')).sort((a,b)=>b.createdAt-a.createdAt)[0]
     if(!pending||pending.completedAt)return {}
     const target=pending.targets.find(t=>t.channelId===channelId)
     const expired=Date.now()-pending.createdAt>3600000
@@ -246,7 +247,7 @@ export class ChannelManager {
 
   async startEnabled(): Promise<void> {
     this.startChatRecovery()
-    for (const channel of this.store.snapshot().channels) if (channel.enabled) {
+    for (const channel of runtimeSnapshot(this.store).channels) if (channel.enabled) {
       try { await this.start(channel.id) }
       catch { this.runtime.set(channel.id,{status:'error',lastError:'渠道启动失败，请检查凭据和配置'}) }
     }
@@ -256,7 +257,7 @@ export class ChannelManager {
     this.startChatRecovery()
     if (this.tasks.has(channelId)) return
     const channel = requiredChannel(this.store, channelId)
-    if ((!channel.platform || channel.platform === 'weixin') && this.store.snapshot().channels.some(c => c.id !== channelId && c.companionId === channel.companionId && (!c.platform || c.platform === 'weixin') && c.enabled)) {
+    if ((!channel.platform || channel.platform === 'weixin') && runtimeSnapshot(this.store).channels.some(c => c.id !== channelId && c.companionId === channel.companionId && (!c.platform || c.platform === 'weixin') && c.enabled)) {
       this.runtime.set(channelId, { status: 'error', lastError: '此伙伴有多个微信渠道启用，请先停用其他渠道，再重新扫码连接需要保留的渠道' })
       return
     }
@@ -330,12 +331,12 @@ export class ChannelManager {
   }
 
   async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal, channelRouteId?: string): Promise<void> {
-    const route=this.store.snapshot().sessions.find(s=>s.sessionId===sessionId&&s.id===channelRouteId)
+    const route=runtimeSnapshot(this.store).sessions.find(s=>s.sessionId===sessionId&&s.id===channelRouteId)
     if(!route||route.kind==='local')throw new Error('当前会话没有绑定渠道')
     const channel=requiredChannel(this.store,route.channelId)
     if(channel.companionId!==route.companionId)throw new Error('附件原渠道不再属于当前伙伴')
     if(!channel.enabled)throw new Error('渠道已停用')
-    if(!channelReplyAllowed(this.store.snapshot(),route.channelId,route.userId))throw new Error('渠道联系人尚未批准')
+    if(!channelReplyAllowed(runtimeSnapshot(this.store),route.channelId,route.userId))throw new Error('渠道联系人尚未批准')
     const credential=await this.credentials.read(route.channelId)
     await this.sender(channel, credential, route.userId).sendAttachment(route.userId,file,this.contextTokens.get(`${route.channelId}:${route.userId}`),signal)
   }
@@ -343,7 +344,7 @@ export class ChannelManager {
   /** TTS has its own durable receipt; transport resolves only after the channel acknowledges audio delivery. */
   async sendTtsAudio(sessionId:string,file:PartnerOutboundAttachment,signal:AbortSignal,routeId:string,guard:()=>void):Promise<void> {
     guard()
-    const route=this.store.snapshot().sessions.find(r=>r.id===routeId&&r.sessionId===sessionId&&r.kind==='channel')
+    const route=runtimeSnapshot(this.store).sessions.find(r=>r.id===routeId&&r.sessionId===sessionId&&r.kind==='channel')
     if(!route)throw Error('语音会话已变化')
     const channel=requiredChannel(this.store,route.channelId)
     if(!['weixin','matrix','mattermost'].includes(channel.platform??'weixin'))throw Error('此渠道不支持音频附件交付')
@@ -355,12 +356,12 @@ export class ChannelManager {
   async notifyContinuation(entry: import('../scheduler/domain.js').ScheduledPartnerTask): Promise<void> {
     const wake = entry.continuation
     if (!wake?.finalReply || wake.board) return
-    const route = savedContinuationRoute(this.store.snapshot(), entry.companionId, wake)
+    const route = savedContinuationRoute(runtimeSnapshot(this.store), entry.companionId, wake)
     if (!route || route.companionId !== entry.companionId) return
-    if (route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === entry.companionId)?.notificationDelivery) return
+    if (route.kind === 'local' && !runtimeSnapshot(this.store).companions.find(c => c.id === entry.companionId)?.notificationDelivery) return
     const reply = await prepareChannelReply(wake.finalReply, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId))
     await this.queueProactive(route, `schedule-final:${entry.id}:${wake.finalReply.key}`, reply, () => {
-      const current = this.store.snapshot().schedules.find(s => s.id === entry.id)
+      const current = runtimeSnapshot(this.store).schedules.find(s => s.id === entry.id)
       return this.store.hasCapability(entry.companionId, 'schedules') && current?.continuation?.state === wake.state
         && (!wake.finalReply || current.continuation.finalReply?.key === wake.finalReply.key)
     }, true)
@@ -369,9 +370,9 @@ export class ChannelManager {
   async notifyTaskResult(task: BoardTask): Promise<void> {
     if (task.requirementId) return
     if (!task.creatorCompanionId || (task.status !== 'done' && task.status !== 'blocked')) return
-    const routes = this.store.snapshot().sessions.filter(item => item.companionId === task.creatorCompanionId)
+    const routes = runtimeSnapshot(this.store).sessions.filter(item => item.companionId === task.creatorCompanionId)
     const route = selectTaskNotificationRoute(routes, task.creatorSessionId, () => false)
-    if (!route || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
+    if (!route || (route.kind === 'local' && !runtimeSnapshot(this.store).companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const cwd = route.cwd ?? partnerCwd(this.defaultCwd, task.creatorCompanionId)
     const delivery = await prepareTaskResultDelivery(task, cwd)
     await this.queueProactive(route, `task-result:${task.id}:${task.revision}:${task.status}`, {
@@ -392,13 +393,13 @@ export class ChannelManager {
     if (!this.requirementDelivery) throw new Error('需求附件交付服务尚未初始化')
     // The owner authors the reply. Transport neither rewrites it nor invents extra documents.
     const text = summary
-    const state = this.store.snapshot()
+    const state = runtimeSnapshot(this.store)
     const latest = state.requirements?.find(r => r.id === item.id)
     if (!latest || latest.revision !== item.revision || latest.status !== item.status ||
       (stage && (!requirementCanReportStage(state, latest) || requirementProgressKey(state, latest) !== item.stageReport!.key))) throw new Error('需求已调整，取消旧结果投递')
     const receipt = stage ? `requirement-stage:${item.id}:${item.stageReport!.key}:delivery-v2` : `requirement-result:${item.id}:${item.revision}:delivery-v2`
     const stillValid = () => {
-      const state = this.store.snapshot(), latest = state.requirements?.find(r => r.id === item.id)
+      const state = runtimeSnapshot(this.store), latest = state.requirements?.find(r => r.id === item.id)
       return Boolean(latest && latest.revision === item.revision && latest.status === item.status &&
         (!stage || (requirementCanReportStage(state, latest) && requirementProgressKey(state, latest) === item.stageReport!.key)))
     }
@@ -407,18 +408,18 @@ export class ChannelManager {
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
       const draft = item.deliveryDraft
       const selected = !stage && draft && draft.summary === summary ? draft.attachmentIds : []
-      const files = await requirementAttachments(item, this.store.snapshot(), service, selected)
+      const files = await requirementAttachments(item, runtimeSnapshot(this.store), service, selected)
       const attachments = await Promise.all(files.map(file => service.outbound(file)))
       if (!stillValid()) throw new Error('需求已调整，取消旧结果投递')
       await this.agents.recordRequirementResult(route, receipt, text, files, service, prefix)
-      const localOnly = route.kind === 'local' && !this.store.snapshot().companions.find(c => c.id === route.companionId)?.notificationDelivery
+      const localOnly = route.kind === 'local' && !runtimeSnapshot(this.store).companions.find(c => c.id === route.companionId)?.notificationDelivery
       if (!localOnly) await this.queueProactive(route, receipt, { text, attachments, attachmentScope: item.id, ...(stage ? { attachmentPolicy: 'text-only' as const } : {}) }, stillValid)
     })
   }
 
   async sendIdleIntermediate(sessionId:string,parts:import('../chat/protocol.js').ChatPart[],routeId:string,receipt:string,signal:AbortSignal):Promise<void> {
     signal.throwIfAborted()
-    const state=this.store.snapshot(),route=state.sessions.find(r=>r.id===routeId&&r.sessionId===sessionId),claim=route?.idleContactState
+    const state=runtimeSnapshot(this.store),route=state.sessions.find(r=>r.id===routeId&&r.sessionId===sessionId),claim=route?.idleContactState
     if(!route||route.kind!=='channel'||!claim||claim.policyRevision===undefined)throw Error('自主活动没有可投递的渠道来源')
     const origin={routeId,sessionId,messageId:claim.messageId,userMessageId:claim.userMessageId,policyRevision:claim.policyRevision}
     if(!await this.agents.idleContactDeliveryCurrent(origin))throw Error('自主活动已变化，未发送中途消息')
@@ -435,7 +436,7 @@ export class ChannelManager {
       const inputs=events.filter(e=>e.type==='user/message'&&e.data.source.kind==='user')
       const lastInput=inputs.at(-1)
       if(lastInput?.type==='user/message' && !events.some(isInternalTaskNotice) && !events.some(isIdleContactNotice)) {
-        const state=this.store.snapshot(), routes=state.sessions.filter(r=>r.sessionId===session.id)
+        const state=runtimeSnapshot(this.store), routes=state.sessions.filter(r=>r.sessionId===session.id)
         const local=routes.find(r=>r.kind==='local')
         const parts=channelReplyPartsAfter(events,0,true)
         if(local && (parts.text||parts.chatParts?.length) && !inputs.some(e=>e.type==='user/message'&&routes.some(r=>r.kind==='channel'&&r.inboundMessageIds?.includes(e.data.id)))) {
@@ -445,19 +446,19 @@ export class ChannelManager {
       const notice=events.find(isIdleContactNotice)
       if(notice?.type==='user/message') {
         if(events.some(isActivitySilenceRequested))return
-        const route=this.store.snapshot().sessions.find(r=>r.sessionId===session.id && r.idleContactState?.messageId===notice.data.id)
+        const route=runtimeSnapshot(this.store).sessions.find(r=>r.sessionId===session.id && r.idleContactState?.messageId===notice.data.id)
         if(!route)return
         const valid=()=>{
-          const state=this.store.snapshot(), companion=state.companions.find(c=>c.id===route.companionId)
+          const state=runtimeSnapshot(this.store), companion=state.companions.find(c=>c.id===route.companionId)
           const current=state.sessions.find(r=>r.id===route.id), claim=current?.idleContactState
           return Boolean(companion && current && activityPolicyCurrent(state,companion,current) && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !isSleeping(companion) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
         }
         if(route.kind==='channel' && valid()) {
           const parts=channelReplyPartsAfter(events,0,true)
           if(parts.text||parts.chatParts?.length) {
-            const card=this.store.snapshot().companions.find(c=>c.id===route.companionId)?.characterCard
+            const card=runtimeSnapshot(this.store).companions.find(c=>c.id===route.companionId)?.characterCard
             const reply=segmentIdleChatReply(await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId)),Boolean(card?.enabled && card.segmentedReplies))
-            const claim=route.idleContactState!,state=this.store.snapshot(),channel=state.channels.find(c=>c.id===route.channelId)!
+            const claim=route.idleContactState!,state=runtimeSnapshot(this.store),channel=state.channels.find(c=>c.id===route.channelId)!
             reply.idleContactOrigin={routeId:route.id,sessionId:session.id,messageId:notice.data.id,userMessageId:claim.userMessageId,policyRevision:claim.policyRevision!}
             if(channel.direct)reply.directSource={routeId:route.id,sessionId:route.sessionId,accountId:channel.accountId,baseUrl:channel.direct.baseUrl,targetId:directReplyTarget(state,route.channelId,route.userId)}
             try {
@@ -473,7 +474,7 @@ export class ChannelManager {
       }
     }
     const route = this.routeForSession(session.id)
-    if (route === undefined || (route.kind === 'local' && !this.store.snapshot().companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
+    if (route === undefined || (route.kind === 'local' && !runtimeSnapshot(this.store).companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
     const concernNotice = concernCreatedNoticeFromEvent(event)
     if (concernNotice !== undefined) {
       await this.queueProactive(route, `concern-created:${session.id}:${event.seq}`, { text: concernNotice, attachments: [] })
@@ -482,7 +483,7 @@ export class ChannelManager {
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const history = session.snapshotEvents().filter(item => item.seq < event.seq)
     const events = completedTurnEvents(history, event)
-    const final = continuationFinalReply(this.store.snapshot().schedules, session.id, history, events, event)
+    const final = continuationFinalReply(runtimeSnapshot(this.store).schedules, session.id, history, events, event)
     if (final) {
       await this.store.update(state => {
         const wake = state.schedules.find(item => item.id === final.id)?.continuation
@@ -510,25 +511,28 @@ export class ChannelManager {
   }
   async deliverBackgroundResult(run:import('../execution/domain.js').ExecutionRun,reply:PartnerReply):Promise<void> {
     const b=run.background;if(!b)throw Error('后台任务缺少原始来源')
+    if(runtimeSnapshot(this.store).recentReceipts.includes('background:'+run.id))return
     const current=()=>{
-      const state=this.store.snapshot(),c=state.companions.find(c=>c.id===run.ownerCompanionId),channel=state.channels.find(c=>c.id===b.channelId)
-      if(channel?.platform!=='qq'||!qqIdentityRelation(channel.qq,b.userId)?.matched)return false
+      const state=runtimeSnapshot(this.store),c=state.companions.find(c=>c.id===run.ownerCompanionId),channel=state.channels.find(c=>c.id===b.channelId)
+      if(!channel?.enabled||channel.platform==='qq'&&!qqIdentityRelation(channel.qq,b.userId)?.matched)return false
       if(!c||b.capabilities.some(cap=>!c.capabilities.includes(cap as never)))return false
       return state.sessions.some(r=>r.id===b.routeId&&r.sessionId===b.sourceSessionId&&r.companionId===run.ownerCompanionId&&r.channelId===b.channelId&&r.userId===b.userId)&&channelReplyAllowed(state,b.channelId,b.userId,b.targetId)
     }
     if(!current())throw Error('后台任务原始来源已失效，保留结果')
-    const payload:PartnerReply={...reply,directSource:{routeId:b.routeId,sessionId:b.sourceSessionId,accountId:b.accountId,baseUrl:b.baseUrl,targetId:b.targetId}}
+    const voiced=await this.agents.prepareBackgroundDelivery(run,reply)
+    if(!current())throw Error('后台任务原始来源已失效，保留结果')
+    const payload:PartnerReply={...voiced,directSource:{routeId:b.routeId,sessionId:b.sourceSessionId,accountId:b.accountId,baseUrl:b.baseUrl,targetId:b.targetId}}
     this.checkChatSource(b.channelId,b.userId,payload)
-    const route=this.store.snapshot().sessions.find(r=>r.id===b.routeId)!
+    const route=runtimeSnapshot(this.store).sessions.find(r=>r.id===b.routeId)!
     await this.queueProactive(route,'background:'+run.id,payload,current,true)
   }
 
   private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply, stillValid?: () => boolean, exactOrigin = false): Promise<void> {
-    if (this.store.snapshot().recentReceipts.includes(receipt)) return
+    if (runtimeSnapshot(this.store).recentReceipts.includes(receipt)) return
     const key = `${route.channelId}:${route.userId}`
     const previous = this.outboundQueues.get(key) ?? Promise.resolve()
     const current = previous.catch(() => {}).then(async () => {
-      if (this.store.snapshot().recentReceipts.includes(receipt)) return
+      if (runtimeSnapshot(this.store).recentReceipts.includes(receipt)) return
       if (stillValid && !stillValid()) throw new Error('需求已调整，取消旧结果投递')
       await this.sendProactiveReply(route.channelId, route.userId, reply, receipt, route.companionId, exactOrigin, stillValid ? ()=>{if(!stillValid())throw Error('原任务授权已变化')} : undefined)
       await this.rememberReceipt(receipt)
@@ -538,7 +542,7 @@ export class ChannelManager {
   }
 
   private routeForSession(sessionId:string):ChannelSession|undefined {
-    const state=this.store.snapshot()
+    const state=runtimeSnapshot(this.store)
     const candidates=state.sessions.filter(item=>item.sessionId===sessionId)
     const inbound=(route:ChannelSession)=>state.pairings.find(p=>p.channelId===route.channelId&&p.userId===route.userId)?.lastInboundAt??0
     return candidates.filter(item=>item.kind==='channel').sort((a,b)=>inbound(b)-inbound(a))[0]??candidates[0]
@@ -546,14 +550,14 @@ export class ChannelManager {
 
   private async sendProactiveReply(channelId: string, userId: string, reply: PartnerReply, receipt?: string, owner?: string, exactOrigin = false, validate?:()=>void): Promise<void> {
     validate?.()
-    const state = this.store.snapshot()
+    const state = runtimeSnapshot(this.store)
     const companionId = exactOrigin ? owner : state.channels.find(c => c.id === channelId)?.companionId ?? owner
     if (!companionId) throw new Error('通知来源伙伴不存在')
     await this.notificationDelivery.deliver(receipt ?? randomBytes(16).toString('hex'), companionId,
-      () => exactOrigin ? [{channelId, userId}] : notificationRoutes(this.store.snapshot(),channelId,userId,companionId), reply,
+      () => exactOrigin ? [{channelId, userId}] : notificationRoutes(runtimeSnapshot(this.store),channelId,userId,companionId), reply,
       async (target, payload, sendPart) => {
         validate?.()
-        const current = this.store.snapshot()
+        const current = runtimeSnapshot(this.store)
         if (!current.channels.some(c => c.id === target.channelId && c.companionId === companionId)) throw new Error('通知目标不属于当前伙伴')
         await this.sendNotificationTarget(target.channelId, target.userId, payload, sendPart,validate)
       })
@@ -588,7 +592,7 @@ export class ChannelManager {
       validate?.();this.checkChatSource(channelId,userId,reply)
       if(reply.idleContactOrigin){
         if(!await this.agents.idleContactDeliveryCurrent(reply.idleContactOrigin))throw Error('主动联系会话已变化，取消旧消息投递')
-        const state=this.store.snapshot(),origin=reply.idleContactOrigin,companion=state.companions.find(c=>c.id===channel.companionId),route=state.sessions.find(r=>r.id===origin.routeId)
+        const state=runtimeSnapshot(this.store),origin=reply.idleContactOrigin,companion=state.companions.find(c=>c.id===channel.companionId),route=state.sessions.find(r=>r.id===origin.routeId)
         if(!companion||!route||!activityPolicyCurrent(state,companion,route)||companion.updatedAt!==origin.policyRevision||isSleeping(companion)||route?.sessionId!==origin.sessionId||route.idleContactState?.messageId!==origin.messageId||route.lastMessageAt>(route.idleContactState?.attemptedAt??0))throw Error('主动联系设置或会话已变化，取消旧消息投递')
       }
       const current = requiredChannel(this.store, channelId)
@@ -662,7 +666,7 @@ export class ChannelManager {
     this.chatRecoveryTimer.unref?.()
   }
   private async recoverIdleReplies():Promise<void> {
-    for(const record of this.store.snapshot().notificationDeliveries??[]){
+    for(const record of runtimeSnapshot(this.store).notificationDeliveries??[]){
       if(this.notificationShutdown.signal.aborted)return
       const origin=record.reply.idleContactOrigin
       if(!origin||record.completedAt||Date.now()-record.createdAt>3600000||record.targets.length!==1)continue
@@ -670,7 +674,7 @@ export class ChannelManager {
       if(!target.retrySafe||Date.now()-(target.lastAttemptAt??0)<30000||this.runtime.get(target.channelId)?.status!=='running')continue
       try {
         if(!await this.agents.idleContactDeliveryCurrent(origin))continue
-        const route=this.store.snapshot().sessions.find(r=>r.id===origin.routeId&&r.sessionId===origin.sessionId&&r.channelId===target.channelId&&r.userId===target.userId)
+        const route=runtimeSnapshot(this.store).sessions.find(r=>r.id===origin.routeId&&r.sessionId===origin.sessionId&&r.channelId===target.channelId&&r.userId===target.userId)
         if(!route)continue
         this.checkChatSource(target.channelId,target.userId,record.reply)
         await this.queueProactive(route,`idle:${origin.messageId}`,record.reply,()=>!this.notificationShutdown.signal.aborted,true)
@@ -679,7 +683,7 @@ export class ChannelManager {
   }
 
   private async recoverChatReplies():Promise<void> {
-    for(const record of this.store.snapshot().notificationDeliveries??[]){
+    for(const record of runtimeSnapshot(this.store).notificationDeliveries??[]){
       if(this.notificationShutdown.signal.aborted)return
       if(record.completedAt||!record.reply.chatParts||!record.reply.directSource||record.targets.some(t=>Date.now()-(t.lastAttemptAt??0)<30000))continue
       const key=JSON.parse(record.id) as [string,string]
@@ -714,12 +718,12 @@ export class ChannelManager {
     const eventId = stableEventId(message)
     if (!userId || !eventId) return
     const receipt = `${channel.id}:${eventId}`
-    if (this.store.snapshot().recentReceipts.includes(receipt)) return
+    if (runtimeSnapshot(this.store).recentReceipts.includes(receipt)) return
     const items = message.item_list ?? []
     const text = extractText(items)
     const tokenKey = `${channel.id}:${userId}`
     if (message.context_token) this.contextTokens.set(tokenKey, message.context_token)
-    const pairing = this.store.snapshot().pairings.find(item => item.channelId === channel.id && item.userId === userId)
+    const pairing = runtimeSnapshot(this.store).pairings.find(item => item.channelId === channel.id && item.userId === userId)
     if (pairing?.status !== 'approved') {
       if (pairing?.status !== 'blocked' && pairing === undefined) {
         const now = Date.now()
@@ -738,7 +742,7 @@ export class ChannelManager {
       await this.rememberReceipt(receipt)
       return
     }
-    const route = this.store.snapshot().sessions.find(item => item.channelId === channel.id && item.userId === userId)
+    const route = runtimeSnapshot(this.store).sessions.find(item => item.channelId === channel.id && item.userId === userId)
     await this.markInbound(channel.id,userId)
     if (route !== undefined && text && await this.answerPendingQuestion(route.sessionId, text, channel, api, userId, signal)) {
       await this.rememberReceipt(receipt)
@@ -765,7 +769,7 @@ export class ChannelManager {
       return
     }
     const authored = new AuthoredProgress(text => api.sendText(userId, text, this.contextTokens.get(tokenKey), signal),
-      () => channelReplyAllowed(this.store.snapshot(), channel.id, userId) && this.store.snapshot().channels.some(c => c.id === channel.id && c.enabled && c.companionId === companion.id), signal,8)
+      () => channelReplyAllowed(runtimeSnapshot(this.store), channel.id, userId) && runtimeSnapshot(this.store).channels.some(c => c.id === channel.id && c.enabled && c.companionId === companion.id), signal,8)
     const updates:ReplyProgress=Object.assign(authored.update,{sendChat:async(parts:import('../chat/protocol.js').ChatPart[],routeId:string,key:string)=>{
       signal.throwIfAborted();await this.sendChatReply(channel,userId,key,{text:'',attachments:[],chatParts:parts,chatOriginRouteId:routeId})
     }})
@@ -796,12 +800,12 @@ export class ChannelManager {
     request: AskUserQuestionRequestEvent,
     next: () => Promise<AskUserQuestionAnswer>,
   ): Promise<AskUserQuestionAnswer> {
-    const origin = request.agent && questionOrigin(request.agent.session.id, request.agent.session.snapshotEvents(), this.store.snapshot().sessions)
+    const origin = request.agent && questionOrigin(request.agent.session.id, request.agent.session.snapshotEvents(), runtimeSnapshot(this.store).sessions)
     if (!origin) return next()
     route = origin
     request.signal?.throwIfAborted()
     if (this.pendingQuestions.has(route.sessionId)) throw new Error('当前会话已有等待回答的问题，请先完成该问题')
-    const state = this.store.snapshot()
+    const state = runtimeSnapshot(this.store)
     const current = state.sessions.find(item => item.id === route.id && item.sessionId === route.sessionId)
     const channel = state.channels.find(item => item.id === route.channelId)
     const pairing = state.pairings.find(item => item.channelId === route.channelId && item.userId === route.userId)
@@ -836,7 +840,7 @@ export class ChannelManager {
       // An active connector handles answers while model work is dispatched.
       // External/native turns without a connector keep the independent receiver.
       const cursor = api instanceof DirectTransport && !this.directDispatchers.has(channel.id) ? (await api.poll(undefined, lifetime)).cursor : undefined
-      const fresh = this.store.snapshot()
+      const fresh = runtimeSnapshot(this.store)
       if (this.pendingQuestions.get(route.sessionId) !== pending
         || !fresh.channels.some(item => item.id === channel.id && item.enabled && item.companionId === route.companionId && item.accountId === channel.accountId && item.platform === channel.platform && item.direct?.baseUrl === channel.direct?.baseUrl)
         || !channelReplyAllowed(fresh,channel.id,route.userId,api instanceof DirectTransport?api.config.targetId:undefined)) throw new Error('提问来源或授权已变化，取消发送')
@@ -863,7 +867,7 @@ export class ChannelManager {
   private async answerPendingQuestion(sessionId: string, text: string, channel: WeixinChannel, api: ChannelSender, userId: string, signal: AbortSignal): Promise<boolean> {
     const pending = this.pendingQuestions.get(sessionId)
     if (pending === undefined || pending.channelId !== channel.id || pending.userId !== userId) return false
-    const state = this.store.snapshot()
+    const state = runtimeSnapshot(this.store)
     const pairing = state.pairings.find(item => item.channelId === channel.id && item.userId === userId)
     if (!channelReplyAllowed(state,channel.id,userId) || !state.channels.some(item => item.id === channel.id && item.enabled && item.companionId === channel.companionId && item.accountId === channel.accountId)) return false
     if (api instanceof DirectTransport && pairing?.directTargetId && pairing.directTargetId !== api.config.targetId) return false
@@ -880,14 +884,14 @@ export class ChannelManager {
 
   private async receiveDirectAnswer(pending: PendingQuestion, channel: WeixinChannel, api: DirectTransport, cursor: string, signal: AbortSignal): Promise<void> {
     while (!signal.aborted && this.pendingQuestions.get(pending.sessionId) === pending) {
-      const state = this.store.snapshot()
+      const state = runtimeSnapshot(this.store)
       if (!state.channels.some(item => item.id === channel.id && item.enabled && item.companionId === channel.companionId)
         || !channelReplyAllowed(state,channel.id,pending.userId,api.config.targetId)) throw new Error('提问来源渠道或联系人权限已撤回')
       const batch = await api.poll(cursor, signal)
       cursor = batch.cursor
       for (const message of batch.messages) {
         const receipt = `${channel.id}:${message.id}`
-        if (message.sender !== pending.userId || !message.text || this.store.snapshot().recentReceipts.includes(receipt)) continue
+        if (message.sender !== pending.userId || !message.text || runtimeSnapshot(this.store).recentReceipts.includes(receipt)) continue
         if (this.pendingQuestions.get(pending.sessionId) !== pending) return
         await this.rememberReceipt(receipt)
         if (await this.answerPendingQuestion(pending.sessionId, message.text, channel, api, pending.userId, signal)) return
@@ -953,7 +957,7 @@ export class ChannelManager {
         if(batch.warning)roomWarning=batch.warning
         else if(batch.messages.length)roomWarning=undefined
         this.runtime.set(channel.id,{status:'running',...(roomWarning?{lastError:roomWarning}:{})})
-        const seenReceipts=new Set(this.store.snapshot().recentReceipts)
+        const seenReceipts=new Set(runtimeSnapshot(this.store).recentReceipts)
         const unseen=batch.messages.filter(message=>!seenReceipts.has(`${channel.id}:${message.id}`)&&!dispatcher.has(message.id)&&!groupBursts.has(message.id))
         for(const group of groupDirectMessages(unseen,channel.direct.targetId)) {
           const message=group[0]!
@@ -1030,15 +1034,15 @@ export class ChannelManager {
   private async handleDirect(channel: WeixinChannel, api: DirectTransport, event: DirectMessage, signal: AbortSignal, group: readonly DirectMessage[] = [event], prepared: () => void = () => {}, mode = busyEnterMode(this.ctx.settings)): Promise<void> {
     const timing=channel.platform==='qq'?this.qqLatency.start(channel.id,event.id,event.receivedAt):undefined
     try {
-    const seen=this.store.snapshot().recentReceipts
+    const seen=runtimeSnapshot(this.store).recentReceipts
     const events=group.filter(item=>!seen.includes(`${channel.id}:${item.id}`))
     if(!events.length)return
     event=events[0]!
     if(events.some(item=>item.sender!==event.sender||(item.targetId??api.config?.targetId)!==(event.targetId??api.config?.targetId)))throw new Error('不能合并不同联系人的附件消息')
     const receipts=events.map(item=>`${channel.id}:${item.id}`)
-    const pairing=this.store.snapshot().pairings.find(p=>p.channelId===channel.id && p.userId===event.sender)
-    const groupAccess=channel.platform==='qq'&&!!event.qqGroup&&channelReplyAllowed(this.store.snapshot(),channel.id,event.sender,event.targetId)
-    const activeChannel=this.store.snapshot().channels.find(c=>c.id===channel.id&&c.enabled&&c.accountId===channel.accountId&&c.companionId===channel.companionId)
+    const pairing=runtimeSnapshot(this.store).pairings.find(p=>p.channelId===channel.id && p.userId===event.sender)
+    const groupAccess=channel.platform==='qq'&&!!event.qqGroup&&channelReplyAllowed(runtimeSnapshot(this.store),channel.id,event.sender,event.targetId)
+    const activeChannel=runtimeSnapshot(this.store).channels.find(c=>c.id===channel.id&&c.enabled&&c.accountId===channel.accountId&&c.companionId===channel.companionId)
     const policy=qqSettings(activeChannel?.qq),peer=qqGroupPeer(event.sender)
     if(channel.platform==='qq'&&(!activeChannel||(event.qqGroup?(!peer||peer.groupId!==event.qqGroup.groupId||!policy.groupReplies||!policy.groupIds.includes(peer.groupId)||pairing?.status==='blocked'):!policy.privateReplies))){await this.rememberReceipts(receipts);return}
     if(channel.platform==='qq'&&(groupAccess||pairing?.status==='approved')&&api.onebot){
@@ -1120,7 +1124,7 @@ export class ChannelManager {
         const companion=requiredCompanion(this.store,channel.companionId)
         if(event.qqGroup?.autonomous&&companion.characterCard?.enabled)text=`${this.groupAutonomy.guidance(channel.id,event)}\n\n${text}`
         const allowed=()=>{
-          const state=this.store.snapshot()
+          const state=runtimeSnapshot(this.store)
           return state.channels.some(c=>c.id===channel.id&&c.enabled&&c.companionId===channel.companionId&&c.accountId===channel.accountId&&c.direct?.baseUrl===channel.direct?.baseUrl&&c.direct?.targetId===channel.direct?.targetId)&&channelReplyAllowed(state,channel.id,event.sender,event.targetId||channel.direct?.targetId)
         }
         const progressTransport=api.progress?.(event.sender)
@@ -1311,7 +1315,7 @@ export function requiredChannel(store: PartnerStore, id: string): WeixinChannel 
 }
 
 export function requiredCompanion(store: PartnerStore, id: string): Companion {
-  const companion = store.snapshot(['companions']).companions.find(item => item.id === id)
+  const companion = runtimePolicy(store,id)?.companion
   if (companion === undefined) throw new Error('伙伴不存在')
   return companion
 }

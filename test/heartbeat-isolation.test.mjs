@@ -104,3 +104,31 @@ test('commits individual concerns, continues after failure and retries only unfi
   assert.equal(state.heartbeatStates[0].consecutiveFailures, 0)
   await scheduler.close()
 })
+
+test('early wake schedules actual concern deadline; old six-hour drift is repaired without ignoring failure backoff',async()=>{
+ const now=Date.now(),next=now+29000
+ const companion={id:'c',automation:{heartbeat:{enabled:true,intervalMinutes:360,dailyLimit:0}}}
+ const state={companions:[companion],heartbeatStates:[{companionId:'c',nextCheckAt:now,consecutiveFailures:0,sentCount:0}],sessions:[{kind:'local',companionId:'c',channelId:'@local',userId:'u',lastMessageAt:0}],channels:[],pairings:[]}
+ let deadline=next,calls=0
+ const scheduler=new HeartbeatScheduler({logger:{warn(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {heartbeat:async()=>{calls++;throw Error('not yet due')}},{},{pendingNotifications:async()=>[],pendingRecording:async()=>undefined,due:async()=>[],nextDueAt:async()=>deadline})
+ await scheduler.trigger('c')
+ assert.equal(state.heartbeatStates[0].nextCheckAt,next);assert.equal(calls,0)
+ let triggered=0;scheduler.trigger=async()=>{triggered++;return {checked:false,sent:false}}
+ state.heartbeatStates[0].nextCheckAt=now+6*3600000
+ await scheduler.tick();assert.equal(triggered,0)
+ deadline=now-1;await scheduler.tick();assert.equal(triggered,1)
+ state.heartbeatStates[0].consecutiveFailures=1
+ await scheduler.tick();assert.equal(triggered,1,'global backoff retained')
+ await scheduler.close()
+})
+
+test('next concern deadline shares due scope and excludes stopped, archived and recording work',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'concern-deadline-'));t.after(()=>rm(root,{recursive:true,force:true}))
+ const store=new PartnerConcernStore(root)
+ const own=await store.createExplicit('c','@local:u','own'),wild=await store.createExplicit('c','*','wild'),foreign=await store.createExplicit('c','@local:other','foreign')
+ const now=Date.now()
+ await store.deferFailedCheck(own,now+20000);await store.deferFailedCheck(wild,now+29000);await store.deferFailedCheck(foreign,now-1000)
+ assert.equal(await store.nextDueAt('c',['@local:u']),now+20000)
+ assert.equal(await store.nextDueAt('c',[]),undefined)
+ assert.equal(await store.nextDueAt('other',['@local:u']),undefined)
+})

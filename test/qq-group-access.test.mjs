@@ -392,9 +392,10 @@ test('background completion stays on frozen source and uses one durable receipt 
  f.manager.sender=()=>f.api
  const run={id:'native-task',ownerCompanionId:'c',background:{routeId:'r',sourceSessionId:'s',channelId:'qq',userId:f.peer,accountId:f.channel.accountId,baseUrl:'ws://local',targetId:f.target,capabilities:[]}}
  f.state.sessions.push({...f.state.sessions[0],id:'later-route',userId:'group:99887766:33445566'})
- const reply={text:'任务成果',attachments:[]}
+ const reply={text:'任务成果',attachments:[]};let renders=0
+ f.agents.prepareBackgroundDelivery=async(run,payload)=>{renders++;assert.equal(run.background.routeId,'r');return {...payload,text:'按人设组织后的成果'}}
  await f.manager.deliverBackgroundResult(run,reply);await f.manager.deliverBackgroundResult(run,reply)
- assert.deepEqual(f.sent,[{userId:f.peer,text:'任务成果'}])
+ assert.deepEqual(f.sent,[{userId:f.peer,text:'按人设组织后的成果'}]);assert.equal(renders,1)
  f.channel.direct.baseUrl='ws://other-account'
  await assert.rejects(f.manager.deliverBackgroundResult({...run,id:'second-task'},reply),/变更/)
  assert.equal(f.sent.length,1)

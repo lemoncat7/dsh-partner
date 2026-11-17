@@ -268,6 +268,20 @@ export class PartnerConcernStore {
     })
   }
 
+  /** Same scope and eligibility as due(), without its batch limit. */
+  async nextDueAt(companionId: string, scopeIds: string[]): Promise<number | undefined> {
+    if (!scopeIds.length) return undefined
+    const database = await this.open(companionId)
+    try {
+      const scopes = [...new Set([...scopeIds, '*'])]
+      const row = database.prepare(`SELECT MIN(next_check_at) AS next FROM concerns
+        WHERE companion_id = ? AND scope_id IN (${scopes.map(() => '?').join(',')})
+        AND state IN ('active', 'watching') AND control != 'stopped'
+        AND recording_snapshot_json IS NULL`).get(companionId, ...scopes) as {next: number | null}
+      return row.next ?? undefined
+    } finally { database.close() }
+  }
+
   async due(companionId: string, scopeId: string, options: ConcernDueOptions = {}): Promise<PartnerConcern[]> {
     const now = options.now ?? Date.now()
     const limit = options.limit ?? 12
@@ -276,7 +290,7 @@ export class PartnerConcernStore {
       try {
         database.exec('BEGIN IMMEDIATE')
         const rows = database.prepare(`SELECT * FROM concerns WHERE companion_id = ? AND scope_id IN (?, '*')
-          AND state IN ('active', 'watching') AND (? = 1 OR next_check_at <= ?)
+          AND state IN ('active', 'watching') AND control != 'stopped' AND (? = 1 OR next_check_at <= ?)
           AND recording_snapshot_json IS NULL
           AND (? IS NULL OR id = ?)
           ORDER BY priority DESC, next_check_at ASC LIMIT ?`).all(

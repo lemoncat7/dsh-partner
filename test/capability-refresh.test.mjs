@@ -238,7 +238,7 @@ test('cancellation cleans new effects and does not mark the failed turn prepared
   assert.equal(sections.size, 2)
 })
 
-test('role chat preserves the registered tool set across enable, edit and disable', async t => {
+test('role bundle installs its own tools while preserving normal work tools across enable, edit and disable', async t => {
   const { step, store, registered, agent, sections, contexts } = await fixture(t)
   agent.session.deriveMessages = () => []
   agent.session.snapshotEvents = () => []
@@ -246,7 +246,9 @@ test('role chat preserves the registered tool set across enable, edit and disabl
   const tools = [...registered.keys()].sort()
   await store.update(state => { state.companions[0].characterCard = { schemaVersion:1,enabled:true,roleText:'坦率的同行者',identity:'',motivation:'',voice:'',relationship:'',greeting:'',length:'short',narration:false,examples:[],lore:[] } })
   await step(2)
-  assert.deepEqual([...registered.keys()].sort(), tools)
+  const roleTools=[...registered.keys()].sort()
+  assert.ok(tools.every(name=>roleTools.includes(name)))
+  assert.ok(roleTools.includes('partner_affection'))
   assert.doesNotMatch(sections.get('partner-identity'), /用户配置的表达选项/)
   assert.match(contexts.get('partner-conversation-memory'), /用户配置的表达选项/)
   assert.doesNotMatch(contexts.get('partner-conversation-memory'), /本轮聊天提醒|坦率的同行者/)
@@ -255,7 +257,7 @@ test('role chat preserves the registered tool set across enable, edit and disabl
   assert.match(sections.get('partner-identity'), /喜欢冷笑话/)
   assert.match(contexts.get('partner-conversation-memory'), /篇幅偏好：愿意展开聊/)
   assert.doesNotMatch(contexts.get('partner-conversation-memory'), /篇幅偏好：短句接话/)
-  assert.deepEqual([...registered.keys()].sort(), tools)
+  assert.deepEqual([...registered.keys()].sort(), roleTools)
   await store.update(state => { state.companions[0].characterCard.enabled = false })
   await step(4)
   assert.deepEqual([...registered.keys()].sort(), tools)

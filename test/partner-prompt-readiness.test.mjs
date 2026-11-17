@@ -30,6 +30,7 @@ async function fixture(t, composer, mode = 'native') {
   const store = await PartnerStore.open(join(directory, 'state.json'))
   await store.update(s => {
     // A mounted MCP intentionally selects native presentation; PTC fixtures must not enable it.
+    s.companions[0].characterCard=normalizeCharacterCard({enabled:true,roleText:'用于角色聊天工具与权限验证的角色'})
     s.companions[0].capabilities = mode==='ptc'?['schedules']:['schedules', 'mcp']
     s.sessions.push({ id: 'route', companionId: s.companions[0].id, sessionId: agent.session.id, kind: 'local', channelId: '@local', userId: 'owner', lastMessageAt: 1 })
   })
@@ -524,4 +525,55 @@ test('speaker changes select tools without re-registering and presentation does 
  assert.equal(compositions,before);assert.equal(disposals,0)
  const denied=await dispatchTool(f.root.tools,{name:'partner_identity',arguments:{},agent:f.agent,callId:'revoked-cached-view',signal:new AbortController().signal})
  assert.equal(denied.isError,true,'a cached owner view cannot authorize a revoked account')
+})
+
+
+test('before-tool preparation admits and executes restored partner tools in the very first frozen set',async t=>{
+ const f=await fixture(t,{async compose(ctx){return ctx.tools.register(defineContentToolFixture({name:'partner_chat_reply',description:'chat',parameters:{},execute:async()=>[{type:'text',text:'first call succeeded'}]}))}})
+ const signal=new AbortController().signal
+ // Reproduce the host's exact new boundary: pending input -> prepare -> resolve -> assemble -> execute.
+ await f.agent.ctx.serial('agent/prepare-tools',{agent:f.agent,turn:1,messages:[],signal})
+ const toolSet=await f.root.tools.resolve({agent:f.agent,modelSelection:{provider:'fixture',model:'test'},signal})
+ try{
+  const assembly=await f.root.systemPrompt.assemble({agent:f.agent,scope:f.agent,toolSet,signal})
+  assert.ok(assembly.tools.some(t=>t.name==='partner_chat_reply'))
+  const result=await dispatchTool(f.root.tools,{agent:f.agent,name:'partner_chat_reply',arguments:{},signal,callId:'first-real-call',toolSet})
+  assert.equal(result.isError,false);assert.match(JSON.stringify(result.content),/first call succeeded/)
+ }finally{toolSet.dispose()}
+})
+test('channel acquisition explicitly prepares an existing native-resumed agent before its first model step',async t=>{
+ const f=await fixture(t,{async compose(ctx){return ctx.tools.register(defineContentToolFixture({name:'partner_chat_reply',description:'chat',parameters:{},execute:async()=>[{type:'text',text:'ready'}]}))}})
+ f.runtime.attachSession=async()=>{};f.runtime.nameQqSession=async()=>{}
+ const state=f.store.snapshot(),route=state.sessions[0],companion=state.companions[0]
+ const agent=await f.runtime.ensureAgentReady(companion,route)
+ assert.equal(agent,f.agent)
+ const toolSet=await f.root.tools.resolve({agent,modelSelection:{provider:'fixture',model:'test'},signal:new AbortController().signal})
+ try{assert.ok(f.root.tools.get('partner_chat_reply',agent,toolSet))}finally{toolSet.dispose()}
+})
+
+test('one role policy selects actual composition, first request tools and protocols across off/on/off',async t=>{
+ const {PartnerAgentComposition}=await import('../lib/collaboration/composition.js')
+ const f=await fixture(t)
+ const composer=new PartnerAgentComposition(f.store,{bindings:()=>[]},{},{directoryFor:()=>[]},{},{},{})
+ composer.setChatToolFactory(()=>['partner_chat_reply','partner_background_task','partner_browser'].map(name=>defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[{type:'text',text:'executed'}]})))
+ f.runtime.composer=composer
+ await f.store.update(s=>{const c=s.companions[0];c.toolDiscovery=true;c.characterCard.enabled=false;c.relationshipText='隐藏的专属关系';c.characterCard.length='short'})
+ const off=await f.assemble()
+ assert.ok(off.tools.some(t=>t.name==='partner_tools'))
+ assert.ok(!off.tools.some(t=>t.name==='partner_chat_reply'||t.name==='partner_background_task'))
+ assert.doesNotMatch(JSON.stringify(off.sections)+JSON.stringify(off.contexts),/隐藏的专属关系|必须先调用 partner_background_task|最终文字回复使用 partner_chat_reply|短句接话开启分段/)
+ const gateway=f.root.tools.get('partner_tools',f.agent)
+ const list=async()=>JSON.stringify(await gateway.execute({action:'list',query:'partner_'},{agent:f.agent,signal:new AbortController().signal}))
+ assert.doesNotMatch(await list(),/partner_background_task|partner_chat_reply/)
+ assert.match(await list(),/partner_browser/)
+ await f.store.update(s=>{s.companions[0].characterCard.enabled=true})
+ const on=await f.assemble()
+ assert.ok(on.tools.some(t=>t.name==='partner_background_task'))
+ assert.match(JSON.stringify(on.sections),/必须先调用 partner_background_task/)
+ const stale=f.root.tools.get('partner_background_task',f.agent)
+ await f.store.update(s=>{s.companions[0].characterCard.enabled=false})
+ await assert.rejects(stale.execute({},{agent:f.agent,signal:new AbortController().signal}),/撤回/)
+ const restored=await f.assemble()
+ assert.ok(!restored.tools.some(t=>t.name==='partner_background_task'))
+ assert.doesNotMatch(JSON.stringify(restored.sections),/必须先调用 partner_background_task/)
 })

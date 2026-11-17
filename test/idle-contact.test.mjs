@@ -12,7 +12,7 @@ import {HeartbeatScheduler} from '../lib/heartbeat.js'
 const now=Date.parse('2026-10-28T06:00:00Z'),tz='Asia/Shanghai'
 const user={id:'user-1',at:now-3*3600_000}
 function fixture(){
-  const companion={id:'c',updatedAt:1,idleContact:{...DEFAULT_IDLE_CONTACT,enabled:true,routeId:'r'},automation:{heartbeat:{enabled:false}}}
+  const companion={id:'c',updatedAt:1,characterCard:{enabled:true},idleContact:{...DEFAULT_IDLE_CONTACT,enabled:true,routeId:'r'},automation:{heartbeat:{enabled:false}}}
   const route={id:'r',kind:'channel',channelId:'ch',userId:'peer',companionId:'c',sessionId:'s',lastMessageAt:user.at}
   const state={companions:[companion],sessions:[route],channels:[{id:'ch',companionId:'c',enabled:true}],pairings:[{channelId:'ch',userId:'peer',status:'approved'}],heartbeatStates:[],recentReceipts:[]}
   return {companion,route,state}

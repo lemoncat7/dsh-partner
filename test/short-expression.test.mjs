@@ -6,7 +6,7 @@ import {chatTools} from '../lib/chat/tools.js'
 test('short expression is a preference; normal direct reply has no mandatory pre-speech round trip',()=>{
  const card={enabled:true,length:'short',segmentedReplies:true}
  const text=renderConversationTurn(card,1)
- assert.match(text,/简短/);assert.doesNotMatch(text,/20字|48字/)
+ assert.match(text,/一句自然短回复/);assert.doesNotMatch(text,/20字|48字/)
  assert.match(renderChatDeliveryGuidance(card),/聊天最终回复用 partner_chat_reply/)
  assert.doesNotMatch(renderChatDeliveryGuidance(card),/普通短句私聊先用/)
 })
@@ -29,7 +29,7 @@ test('ordinary short reply over twenty characters preserves facts and finishes w
 test('segmented chat shares short-bubble rules with optional expression generation',()=>{
  const card={enabled:true,segmentedReplies:true,length:'short'}
  for(const prompt of [renderChatDeliveryGuidance(card),renderExpressionPreferences(card)]){
-  assert.match(prompt,/半句到两句/);assert.match(prompt,/所有中英文标点符号合计最多一个/);assert.match(prompt,/连续标点逐个计数/);assert.match(prompt,/允许超过三条消息/);assert.match(prompt,/代码、逐字引用、列表、完整文档/)
+  assert.match(prompt,/半句到两句/);assert.match(prompt,/所有中英文标点符号合计最多一个/);assert.match(prompt,/连续标点逐个计数/);assert.match(prompt,/每轮最多 4 条文字/);assert.doesNotMatch(prompt,/每轮通常 1～3 条/);assert.match(prompt,/不截断模型输出/);assert.match(prompt,/代码、逐字引用、列表、完整文档/)
  }
 })
 

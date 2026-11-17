@@ -42,3 +42,31 @@ test('recovery result is visible without turning blocked work into successful de
  assert.equal(concernReplySummary([message('c'),blocked,end],'c'),blocked.data.message.content[0].text)
  assert.equal(concernReplySummary([message('c'),blocked,{type:'turn/end',data:{reason:{kind:'interrupted'}}}],'c'),undefined)
 })
+
+test('automatic recovery requires exact disposal and no later user or task input',async()=>{
+ const {concernDisposed,concernMissingReply,ConcernInterruptedError}=await import('../lib/concern-execution-receipt.js')
+ const disposed={type:'turn/end',data:{reason:{kind:'aborted',reason:{kind:'disposed'}}}}
+ const log=[message('c'),{type:'tool/result'},disposed]
+ assert.equal(concernDisposed(log,'c'),true)
+ assert.ok(concernMissingReply(log,'c') instanceof ConcernInterruptedError)
+ for(const events of [log.concat(message('later')), [message('c'),end], [message('c')], [message('c'),{type:'turn/end',data:{reason:{kind:'aborted',reason:{kind:'user'}}}}]])assert.equal(concernDisposed(events,'c'),false)
+ assert.equal(concernDisposed(log.concat({type:'user/message',data:{source:{kind:'runtime-context'}}}),'c'),true)
+})
+
+
+test('producer-declared skill catalogs preserve final receipts and host-disposal recovery',async()=>{
+ const {concernReplySummary,concernDisposed,concernMissingReply,ConcernInterruptedError}=await import('../lib/concern-execution-receipt.js')
+ const disposed={type:'turn/end',data:{reason:{kind:'aborted',reason:{kind:'disposed'}}}}
+ const blocked={type:'assistant/message',data:{message:{content:[{type:'text',text:'恢复入口受阻，尚未操作公众号'}]}}}
+ for(const source of [{kind:'skill-catalog',form:'catalog',entries:[]},{kind:'skill-catalog',form:'catalog',entries:[],update:true},{kind:'plugin:skill-directory',form:'catalog'},{kind:'plugin:another-skill-provider',form:'catalog'}]){
+  const catalog={type:'user/message',data:{id:'skills',source,content:[{type:'text',text:'Available skills'}]}}
+  assert.equal(concernReplySummary([message('task'),catalog,blocked,end],'task'),'恢复入口受阻，尚未操作公众号')
+  assert.equal(concernDisposed([message('task'),catalog,disposed,catalog],'task'),true)
+  assert.ok(concernMissingReply([message('task'),catalog,disposed],'task') instanceof ConcernInterruptedError)
+  for(const next of [message('new-user'),{type:'user/message',data:{id:'next-task',source:{kind:'plugin:@lemoncat7/dsh-partner',form:'notice',summary:'关注变化 · 直接执行'}}},{type:'user/message',data:{id:'unknown',source:{kind:'unknown'}}},{type:'user/message',data:{id:'invoke',source:{kind:'skill-invocation',form:'instructions',name:'publish'}}},{type:'user/message',data:{id:'user-catalog',source:{kind:'user',form:'catalog'}}}]){
+   assert.equal(hasConcernReply([message('task'),catalog,next,blocked,end],'task'),false)
+   assert.equal(concernDisposed([message('task'),catalog,disposed,next],'task'),false)
+  }
+  assert.equal(hasConcernReply([message('task'),catalog,blocked,{type:'turn/end',data:{reason:{kind:'cancelled'}}}],'task'),false)
+ }
+})

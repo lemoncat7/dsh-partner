@@ -1,3 +1,4 @@
+import {roleChatPolicy} from '../companions/runtime-policy.js'
 import type { CompanionIdentity } from '../companions/identity.js'
 
 /** A channel supplies verified audience metadata, never a nickname or model guess. */
@@ -14,6 +15,7 @@ export function includesRelationship(audience: IdentityAudience): boolean {
 }
 /** Explicit empty text clears the old relationship too; old human drafts remain intact. */
 export function relationshipTextForIdentity(identity: Pick<CompanionIdentity, 'relationshipText' | 'characterCard'>): string {
+  if(!roleChatPolicy(identity).roleChat)return ''
   return (identity.relationshipText ?? (identity.characterCard?.enabled ? identity.characterCard.relationship : '') ?? '').trim()
 }
 export function renderIdentityRelationship(identity: Pick<CompanionIdentity, 'relationshipText' | 'characterCard'>, audience: IdentityAudience = { channel: 'default' }): string {

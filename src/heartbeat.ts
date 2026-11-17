@@ -1,3 +1,4 @@
+import {runtimeSnapshot} from './companions/runtime-policy.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ChannelSession, Companion, HeartbeatRuntimeState } from './domain.js'
 import { PartnerStore } from './store.js'
@@ -36,7 +37,7 @@ export class HeartbeatScheduler {
 
   startManual(id: string, concernId?: string) {
     if (this.closed) throw new Error('关注服务正在停止')
-    if (!this.store.snapshot().companions.some(item => item.id === id)) throw new Error('伙伴不存在')
+    if (!runtimeSnapshot(this.store).companions.some(item => item.id === id)) throw new Error('伙伴不存在')
     if (this.store.isCompanionRemoving(id)) throw new Error('伙伴正在删除')
     if (this.isRunning(id)) return { accepted: false, running: true, reason: '心跳正在执行' }
     this.manualResults.delete(id)
@@ -44,7 +45,7 @@ export class HeartbeatScheduler {
     void this.trigger(id, { manual: true, ...(concernId ? { concernId } : {}) })
       .then(result => { this.manualResults.set(id, result) })
       .catch(() => { this.manualResults.set(id, { checked: false, sent: false, outcome: 'blocked', reason: '检查受阻，请查看关注活动记录' }) })
-    for (const key of this.manualResults.keys()) if (!this.store.snapshot().companions.some(item => item.id === key)) this.manualResults.delete(key)
+    for (const key of this.manualResults.keys()) if (!runtimeSnapshot(this.store).companions.some(item => item.id === key)) this.manualResults.delete(key)
     return { accepted: true, running: true, reason: '已开始后台检查' }
   }
 
@@ -80,7 +81,7 @@ export class HeartbeatScheduler {
   async trigger(companionId: string, options: HeartbeatTriggerOptions = {}): Promise<HeartbeatResult> {
     if (this.store.isCompanionRemoving(companionId)) return { checked: false, sent: false, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { checked: false, sent: false, reason: '心跳正在执行' }
-    const companion = this.store.snapshot().companions.find(item => item.id === companionId)
+    const companion = runtimeSnapshot(this.store).companions.find(item => item.id === companionId)
     if (companion === undefined) throw new Error('伙伴不存在')
     if (!options.manual && !companion.automation.heartbeat.enabled) return { checked: false, sent: false, reason: '心跳未启用' }
     this.running.add(companionId)
@@ -107,26 +108,33 @@ export class HeartbeatScheduler {
 
   private async tick(): Promise<void> {
     const now = Date.now()
-    for (const companion of this.store.snapshot().companions) {
+    for (const companion of runtimeSnapshot(this.store).companions) {
       if (!companion.automation.heartbeat.enabled) { this.startIdleContact(companion); continue }
       if(!this.running.has(companion.id)) await this.executionDispatcher?.(companion.id).catch(error=>this.ctx.logger.warn(`关注后续任务调度失败：${message(error)}`))
       if(!this.running.has(companion.id) && await this.concerns.pendingRecording(companion.id,now)) {
         void this.trigger(companion.id,{recordingOnly:true}).catch(error=>this.ctx.logger.warn(`记录同步未完成：${message(error)}`))
         continue
       }
-      const stored = this.store.snapshot().heartbeatStates.find(item => item.companionId === companion.id)
+      const stored = runtimeSnapshot(this.store).heartbeatStates.find(item => item.companionId === companion.id)
       if (stored === undefined) {
         await this.saveState(companion, heartbeatState([], companion, now, this.timeZone))
         continue
       }
-      const state = stored
+      // Repair old interval-based wakeups, while preserving scheduler-level failure backoff.
+      const nextDue = stored.consecutiveFailures === 0 ? await this.nextConcernDue(companion.id) : undefined
+      const state = nextDue !== undefined && nextDue < stored.nextCheckAt ? {...stored, nextCheckAt: nextDue} : stored
       if (state.nextCheckAt > now) { this.startIdleContact(companion); continue }
       void this.trigger(companion.id).catch(error => this.ctx.logger.warn(`dsh-partner heartbeat for ${companion.id} failed: ${message(error)}`))
     }
   }
 
+  private async nextConcernDue(companionId: string): Promise<number | undefined> {
+    const routes = await this.executionRoutes(companionId)
+    return this.concerns.nextDueAt?.(companionId, routes.map(r => memoryScope(r.channelId, r.userId)))
+  }
+
   private async executionRoutes(companionId: string): Promise<ChannelSession[]> {
-    const state = this.store.snapshot()
+    const state = runtimeSnapshot(this.store)
     const routes = state.sessions.filter(route => route.companionId === companionId &&
       (route.kind === 'local' || state.pairings.some(pairing => pairing.channelId === route.channelId && pairing.userId === route.userId && pairing.status === 'approved')))
       .sort((a,b) => b.lastMessageAt - a.lastMessageAt)
@@ -135,7 +143,7 @@ export class HeartbeatScheduler {
 
   private canNotify(companion: Companion, route: ChannelSession, manual: boolean | undefined, sentCount: number): boolean {
     const policy = companion.automation.heartbeat
-    return deliverableRoutes(this.store.snapshot(), companion.id).some(item => item.channelId === route.channelId && item.userId === route.userId)
+    return deliverableRoutes(runtimeSnapshot(this.store), companion.id).some(item => item.channelId === route.channelId && item.userId === route.userId)
       && (manual === true || (!quiet(Date.now(), policy.quietStartHour, policy.quietEndHour, this.timeZone) && (policy.dailyLimit <= 0 || sentCount < policy.dailyLimit)))
   }
 
@@ -156,7 +164,7 @@ export class HeartbeatScheduler {
       } catch(error) {await this.concerns.settleRecording(item,false);throw error}
     }
     const policy = companion.automation.heartbeat
-    const existing = heartbeatState(this.store.snapshot().heartbeatStates, companion, now, this.timeZone)
+    const existing = heartbeatState(runtimeSnapshot(this.store).heartbeatStates, companion, now, this.timeZone)
     const today = localDay(now, this.timeZone)
     const sentCount = existing.sentDay === today ? existing.sentCount : 0
     const routes = await this.executionRoutes(companion.id)
@@ -187,7 +195,7 @@ export class HeartbeatScheduler {
       if (due.length === 0) {
         await this.saveState(companion, {
           ...existing,
-          nextCheckAt: now + policy.intervalMinutes * 60_000,
+          nextCheckAt: await this.nextConcernDue(companion.id) ?? now + policy.intervalMinutes * 60_000,
           sentDay: today,
           sentCount,
         })
@@ -237,8 +245,10 @@ export class HeartbeatScheduler {
       // Output destinations are handled in the execution; source knowledge must never receive observation writeback.
       const outcome = failures.length === 0 ? 'success' : completedChecks > 0 ? 'partial' : 'blocked'
       const partialError = failures.length ? `${outcome === 'partial' ? '部分完成，部分关注受阻' : '检查受阻'}：${failures.join('；')}。仅复查失败项；能力或授权缺失需补齐后才能成功，实际检查还受静默时段及运行状态限制。其他关注正常处理。` : undefined
+      const nextDue = await this.nextConcernDue(companion.id)
       const scheduled = (sent: boolean) => {
         const next = successState(existing, companion, now, today, sentCount + (sent ? 1 : 0), sent)
+        next.nextCheckAt = nextDue ?? Date.now() + policy.intervalMinutes * 60_000
         if (retryTimes.length) next.nextCheckAt = Math.min(next.nextCheckAt, ...retryTimes)
         return next
       }

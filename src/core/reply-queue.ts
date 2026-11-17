@@ -1,4 +1,4 @@
-type Kind = 'ordered' | 'direct' | 'ambient'
+type Kind = 'ordered' | 'direct' | 'ambient' | 'delivery'
 interface Job<T> { kind:Kind; scope?:string|undefined; run:()=>Promise<T>; skip:()=>T; resolve:(value:T)=>void; reject:(error:unknown)=>void }
 interface Lane<T> { jobs:Job<T>[]; active?:Job<T>|undefined; protected?:string|undefined; done:Promise<void>; release:()=>void }
 /** Optional group chatter is a current opportunity, never a durable FIFO obligation. */
@@ -20,7 +20,7 @@ export class ReplyQueue<T> {
  busy(key:string):boolean {return this.lanes.has(key)}
  private async drain(key:string,lane:Lane<T>):Promise<void> {
   try{while(lane.jobs.length){
-   const priority=lane.jobs.findIndex(j=>j.kind!=='ambient'),job=lane.jobs.splice(priority<0?0:priority,1)[0]!
+   const delivery=lane.jobs.findIndex(j=>j.kind==='delivery'),priority=delivery<0?lane.jobs.findIndex(j=>j.kind!=='ambient'):delivery,job=lane.jobs.splice(priority<0?0:priority,1)[0]!
    lane.active=job;lane.protected=undefined
    try{job.resolve(await job.run())}catch(error){job.reject(error)}finally{lane.active=undefined;lane.protected=undefined}
   }}finally{if(this.lanes.get(key)===lane)this.lanes.delete(key);lane.release()}

@@ -158,7 +158,7 @@ test('autonomous notice refreshes context even without a new user message, then 
  assert.doesNotMatch(f.contexts.values().next().value.text,/partner_activity_finish/)
 })
 
-test('QQ binding refreshes independently of persona/tool discovery, shared routing and setting revisions',async()=>{
+test('QQ role relationship requires role chat, then refreshes binding independently of tool discovery and revisions',async()=>{
  const f=fixture(false),signal=new AbortController().signal
  f.config.companion.characterCard.enabled=false
  const owner={id:'owner',kind:'channel',sessionId:f.agent.session.id,companionId:f.config.companion.id,channelId:'qq',userId:'12345678',inboundMessageIds:[]}
@@ -166,12 +166,15 @@ test('QQ binding refreshes independently of persona/tool discovery, shared routi
  const state={companions:[f.config.companion],sessions:[f.config.route,owner,guest],channels:[{id:'qq',platform:'qq',qq:{identityBinding:{enabled:true,qqId:'12345678'}}}]}
  f.runtime.store.snapshot=()=>state
  const send=async(route)=>{f.input('我就是哥哥');route.inboundMessageIds.push(f.agent.session.snapshotEvents().at(-1).data.id);await f.runtime.prepareConversationContext(f.agent,signal);return f.contexts.values().next().value.text}
+ assert.doesNotMatch(await send(owner),/当前账号是这层关系|当前对象不是已核验/)
+ f.config.companion.characterCard.enabled=true
  assert.match(await send(owner),/当前账号是这层关系的绑定对象/)
  assert.match(await send(guest),/当前对象不是已核验/)
  // Saving binding settings takes effect even when the general persona revision is unchanged.
  state.channels[0].qq.identityBinding.qqId='22345678'
  await f.runtime.prepareConversationContext(f.agent,signal)
  assert.match(f.contexts.values().next().value.text,/当前账号是这层关系的绑定对象/)
+ f.config.companion.characterCard.enabled=false
  f.input('本地消息');await f.runtime.prepareConversationContext(f.agent,signal);assert.equal(f.contexts.size,1);assert.match(f.contexts.values().next().value.text,/交流时间/);assert.doesNotMatch(f.contexts.values().next().value.text,/当前账号是这层关系|联系人画像|长期记忆|用户配置的表达选项/)
  assert.equal(f.calls.length,0,'relation attribution does not add model calls or enable memory')
  assert.equal(f.sections.size,0,'does not replace personality/tool sections')

@@ -178,3 +178,17 @@ test('remember and reopening an archived thought respect the shared cap and keep
  for(let i=0;i<15;i++)await tool.execute({action:'remember',text:'新念头'+i,reason:'想试试看'},exec)
  assert.equal(t.status,'open');assert.equal(old.status,'open')
 })
+
+ test('role policy prevents thought extraction and revokes pending proposals without changing saved activity settings',async()=>{
+ const f=fixture();assert.ok(f.service.prepare(f.turn))
+ f.c.characterCard.enabled=false
+ assert.equal(f.service.prepare(f.turn),undefined)
+ await f.service.apply(f.turn,f.proposal)
+ assert.equal(f.c.thoughts,undefined)
+ assert.equal(f.c.idleContact.enabled,true)
+ assert.equal(f.c.automation.memory.enabled,true)
+ f.c.characterCard.enabled=true
+ assert.ok(f.service.prepare(f.turn))
+ await f.service.apply(f.turn,f.proposal)
+ assert.equal(f.c.thoughts.length,1)
+ })

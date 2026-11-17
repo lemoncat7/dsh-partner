@@ -6,6 +6,7 @@ import type { ConversationTurn } from '../memory-domain.js'
 import type { PartnerStore } from '../store.js'
 import { idleContactRouteAllowed } from './idle-contact.js'
 import { affectionAudienceAllowed } from './affection-adapter.js'
+import { runtimePolicy, runtimeSnapshot } from '../companions/runtime-policy.js'
 
 export interface CompanionThought {
   id: string
@@ -71,7 +72,7 @@ export function renderThoughts(state:PartnerState,c:Companion,route:ChannelSessi
 export class ThoughtService {
   constructor(private readonly store:PartnerStore){}
   prepare(turn:ConversationTurn):{sourceRouteIds:string[];prompt:string}|undefined {
-    const state=this.store.snapshot(),c=state.companions.find(c=>c.id===turn.companionId)
+    const state=runtimeSnapshot(this.store),c=state.companions.find(c=>c.id===turn.companionId)
     if(!c?.idleContact?.enabled||!c.automation.memory.enabled||!turn.sourceRouteIds?.length||Date.now()-turn.at>3600000)return
     const targets=thoughtTargets(state,c,turn.sourceRouteIds)
     if(!targets.length)return
@@ -82,6 +83,7 @@ export class ThoughtService {
     const idea=text(value.text,300),why=text(value.why,300),evidence=text(value.evidence,300),targetId=text(value.targetRouteId,200)
     if(!idea||!why||!evidence||(!turn.user.includes(evidence)&&!turn.assistant.includes(evidence)))return
     await this.store.update(state=>{
+      if(!runtimePolicy(this.store,turn.companionId)?.roleChat)return
       const c=state.companions.find(c=>c.id===turn.companionId),target=state.sessions.find(r=>r.id===targetId)
       if(!c?.idleContact?.enabled||!c.automation.memory.enabled||!target||this.store.isCompanionRemoving(c.id)||!thoughtTargetAllowed(state,c,proposal.sourceRouteIds,target))return
       const thoughts=c.thoughts??=[]

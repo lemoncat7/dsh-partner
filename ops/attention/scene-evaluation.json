@@ -1,0 +1,162 @@
+[
+  {
+    "text": "小家伙出来说句话",
+    "label": "address"
+  },
+  {
+    "text": "弟弟～",
+    "label": "address"
+  },
+  {
+    "text": "喂喂还活着不",
+    "label": "address"
+  },
+  {
+    "text": "在不在呀搭档",
+    "label": "address"
+  },
+  {
+    "text": "小可爱人去哪儿啦",
+    "label": "address"
+  },
+  {
+    "text": "群里有人懂这个部署错误吗",
+    "label": "question"
+  },
+  {
+    "text": "怎么把这个服务重启呀",
+    "label": "question"
+  },
+  {
+    "text": "这两台笔记本选哪个合适",
+    "label": "question"
+  },
+  {
+    "text": "能不能教我用这个功能",
+    "label": "question"
+  },
+  {
+    "text": "大家有什么建议没有",
+    "label": "question"
+  },
+  {
+    "text": "声称戒糖的人已经喝完第二杯奶茶了",
+    "label": "banter"
+  },
+  {
+    "text": "刚吹完牛就被现实教育了",
+    "label": "banter"
+  },
+  {
+    "text": "这代码是用脚写的吗笑死",
+    "label": "banter"
+  },
+  {
+    "text": "上分没我的份掉分一次不落",
+    "label": "banter"
+  },
+  {
+    "text": "你这嘴硬程度简直能当防弹板",
+    "label": "banter"
+  },
+  {
+    "text": "今天面试过啦开心",
+    "label": "share"
+  },
+  {
+    "text": "刚拍到一只小橘猫太可爱了",
+    "label": "share"
+  },
+  {
+    "text": "我的新鼠标终于送来了",
+    "label": "share"
+  },
+  {
+    "text": "我刚追的这集给我看哭了",
+    "label": "share"
+  },
+  {
+    "text": "总算把折腾一周的程序跑起来了",
+    "label": "share"
+  },
+  {
+    "text": "说个脑洞如果人能飞会怎样",
+    "label": "topic"
+  },
+  {
+    "text": "要不大家聊聊各自养过的宠物",
+    "label": "topic"
+  },
+  {
+    "text": "来聊点轻松的怎么样",
+    "label": "topic"
+  },
+  {
+    "text": "换个话头你们周末准备干嘛",
+    "label": "topic"
+  },
+  {
+    "text": "谁愿意讲件有意思的小事",
+    "label": "topic"
+  },
+  {
+    "text": "懂啦不用再解释了",
+    "label": "close"
+  },
+  {
+    "text": "今天就聊到这儿吧",
+    "label": "close"
+  },
+  {
+    "text": "行我先撤了",
+    "label": "close"
+  },
+  {
+    "text": "我想安静一下不用回",
+    "label": "close"
+  },
+  {
+    "text": "谢谢先去忙了",
+    "label": "close"
+  },
+  {
+    "text": "我弟弟刚刚打电话给我",
+    "label": "share"
+  },
+  {
+    "text": "那是她的哥哥不是在叫你",
+    "label": "other"
+  },
+  {
+    "text": "老刘你跟小陈商量一下",
+    "label": "other"
+  },
+  {
+    "text": "我家妹妹也这么觉得",
+    "label": "share"
+  },
+  {
+    "text": "小张刚才是在问他同学",
+    "label": "other"
+  },
+  {
+    "text": "临时测试消息",
+    "label": "background"
+  },
+  {
+    "text": "这条纯占位",
+    "label": "background"
+  },
+  {
+    "text": "[语音]",
+    "label": "background"
+  },
+  {
+    "text": "留个记录",
+    "label": "background"
+  },
+  {
+    "text": "签到第七天",
+    "label": "background"
+  }
+]

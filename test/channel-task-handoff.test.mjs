@@ -17,7 +17,7 @@ test('QQ input during silent autonomous work starts an owned reply and delivers 
  const root=new Context();root.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(root)
  const session=Session.create('handoff'),sent=[],autonomy=deferred(),started=deferred(),finish=deferred()
  const channel={id:'qq',platform:'qq',accountId:'bot',companionId:'c',enabled:true,direct:{baseUrl:'http://local',targetId:'room'},qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}
- const companion={id:'c',toolDiscovery:true},route={id:'r',kind:'channel',channelId:'qq',userId:'12345678',companionId:'c',sessionId:session.id,qqSessionMode:'separate',inboundMessageIds:['old'],cwd:'/tmp'}
+ const companion={id:'c',toolDiscovery:true,characterCard:{enabled:true}},route={id:'r',kind:'channel',channelId:'qq',userId:'12345678',companionId:'c',sessionId:session.id,qqSessionMode:'separate',inboundMessageIds:['old'],cwd:'/tmp'}
  const state={companions:[companion],channels:[channel],sessions:[route],pairings:[{channelId:'qq',userId:route.userId,status:'approved',directTargetId:'room'}],recentReceipts:[]}
  const store={snapshot:()=>state,subscribe:()=>()=>{},update:async fn=>fn(state),isCompanionRemoving:()=>false}
  const agent={session,status:'running',options:{},steer:()=>assert.fail('autonomous execution must not absorb user input')},scope=createScope(root,agent);agent.ctx=scope.ctx;t.after(()=>scope.dispose())

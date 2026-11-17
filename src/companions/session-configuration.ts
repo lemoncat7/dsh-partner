@@ -1,3 +1,4 @@
+import {runtimeState,runtimePolicy} from './runtime-policy.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { resolveToolAccess } from '../execution/tool-access-adapter.js'
@@ -16,10 +17,10 @@ export class SessionConfigurationIndex {
   private sessionRoutes = new Map<string, ChannelSession[]>()
   private readonly unsubscribe: () => void
 
-  constructor(store: PartnerStore) {
-    this.state = store.snapshot()
+  constructor(private readonly store: PartnerStore) {
+    this.state = runtimeState(store.snapshot(),id=>runtimePolicy(store,id))
     this.index()
-    this.unsubscribe = store.subscribe(next => { this.state = next; this.index() }, () => {})
+    this.unsubscribe = store.subscribe(next => { this.state = runtimeState(next,id=>runtimePolicy(store,id)); this.index() }, () => {})
   }
 
   private index(): void {
@@ -58,6 +59,8 @@ export class SessionConfigurationIndex {
     return { route, companion, revision }
   }
 
+  runtimePolicy(owner:string){return runtimePolicy(this.store,owner)}
+
   // Internal read projections use the committed index; no task/receipt clones.
   // Every invocation sees the latest saved state and the caller's admitted input.
   toolAccess(agent: Pick<Agent, 'session'>, events?: readonly SessionEvent[]) {
@@ -66,8 +69,8 @@ export class SessionConfigurationIndex {
   toolPresentation(agent: Pick<Agent, 'session'>, events: readonly SessionEvent[]) {
     const current = this.forSession(agent.session.id)
     return {current, access:this.toolAccess(agent, events),
-      decisionRequired:!!current && activityDecisionAvailable(this.state,current.companion,agent.session.id,events),
-      followup:current ? taskFollowup(this.state,current.companion.id,agent.session.id,events) : undefined}
+      decisionRequired:!!current?.companion.characterCard?.enabled && activityDecisionAvailable(this.state,current.companion,agent.session.id,events),
+      followup:current?.companion.characterCard?.enabled ? taskFollowup(this.state,current.companion.id,agent.session.id,events) : undefined}
   }
   routesForSession(sessionId: string): readonly ChannelSession[] { return this.sessionRoutes.get(sessionId) ?? [] }
   activityCurrent(companion: Companion, route: ChannelSession): boolean { return activityPolicyCurrent(this.state,companion,route) }

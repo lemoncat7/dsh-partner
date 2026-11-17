@@ -16,7 +16,7 @@ import { isInternalTaskNotice, isRequirementDeliveryReceipt } from '../channels/
 import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
 import type { AttachmentDeliveryService } from './service.js'
 
-export const ATTACHMENT_PROTOCOL = '交付图片或文档时，通过 partner_tools 查询并调用 partner_send_attachment；它按当前渠道自动选择发送账号和目标，不要拿普通 QQ 群号调用另一个机器人的 qqbot_send_file（其 target 使用不同的开放平台标识）。path 填生成工具返回的真实本地文件路径；长回复可用 document 的 name/content 直接生成文档，本轮完整工作报告可用 workReport.runIds 引用真实记录。普通 Markdown 链接仅是引用，不代表发送成功。工具会把指定文件显示在会话中，并在当前会话绑定渠道时发送真实附件；必须以工具返回的 channel 状态为准。失败用 deliveryId 重试原附件，无需重新生成。远端文件先下载到当前会话目录，不要编造 sandbox 地址。不要提交中间产物、内部核验材料或用户未要求交付的文件；按用户配置的短句接话交付完整长回复或工作报告属于已选择的交付方式。报告用贴合任务主题的文件名；工具完成后继续原目标或按当前人物设定收尾，不要再次粘贴附件下载地址。若临时执行环境未提供此工具，只向负责人交回真实文件位置和结果，不得声称附件已发送。'
+export const ATTACHMENT_PROTOCOL = '交付图片或文档时，通过 partner_tools 查询并调用 partner_send_attachment；它按当前渠道自动选择发送账号和目标，不要拿普通 QQ 群号调用另一个机器人的 qqbot_send_file（其 target 使用不同的开放平台标识）。path 填生成工具返回的真实本地文件路径；长回复可用 document 的 name/content 直接生成文档，本轮完整工作报告可用 workReport.runIds 引用真实记录。普通 Markdown 链接仅是引用，不代表发送成功。工具会把指定文件显示在会话中，并在当前会话绑定渠道时发送真实附件；必须以工具返回的 channel 状态为准。失败用 deliveryId 重试原附件，无需重新生成。远端文件先下载到当前会话目录，不要编造 sandbox 地址。不要提交中间产物、内部核验材料或用户未要求交付的文件；长资料是否作为附件按当前请求和生效的交付设置决定，不强制将所有结果写成报告。报告用贴合任务主题的文件名；工具完成后继续原目标或正常答复，不要再次粘贴附件下载地址。若临时执行环境未提供此工具，只向负责人交回真实文件位置和结果，不得声称附件已发送。'
 
 export function attachmentTool(companionId: string, store: PartnerStore, service: AttachmentDeliveryService, ctx: Context, channels: ChannelManager, prefix: string): ToolDefinition {
   return {

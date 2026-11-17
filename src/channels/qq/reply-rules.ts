@@ -1,5 +1,5 @@
 import type { DirectMessage } from '../direct/transport.js'
-import type { AttentionPrediction } from './attention-classifier.js'
+import { isAttentionCall, isClearScene, type AttentionPrediction } from './attention-classifier.js'
 
 export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[]; route:'direct'|'continuation'|'semantic'|'fallback'|'other'|'closing'|'opportunity' }
 export interface ReplyScoreContext { name:string; recent?:{at:number;text:string}; now:number; seed:string; semantic?:AttentionPrediction; quickContinuation?:boolean; otherConversation?:boolean; quietRecent?:{at:number;text:string}; groupRecent?:{at:number;text:string} }
@@ -43,12 +43,29 @@ export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  const routed=routeGroupReply(event,context);if(routed)return routed
  const text=event.text.trim(),semantic=context.semantic
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
+ // Recency alone cannot make unrelated group chatter a continuation.
+ // Require semantic evidence tied to the partner's actual delivered reply.
+ if(activeConversation(context)&&(semantic?.replySimilarity??0)>=.4&&(text||event.media?.length))return decide(true,'continuation','内容承接伙伴刚才的实际回复，进入上下文判断')
  if(semantic){
   const score=Math.round(semantic.confidence*100)
+  const scene=semantic.scene,sceneClear=isClearScene(scene)
+  if(isAttentionCall(semantic))return decide(true,'semantic','本地语义识别为呼唤，按呼唤证据接入',score)
+  // A scene is an opportunity, never a replacement for explicit addressing/stop facts.
+  if(sceneClear&&['other','close','background'].includes(scene!.label))return decide(false,'semantic',`场景识别：${scene!.label==='other'?'内容指向其他人':scene!.label==='close'?'确认或收尾':'没有交流内容'}，先旁听`,Math.round(scene!.confidence*100))
   const groupAge=context.groupRecent?context.now-context.groupRecent.at:Infinity
   const strongNegative=['other','close','background'].includes(semantic.label)&&semantic.confidence>=.72&&semantic.margin>=.35
   if((groupAge>=0&&groupAge<GROUP_CONVERSATION_WINDOW_MS||context.quietRecent)&&!strongNegative&&(semantic.contextSimilarity??0)>=.45){
    return decide(true,'continuation','伙伴已参与本群话题，其他成员的相关补充按共同续聊处理',score)
+  }
+  if(sceneClear&&['question','banter','share','topic'].includes(scene!.label)){
+   const related=(semantic.replySimilarity??0)>=.4||!!context.quietRecent&&(semantic.contextSimilarity??0)>=.4
+   const interested=(semantic.profileSimilarity??0)>=.45
+   const established=activeConversation(context)||groupAge>=0&&groupAge<GROUP_CONVERSATION_WINDOW_MS
+   const probability = established || related ? 1 : (scene!.label==='question' || scene!.label==='topic') ? .75 : interested ? .65 : context.otherConversation ? .25 : .5
+   let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
+   const reply=(hash>>>0)/4294967296<probability
+   const names={question:'求助或观点交流',banter:'玩笑、接梗或吐槽',share:'分享见闻或情绪',topic:'开启新话题'}
+   return {reply,route:established||related?'continuation':'opportunity',score:Math.round(scene!.confidence*100),probability,reasons:[`场景识别：${names[scene!.label as keyof typeof names]}；${established||related?'顺着已参与的话题接话':interested?'与当前伙伴设定相关，选择是否参与':context.otherConversation?'其他成员正在交流，克制插话':'有参与机会，选择是否接话'}${reply?'':'，本次旁听'}`]}
   }
   const clear=semantic.confidence>=.65&&semantic.margin>=.15||semantic.confidence>=.58&&semantic.margin>=.2||semantic.confidence>=.52&&semantic.margin>=.25
   const related=semantic.confidence>=.48&&semantic.margin>=.12&&(semantic.contextSimilarity??0)>=.4

@@ -1,3 +1,4 @@
+import {runtimePolicy} from '../companions/runtime-policy.js'
 import {installMcpEntry} from '../mcp/tool-entry.js'
 import {trackPartnerTools} from '../execution/tool-ownership.js'
 import { habitTool } from '../character/habit-tool.js'
@@ -5,7 +6,7 @@ import { thoughtTool } from '../character/thought-tool.js'
 import { affectionTool } from '../character/affection-tool.js'
 import {workflowProtocol} from './workflow-protocols.js'
 import { idleActivityFinishTool } from '../character/activity-tool.js'
-import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
+import {installToolDiscovery,TOOL_DISCOVERY_PROMPT,WORK_TOOL_DISCOVERY_PROMPT,type DiscoverableTool} from './tool-discovery.js'
 import { identityTool } from '../companions/identity-tool.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { continuationChannelOrigin } from '../scheduler/channel-origin.js'
@@ -58,12 +59,18 @@ export class PartnerAgentComposition {
   ) {}
 
   async compose(ctx: AgentCompositionContext, companion: Companion): Promise<() => void> {
+    const policy=runtimePolicy(this.store,companion.id)
+    if(!policy)throw Error('伙伴不存在')
+    companion=policy.companion
     const skillsEnabled = companion.capabilities.includes('skills')
     const enabledSkills = skillsEnabled ? this.skills.bindings(companion.id) : []
     const disposers: Array<() => void> = []
     const catalog:DiscoverableTool[]=[]
     const protocol=(name:string)=>workflowProtocol(name,this.store.snapshot().companions.find(c=>c.id===companion.id)??companion)
     const add=(tool:ToolDefinition,allowed=()=>true):void=>{
+      if(!policy.allowsTool(tool.name))return
+      const capabilityAllowed=allowed
+      allowed=()=>!!runtimePolicy(this.store,companion.id)?.allowsTool(tool.name)&&capabilityAllowed()
       const original=tool
       tool={...original,async execute(args,exec){
         if(!allowed())throw Error('能力已撤回')
@@ -105,8 +112,8 @@ export class PartnerAgentComposition {
       if(companion.toolDiscovery)disposers.push(installToolDiscovery(ctx.tools,companion.id,this.store,catalog))
       disposers.push(ctx.systemPrompt.section({
         name:'partner-collaboration',order:-7,
-        text:[companion.toolDiscovery ? TOOL_DISCOVERY_PROMPT : '伙伴能力通过当前工具调用。工作流程可用 partner_workflow 查询，Skill 使用 partner_skill 加载；权限以实际校验为准。',
-          'QQ 私聊或群聊里已获完整伙伴授权的用户明确交办调查、整理文档、生图、编程等工作（包括一次生图）时，必须先调用 partner_background_task start 交给宿主原生后台任务，input 带完整当前要求、上下文和文件路径；成功接收后只简短确认并结束前台本轮，不轮询、不等待、不重复执行。普通闲聊和能直接答的轻量问题仍在前台回答；后台完成会固定投递原会话。原发起人明确补充或取消时，通过该工具 list/status 查对应任务并 update/cancel，普通群聊不能改变后台目标。未获此入口授权的用户沿用现有工具权限，不绕过权限。已有看板、委派沿用对应任务。操作流程在 describe 中按需读取，工具目录不代表已经完成调查。工作结果约束事实，回复语气仍由当前角色与关系决定。',
+        text:[companion.toolDiscovery ? (policy.roleChat?TOOL_DISCOVERY_PROMPT:WORK_TOOL_DISCOVERY_PROMPT) : '伙伴能力通过当前工具调用。工作流程可用 partner_workflow 查询，Skill 使用 partner_skill 加载；权限以实际校验为准。',
+          policy.rules.forceBackground ? '当前伙伴本地或渠道会话里已获完整伙伴授权的用户明确交办调查、整理文档、生图、编程等工作（包括一次生图）时，必须先调用 partner_background_task start 交给宿主原生后台任务，input 只带自包含的任务要求、必要约束和文件路径，不复制聊天历史、人设或工具回执；成功接收后只简短确认并结束前台本轮，不轮询、不等待、不重复执行。普通闲聊和能直接答的轻量问题仍在前台回答；后台完成会固定投递原会话。原发起人明确补充或取消时，通过该工具 list/status 查对应任务并 update/cancel，普通群聊不能改变后台目标。未获此入口授权的用户沿用现有工具权限，不绕过权限。已有看板、委派沿用对应任务。操作流程在 describe 中按需读取，工具目录不代表已经完成调查。工作结果约束事实，回复语气仍由当前角色与关系决定。' : '',
           companion.idleContact?.enabled ? '自主活动已开启。你可以按自己的意图继续行动，也可以结束；如想在本轮之后再继续，可按需查询 partner_thoughts，用 plan 留下下一步意图、会话和等待时间。没有安排就按空闲频率唤起，不因回复完成自动追加一轮。真实结果、用户新消息与停止要求优先；不必每轮计划或汇报计划。' : '',
           companion.capabilities.includes('mcp') ? '伙伴挂载的 MCP 服务通过独立 partner_mcp 入口按服务发现与调用，不经 partner_tools；原 mcp__ 名称是内部操作标识，不是顶层入口。' : '',
           renderEnabledSkills(companion,enabledSkills),

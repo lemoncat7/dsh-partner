@@ -1,3 +1,5 @@
+import {qqIdentityRelation} from './identity-binding.js'
+import {relationshipTextForIdentity} from '../../character/relationship-adapter.js'
 import {renderGroupConversationGuidance} from './conversation-guidance.js'
 import { isSleeping } from '../../character/sleep.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -5,11 +7,11 @@ import type { Companion } from '../../domain.js'
 import type { DirectMessage } from '../direct/transport.js'
 import type { QqSettings } from './settings.js'
 import { activeConversation, conversationEnded, routeGroupReply, scoreGroupReply, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
-import { localAttentionClassifier, type AttentionClassifier, type AttentionDiagnostic } from './attention-classifier.js'
+import { isAttentionCall, localAttentionClassifier, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
 type Observation={id:string;sender:string;qqId:string;text:string;redirect:boolean;at:number;sequence:number}
 type Conversation={at:number;text:string;observedSequence:number}
-export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;decisionMs?:number;contextSize?:number;classification?:AttentionDiagnostic;semantic?:{label:string;confidence:number;margin:number;contextSimilarity?:number}}
+export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;decisionMs?:number;contextSize?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
 const CONTEXT_TTL_MS=10*60_000
 export const SPONTANEOUS_INTERVAL_MS=5000
 export const QUIET_CONVERSATION_WINDOW_MS=2*60*60_000
@@ -65,7 +67,7 @@ export class QqGroupAutonomy {
   if(quiet&&!rows.some(r=>r.kind==='partner'&&r.at===quiet.at))rows.push({qqId:'',sender:'伙伴（已确认送达）',text:quiet.text,at:quiet.at,kind:'partner'})
   return JSON.stringify(rows.sort((a,b)=>a.at-b.at).slice(-16).map(row=>({...row,at:new Date(row.at).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
  }
- /** Bound short-lived relevance evidence; intent still comes from the current message alone. */
+ /** Bound short-lived group snippets; the scene policy also receives confirmed delivery evidence. */
  attentionContext(channelId:string,event:DirectMessage):string[] {
   const rows=JSON.parse(this.context(channelId,event)||'[]') as {text:string;kind:string;ageSeconds:number}[]
   const fresh=rows.filter(r=>r.ageSeconds<=90&&r.text.trim()&&!r.text.startsWith('（已发送回复'))
@@ -95,9 +97,10 @@ export class QqGroupAutonomy {
  }
  guidance(channelId:string,event:DirectMessage):string {
   const recent=this.groupRecent(channelId,event)??this.quietRecent(channelId,event)
-  return renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined)
+  const decision=this.decisions.get(channelId)
+  return renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined,decision?.messageId===event.id?decision.semantic?.scene:undefined)
  }
- async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,_settings?:Partial<QqSettings>,addressOnly=false):Promise<boolean> {
+ async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,settings?:Partial<QqSettings>,addressOnly=false):Promise<boolean> {
   signal.throwIfAborted()
   if(event.qqGroup && isSleeping(companion,this.now()) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self')return this.record(channelId,event,'伙伴正在睡眠，暂停群聊自主接话')
   if(!event.qqGroup?.autonomous)return true
@@ -117,15 +120,21 @@ export class QqGroupAutonomy {
   let semantic,classification:AttentionDiagnostic|undefined
   const attentionContext=result?[]:this.attentionContext(channelId,event)
   if(!result){
-   try{semantic=await this.classify(event.text,signal,attentionContext,value=>{classification=value})}catch{signal.throwIfAborted()}
+   // Persona is topical relevance, never proof of identity or authority. Relationship
+   // text belongs only to the transport-verified bound speaker, not the whole room.
+   const relationship=qqIdentityRelation(settings,event.qqGroup.userId)?.matched?relationshipTextForIdentity(companion):''
+   const profile=[companion.name,[companion.role,companion.description,companion.characterCard?.enabled?companion.characterCard.roleText:''].filter(Boolean).join('；'),relationship].filter((v):v is string=>!!v?.trim()).map(t=>t.slice(0,160))
+   const frame:AttentionFrame={profile,partnerText:(groupRecent?.text??quietRecent?.text??'').slice(0,160)}
+   try{semantic=await this.classify(event.text,signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
    signal.throwIfAborted()
    result=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
   }
   // Busy work still lets the local model recognize a call; only calls queue.
-  if(addressOnly&&result.route!=='direct'&&!(result.reply&&semantic?.label==='address'))result={...result,reply:false,probability:0,reasons:[...result.reasons,'任务执行期间普通群聊仅旁听，不插入或排队补答']}
+  const recognizedCall=isAttentionCall(semantic)
+  if(addressOnly&&result.route!=='direct'&&!(result.reply&&recognizedCall))result={...result,reply:false,probability:0,reasons:[...result.reasons,'任务执行期间普通群聊仅旁听，不插入或排队补答']}
   // Bound unsolicited admissions per room, including while an earlier reply is still queued.
   // Explicit addressing and an established speaker thread are not subject to this interval.
-  if(result.reply&&!activeConversation(context)&&(result.route==='opportunity'||result.route==='semantic'&&semantic?.label==='engage')&&group){
+  if(result.reply&&!recognizedCall&&!activeConversation(context)&&(result.route==='opportunity'||result.route==='semantic'&&semantic?.label==='engage')&&group){
    if(group.lastSpontaneousAt!==undefined&&this.now()-group.lastSpontaneousAt<SPONTANEOUS_INTERVAL_MS)result={...result,reply:false,probability:0,reasons:['刚选择过一次群内主动接话，本条先旁听，避免连续插话']}
    else group.lastSpontaneousAt=this.now()
   }

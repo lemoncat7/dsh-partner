@@ -1,3 +1,4 @@
+import {PartnerWorkSessionCleanup} from './execution/session-cleanup.js'
 import {NativeBackgroundTasks} from './execution/native-background.js'
 import {installInterestLimit,recoverInterest} from './character/interest-runtime.js'
 import {qqSettings} from './channels/qq/settings.js'
@@ -198,7 +199,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
-    const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>channels.deliverBackgroundResult(run,reply))
+    const workCleanup=new PartnerWorkSessionCleanup(ctx,store)
+    ctx.effect(()=>()=>workCleanup.close())
+    const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply))
     scheduler.continuations.configure({
       execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
       notify: entry => channels.notifyContinuation(entry),
@@ -301,6 +304,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     await agents.reconcileQqSessions()
     if (resolved.autoStartChannels) await channels.startEnabled()
     await background.recoverDeliveries()
+    const backgroundDeliveryRetry=setInterval(()=>{void background.recoverDeliveries().then(()=>workCleanup.sweep()).catch(error=>ctx.logger.warn('后台结果投递恢复失败：'+String(error)))},30000)
+    void workCleanup.sweep().catch(error=>ctx.logger.warn('伙伴工作会话清理失败：'+String(error)))
+    ctx.effect(()=>()=>clearInterval(backgroundDeliveryRetry))
     await push.start()
     sleep.start()
     continuous.start()

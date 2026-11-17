@@ -1,3 +1,4 @@
+import {runtimeSnapshot} from '../companions/runtime-policy.js'
 import {ToolCallId} from '@deepseek-ai/dsh-llm'
 import type {ToolRunContext} from '@deepseek-ai/dsh-tools'
 import {scopeTarget} from '@deepseek-ai/dsh-scope'
@@ -23,7 +24,7 @@ export function shortSpokenText(parts:readonly {text?:string}[]):string|undefine
 export async function sendPreferredVoice(owner:string,store:PartnerStore,exec:ToolRunContext,parts:readonly {text?:string}[],options:ReplyDeliveryOptions={}):Promise<ChatReply|undefined>{
  if(options.delivery!==undefined&&!['auto','text','voice'].includes(options.delivery))throw Error('回复方式无效')
  if(options.delivery==='text'||options.preserveText||options.inlineDetails)return
- const state=store.snapshot(),card=state.companions.find(c=>c.id===owner)?.characterCard,agent=exec.agent
+ const state=runtimeSnapshot(store),card=state.companions.find(c=>c.id===owner)?.characterCard,agent=exec.agent
  if(!agent||options.delivery!=='voice'&&!(card?.length==='short'&&card.shortVoiceReplies))return
  const texts=parts.map(part=>shortSpokenText([part]))
  if(!texts.length||texts.some(text=>!text)){if(options.delivery==='voice')throw Error('此回复包含长内容或非口语内容；请用文字，或单独通过语音工具发送合适的台词');return}

@@ -2,14 +2,22 @@ import type {SessionEvent} from '@deepseek-ai/dsh-session'
 import {isPluginSource} from './message-source.js'
 
 const CONTEXT_SOURCES=new Set(['runtime-context','time-context','compact-checkpoint','system-prompt','model-selection','tool-registry','ptc-mode'])
+/** Catalog producers are extensible; their directory snapshots do not submit work.
+ * Keep actual user input, skill invocations, new task notices and unknown sources as boundaries. */
+function isConcernContext(event:Extract<SessionEvent,{type:'user/message'}>):boolean {
+  const source=event.data.source
+  if(!source||source.kind==='user')return false
+  if(CONTEXT_SOURCES.has(source.kind)||'form' in source&&source.form==='catalog')return true
+  return isPluginSource(source,'@lemoncat7/dsh-partner')&&source.form==='notice'
+    &&['伙伴附件交付','需求成果交付'].includes(source.summary??'')
+}
+
 /** Return only this execution's completed final answer. Bookkeeping is not new input. */
 export function concernReplySummary(events:readonly SessionEvent[],messageId:string):string|undefined {
   let found=false,answer=''
   for(const event of events){
     if(event.type==='user/message'){
-      const source=event.data.source
-      if(source&&CONTEXT_SOURCES.has(source.kind))continue
-      if(source&&isPluginSource(source,'@lemoncat7/dsh-partner')&&source.form==='notice'&&['伙伴附件交付','需求成果交付'].includes(source.summary??''))continue
+      if(isConcernContext(event))continue
       if(found)return undefined
       found=event.data.id===messageId
       continue
@@ -24,3 +32,28 @@ export function concernReplySummary(events:readonly SessionEvent[],messageId:str
   return undefined
 }
 export function hasConcernReply(events:readonly SessionEvent[],messageId:string):boolean {return concernReplySummary(events,messageId)!==undefined}
+
+/** Only a host disposal is resumable. Cancellation, newer input and unknown outcomes stay manual. */
+export function concernDisposed(events: readonly SessionEvent[], messageId: string): boolean {
+  let found = false, disposed = false, ended = false
+  for (const event of events) {
+    if (event.type === 'user/message') {
+      if (isConcernContext(event)) continue
+      if (found) return false
+      found = event.data.id === messageId
+    }
+    if (found && !ended && event.type === 'turn/end') {
+      ended = true
+      const reason = event.data.reason
+      disposed = reason.kind === 'aborted' && reason.reason.kind === 'disposed'
+    }
+  }
+  return found && disposed
+}
+
+export class ConcernInterruptedError extends Error {
+  constructor() { super('关注执行被宿主中断；恢复前须核对已有产物和外部回执'); this.name = 'ConcernInterruptedError' }
+}
+export function concernMissingReply(events: readonly SessionEvent[], messageId: string): Error {
+  return concernDisposed(events, messageId) ? new ConcernInterruptedError() : new Error('关注执行未返回最终答复，请核对后重试')
+}

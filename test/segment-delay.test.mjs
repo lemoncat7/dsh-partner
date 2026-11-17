@@ -41,7 +41,7 @@ test('supersession, permission removal and shutdown stop the wait before the nex
 })
 function fixture(card=configured(.08,.08)){
  const channel={id:'q',platform:'qq',accountId:'12345678',companionId:'c',enabled:true,direct:{baseUrl:'ws://local'},qq:{groupReplies:true,groupIds:['99887766'],autonomousGroupIds:['99887766']}}
- const state={channels:[channel],companions:[{id:'c',characterCard:card}],pairings:[],sessions:[]},sent=[]
+ const state={channels:[channel],companions:[{id:'c',characterCard:{...card,enabled:true}}],pairings:[],sessions:[]},sent=[]
  const store={snapshot:()=>structuredClone(state),subscribe:()=>()=>{},isCompanionRemoving:()=>false}
  const manager=new ChannelManager({logger:{info(){},warn(){}}},store,{read:async()=>({})},{},'/tmp')
  manager.sender=()=>({sendText:async(user,text)=>sent.push({user,text,at:performance.now()}),sendAttachment:async(user,a)=>sent.push({user,text:a.name,at:performance.now()})})

@@ -153,7 +153,7 @@ test('exclusive persona keeps chosen message segmentation in runtime context wit
  for(const autonomous of [false,true]){
   const text=renderConversationTurn(card,1,autonomous)
   assert.match(text,/用户选择的消息分段/);assert.match(text,/半句到两句/)
-  assert.match(text,/continueTurn:true/);assert.match(text,/不是整轮只能回一句/)
+  assert.match(text,/continueTurn:true/);assert.match(text,/条数按内容决定/)
   assert.doesNotMatch(text,/由用户独立设置的人物|撒娇|咿呀|哥哥|小孩/)
  }
  assert.doesNotMatch(renderConversationTurn({...card,segmentedReplies:false},1),/用户选择的消息分段/)

@@ -6,7 +6,7 @@ import { isPluginSource } from '../message-source.js'
 const INTERNAL_TASK_NOTICES = new Set([
   '看板任务待验收', '看板任务已完成', '看板任务受阻', '伙伴执行看板任务', '伙伴核验看板任务', '伙伴汇总需求',
   '伙伴长任务续接',
-  '需求成果交付',
+  '需求成果交付', '伙伴后台任务完成',
 ])
 
 export function isInternalTaskNotice(event: SessionEvent): boolean {

@@ -5,7 +5,7 @@ import {requestReservation,usageTotal} from './model.js'
 
 export function installContinuousBudget(ctx:Context,agents:PartnerAgentRuntime,service:ContinuousService):()=>void{
  const disposers:Array<()=>void>=[]
- disposers.push(ctx.on('agent/request',async({agent},next)=>{const options=await next();return agents.continuousClaim(agent.session.id)?{...options,maxTokens:700}:options}))
+ // Reply length follows the selected model; observation budgets stay in the observer.
  disposers.push(ctx.on('llm/stream',async function*(options,next){
   const claim=options.sessionId?agents.continuousClaim(options.sessionId):undefined
   if(!claim){yield*next();return}

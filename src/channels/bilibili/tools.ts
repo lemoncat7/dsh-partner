@@ -1,3 +1,4 @@
+import {backgroundToolScope} from '../../execution/background-scope.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { renderPersonaDelivery } from '../../chat/persona-delivery.js'
 import {isIdleContactNotice} from '../../character/idle-contact.js'
@@ -11,7 +12,7 @@ export function bilibiliTool(owner:string,store:PartnerStore,service:BilibiliSer
  parameters:{type:'object',properties:{preserveText:{type:'boolean',description:'仅用户本轮指定逐字发布的原文，可核对时保持原文。'},action:{type:'string',enum:['list','describe','call']},channelId:{type:'string'},operation:{type:'string'},params:{type:'object'}},required:['action'],additionalProperties:false},
  output:{schema:{type:'object'},render:(_a,v)=>{const {personaDelivery,...visible}=v as Record<string,unknown>;return [{type:'text',text:JSON.stringify(visible)}]},presentationMeta:(_a,v)=>({kind:'partner-bilibili-v1',personaDelivery:typeof v==='object'&&v!==null&&!Array.isArray(v)?v.personaDelivery??null:null})},presentCall:()=>({card:'generic',title:'B 站渠道能力'}),
  async execute(raw,exec){const a=raw as {action:string;channelId?:string;operation?:string;params?:Record<string,unknown>;preserveText?:boolean};const agent=exec.agent
- const guard=()=>{exec.signal.throwIfAborted();if(!agent||store.isCompanionRemoving(owner)||!store.snapshot().sessions.some(r=>r.sessionId===agent.session.id&&r.companionId===owner))throw Error('当前会话无权使用此伙伴 B 站账号')}
+ const guard=()=>{exec.signal.throwIfAborted();if(!agent||store.isCompanionRemoving(owner)||!store.snapshot().sessions.some(r=>r.sessionId===agent.session.id&&r.companionId===owner)&&!backgroundToolScope(store,owner,agent.session.id))throw Error('当前会话无权使用此伙伴 B 站账号')}
  const autonomous=()=>{const last=agent?.session.snapshotEvents().filter(e=>e.type==='user/message').at(-1);return !!last&&isIdleContactNotice(last)}
  guard();const channels=store.snapshot().channels.filter(c=>c.companionId===owner&&c.platform==='bilibili'&&c.enabled&&(!autonomous()||biliSettings(c.bilibili).autonomousActions))
  const available=(c:typeof channels[number])=>BILI_ACTIONS.filter(op=>biliSettings(c.bilibili).enabledActions.includes(op.id)&&(!op.login||(c.accountId&&biliSettings(c.bilibili).privateActions&&!qqChatOnly(agent!,store.snapshot()))))

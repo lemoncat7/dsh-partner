@@ -11,9 +11,18 @@ class Classifier:
         self.labels = head['labels']
         self.weights = np.array(head['weights'], dtype=np.float32)
         self.bias = np.array(head['bias'], dtype=np.float32)
+        scene_path=head_path.with_name('scene-head.json')
+        self.scene=json.loads(scene_path.read_text()) if scene_path.exists() else None
+        if self.scene:
+            self.scene['weights']=np.array(self.scene['weights'],dtype=np.float32)
+            self.scene['bias']=np.array(self.scene['bias'],dtype=np.float32)
 
-    def classify(self, text, context=None):
-        texts=[text]+list(context or [])[:4]
+    def classify(self, text, context=None, frame=None):
+        context=list(context or [])[:4]
+        frame=frame or {}
+        profile=list(frame.get('profile',[]))[:3]
+        partner=frame.get('partnerText','')
+        texts=[text]+context+profile+([partner] if partner else [])
         now=time.monotonic()
         for key, (_, at) in list(self.cache.items()):
             if now-at>120: del self.cache[key]
@@ -36,5 +45,12 @@ class Classifier:
         result={'label':self.labels[order[-1]], 'confidence':float(probabilities[order[-1]]),
                 'margin':float(probabilities[order[-1]]-probabilities[order[-2]]),
                 'scores':dict(zip(self.labels, map(float, probabilities)))}
-        if len(vectors)>1: result['contextSimilarity']=float(np.clip(max(vectors[0] @ v for v in vectors[1:]),0,1))
+        def similarity(rows):return float(np.clip(max(vectors[0] @ v for v in rows),0,1))
+        if context:result['contextSimilarity']=similarity(vectors[1:1+len(context)])
+        if profile:result['profileSimilarity']=similarity(vectors[1+len(context):1+len(context)+len(profile)])
+        if partner:result['replySimilarity']=similarity(vectors[-1:])
+        scene=getattr(self,'scene',None)
+        if scene:
+            z=x @ scene['weights']+scene['bias'];p=np.exp(z-z.max());p=(p/p.sum())[0];order=np.argsort(p)
+            result['scene']={'label':scene['labels'][order[-1]],'confidence':float(p[order[-1]]),'margin':float(p[order[-1]]-p[order[-2]])}
         return result

@@ -45,9 +45,9 @@ test('slow local classification has a short budget and does not stall the next m
  let calls=0
  const classify=await fixture(t,()=>{calls++})
  const start=performance.now();assert.equal(await classify('需要判断的群聊',signal()),undefined)
- assert.ok(performance.now()-start<1000,'classification must finish below the old 1.2s timeout')
+ assert.ok(performance.now()-start<2000,'classification uses a single bounded cold-start budget')
  const next=performance.now();assert.equal(await classify('后续补充',signal()),undefined)
- assert.ok(performance.now()-next<100);assert.equal(calls,2)
+ assert.ok(performance.now()-next<100);assert.equal(calls,1,'a timeout must not duplicate inference in the single-worker queue')
 })
 
 test('context is bounded separately from current intent, optional similarity is validated, and legacy responses still work',async t=>{
@@ -74,4 +74,23 @@ test('one failed request does not disable recognition for thirty seconds; retry 
  assert.equal(await classify('第一条',signal(),[],d=>{diagnostic=d}),undefined);assert.equal(diagnostic.retryAfterMs,1000)
  await classify('紧接着',signal(),[],d=>{diagnostic=d});assert.equal(diagnostic.status,'backoff');assert.equal(calls,1)
  now+=1000;good=true;assert.ok(await classify('恢复后',signal(),[],d=>{diagnostic=d}));assert.equal(diagnostic.status,'ok');assert.equal(calls,2)
+})
+
+
+test('a cold inference slower than the old 450ms budget succeeds without retrying',async t=>{
+ let calls=0,diagnostic
+ const classify=await fixture(t,(_req,res)=>{calls++;setTimeout(()=>res.end(JSON.stringify({label:'address',confidence:.8,margin:.6})),700)})
+ assert.equal((await classify('弟弟，你在吗',signal(),[],d=>{diagnostic=d})).label,'address');assert.equal(calls,1);assert.equal(diagnostic.attempts,1)
+})
+
+test('scene protocol bounds verified profile independently and rejects malformed optional metadata',async t=>{
+ let n=0
+ const classify=await fixture(t,(req,res)=>{let raw='';req.on('data',b=>raw+=b);req.on('end',()=>{
+  const body=JSON.parse(raw);assert.equal(body.frame.profile.length,3);assert.ok(body.frame.profile.every(s=>s.length<=160));assert.equal(body.frame.partnerText.length,160)
+  res.end(JSON.stringify({label:'engage',confidence:.8,margin:.6,replySimilarity:n?2:.7,profileSimilarity:.5,scene:n++?{label:'invented',confidence:1,margin:1}:{label:'banter',confidence:.8,margin:.6}}))
+ })})
+ const frame={profile:Array(5).fill('x'.repeat(300)),partnerText:'y'.repeat(300)}
+ const result=await classify('当前内容',signal(),[],undefined,frame)
+ assert.deepEqual(result.scene,{label:'banter',confidence:.8,margin:.6});assert.equal(result.replySimilarity,.7);assert.equal(result.profileSimilarity,.5)
+ const invalid=await classify('下一条',signal(),[],undefined,frame);assert.equal(invalid.scene,undefined);assert.equal(invalid.replySimilarity,undefined)
 })

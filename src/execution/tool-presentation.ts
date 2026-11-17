@@ -1,3 +1,5 @@
+import {runtimePolicy} from '../companions/runtime-policy.js'
+import {isPartnerOwnedTool} from './tool-ownership.js'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { withActivityChoiceSchema } from '../character/activity-decision.js'
 import { withTaskReviewSchema } from '../chat/task-followup.js'
@@ -28,12 +30,14 @@ export function createToolPresentationSelector(store: PartnerStore) {
       definitions = tools.slice(); revision = currentRevision; views.clear()
     }
     const {owner,flags,access} = policy
-    const key = JSON.stringify([owner,flags,access.sendTools,access.allowedTools])
+    const currentPolicy=owner?runtimePolicy(store,owner):undefined
+    const key = JSON.stringify([owner,flags,access.sendTools,access.allowedTools,currentPolicy?.roleChat])
     const cached = views.get(key)
     if (cached) return cached
     const selected = tools.filter(tool => {
       if ((flags & ToolPresentationFlag.TerminalOnly) && !terminal.has(tool.name)) return false
       if (!owner) return true
+      if (currentPolicy&&!currentPolicy.allowsTool(tool.name)&&isPartnerOwnedTool(store,owner,tool.name))return false
       if (isPartnerMcpOperation(store,owner,tool.name)) return false
       if ((flags & ToolPresentationFlag.Discovery) && !entries.has(tool.name) && isPartnerDiscoveryTool(store,owner,tool.name)) return false
       return publicEntries.has(tool.name) || channelToolAllowed(store,owner,tool.name,access)

@@ -1,16 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {installInterestLimit,recoverInterest} from '../lib/character/interest-runtime.js'
-test('interest requests are bounded; normal user requests keep their original options',async()=>{
+test('interest continues beyond four requests without aborting or reducing model output',async()=>{
  const hooks=new Map(),ctx={on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name)}},claim={valid:true,counter:{steps:0}},limited=[]
  let current=claim
  const agents={interestClaim:id=>id==='s'?current:undefined,interestLimit:async(id,reason)=>limited.push(reason)}
  const dispose=installInterestLimit(ctx,agents),request=hooks.get('agent/request'),stream=hooks.get('llm/stream')
- assert.equal((await request({agent:{session:{id:'s'}}},async()=>({maxTokens:9000}))).maxTokens,800)
+ assert.equal((await request({agent:{session:{id:'s'}}},async()=>({maxTokens:9000}))).maxTokens,9000)
  assert.equal((await request({agent:{session:{id:'user'}}},async()=>({maxTokens:9000}))).maxTokens,9000)
  const consume=async(id)=>{const chunks=[];for await(const c of stream({sessionId:id},async function*(){yield {type:'text-delta',text:'ok'}}))chunks.push(c);return chunks}
- for(let i=0;i<4;i++)assert.equal((await consume('s')).length,1)
- await assert.rejects(consume('s'),/上限/);assert.equal(limited.length,1)
+ for(let i=0;i<20;i++)assert.equal((await consume('s')).length,1)
+ assert.equal((await consume('s')).length,1);assert.equal(limited.length,0)
  assert.equal((await consume('user')).length,1)
  current=undefined;assert.equal((await consume('s')).length,1)
  dispose();assert.equal(hooks.size,0)

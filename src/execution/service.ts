@@ -89,7 +89,7 @@ export class EphemeralExecutionService {
     if (this.closed) throw new Error('Ephemeral execution service is closed')
     const sessionId = `partner-run-${randomUUID()}`
     const runId = `run-${randomUUID()}`
-    const destroyAfterRun = request.destroyAfterRun ?? true
+    const destroyAfterRun = true
     const run: ExecutionRun = {
       id: runId, kind: request.kind, ownerCompanionId: request.companion.id, sessionId, sourceId: request.sourceId,
       status: 'running', destroyAfterRun, startedAt: Date.now(), toolNames: request.allowedTools ?? [],
@@ -154,7 +154,7 @@ export class EphemeralExecutionService {
     } finally {
       Object.assign(run, {
         status, completedAt: Date.now(),
-        ...(output ? { outputSummary: output.slice(0, 2000) } : {}),
+        ...(output ? { outputSummary: output } : {}),
         ...(error ? { error } : {}),
       })
       await this.saveRun(run)

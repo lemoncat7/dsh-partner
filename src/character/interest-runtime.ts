@@ -1,16 +1,23 @@
+import {recoverReplyTokenLimit} from '../execution/request-token-recovery.js'
 import type {Context} from '@deepseek-ai/cordis'
 import type {PartnerAgentRuntime} from '../agent-runtime.js'
 import type {PartnerStore} from '../store.js'
 
-/** No extra classifier. Bound only the new interest wake, never a user turn or ordinary idle work. */
+/** No extra classifier. Validate only the current interest wake; never impose a request-count ceiling. */
 export function installInterestLimit(ctx:Context,agents:PartnerAgentRuntime):()=>void{
  const stops:Array<()=>void>=[]
- stops.push(ctx.on('agent/request',async({agent},next)=>{const options=await next();return agents.interestClaim(agent.session.id)?{...options,maxTokens:800}:options}))
+ // The host persists agent/request controls. Never use them to shorten a reply.
+ const checked=new WeakSet<object>()
+ stops.push(ctx.on('agent/request',async({agent},next)=>{
+  const options=await next();if(!agents.runtimePolicyForSession?.(agent.session.id)?.roleChat||checked.has(agent))return options
+  checked.add(agent)
+  if(options.maxTokens!==700&&options.maxTokens!==800)return options
+  return recoverReplyTokenLimit(options,agent.session.snapshotEvents?.()??[])
+ }))
  stops.push(ctx.on('llm/stream',async function*(options,next){
   const claim=options.sessionId?agents.interestClaim(options.sessionId):undefined
   if(!claim){yield*next();return}
   if(!claim.valid){agents.stopInterest(options.sessionId!,claim.messageId);return}
-  if(claim.counter.steps>=4){await agents.interestLimit(options.sessionId!,'本次兴趣续接已达到 4 次模型请求上限，不自动重试');throw Error('兴趣续接请求上限')}
   claim.counter.steps++
   for await(const chunk of next()){
    const current=agents.interestClaim(options.sessionId!)

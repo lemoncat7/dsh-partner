@@ -1,3 +1,4 @@
+import {resolveCompanionRuntimePolicy,type CompanionRuntimePolicy} from './companions/runtime-policy.js'
 import { enforceThoughtBudget } from './character/thought-budget.js'
 import {validateBrowserConfig} from './browser/domain.js'
 import {validateTtsState} from './voice/validation.js'
@@ -17,6 +18,8 @@ import { validatePushState } from './notifications/push-state.js'
 import { reconcileBoardContinuations } from './tasks/continuation.js'
 
 export class PartnerStore {
+  private sessionPolicies = new Map<string,CompanionRuntimePolicy>()
+  private policies = new Map<string,CompanionRuntimePolicy>()
   private state: PartnerState
   private writes: Promise<void> = Promise.resolve()
   private readonly removingCompanions = new Set<string>()
@@ -25,6 +28,7 @@ export class PartnerStore {
   private frozen = false
   private constructor(private readonly path: string, state: PartnerState, private readonly split?: SplitStatePersistence) {
     this.state = state
+    this.compilePolicies()
   }
 
   static async openSplit(split: SplitStatePersistence): Promise<PartnerStore> {
@@ -57,6 +61,13 @@ export class PartnerStore {
     }
     return new PartnerStore(path, state)
   }
+
+  private compilePolicies():void {
+    this.policies=new Map(this.state.companions.map(c=>[c.id,resolveCompanionRuntimePolicy(c)]))
+    this.sessionPolicies=new Map(this.state.sessions.flatMap(r=>{const p=this.policies.get(r.companionId);return p?[[r.sessionId,p] as const]:[]}))
+  }
+  runtimePolicyForSession(sessionId:string):CompanionRuntimePolicy|undefined { return this.sessionPolicies.get(sessionId) }
+  runtimePolicy(owner:string):CompanionRuntimePolicy|undefined { return this.policies.get(owner) }
 
   snapshot(): PartnerState
   snapshot<K extends keyof PartnerState>(keys: readonly K[]): Pick<PartnerState, K>
@@ -102,6 +113,7 @@ export class PartnerStore {
       await this.persist(next)
       const previous = this.state
       this.state = next
+      this.compilePolicies()
       // Observers cannot turn an already committed write into an apparent failure.
       for (const listener of this.listeners) {
         try { listener.notify(next, previous) } catch (error) { try { listener.onError(error) } catch { /* reporting must not reject a committed write */ } }

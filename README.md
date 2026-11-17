@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/%40lemoncat7%2Fdsh-partner)](https://www.npmjs.com/package/@lemoncat7/dsh-partner)
 
-当前版本：[2.25.9 更新说明](docs/releases/2.25.9.md)。
+当前版本：[2.27.11 更新说明](docs/releases/2.27.11.md)。
 
 ## 功能
 

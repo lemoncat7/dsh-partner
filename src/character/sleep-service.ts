@@ -1,3 +1,4 @@
+import {runtimeSnapshot,runtimePolicy} from '../companions/runtime-policy.js'
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
@@ -34,7 +35,7 @@ export class SleepService {
   }
   async close(): Promise<void> { this.closed = true; if (this.timer) clearTimeout(this.timer); for (const c of this.controllers.values()) c.abort(); await this.job; await this.tickJob }
   private current(id: string): Companion {
-    const c = this.store.snapshot().companions.find(c => c.id === id)
+    const c = runtimeSnapshot(this.store).companions.find(c => c.id === id)
     if (!c || this.store.isCompanionRemoving(id)) throw new Error('伙伴不存在或正在删除')
     return c
   }
@@ -42,7 +43,7 @@ export class SleepService {
   async acceptInput(sessionId: string, messages: readonly UserMessage[]): Promise<void> {
     for (const message of messages) {
       if (message.source.kind !== 'user') continue
-      const state = this.store.snapshot(), routes = state.sessions.filter(r => r.sessionId === sessionId)
+      const state = runtimeSnapshot(this.store), routes = state.sessions.filter(r => r.sessionId === sessionId)
       const route = routes.find(r => r.inboundMessageIds?.includes(message.id)) ?? routes.find(r => r.kind === 'local')
       if (!route) continue
       const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
@@ -50,10 +51,10 @@ export class SleepService {
     }
   }
   async onUserMessage(sessionId: string, at: number, messageId = `${sessionId}:${at}`, privateMessage = true, urgent = false): Promise<void> {
-    const state = this.store.snapshot(), route = state.sessions.find(r => r.sessionId === sessionId)
+    const state = runtimeSnapshot(this.store), route = state.sessions.find(r => r.sessionId === sessionId)
     if (!route) return
     const c = state.companions.find(c => c.id === route.companionId)
-    if (!c || (!sleepPolicy(c).enabled && !c.sleepState) || c.sleepState?.inputIds?.includes(messageId)) return
+    if (!c || !runtimePolicy(this.store,c.id)?.roleChat || (!sleepPolicy(c).enabled && !c.sleepState) || c.sleepState?.inputIds?.includes(messageId)) return
     this.controllers.get(c.id)?.abort()
     await this.store.update(s => {
       const current = s.companions.find(item => item.id === c.id)
@@ -128,14 +129,14 @@ export class SleepService {
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
       execute: async (raw, exec) => {
         exec.signal.throwIfAborted()
-        const route = this.store.snapshot().sessions.find(r => r.companionId === owner && r.sessionId === exec.agent?.session.id)
+        const route = runtimeSnapshot(this.store).sessions.find(r => r.companionId === owner && r.sessionId === exec.agent?.session.id)
         if (!route) throw new Error('只能在自己的聊天会话中管理睡眠')
         const input = record(raw)
         if (input.action === 'sleep') await this.sleep(owner, route.id, input.minutes, input.reason, input.dream !== false)
         else if (input.action === 'wake') await this.wake(owner)
         else if (input.action !== 'inspect') throw new Error('睡眠 action 无效')
         const c = this.current(owner), episode = c.sleepState?.episode
-        const routeIds = new Set(this.store.snapshot().sessions.filter(r => r.companionId === owner && r.sessionId === route.sessionId).map(r => r.id))
+        const routeIds = new Set(runtimeSnapshot(this.store).sessions.filter(r => r.companionId === owner && r.sessionId === route.sessionId).map(r => r.id))
         return JSON.stringify({ sleeping: isSleeping(c, this.now()), fatigue: fatigueValue(c, this.now()), policy: sleepPolicy(c), ...(episode && routeIds.has(episode.routeId) ? { episode } : {}), dreams: c.sleepState?.dreams?.filter(d => routeIds.has(d.routeId)).slice(-3) ?? [], note: '梦是想象与感受，不是真实记忆；不需要主动发送消息。' })
       },
     }
@@ -146,7 +147,7 @@ export class SleepService {
   }
   private async runTick(): Promise<void> {
     if (this.closed) return
-    for (const initial of this.store.snapshot().companions) {
+    for (const initial of runtimeSnapshot(this.store).companions) {
       if (this.closed) return
       if (this.store.isCompanionRemoving(initial.id)) continue
       const now = this.now(), enabled = sleepPolicy(initial).enabled
@@ -156,7 +157,7 @@ export class SleepService {
       })
       let c = this.current(initial.id), e = c.sleepState?.episode
       if (e && !e.wokeAt && (!enabled || e.wakeAt <= now)) { await this.wake(c.id, enabled ? '自然醒来' : '睡眠功能已关闭'); c = this.current(c.id); e = c.sleepState?.episode }
-      if (!enabled || this.ports.busy(c.id) || sleepWorkPending(this.store.snapshot(), c.id)) continue
+      if (!enabled || this.ports.busy(c.id) || sleepWorkPending(runtimeSnapshot(this.store), c.id)) continue
       if (isSleeping(c, now)) {
         if (e?.dream === 'generating' && !this.controllers.has(c.id)) {
           await this.finishDream(c.id, e.id, 'interrupted')
@@ -165,7 +166,7 @@ export class SleepService {
         }
         continue
       }
-      const state = this.store.snapshot(), activity = sleepActivity(state, c), value = fatigueValue(c, now)
+      const state = runtimeSnapshot(this.store), activity = sleepActivity(state, c), value = fatigueValue(c, now)
       if (!activity || now - activity < IDLE_MS || now - (e?.wokeAt ?? 0) < 10 * 60_000 || now - (c.sleepState?.decision?.at ?? 0) < 60_000) continue
       const route = state.sessions.filter(r => r.companionId === c.id && !this.ports.archived(r.sessionId)).sort((a,b) => b.lastMessageAt - a.lastMessageAt)[0]
       if (!route) continue
@@ -178,7 +179,7 @@ export class SleepService {
     }
   }
   private async memories(id: string, routeId: string): Promise<Array<{ id: string; content: string }>> {
-    const state = this.store.snapshot(), c = this.current(id), route = state.sessions.find(r => r.id === routeId && r.companionId === id)
+    const state = runtimeSnapshot(this.store), c = this.current(id), route = state.sessions.find(r => r.id === routeId && r.companionId === id)
     if (!c.automation.memory.enabled || !route) return []
     const scope = conversationMemoryScope(route, state.sessions)
     return (await this.memory.recentMemories(id, 12, scope)).filter(m => m.status === 'active').slice(0,8).map(m => ({ id: m.id, content: `${m.subject}: ${m.content}`.slice(0,900) }))

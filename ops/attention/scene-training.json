@@ -1,0 +1,1146 @@
+[
+  {
+    "text": "喂",
+    "label": "address"
+  },
+  {
+    "text": "喂喂",
+    "label": "address"
+  },
+  {
+    "text": "在不",
+    "label": "address"
+  },
+  {
+    "text": "在吗",
+    "label": "address"
+  },
+  {
+    "text": "人呢",
+    "label": "address"
+  },
+  {
+    "text": "你在不在",
+    "label": "address"
+  },
+  {
+    "text": "还醒着吗",
+    "label": "address"
+  },
+  {
+    "text": "出来一下",
+    "label": "address"
+  },
+  {
+    "text": "出来冒泡",
+    "label": "address"
+  },
+  {
+    "text": "搭档",
+    "label": "address"
+  },
+  {
+    "text": "搭档在不",
+    "label": "address"
+  },
+  {
+    "text": "小伙伴",
+    "label": "address"
+  },
+  {
+    "text": "小朋友",
+    "label": "address"
+  },
+  {
+    "text": "小家伙",
+    "label": "address"
+  },
+  {
+    "text": "小可爱",
+    "label": "address"
+  },
+  {
+    "text": "小笨蛋",
+    "label": "address"
+  },
+  {
+    "text": "哥哥",
+    "label": "address"
+  },
+  {
+    "text": "姐姐",
+    "label": "address"
+  },
+  {
+    "text": "弟弟",
+    "label": "address"
+  },
+  {
+    "text": "妹妹",
+    "label": "address"
+  },
+  {
+    "text": "宝贝",
+    "label": "address"
+  },
+  {
+    "text": "亲爱的",
+    "label": "address"
+  },
+  {
+    "text": "兄弟",
+    "label": "address"
+  },
+  {
+    "text": "朋友你在不在",
+    "label": "address"
+  },
+  {
+    "text": "叫你呢",
+    "label": "address"
+  },
+  {
+    "text": "你怎么不理我",
+    "label": "address"
+  },
+  {
+    "text": "你人去哪了",
+    "label": "address"
+  },
+  {
+    "text": "理理我嘛",
+    "label": "address"
+  },
+  {
+    "text": "我在叫你呀",
+    "label": "address"
+  },
+  {
+    "text": "过来陪我聊聊",
+    "label": "address"
+  },
+  {
+    "text": "能听到我说话吗",
+    "label": "address"
+  },
+  {
+    "text": "呼叫一下",
+    "label": "address"
+  },
+  {
+    "text": "Hello are you there",
+    "label": "address"
+  },
+  {
+    "text": "Hey buddy",
+    "label": "address"
+  },
+  {
+    "text": "もしもし",
+    "label": "address"
+  },
+  {
+    "text": "弟弟弟弟",
+    "label": "address"
+  },
+  {
+    "text": "弟弟！",
+    "label": "address"
+  },
+  {
+    "text": "小朋友醒醒",
+    "label": "address"
+  },
+  {
+    "text": "怎么不搭理我",
+    "label": "address"
+  },
+  {
+    "text": "你倒是吱一声呀",
+    "label": "address"
+  },
+  {
+    "text": "人还在嘛",
+    "label": "address"
+  },
+  {
+    "text": "帮我看看这个",
+    "label": "question"
+  },
+  {
+    "text": "这道题怎么解",
+    "label": "question"
+  },
+  {
+    "text": "这个报错怎么处理",
+    "label": "question"
+  },
+  {
+    "text": "这种情况该怎么办",
+    "label": "question"
+  },
+  {
+    "text": "你觉得哪个更好",
+    "label": "question"
+  },
+  {
+    "text": "有人知道怎么修吗",
+    "label": "question"
+  },
+  {
+    "text": "大家怎么看这个事情",
+    "label": "question"
+  },
+  {
+    "text": "我想听听你们的想法",
+    "label": "question"
+  },
+  {
+    "text": "谁会装这个软件",
+    "label": "question"
+  },
+  {
+    "text": "有没有推荐的电影",
+    "label": "question"
+  },
+  {
+    "text": "能解释一下这个意思吗",
+    "label": "question"
+  },
+  {
+    "text": "你能帮我查一下吗",
+    "label": "question"
+  },
+  {
+    "text": "你会画画吗",
+    "label": "question"
+  },
+  {
+    "text": "这个工具好用吗",
+    "label": "question"
+  },
+  {
+    "text": "今天中午吃什么",
+    "label": "question"
+  },
+  {
+    "text": "明天要带伞吗",
+    "label": "question"
+  },
+  {
+    "text": "怎么才能睡得早一点",
+    "label": "question"
+  },
+  {
+    "text": "你怎么看",
+    "label": "question"
+  },
+  {
+    "text": "这个配置对不对",
+    "label": "question"
+  },
+  {
+    "text": "有没有人遇到这个错误",
+    "label": "question"
+  },
+  {
+    "text": "大家觉得选红色还是蓝色",
+    "label": "question"
+  },
+  {
+    "text": "这个梗什么意思",
+    "label": "question"
+  },
+  {
+    "text": "如何给容器设置代理",
+    "label": "question"
+  },
+  {
+    "text": "这张照片拍得好吗",
+    "label": "question"
+  },
+  {
+    "text": "推荐一首歌吧",
+    "label": "question"
+  },
+  {
+    "text": "我该买哪款手机",
+    "label": "question"
+  },
+  {
+    "text": "你能帮忙做个总结吗",
+    "label": "question"
+  },
+  {
+    "text": "这个脚本为什么失败",
+    "label": "question"
+  },
+  {
+    "text": "可以帮我找找资料吗",
+    "label": "question"
+  },
+  {
+    "text": "说说你的看法",
+    "label": "question"
+  },
+  {
+    "text": "有懂这个的吗",
+    "label": "question"
+  },
+  {
+    "text": "哪种办法更省时间",
+    "label": "question"
+  },
+  {
+    "text": "嘴上说早睡结果又两点了",
+    "label": "banter"
+  },
+  {
+    "text": "你这操作也是没谁了",
+    "label": "banter"
+  },
+  {
+    "text": "又菜又爱玩说的就是我",
+    "label": "banter"
+  },
+  {
+    "text": "我这脑子是不是拿去换积分了",
+    "label": "banter"
+  },
+  {
+    "text": "今天又把自己蠢笑了",
+    "label": "banter"
+  },
+  {
+    "text": "说好的减肥呢奶茶已经点了",
+    "label": "banter"
+  },
+  {
+    "text": "钱包比我的脸还干净",
+    "label": "banter"
+  },
+  {
+    "text": "上班哪有不疯的硬撑罢了",
+    "label": "banter"
+  },
+  {
+    "text": "我的作息已经不配叫作息了",
+    "label": "banter"
+  },
+  {
+    "text": "游戏可以输嘴不能输",
+    "label": "banter"
+  },
+  {
+    "text": "又被自己写的代码背刺了",
+    "label": "banter"
+  },
+  {
+    "text": "这波属于是反向上分",
+    "label": "banter"
+  },
+  {
+    "text": "他这嘴比服务器还硬",
+    "label": "banter"
+  },
+  {
+    "text": "这手速建议去抢菜",
+    "label": "banter"
+  },
+  {
+    "text": "你这话说得我CPU都烧了",
+    "label": "banter"
+  },
+  {
+    "text": "菜得很稳定也是一种实力",
+    "label": "banter"
+  },
+  {
+    "text": "这波操作给我看乐了",
+    "label": "banter"
+  },
+  {
+    "text": "打工人的命也是命",
+    "label": "banter"
+  },
+  {
+    "text": "我宣布床封印了我",
+    "label": "banter"
+  },
+  {
+    "text": "这班上得像渡劫",
+    "label": "banter"
+  },
+  {
+    "text": "别人上分我上火",
+    "label": "banter"
+  },
+  {
+    "text": "计划很丰满执行很摆烂",
+    "label": "banter"
+  },
+  {
+    "text": "这网络是拿土豆供电的吗",
+    "label": "banter"
+  },
+  {
+    "text": "你是不是偷偷去进修抬杠了",
+    "label": "banter"
+  },
+  {
+    "text": "笑死你还挺会接梗",
+    "label": "banter"
+  },
+  {
+    "text": "别装啦刚才是谁说不会的",
+    "label": "banter"
+  },
+  {
+    "text": "我真是个小机灵鬼把文件删了",
+    "label": "banter"
+  },
+  {
+    "text": "刚说不会翻车就翻了",
+    "label": "banter"
+  },
+  {
+    "text": "这是什么人间迷惑行为",
+    "label": "banter"
+  },
+  {
+    "text": "昨天立的flag今天已经倒了",
+    "label": "banter"
+  },
+  {
+    "text": "感觉你在演我",
+    "label": "banter"
+  },
+  {
+    "text": "哈哈你又被打脸了",
+    "label": "banter"
+  },
+  {
+    "text": "今天终于把项目做完了",
+    "label": "share"
+  },
+  {
+    "text": "刚看到一只特别胖的猫",
+    "label": "share"
+  },
+  {
+    "text": "我今天心情有点差",
+    "label": "share"
+  },
+  {
+    "text": "刚看完电影好感动",
+    "label": "share"
+  },
+  {
+    "text": "今天的夕阳真漂亮",
+    "label": "share"
+  },
+  {
+    "text": "我买的新键盘到了",
+    "label": "share"
+  },
+  {
+    "text": "发现一首超好听的歌",
+    "label": "share"
+  },
+  {
+    "text": "今天下雨没带伞淋透了",
+    "label": "share"
+  },
+  {
+    "text": "我考试通过了",
+    "label": "share"
+  },
+  {
+    "text": "这个游戏的剧情好离谱",
+    "label": "share"
+  },
+  {
+    "text": "感觉最近状态不太好",
+    "label": "share"
+  },
+  {
+    "text": "这次旅行拍了好多照片",
+    "label": "share"
+  },
+  {
+    "text": "今天做饭成功了",
+    "label": "share"
+  },
+  {
+    "text": "终于等到更新了",
+    "label": "share"
+  },
+  {
+    "text": "我刚发现一个有意思的网站",
+    "label": "share"
+  },
+  {
+    "text": "猫把我的杯子打翻了",
+    "label": "share"
+  },
+  {
+    "text": "今天加班到现在才回来",
+    "label": "share"
+  },
+  {
+    "text": "最近有点想学吉他",
+    "label": "share"
+  },
+  {
+    "text": "这个表情包也太有意思了",
+    "label": "share"
+  },
+  {
+    "text": "我今天被老板气到了",
+    "label": "share"
+  },
+  {
+    "text": "刚刚看到了流星",
+    "label": "share"
+  },
+  {
+    "text": "终于找到丢掉的耳机了",
+    "label": "share"
+  },
+  {
+    "text": "我把电脑修好了",
+    "label": "share"
+  },
+  {
+    "text": "这部番的结局让我缓不过来",
+    "label": "share"
+  },
+  {
+    "text": "今晚吃到了很棒的火锅",
+    "label": "share"
+  },
+  {
+    "text": "今天跑完了五公里",
+    "label": "share"
+  },
+  {
+    "text": "我有点难过想找人说说",
+    "label": "share"
+  },
+  {
+    "text": "我刚画了一张图",
+    "label": "share"
+  },
+  {
+    "text": "新出的这个功能挺有意思",
+    "label": "share"
+  },
+  {
+    "text": "今天遇到件挺暖心的事",
+    "label": "share"
+  },
+  {
+    "text": "我终于把那个bug解决了",
+    "label": "share"
+  },
+  {
+    "text": "刚看到个新闻挺惊讶的",
+    "label": "share"
+  },
+  {
+    "text": "咱们换个话题吧",
+    "label": "topic"
+  },
+  {
+    "text": "聊点别的",
+    "label": "topic"
+  },
+  {
+    "text": "来聊点有意思的",
+    "label": "topic"
+  },
+  {
+    "text": "如果可以穿越你想去哪",
+    "label": "topic"
+  },
+  {
+    "text": "要不大家说说最近在玩什么",
+    "label": "topic"
+  },
+  {
+    "text": "突然想到一个问题要是猫会说话呢",
+    "label": "topic"
+  },
+  {
+    "text": "来个脑洞如果你能隐身一天",
+    "label": "topic"
+  },
+  {
+    "text": "你们最离谱的梦是什么",
+    "label": "topic"
+  },
+  {
+    "text": "要不聊聊各自最爱的电影",
+    "label": "topic"
+  },
+  {
+    "text": "假如明天不用上班你会干什么",
+    "label": "topic"
+  },
+  {
+    "text": "大家分享一件今天的小事吧",
+    "label": "topic"
+  },
+  {
+    "text": "想聊聊童年的零食",
+    "label": "topic"
+  },
+  {
+    "text": "我们来玩个接龙怎么样",
+    "label": "topic"
+  },
+  {
+    "text": "不如一起想个故事",
+    "label": "topic"
+  },
+  {
+    "text": "说点开心的吧",
+    "label": "topic"
+  },
+  {
+    "text": "有没有想一起讨论的新话题",
+    "label": "topic"
+  },
+  {
+    "text": "来做个选择题你选魔法还是科技",
+    "label": "topic"
+  },
+  {
+    "text": "换个轻松点的话题",
+    "label": "topic"
+  },
+  {
+    "text": "谁有好玩的事情分享一下",
+    "label": "topic"
+  },
+  {
+    "text": "我们聊聊旅行吧",
+    "label": "topic"
+  },
+  {
+    "text": "有没有人想玩猜谜",
+    "label": "topic"
+  },
+  {
+    "text": "忽然好奇你们的理想一天是什么",
+    "label": "topic"
+  },
+  {
+    "text": "来点新话头",
+    "label": "topic"
+  },
+  {
+    "text": "我们聊点什么好呢",
+    "label": "topic"
+  },
+  {
+    "text": "你们要不要听个冷笑话",
+    "label": "topic"
+  },
+  {
+    "text": "不聊工作了来聊游戏",
+    "label": "topic"
+  },
+  {
+    "text": "来讨论个假设如果世界只剩下一种食物",
+    "label": "topic"
+  },
+  {
+    "text": "我有一个奇怪的脑洞要不要听",
+    "label": "topic"
+  },
+  {
+    "text": "好的",
+    "label": "close"
+  },
+  {
+    "text": "好吧",
+    "label": "close"
+  },
+  {
+    "text": "收到",
+    "label": "close"
+  },
+  {
+    "text": "知道了",
+    "label": "close"
+  },
+  {
+    "text": "明白了",
+    "label": "close"
+  },
+  {
+    "text": "了解",
+    "label": "close"
+  },
+  {
+    "text": "嗯嗯",
+    "label": "close"
+  },
+  {
+    "text": "嗯",
+    "label": "close"
+  },
+  {
+    "text": "行",
+    "label": "close"
+  },
+  {
+    "text": "谢谢",
+    "label": "close"
+  },
+  {
+    "text": "谢啦",
+    "label": "close"
+  },
+  {
+    "text": "辛苦了",
+    "label": "close"
+  },
+  {
+    "text": "晚安",
+    "label": "close"
+  },
+  {
+    "text": "拜拜",
+    "label": "close"
+  },
+  {
+    "text": "先这样吧",
+    "label": "close"
+  },
+  {
+    "text": "不聊了",
+    "label": "close"
+  },
+  {
+    "text": "不用回了",
+    "label": "close"
+  },
+  {
+    "text": "别回复了",
+    "label": "close"
+  },
+  {
+    "text": "让我安静一会",
+    "label": "close"
+  },
+  {
+    "text": "这个话题到此为止",
+    "label": "close"
+  },
+  {
+    "text": "暂停一下",
+    "label": "close"
+  },
+  {
+    "text": "我去忙了",
+    "label": "close"
+  },
+  {
+    "text": "先走了",
+    "label": "close"
+  },
+  {
+    "text": "下次聊",
+    "label": "close"
+  },
+  {
+    "text": "够了先停",
+    "label": "close"
+  },
+  {
+    "text": "不用再说了",
+    "label": "close"
+  },
+  {
+    "text": "不需要继续解释",
+    "label": "close"
+  },
+  {
+    "text": "我要休息了别打扰",
+    "label": "close"
+  },
+  {
+    "text": "先别说话了",
+    "label": "close"
+  },
+  {
+    "text": "我弟弟今天放假了",
+    "label": "share"
+  },
+  {
+    "text": "他弟弟来了",
+    "label": "share"
+  },
+  {
+    "text": "我妹妹的书包丢了",
+    "label": "share"
+  },
+  {
+    "text": "你弟弟叫什么名字",
+    "label": "question"
+  },
+  {
+    "text": "她哥哥明天来接她",
+    "label": "share"
+  },
+  {
+    "text": "我姐姐正在做饭",
+    "label": "share"
+  },
+  {
+    "text": "他说他的小可爱不见了",
+    "label": "share"
+  },
+  {
+    "text": "刚才叫的是我家弟弟",
+    "label": "other"
+  },
+  {
+    "text": "我喊的是他不是你",
+    "label": "other"
+  },
+  {
+    "text": "这句话是跟别人说的",
+    "label": "other"
+  },
+  {
+    "text": "别误会我没叫你",
+    "label": "other"
+  },
+  {
+    "text": "老王你今晚来吗",
+    "label": "other"
+  },
+  {
+    "text": "小李把文件发给小张",
+    "label": "other"
+  },
+  {
+    "text": "这是我和他的私事",
+    "label": "other"
+  },
+  {
+    "text": "我在问小陈",
+    "label": "other"
+  },
+  {
+    "text": "刚刚那句说的是我同事",
+    "label": "other"
+  },
+  {
+    "text": "我哥哥让我早点回家",
+    "label": "share"
+  },
+  {
+    "text": "这件事让他们俩自己聊",
+    "label": "other"
+  },
+  {
+    "text": "她在跟她妹妹打电话",
+    "label": "share"
+  },
+  {
+    "text": "我喊了一声弟弟他没听见",
+    "label": "share"
+  },
+  {
+    "text": "你姐姐今年多大了",
+    "label": "question"
+  },
+  {
+    "text": "他叫宝贝的是他女朋友",
+    "label": "share"
+  },
+  {
+    "text": "别人的弟弟也太可爱了",
+    "label": "share"
+  },
+  {
+    "text": "我朋友在找他哥哥",
+    "label": "share"
+  },
+  {
+    "text": "张三你发错群了",
+    "label": "other"
+  },
+  {
+    "text": "小王记得回小李的消息",
+    "label": "other"
+  },
+  {
+    "text": "她弟弟昨天刚开学",
+    "label": "share"
+  },
+  {
+    "text": "我没叫这个机器人",
+    "label": "other"
+  },
+  {
+    "text": "测试",
+    "label": "background"
+  },
+  {
+    "text": "打卡",
+    "label": "background"
+  },
+  {
+    "text": "路过",
+    "label": "background"
+  },
+  {
+    "text": "冒泡",
+    "label": "background"
+  },
+  {
+    "text": "占个位",
+    "label": "background"
+  },
+  {
+    "text": "111",
+    "label": "background"
+  },
+  {
+    "text": "123",
+    "label": "background"
+  },
+  {
+    "text": "。",
+    "label": "background"
+  },
+  {
+    "text": "？",
+    "label": "background"
+  },
+  {
+    "text": "...",
+    "label": "background"
+  },
+  {
+    "text": "[图片]",
+    "label": "background"
+  },
+  {
+    "text": "[表情]",
+    "label": "background"
+  },
+  {
+    "text": "消息已撤回",
+    "label": "background"
+  },
+  {
+    "text": "系统通知",
+    "label": "background"
+  },
+  {
+    "text": "仅记录一下",
+    "label": "background"
+  },
+  {
+    "text": "存个链接",
+    "label": "background"
+  },
+  {
+    "text": "备忘",
+    "label": "background"
+  },
+  {
+    "text": "转存一下",
+    "label": "background"
+  },
+  {
+    "text": "签到",
+    "label": "background"
+  },
+  {
+    "text": "灌水",
+    "label": "background"
+  },
+  {
+    "text": "没人",
+    "label": "background"
+  },
+  {
+    "text": "无",
+    "label": "background"
+  },
+  {
+    "text": "[文件]",
+    "label": "background"
+  },
+  {
+    "text": "消息转发",
+    "label": "background"
+  },
+  {
+    "text": "机器人测试",
+    "label": "background"
+  },
+  {
+    "text": "复制记录",
+    "label": "background"
+  },
+  {
+    "text": "此处留空",
+    "label": "background"
+  },
+  {
+    "text": "已编辑",
+    "label": "background"
+  },
+  {
+    "label": "question",
+    "text": "今天中午吃什么"
+  },
+  {
+    "label": "question",
+    "text": "晚上吃点啥好呢"
+  },
+  {
+    "label": "question",
+    "text": "这个怎么弄呀"
+  },
+  {
+    "label": "question",
+    "text": "你觉得好不好看"
+  },
+  {
+    "label": "question",
+    "text": "你弟弟最近怎么样"
+  },
+  {
+    "label": "question",
+    "text": "你朋友有没有推荐过好玩的"
+  },
+  {
+    "label": "question",
+    "text": "有什么值得看的新电影吗"
+  },
+  {
+    "label": "other",
+    "text": "阿伟这题你来回答"
+  },
+  {
+    "label": "other",
+    "text": "我问的是张三不在问你"
+  },
+  {
+    "label": "other",
+    "text": "小张这份文件麻烦发给我"
+  },
+  {
+    "label": "other",
+    "text": "这句只想让老李回答"
+  },
+  {
+    "label": "other",
+    "text": "让小陈自己说"
+  },
+  {
+    "label": "other",
+    "text": "刚才那句话是对小王说的"
+  },
+  {
+    "label": "other",
+    "text": "别接这句我在跟别人聊"
+  },
+  {
+    "label": "other",
+    "text": "我不是喊你"
+  },
+  {
+    "label": "other",
+    "text": "我问他呢你别插话"
+  },
+  {
+    "label": "other",
+    "text": "这话是说给我同学的"
+  },
+  {
+    "label": "other",
+    "text": "小赵你听见没有"
+  },
+  {
+    "label": "other",
+    "text": "王老师这道题能再解释一遍吗"
+  },
+  {
+    "label": "other",
+    "text": "我在等小刘回我"
+  },
+  {
+    "label": "other",
+    "text": "他俩在商量跟你没关系"
+  },
+  {
+    "label": "other",
+    "text": "阿明来一下有事找你"
+  },
+  {
+    "label": "share",
+    "text": "我弟弟说他饿了"
+  },
+  {
+    "label": "share",
+    "text": "我弟弟今天终于放假"
+  },
+  {
+    "label": "share",
+    "text": "妹妹今天考得不错"
+  },
+  {
+    "label": "share",
+    "text": "朋友送了我一个礼物"
+  },
+  {
+    "label": "share",
+    "text": "今天热得我想住冰箱里"
+  },
+  {
+    "label": "share",
+    "text": "我终于要下班了"
+  },
+  {
+    "label": "share",
+    "text": "最近都没人陪我玩游戏"
+  },
+  {
+    "label": "banter",
+    "text": "好好好就你最会嘴硬"
+  },
+  {
+    "label": "banter",
+    "text": "我都快被自己菜笑了"
+  },
+  {
+    "label": "banter",
+    "text": "你这脑回路我是真服了"
+  },
+  {
+    "label": "banter",
+    "text": "这操作看得人两眼一黑"
+  },
+  {
+    "label": "banter",
+    "text": "你可真是个小天才呀"
+  },
+  {
+    "label": "banter",
+    "text": "这都能输不愧是我"
+  },
+  {
+    "label": "banter",
+    "text": "我这运气可以去当反面教材了"
+  }
+]

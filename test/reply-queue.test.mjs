@@ -49,3 +49,12 @@ test('runtime retains slow current input, skips superseded opportunities and rel
  assert.equal((await runtime.reply(c,'qq',route.userId,{text:'explicit task',attachments:[],groupReply:{kind:'direct',receivedAt:Date.now()-60000}})).text,'done')
  await runtime.replyQueue.idle('session');assert.equal(runtime.queues.size,0);assert.equal(calls,2)
 })
+
+test('completed background gets the next foreground slot without interrupting the active reply',async()=>{
+ const q=new ReplyQueue(),gate=deferred(),seen=[]
+ const active=q.enqueue('s','ordered',undefined,async()=>{seen.push('active');await gate.promise;seen.push('finished')},()=>null);await Promise.resolve()
+ const chatter=q.enqueue('s','ambient','room',async()=>seen.push('chatter'),()=>null)
+ const user=q.enqueue('s','direct','room',async()=>seen.push('user'),()=>null)
+ const done=q.enqueue('s','delivery',undefined,async()=>seen.push('completion'),()=>null)
+ assert.deepEqual(seen,['active']);gate.resolve();await Promise.all([active,chatter,user,done]);assert.deepEqual(seen,['active','finished','completion','user'])
+})

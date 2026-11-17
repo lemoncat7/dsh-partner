@@ -144,7 +144,7 @@ test('separate relationship edits survive restart and refresh both runtime and p
  const index=new SessionConfigurationIndex(f.store);t.after(()=>index.close())
  const before=index.forSession('session').revision
  await f.update({relationshipText:'我们是老朋友，称呼名字。'})
- assert.notEqual(index.forSession('session').revision,before)
+ assert.equal(index.forSession('session').revision,before,'saved relationship edits do not change ordinary execution policy')
  let c=f.store.snapshot().companions[0]
  assert.equal(c.relationshipText,'我们是老朋友，称呼名字。');assert.equal(pageIdentity(c).relationshipText,'我们是老朋友，称呼名字。')
  assert.equal((await PartnerStore.open(f.path)).snapshot().companions[0].relationshipText,c.relationshipText)

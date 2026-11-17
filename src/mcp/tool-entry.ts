@@ -1,3 +1,4 @@
+import {backgroundToolScope} from '../execution/background-scope.js'
 import {AjvJsonSchemaValidator} from '@modelcontextprotocol/sdk/validation/ajv'
 import type {JsonSchemaType,JsonSchemaValidator} from '@modelcontextprotocol/sdk/validation'
 import type {ToolRuntime,ToolRunContext,ToolExecutionResult} from '@deepseek-ai/dsh-tools'
@@ -21,17 +22,18 @@ export function installMcpEntry(runtime:ToolRuntime,owner:string,store:PartnerSt
   const disposers=[trackPartnerTools(store,owner,[...registered.keys(),'partner_mcp']),()=>{scopes.delete(token);if(!scopes.size&&owners.get(owner)===scopes)owners.delete(owner)}]
   const guard=(exec:ToolRunContext)=>{
     exec.signal.throwIfAborted()
-    if(closed||!exec.agent||store.isCompanionRemoving(owner)||!store.hasCapability(owner,'mcp')||!store.snapshot().sessions.some(r=>r.companionId===owner&&r.sessionId===exec.agent!.session.id))throw Error('当前会话未授权此伙伴的 MCP 能力')
+    if(closed||!exec.agent||store.isCompanionRemoving(owner)||!store.hasCapability(owner,'mcp')||!store.snapshot().sessions.some(r=>r.companionId===owner&&r.sessionId===exec.agent!.session.id)&&!backgroundToolScope(store,owner,exec.agent.session.id))throw Error('当前会话未授权此伙伴的 MCP 能力')
     const access=resolveToolAccess({agent:exec.agent,state:store.snapshot()})
     if(!access.sendTools||access.allowedTools&&!access.allowedTools.includes('partner_mcp'))throw Error('当前会话未授权此伙伴的 MCP 能力')
   }
+  const scopedRuntime=(exec:ToolRunContext)=>backgroundToolScope(store,owner,exec.agent!.session.id)?exec.agent!.ctx.tools:runtime
   const available=(exec:ToolRunContext)=>{
     guard(exec)
-    const catalog=service.catalog(),bound=new Set(catalog.bindings.filter(b=>b.companionId===owner).map(b=>b.serverId))
+    const targetRuntime=scopedRuntime(exec),catalog=service.catalog(),bound=new Set(catalog.bindings.filter(b=>b.companionId===owner).map(b=>b.serverId))
     return catalog.servers.filter(s=>s.enabled&&bound.has(s.id)).map(server=>({server,tools:server.tools.filter(tool=>{
       const name=mcpToolName(server.id,tool.name),original=registered.get(name)
       return original&&JSON.stringify(original.parameters)===JSON.stringify(tool.inputSchema)&&
-        (typeof runtime.executable==='function'?runtime.executable(name,exec.agent,exec.toolSet):runtime.get(name,exec.agent))
+        (typeof targetRuntime.executable==='function'?targetRuntime.executable(name,exec.agent,exec.toolSet):targetRuntime.get(name,exec.agent))
     })}))
   }
   try {
@@ -71,7 +73,7 @@ export function installMcpEntry(runtime:ToolRuntime,owner:string,store:PartnerSt
         if(args.action!=='call')throw Error('请选择 list、describe 或 call')
         const parameters=args.arguments??{}
         if(!parameters||typeof parameters!=='object'||Array.isArray(parameters)||JSON.stringify(parameters).length>200000)throw Error('MCP arguments 必须是大小受限的参数对象')
-        return dispatchDiscoveredTool(runtime,selected.name,parameters,exec)
+        return dispatchDiscoveredTool(scopedRuntime(exec),selected.name,parameters,exec)
       },
     }))
   }catch(error){for(const dispose of disposers.reverse())dispose();throw error}

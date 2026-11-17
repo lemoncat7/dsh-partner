@@ -58,7 +58,7 @@ test('fixed entries describe and invoke original tools without registry churn; h
  assert.equal(logs.length,2);assert.equal(logs[1].data.isError,true)
 })
 test('QQ adapter lists only authorized abilities, changes identity without changing tools, and denies stale/nested calls',async t=>{
- const f=fixture(t);let calls=0
+ const f=fixture(t);f.companion.characterCard={enabled:true};let calls=0
  const defs=['partner_identity','partner_chat_reply','partner_stickers','partner_qq_reply','partner_memory_recall'].map(name=>definition(name,async()=>{calls++;return {ok:true}}))
  t.after(installToolDiscovery(f.scope.ctx.tools,'c',f.store,defs.map(tool=>({tool,allowed:()=>true}))))
  t.after(f.scope.ctx.tools.register(definition('host_private')))
