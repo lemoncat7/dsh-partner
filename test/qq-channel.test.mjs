@@ -335,3 +335,31 @@ test('one segmented reply validates QQ recipient once and still checks every sen
  await assert.rejects(api.sendText(peer,'next reply',undefined,signal),/尚未上线/)
  assert.equal(s.requests.filter(r=>r.action==='get_login_info').length,2)
 })
+
+test('mention positions distinguish a referenced member from the addressee without changing message text',async()=>{
+ const {QqGroupAutonomy}=await import('../lib/channels/qq/autonomy.js')
+ const {attentionMessageText,routeGroupReply}=await import('../lib/channels/qq/reply-rules.js')
+ const policy={...groupSettings,autonomousGroupIds:[group]}
+ const text=text=>({type:'text',data:{text}}),at=qq=>({type:'at',data:{qq}})
+ const parse=message=>oneBotMessage(groupEvent({message}),bot,'',policy)
+ const reference=parse([text('弟弟 你觉得'),at(peer),text(' 他打球怎么样')])
+ assert.equal(reference.text,'弟弟 你觉得 他打球怎么样')
+ assert.deepEqual(reference.qqGroup.otherMentionOffsets,[6])
+ assert.equal(attentionMessageText(reference),'弟弟 你觉得 @其他成员  他打球怎么样')
+ const context={name:'伙伴',now:Date.now(),seed:'mention-regression'}
+ assert.equal(routeGroupReply(reference,context),undefined,'embedded mention must reach local recognition')
+ const call={label:'address',confidence:.8,margin:.6,scene:{label:'address',confidence:.8,margin:.6}}
+ let calls=0
+ const gate=new QqGroupAutonomy({},()=>context.now,async value=>{calls++;assert.equal(value,attentionMessageText(reference));return call})
+ gate.observe('c',reference)
+ assert.equal(await gate.shouldReply('c',reference,{name:'伙伴'},AbortSignal.timeout(3000),undefined,true),true)
+ for(const message of [[at(peer),text('你觉得他打球怎么样')],[text(' ， '),at(peer),text('弟弟你觉得呢')]]){
+  const other=parse(message);gate.observe('c',other)
+  assert.equal(await gate.shouldReply('c',other,{name:'伙伴'},AbortSignal.timeout(3000)),false)
+ }
+ assert.equal(calls,1,'ordinary @ other-member messages do not invoke local or remote inference')
+ const multiple=parse([text('伙伴看看'),at(peer),text('和'),at('77665544'),text('的意见')])
+ assert.deepEqual(multiple.qqGroup.otherMentionOffsets,[4,5])
+ assert.equal(attentionMessageText(multiple),'伙伴看看 @其他成员 和 @其他成员 的意见')
+ assert.equal(parse([text('@其他成员 你觉得呢')]).qqGroup.otherMention,undefined,'literal text cannot manufacture structured mention facts')
+})

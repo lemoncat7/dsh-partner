@@ -22,7 +22,7 @@ test('creation-heavy history surfaces unused space and social reading without sc
  assert.ok(d.explorationOptions.some(x=>x.tool==='partner_qq'&&x.discoveryOperations.includes('get_qzone_feeds')))
  assert.ok(d.explorationOptions.some(x=>x.discoveryOperations.includes('unread')))
  assert.ok(d.explorationOptions.every(x=>x.observedRounds===0))
- assert.doesNotMatch(JSON.stringify(d),/send_qzone_msg|delete_qzone_msg|set_qq_profile|publish_video|PRIVATE SUMMARY|private\/file/)
+ assert.doesNotMatch(JSON.stringify(d.explorationOptions),/send_qzone_msg|delete_qzone_msg|set_qq_profile|publish_video|PRIVATE SUMMARY|private\/file/)
  assert.match(text,/不是轮流打卡、必做任务或发言配额/)
  assert.deepEqual({s,c},before)
 })
@@ -71,4 +71,23 @@ test('real idle prompt includes selection feedback without exposing other sessio
  assert.doesNotMatch(prompt,/PRIVATE SUMMARY|private\/file/)
  assert.match(prompt,/明确的用户约定/);assert.match(prompt,/看到内容后/)
  assert.deepEqual(s,before)
+})
+
+
+test('public expression is independent of reading and unanswered chat, bounded by current permissions',()=>{
+ const s=fixture(),catalog=()=>createChannelActivities().describe(s,'c'),c={id:'c'}
+ let d=data(activityChoiceContext(c,[],catalog(),'s',now))
+ assert.ok(d.expressionOptions.some(x=>x.channelId==='qq'&&x.expressionOperations.includes('send_qzone_msg')))
+ assert.ok(d.expressionOptions.some(x=>x.channelId==='b'&&x.expressionOperations.includes('dynamic')))
+ c.activityJournal=[row('reading',['partner_qq:get_qzone_feeds'])]
+ d=data(activityChoiceContext(c,[],catalog(),'s',now))
+ assert.equal(d.expressionOptions.find(x=>x.channelId==='qq').observedRounds,0)
+ c.activityJournal=[row('failed',['partner_qq:send_qzone_msg'])];c.activityJournal[0].tools[0].ok=false
+ assert.ok(!data(activityChoiceContext(c,[],catalog(),'s',now)).expressionOptions.some(x=>x.channelId==='qq'))
+ s.channels[0].qq.autonomousActions=false
+ c.activityJournal=[]
+ assert.ok(!data(activityChoiceContext(c,[],catalog(),'s',now)).expressionOptions.some(x=>x.channelId==='qq'))
+ const r=new ChannelActivityRegistry();r.register({id:'bad',platform:'qq',discover:()=>[{id:'a',title:'a',tool:'t',visibility:'private',description:'d',operations:['read'],expressionOperations:['write']}]})
+ assert.deepEqual(r.describe(fixture(),'c'),[])
+ assert.match(activityChoiceContext(c,[],catalog(),'s',now),/只影响是否继续向他发消息/)
 })

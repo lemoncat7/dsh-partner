@@ -665,6 +665,8 @@ function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[],
     if (candidate.targetMemoryId && !match) continue
     if (match?.locked || memories.some(item => item.kind === candidate.kind && item.scopeId === turn.scopeId && sameMemorySubject(item, candidate.kind, subject) && item.updatedAt > turn.at)) continue
     const evidence = candidate.sourceEvidence ?? { turnId: turn.id, at: turn.at, excerpt: compact(turn.user, 300) }
+    // A late daily review must not revive a preference already corrected by newer user evidence.
+    if (match && candidate.kind === 'preference' && evidence.at < Math.max(0,...match.evidence.map(e => e.at))) continue
     if (candidate.operation === 'remove' || candidate.operation === 'complete') {
       if (match) {
         match.status = candidate.operation === 'remove' ? 'superseded' : 'completed'; match.updatedAt = turn.at
@@ -673,6 +675,9 @@ function mergeMemories(existing: PartnerMemory[], candidates: MemoryCandidate[],
       continue
     }
     if (match) {
+      if (candidate.kind === 'preference' && match.content !== compact(candidate.content, 800) && !(candidate.reaffirm && candidate.targetMemoryId === match.id)) {
+        match.evidence = match.evidence.map(item => ({...item,supportsCurrent:false}))
+      }
       if (!match.locked) match.content = compact(candidate.content, 800)
       match.confidence = bounded(candidate.confidence); match.importance = bounded(candidate.importance)
       match.updatedAt = turn.at; match.status = 'active'; match.evidence = [...match.evidence.filter(item => item.turnId !== evidence.turnId), evidence].slice(-8)

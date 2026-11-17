@@ -1,3 +1,4 @@
+import {renderTaskPreferences} from './execution/task-preferences.js'
 import {PartnerWorkSessionCleanup} from './execution/session-cleanup.js'
 import {NativeBackgroundTasks} from './execution/native-background.js'
 import {installInterestLimit,recoverInterest} from './character/interest-runtime.js'
@@ -201,7 +202,12 @@ export function apply(context: Context, config: PartnerConfig): void {
     const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
     const workCleanup=new PartnerWorkSessionCleanup(ctx,store)
     ctx.effect(()=>()=>workCleanup.close())
-    const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply))
+    const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply),async (run,input)=>{
+      const state=store.snapshot(),route=state.sessions.find(r=>r.id===run.background?.routeId&&r.companionId===run.ownerCompanionId)
+      if(!route)return ''
+      const recalled=await memory.recallContext(run.ownerCompanionId,conversationMemoryScope(route,state.sessions.filter(r=>r.companionId===run.ownerCompanionId)),input,12,{includeHistory:false})
+      return renderTaskPreferences(recalled.profile,recalled.relevant)
+    })
     scheduler.continuations.configure({
       execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
       notify: entry => channels.notifyContinuation(entry),
@@ -304,8 +310,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     await agents.reconcileQqSessions()
     if (resolved.autoStartChannels) await channels.startEnabled()
     await background.recoverDeliveries()
-    const backgroundDeliveryRetry=setInterval(()=>{void background.recoverDeliveries().then(()=>workCleanup.sweep()).catch(error=>ctx.logger.warn('后台结果投递恢复失败：'+String(error)))},30000)
     void workCleanup.sweep().catch(error=>ctx.logger.warn('伙伴工作会话清理失败：'+String(error)))
+    const backgroundDeliveryRetry=setInterval(()=>{void background.recoverDeliveries().then(()=>workCleanup.sweep()).catch(error=>ctx.logger.warn('后台结果投递恢复失败：'+String(error)))},30000)
     ctx.effect(()=>()=>clearInterval(backgroundDeliveryRetry))
     await push.start()
     sleep.start()

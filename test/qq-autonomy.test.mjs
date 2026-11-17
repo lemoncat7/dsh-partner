@@ -356,3 +356,23 @@ test('weak correlated address labels alone cannot admit unrelated chatter',()=>{
  const semantic={label:'address',confidence:.28,margin:.01,scene:{label:'address',confidence:.2,margin:.01}}
  assert.equal(scoreGroupReply(input('随便聊聊'),{...context,semantic}).reply,false)
 })
+
+test('embedded mentions require semantic addressing, including while busy, without inheriting a recent thread',async()=>{
+ const mentioned=input('弟弟 你觉得 他打球怎么样',{otherMention:true,otherMentionOffsets:[6]})
+ assert.equal(routeGroupReply(mentioned,{...context,quickContinuation:true,recent:{at:context.now,text:'你说'}}),undefined)
+ const call={label:'address',confidence:.8,margin:.6,scene:{label:'address',confidence:.8,margin:.6}}
+ let calls=0,prediction=call
+ const gate=new QqGroupAutonomy(forbidden,()=>context.now,async(text)=>{calls++;assert.equal(text,'弟弟 你觉得 @其他成员  他打球怎么样');return prediction})
+ const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'你说')
+ gate.observe('c',mentioned)
+ assert.equal(await gate.shouldReply('c',mentioned,companion,signal(),undefined,true),true)
+ gate.replied('c',mentioned,'我觉得还不错')
+ assert.match(gate.context('c',input('后续')),/我觉得还不错/,'mentioning a subject must not retire the delivered conversation')
+ for(const semantic of [undefined,{label:'other',confidence:.9,margin:.8},{label:'engage',confidence:.9,margin:.8,replySimilarity:1,scene:{label:'question',confidence:.9,margin:.8}}]){
+  prediction=semantic
+  assert.equal(await gate.shouldReply('c',mentioned,companion,signal()),false,'neither recent conversation nor question scene proves who is addressed')
+ }
+ assert.equal(calls,4)
+ const follow=input('接着说');gate.observe('c',follow);prediction=undefined
+ assert.equal(await gate.shouldReply('c',follow,companion,signal()),false,'semantic redirect retires the speaker thread')
+})

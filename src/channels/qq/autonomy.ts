@@ -6,7 +6,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Companion } from '../../domain.js'
 import type { DirectMessage } from '../direct/transport.js'
 import type { QqSettings } from './settings.js'
-import { activeConversation, conversationEnded, routeGroupReply, scoreGroupReply, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
+import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, routeGroupReply, scoreGroupReply, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
 import { isAttentionCall, localAttentionClassifier, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
 type Observation={id:string;sender:string;qqId:string;text:string;redirect:boolean;at:number;sequence:number}
@@ -35,7 +35,7 @@ export class QqGroupAutonomy {
   const key=channelId+':'+event.qqGroup.groupId
   let group=this.groups.get(key)
   if(!group){group={messages:[],replies:new Map(),sequence:0};this.groups.set(key,group)}
-  const redirect=(!event.qqGroup.mentioned&&event.qqGroup.replyTo!=='self'&&(event.qqGroup.otherMention===true||event.qqGroup.replyTo==='other'))||conversationEnded(event.text)
+  const redirect=(!event.qqGroup.mentioned&&event.qqGroup.replyTo!=='self'&&(mentionsOtherRecipient(event)||event.qqGroup.replyTo==='other'))||conversationEnded(event.text)
   if(redirect)group.replies.delete(event.qqGroup.userId)
   const now=this.now(),sourceAt=event.timestamp??event.receivedAt
   const at=typeof sourceAt==='number'&&Number.isFinite(sourceAt)&&sourceAt>0&&sourceAt<=now?sourceAt:now
@@ -125,9 +125,16 @@ export class QqGroupAutonomy {
    const relationship=qqIdentityRelation(settings,event.qqGroup.userId)?.matched?relationshipTextForIdentity(companion):''
    const profile=[companion.name,[companion.role,companion.description,companion.characterCard?.enabled?companion.characterCard.roleText:''].filter(Boolean).join('；'),relationship].filter((v):v is string=>!!v?.trim()).map(t=>t.slice(0,160))
    const frame:AttentionFrame={profile,partnerText:(groupRecent?.text??quietRecent?.text??'').slice(0,160)}
-   try{semantic=await this.classify(event.text,signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
+   try{semantic=await this.classify(attentionMessageText(event),signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
    signal.throwIfAborted()
    result=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
+  }
+  // Resolve ambiguous embedded mentions after semantics; confirmed redirects retire the
+  // speaker thread, while references to somebody else preserve delivered continuity.
+  if(result.route==='other'&&event.qqGroup.otherMention&&!event.qqGroup.mentioned&&event.qqGroup.replyTo!=='self'&&group){
+   const observation=group.messages.find(m=>m.id===event.id)
+   if(observation)observation.redirect=true
+   group.replies.delete(event.qqGroup.userId)
   }
   // Busy work still lets the local model recognize a call; only calls queue.
   const recognizedCall=isAttentionCall(semantic)

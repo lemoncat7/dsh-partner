@@ -128,3 +128,43 @@ test('keeps conflict connections isolated to their contact scope', async (t) => 
   assert.equal(contextA.connections.some(item => item.relation.kind === 'conflicts_with'), true)
   assert.deepEqual(contextB.connections, [])
 })
+
+
+test('repeated preferences retain distinct supporting evidence and corrections clear old emphasis',async t=>{
+ const {preferenceEvidenceCount,preferenceEmphasis}=await import('../lib/profile-domain.js')
+ const {renderTaskPreferences}=await import('../lib/execution/task-preferences.js')
+ const root=await mkdtemp(join(tmpdir(),'partner-emphasis-'));t.after(()=>rm(root,{recursive:true,force:true}))
+ const store=new PartnerMemoryStore(root)
+ const first=memory('preference','参考资料使用','涉及自己的生图，有参考图时作为实际输入。',.96,.85)
+ await store.consolidate(turn('one',1000,'画自己时用已有参考图'),{daily,memories:[first]})
+ let [m]=await store.recentMemories('companion-1')
+ const repeat={...first,targetMemoryId:m.id,reaffirm:true}
+ await store.consolidate(turn('two',2000,'再次强调参考图要实际输入'),{daily,memories:[repeat]})
+ await store.consolidate(turn('three',3000,'再说一次，必须带已有参考图'),{daily,memories:[repeat]})
+ // The same source turn may be extracted again by a daily review.
+ await store.consolidate(turn('review',4000),{daily,memories:[{...repeat,sourceEvidence:{turnId:'three',at:3000,excerpt:'再说一次，必须带已有参考图'}}]})
+ let profile=await store.profileSnapshot('companion-1','weixin-1:user-1');m=profile.preferences[0]
+ assert.equal(preferenceEvidenceCount(m),3);assert.match(preferenceEmphasis(m),/反复强调/)
+ assert.match(renderTaskPreferences(profile),/实际输入/);assert.doesNotMatch(renderTaskPreferences(profile),/用户说明了|知道了/)
+ const version=profile.version
+ await store.consolidate(turn('correction',5000,'以后只有我明确要求时才用参考图'),{daily,memories:[{...first,targetMemoryId:m.id,content:'仅用户明确要求时使用参考图。'}]})
+ profile=await store.profileSnapshot('companion-1','weixin-1:user-1');m=profile.preferences[0]
+ assert.equal(preferenceEvidenceCount(m),1);assert.equal(preferenceEmphasis(m),'');assert.notEqual(profile.version,version)
+ assert.equal(m.evidence.filter(e=>e.supportsCurrent===false).length,3)
+ await store.consolidate(turn('late-review',6000),{daily,memories:[{...repeat,sourceEvidence:{turnId:'two',at:2000,excerpt:'再次强调参考图要实际输入'}}]})
+ const current=await store.profileSnapshot('companion-1','weixin-1:user-1')
+ assert.equal(current.preferences[0].content,'仅用户明确要求时使用参考图。')
+ assert.equal((await store.profileSnapshot('companion-1','other')).preferences.length,0)
+ assert.equal(renderTaskPreferences({preferences:[]}), '')
+})
+
+
+test('task relevant preferences survive a full general baseline and reject foreign or unreliable entries',async()=>{
+ const {renderTaskPreferences}=await import('../lib/execution/task-preferences.js')
+ const base={kind:'preference',status:'active',companionId:'c',scopeId:'s',confidence:.96,importance:.85,evidence:[{turnId:'x',excerpt:'用户原话'}]}
+ const profile={companionId:'c',scopeId:'s',preferences:Array.from({length:4},(_,i)=>({...base,id:'base'+i,subject:'通用偏好'+i,content:'通用'}))}
+ const relevant={...base,id:'ref',subject:'参考图',content:'必须实际传入参考图'}
+ const text=renderTaskPreferences(profile,[{...relevant,id:'foreign',scopeId:'other',content:'FOREIGN'},{...relevant,id:'weak',confidence:.1,content:'WEAK'},relevant])
+ assert.match(text,/实际传入参考图/);assert.doesNotMatch(text,/FOREIGN|WEAK/)
+ assert.equal(JSON.parse(text.split('：\n')[1]).length,4)
+})

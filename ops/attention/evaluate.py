@@ -1,8 +1,8 @@
 import argparse, json, pathlib, time, resource
 from classifier import Classifier
-p=argparse.ArgumentParser();p.add_argument('--model-dir',required=True);p.add_argument('--head',required=True);p.add_argument('--scenes',action='store_true');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--model-dir',required=True);p.add_argument('--head',required=True);modes=p.add_mutually_exclusive_group();modes.add_argument('--scenes',action='store_true');modes.add_argument('--recipients',action='store_true');args=p.parse_args()
 model=Classifier(pathlib.Path(args.model_dir),pathlib.Path(args.head))
-rows=json.loads(pathlib.Path(__file__).with_name('scene-evaluation.json' if args.scenes else 'evaluation.json').read_text())
+rows=json.loads(pathlib.Path(__file__).with_name('recipient-evaluation.json' if args.recipients else 'scene-evaluation.json' if args.scenes else 'evaluation.json').read_text())
 results=[];times=[]
 for row in rows:
     start=time.perf_counter();result=model.classify(row['text']);times.append((time.perf_counter()-start)*1000)

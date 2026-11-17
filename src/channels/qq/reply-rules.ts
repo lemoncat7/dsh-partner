@@ -24,6 +24,20 @@ function directAddress(text:string,name:string):boolean {
  const tail=text.slice(name.length)
  return !tail||/^[\s\p{P}]/u.test(tail)||/^(?:你|人呢|在吗|在不在|出来|来一下|帮我|帮忙|能不能|可以|会不会)/u.test(tail)
 }
+/** A mention at the start identifies a recipient; an embedded mention may be the subject.
+ * Older/unstructured events remain conservative rather than guessing a missing position. */
+export function mentionsOtherRecipient(event:DirectMessage):boolean {
+ const group=event.qqGroup
+ if(!group?.otherMention)return false
+ const offset=group.otherMentionOffsets?.[0]
+ return offset===undefined||!event.text.slice(0,offset).replace(/[\s\p{P}\p{S}]/gu,'')
+}
+/** Preserve structured mention positions only for local intent recognition, never invent names. */
+export function attentionMessageText(event:DirectMessage):string {
+ let text=event.text
+ for(const offset of [...(event.qqGroup?.otherMentionOffsets??[])].reverse())text=text.slice(0,offset)+' @其他成员 '+text.slice(offset)
+ return text
+}
 /** Strong routing facts run before semantics; recent conversation is context, not a promise to answer every line. */
 export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore|undefined {
  const text=event.text.trim(),group=event.qqGroup
@@ -31,8 +45,9 @@ export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  if(conversationEnded(text))return decide(false,'closing','用户明确结束或暂停接话')
  if(group?.mentioned)return decide(true,'direct','明确 @ 伙伴')
  if(group?.replyTo==='self')return decide(true,'direct','引用伙伴已确认发送的消息')
- if(group?.otherMention||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
+ if(mentionsOtherRecipient(event)||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
  if(!group?.hasReply&&directAddress(text,context.name.trim()))return decide(true,'direct','直接叫到角色名字')
+ if(group?.otherMention)return undefined // Ambiguous recipient: require the local model, never a recency/public-question shortcut.
  if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了|晚安|拜拜|下次聊|先走了)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
  if(!event.media?.length&&/^[\s\p{P}\p{S}]+$/u.test(text)&&!activeConversation(context))return decide(false,'fallback','孤立标点或符号，没有明确对话对象')
  if(/(?:大家|各位|你们).{0,16}(?:觉得|怎么看|谁会|能不能|来看看|帮忙)|(?:有没有人|有人(?:知道|会|能|懂))/u.test(text))return decide(true,'opportunity','面向全群的询问或交流邀请，进入接话判断')
@@ -43,6 +58,9 @@ export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  const routed=routeGroupReply(event,context);if(routed)return routed
  const text=event.text.trim(),semantic=context.semantic
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
+ if(event.qqGroup?.otherMention)return isAttentionCall(semantic)
+  ?decide(true,'semantic','本地语义识别为向伙伴提问，@ 的成员是谈论对象',Math.round(semantic!.confidence*100))
+  :decide(false,'other','提及其他成员，但缺少向伙伴说话的明确语义依据')
  // Recency alone cannot make unrelated group chatter a continuation.
  // Require semantic evidence tied to the partner's actual delivered reply.
  if(activeConversation(context)&&(semantic?.replySimilarity??0)>=.4&&(text||event.media?.length))return decide(true,'continuation','内容承接伙伴刚才的实际回复，进入上下文判断')

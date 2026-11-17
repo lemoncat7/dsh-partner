@@ -48,15 +48,16 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
   const fileOnly=Array.isArray(raw.message)&&raw.message.length===1&&raw.message[0]?.type==='file'?raw.message[0].data:undefined
   const id = groupId&&typeof fileOnly?.file_id==='string'&&fileOnly.file_id&&Number.isFinite(raw.time)?'upload-'+createHash('sha256').update(JSON.stringify([fileOnly.file_id,raw.time])).digest('hex').slice(0,32):raw.message_id
   if (!['string', 'number'].includes(typeof id) || !String(id) || String(id).length > 128) return
-  const text: string[] = [], media: DirectMedia[] = []
+  const text: string[] = [], media: DirectMedia[] = [], otherMentionOffsets:number[]=[]
   if (typeof raw.message === 'string') text.push(raw.message.slice(0, 100000))
   else if (Array.isArray(raw.message)) for (const [index,part] of raw.message.slice(0, 128).entries()) {
     if (part?.type === 'text' && typeof part.data?.text === 'string') text.push(part.data.text.slice(0, 100000))
+    else if(part?.type==='at'&&String(part.data?.qq)!==accountId)otherMentionOffsets.push(text.reduce((length,part)=>length+part.length,0))
     else if (part?.type === 'face') text.push(`[QQ 表情 ${String(part.data?.id ?? '').slice(0, 20)}]`)
     else if (['image', 'record', 'video', 'file'].includes(part?.type)) {
       const messageId=Number(raw.message_id)
       media.push(qqMediaPart(part,Number.isSafeInteger(messageId)&&messageId!==0&&Math.abs(messageId)<=2147483647?{messageId,index,senderId:realSender}:undefined)!)
     }
   }
-  return { ...(replyToId?{qqReplyId:replyToId}:{}),...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous,...(otherMention?{otherMention:true}:{}),...(hasReply?{hasReply:true}:{}),...(replyToId?{replyToId}:{})}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: (mentioned?'[对方 @ 了你]\n':'')+text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
+  return { ...(replyToId?{qqReplyId:replyToId}:{}),...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous,...(otherMention?{otherMention:true,otherMentionOffsets:otherMentionOffsets.filter(offset=>offset<=100000).map(offset=>offset+(mentioned?'[对方 @ 了你]\n'.length:0))}:{}),...(hasReply?{hasReply:true}:{}),...(replyToId?{replyToId}:{})}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: (mentioned?'[对方 @ 了你]\n':'')+text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }

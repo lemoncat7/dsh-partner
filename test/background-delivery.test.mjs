@@ -161,3 +161,49 @@ test('disabling role chat delivers full original task output without a persona t
  const result=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
  assert.equal(result,f.reply);assert.equal(result.text,text);assert.equal(f.turns(),0);assert.equal(f.guards.size,0)
 })
+
+const channelFixture=speech=>{
+ const f=fixture(speech)
+ f.run.background.sourceKind='channel';f.run.background.cwd='/workspace/.partner-background/task';f.run.background.sourceCwd='/workspace'
+ f.route.kind='channel';f.c.characterCard.segmentedReplies=true
+ f.reply.attachments=[{path:'/workspace/.partner-background/task/artifacts/copied.png',name:'四格漫画.png',mediaType:'image/png',kind:'file'}]
+ return f
+}
+test('channel background image delivery omits the generated local Markdown bubble, including retries and history recovery',async()=>{
+ const speech='画好了 两升就倒还敢喊最大啊\n\n![四格漫画](/workspace/generated/original.png)'
+ const f=channelFixture(speech)
+ const check=answer=>{
+  assert.equal(answer.text,'画好了 两升就倒还敢喊最大啊')
+  assert.deepEqual(answer.chatParts.filter(p=>p.type==='text'),[{type:'text',text:answer.text}])
+  assert.equal(answer.chatParts.at(-1).attachment,f.reply.attachments[0]);assert.equal(answer.attachments,f.reply.attachments)
+ }
+ check(await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply))
+ check(await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply))
+ delete f.run.background.foregroundReply
+ check(await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply))
+ assert.equal(f.turns(),1)
+ assert.ok(f.events.some(e=>e.type==='assistant/message'&&e.data.message.content.some(p=>p.text===speech)),'native session history keeps its original answer')
+ assert.match(f.events.find(isInternalTaskNotice).data.content[0].text,/不要输出本地文件路径/)
+ assert.doesNotMatch(f.events.find(isInternalTaskNotice).data.content[0].text,/文件 Markdown 链接单独保留完整格式/)
+})
+test('local generated references are omitted while public URLs, technical code and unrelated paths survive',async()=>{
+ for(const reference of ['![图](<file:///workspace/generated/a%20b.png>)','![图](sandbox:generated/a.png)','![图](generated/a.png)','`/workspace/generated/a.png`','/workspace/generated/a.png','/workspace/.partner-background/task/artifacts/copied.png']){
+  const f=channelFixture('看看这张\n\n'+reference),answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+  assert.equal(answer.text,'看看这张',reference)
+ }
+ for(const reference of ['![图](https://example.com/a.png)','[外部链接](https://example.com/a)','```md\n![示例](/workspace/generated/a.png)\n```','配置目录 /etc/app/config.yaml','版本 v2.6']){
+  const f=channelFixture(reference),answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+  assert.equal(answer.text,reference)
+ }
+ const f=channelFixture('![图](/workspace/generated/a.png)'),answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+ assert.equal(answer.text,'');assert.equal(answer.chatParts.length,1);assert.equal(answer.chatParts[0].type,'image','image-only results never invent an empty text bubble')
+})
+test('native/local file links, missing attachments and ordinary non-persona execution are preserved',async()=>{
+ const speech='画好了\n\n![四格漫画](/workspace/generated/a.png)'
+ const f=fixture(speech),answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+ assert.equal(answer.text,speech)
+ const missing=channelFixture(speech);missing.reply.attachments=[]
+ assert.equal((await composeBackgroundDelivery(missing.ctx,missing.store,missing.run,missing.agent,missing.reply)).text,speech)
+ const normal=channelFixture(speech);normal.c.characterCard.enabled=false
+ assert.equal(await composeBackgroundDelivery(normal.ctx,normal.store,normal.run,normal.agent,normal.reply),normal.reply)
+})

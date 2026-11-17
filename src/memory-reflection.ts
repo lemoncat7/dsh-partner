@@ -215,7 +215,7 @@ function modelSelection(ctx: ReflectionContext, companion: Companion): { provide
 const MEMORY_QUALITY_RULES = `梦境、想象和角色主观联想不是用户真实经历，不能因为助手提到梦而写成事实记忆。记忆写入契约：每个 memories 候选（包括 complete/remove）必须附 evidenceQuote（用户原话的连续引用，2-300 字）和 sourceTurnId（该原话所在轮次 id），不能引用助手回答或日记摘要；无证据则不输出。更新同义旧记忆时附 targetMemoryId，必须是输入中的同类型记忆 id，并沿用原 subject；不要凭标题相似合并不同项目或相反偏好。纠错时 confidence 应反映新证据，允许降低。一次性执行请求和过程细节只进 daily，不新增 task；task 仅保留明确跨轮次未完承诺，已有任务完成仍应 complete。持续观察交 concerns，项目技术正文交知识库，记忆不复制整篇资料。emotion 仅限用户明确自述感受，不得把催促、设计反馈或工作要求当情绪。长期偏好、画像默认不设 expiresInDays，只有用户明确有效期时才设置。`
 
 function memoryCandidateContract(): string {
-  return `memories 每项必须包含完整字段，例如：{"kind":"profile","subject":"常用环境","content":"用户日常使用 macOS。","confidence":0.95,"importance":0.8,"operation":"upsert","evidenceQuote":"我平时用 macOS","sourceTurnId":"复制输入中对应的 id"}。该例仅说明格式，不是待记录事实。evidenceQuote 必须来自输入 user 的连续原话，不能包含压缩标记省略号；sourceTurnId 取 newTurn.id 或 turns[].id。targetMemoryId 仅更新已有记忆时填写；长期画像和偏好不要填写 expiresInDays。用户明确陈述的长期背景和明确的长期协作偏好，应当及时提炼，不要求先重复多次；不能从临时任务推断身份。`
+  return `memories 每项必须包含完整字段，例如：{"kind":"profile","subject":"常用环境","content":"用户日常使用 macOS。","confidence":0.95,"importance":0.8,"operation":"upsert","evidenceQuote":"我平时用 macOS","sourceTurnId":"复制输入中对应的 id"}。该例仅说明格式，不是待记录事实。evidenceQuote 必须来自输入 user 的连续原话，不能包含压缩标记省略号；sourceTurnId 取 newTurn.id 或 turns[].id。targetMemoryId 仅更新已有记忆时填写；长期画像和偏好不要填写 expiresInDays。用户明确陈述的长期背景和明确的长期协作偏好（包括办事方式、参考资料使用要求），应当及时提炼，不要求先重复多次；同一偏好再次强调时更新已有 targetMemoryId、沿用 subject 和规范 content，并附本次用户证据，可标记 reaffirm:true；只有含义、适用范围和例外均未改变才可 reaffirm。用户纠正、改口或撤销时不能 reaffirm。不能从临时任务推断身份。`
 }
 
 const REFLECTION_SYSTEM = `你是长期伙伴的记忆整理器。你不回答用户，只从有证据的对话中维护每日回顾和结构化记忆。优先保留稳定偏好、明确要求记住的事实、重要约定和有后续价值的进展；闲聊、问候、一次性查询、工具过程和重复事实不新增长期条目，无值得保留的信息时 memories 和 concerns 返回空数组。记忆不是聊天流水账。
@@ -310,6 +310,7 @@ function parseCandidate(value: unknown): MemoryCandidate | undefined {
   if (!subject || (operation === 'upsert' && !content)) return undefined
   const candidate: MemoryCandidate = {
     kind, operation, subject, content,
+    ...(kind === 'preference' && item.reaffirm === true && string(item.targetMemoryId,160) ? {reaffirm:true} : {}),
     ...(string(item.targetMemoryId, 160) ? { targetMemoryId: string(item.targetMemoryId, 160) } : {}),
     evidenceQuote: string(item.evidenceQuote, 300), sourceTurnId: string(item.sourceTurnId, 160),
     confidence: number(item.confidence), importance: number(item.importance),

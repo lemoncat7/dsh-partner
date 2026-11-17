@@ -24,6 +24,8 @@ export interface ConversationTurn {
 }
 
 export interface MemoryEvidence {
+  /** False retains old evidence for audit after a preference was corrected. */
+  supportsCurrent?: boolean
   turnId: string
   at: number
   excerpt: string
@@ -80,6 +82,8 @@ export interface DailyReflection {
 }
 
 export interface MemoryCandidate {
+  /** Existing preference is reaffirmed, with unchanged meaning and boundaries. */
+  reaffirm?: boolean
   targetMemoryId?: string
   evidenceQuote?: string
   sourceTurnId?: string

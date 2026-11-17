@@ -32,7 +32,7 @@ interface NativeRuntime {
 const workTools=new Set(['partner_workflow','partner_skill','partner_browser','partner_mcp','partner_bilibili'])
 const forbidden=new Set(['partner_background_task','partner_chat_reply','partner_chat_say','partner_chat_progress','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_habits','partner_sleep','partner_agreement','partner_access_grants','partner_collaborate','partner_requirement','partner_task','partner_schedule'])
 const outputSchema={type:'object',additionalProperties:false,required:['text','files'],properties:{text:{type:'string'},files:{type:'array',items:{type:'object',additionalProperties:false,required:['path','name','mediaType'],properties:{path:{type:'string'},name:{type:'string'},mediaType:{type:'string'}}}}}}
-const instruction='只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 填本任务产物或原会话授权目录中的现有文件，附文件名与 MIME；平台会保存交付副本。附件报告按需提供，files 可以为空；图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
+const instruction='只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空；图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
 export const PARTNER_BACKGROUND_PROVIDER={name:'partner-task',capabilities:{agentOptions:true,agentPreset:false,outputSchema:true,depthLimit:true},inheritsParentContext:false,prepareContinuable:async()=>({})}
 
 /** Native activations own execution. The adapter owns frozen channel provenance and delivery receipts. */
@@ -45,7 +45,7 @@ export class NativeBackgroundTasks {
  private closing=false
  private recovering=false
  private readonly delivering=new Map<string,Promise<void>>()
- constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>){
+ constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>){
   this.detachGuard=(ctx.tools as ToolRuntime).guard(exec=>{
    const child=exec.agent&&this.children.get(exec.agent.session.id)
    if(!child){
@@ -88,7 +88,7 @@ export class NativeBackgroundTasks {
   if(route.kind!=='channel'||!channel?.enabled||channel.accountId!==source.accountId||(channel.direct?.baseUrl??'')!==source.baseUrl||directReplyTarget(state,source.channelId,source.userId)!==source.targetId||!channelReplyAllowed(state,source.channelId,source.userId)||channel.platform==='qq'&&!qqIdentityRelation(channel.qq,source.userId)?.matched)throw Error('后台任务需要原发起人的完整伙伴授权')
  }
  tool(owner:string):ToolDefinition {
-  return {name:'partner_background_task',description:'当前伙伴会话里明确交办的调查、整理文档、生图、编程等工作（包括一次生图），一旦识别必须先用 start 交给 DSH 原生后台子任务，立刻返回前台；普通闲聊和轻量直接提问不创建任务。input 只写自包含的任务要求、约束和必要文件路径；不要复制聊天记录、人设、原始消息 JSON 或工具回执。后台从空白会话开始，不继承前台历史。后台独立完成并在交付时按原伙伴人设简短接话并按需将已有产物或确有必要的详细资料作为附件送回原会话，不为每个任务额外生成报告，无需轮询、等待或前台重复执行。list/status 查询当前发起人的任务；只有该发起人明确补充或取消时用 update/cancel，不能因群消息变多就修改或取消。cancel 停止运行但保留任务进度，原发起人明确要求继续时用 resume 和原 taskId，可在 input 补充未完成目标；不另建任务或重复已完成操作。只有明确要求彻底放弃并删除任务时用 discard；完成交付后自动回收。',
+  return {name:'partner_background_task',description:'当前伙伴会话里明确交办的调查、整理文档、生图、编程等工作（包括一次生图），一旦识别必须先用 start 交给 DSH 原生后台子任务，立刻返回前台；普通闲聊、轻量直接提问、准备好内容后的一次渠道发布（例如发说说）不创建任务，后者由原会话调用渠道工具。input 只写自包含的任务要求、约束和必要文件路径；不要复制聊天记录、人设、原始消息 JSON 或工具回执。后台从空白会话开始，不继承前台历史。后台独立完成并在交付时按原伙伴人设简短接话并按需将已有产物或确有必要的详细资料作为附件送回原会话，不为每个任务额外生成报告，无需轮询、等待或前台重复执行。list/status 查询当前发起人的任务；只有该发起人明确补充或取消时用 update/cancel，不能因群消息变多就修改或取消。cancel 停止运行但保留任务进度，原发起人明确要求继续时用 resume 和原 taskId，可在 input 补充未完成目标；不另建任务或重复已完成操作。只有明确要求彻底放弃并删除任务时用 discard；完成交付后自动回收。',
    parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','cancel','resume','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120}}},
    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'原生后台任务'}),
    execute:async(raw,exec)=>{
@@ -157,7 +157,11 @@ export class NativeBackgroundTasks {
   const release=()=>{if(this.children.get(childId)===child)this.releaseChild(childId)}
   try{
    child.disposeScope=bindBackgroundScope(this.store,childId,{owner:run.ownerCompanionId,browserScope:browserAudience(run.ownerCompanionId,parent.session.id,events,runtimeSnapshot(this.store))??JSON.stringify([route.channelId,route.userId]),authorize:()=>this.authorize(run,parent)})
-   const spec={provider:PARTNER_BACKGROUND_PROVIDER.name,childId,parent,signal,delivery:'caller',label:run.background!.label,cwd:run.background!.cwd,prompt:[{type:'text',text:input}],outputSchema,maxDepth:Math.min(1,native.resolveMaxDepth?.()??1)}
+   const companion=runtimeSnapshot(this.store).companions.find(c=>c.id===run.ownerCompanionId)
+   const preferences=companion?.characterCard?.enabled&&companion.automation?.memory?.enabled?await this.preferences?.(run,input):undefined
+   this.authorize(run,parent)
+   const prompt=[{type:'text',text:input},...(preferences?[{type:'text',text:preferences}]:[])]
+   const spec={provider:PARTNER_BACKGROUND_PROVIDER.name,childId,parent,signal,delivery:'caller',label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,maxDepth:Math.min(1,native.resolveMaxDepth?.()??1)}
    child.activation=resume?await native.resumeActivation!(spec):await native.startActivation(spec)
    this.authorize(run,parent)
    if(runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)?.status==='canceled')throw Error('任务已被取消')

@@ -1142,5 +1142,233 @@
   {
     "label": "banter",
     "text": "我这运气可以去当反面教材了"
+  },
+  {
+    "text": "搭档，你觉得 @其他成员 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "弟弟 你觉得 @其他成员 他唱歌怎么样",
+    "label": "address"
+  },
+  {
+    "text": "姐姐，帮我分析 @其他成员 这个方案",
+    "label": "address"
+  },
+  {
+    "text": "哥哥你看看 @其他成员 刚才那张图",
+    "label": "address"
+  },
+  {
+    "text": "宝贝你怎么看 @其他成员 的意见",
+    "label": "address"
+  },
+  {
+    "text": "伙伴，评价一下 @其他成员 的操作",
+    "label": "address"
+  },
+  {
+    "text": "小朋友你觉得 @其他成员 他技术如何",
+    "label": "address"
+  },
+  {
+    "text": "朋友你帮我看看 @其他成员 这段话",
+    "label": "address"
+  },
+  {
+    "text": "搭档，你赞同 @其他成员 说的吗",
+    "label": "address"
+  },
+  {
+    "text": "弟弟 你觉得他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "姐姐你觉得她跳舞怎么样",
+    "label": "address"
+  },
+  {
+    "text": "弟弟 你觉得",
+    "label": "address"
+  },
+  {
+    "text": "搭档，你评价一下这人",
+    "label": "address"
+  },
+  {
+    "text": "伙伴你帮我瞅瞅他这个表现",
+    "label": "address"
+  },
+  {
+    "text": "哥哥，你说他是不是在吹牛",
+    "label": "address"
+  },
+  {
+    "text": "小王 你觉得 @其他成员 他打球怎么样",
+    "label": "other"
+  },
+  {
+    "text": "小李，你看看 @其他成员 说得对不对",
+    "label": "other"
+  },
+  {
+    "text": "张经理，帮忙问问 @其他成员",
+    "label": "other"
+  },
+  {
+    "text": "我弟弟说 @其他成员 他打球不错",
+    "label": "other"
+  },
+  {
+    "text": "我问弟弟 @其他成员 他打球怎么样",
+    "label": "other"
+  },
+  {
+    "text": "他姐姐觉得 @其他成员 唱歌好听",
+    "label": "other"
+  },
+  {
+    "text": "刚才我叫弟弟来看 @其他成员 的视频",
+    "label": "other"
+  },
+  {
+    "text": "@其他成员 你觉得他怎么样",
+    "label": "other"
+  },
+  {
+    "text": "@其他成员 你帮我看看",
+    "label": "other"
+  },
+  {
+    "text": "小陈你帮我评价一下 @其他成员",
+    "label": "other"
+  },
+  {
+    "text": "弟弟这个称呼是说 @其他成员 的",
+    "label": "other"
+  },
+  {
+    "text": "这句话是对 @其他成员 说的",
+    "label": "other"
+  },
+  {
+    "text": "我在问 @其他成员 不是问你",
+    "label": "other"
+  },
+  {
+    "text": "@其他成员 弟弟你来回答",
+    "label": "other"
+  },
+  {
+    "text": "小王，你觉得他打球怎么样",
+    "label": "other"
+  },
+  {
+    "text": "我问的是我弟弟，不是在叫你",
+    "label": "other"
+  },
+  {
+    "text": "弟弟，你觉得 @其他成员 篮球打得如何",
+    "label": "address"
+  },
+  {
+    "text": "弟弟，你怎么看 @其他成员 这个人",
+    "label": "address"
+  },
+  {
+    "text": "弟弟你评价一下 @其他成员 的水平",
+    "label": "address"
+  },
+  {
+    "text": "弟弟，你帮我看看 @其他成员 的这张照片",
+    "label": "address"
+  },
+  {
+    "text": "弟弟你觉得 @其他成员 的歌唱得好不好",
+    "label": "address"
+  },
+  {
+    "text": "弟弟 你觉得 @其他成员 他踢球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "姐姐，点评一下 @其他成员 的设计",
+    "label": "address"
+  },
+  {
+    "text": "哥哥 你觉得 @其他成员 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "搭档 你觉得 @其他成员 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "朋友你怎么看 @其他成员 这段代码",
+    "label": "address"
+  },
+  {
+    "text": "宝贝 你觉得 @其他成员 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "朋友，帮我评价 @其他成员 这个方案",
+    "label": "address"
+  },
+  {
+    "text": "你弟弟觉得 @其他成员 怎么样",
+    "label": "other"
+  },
+  {
+    "text": "我姐姐觉得 @其他成员 水平不错",
+    "label": "other"
+  },
+  {
+    "text": "他弟弟认为 @其他成员 唱得好",
+    "label": "other"
+  },
+  {
+    "text": "你哥哥怎么看 @其他成员 的设计",
+    "label": "other"
+  },
+  {
+    "text": "你朋友觉得 @其他成员 说得对吗",
+    "label": "other"
+  },
+  {
+    "text": "我搭档说 @其他成员 这次能赢",
+    "label": "other"
+  },
+  {
+    "text": "我问了弟弟，他觉得 @其他成员 可以",
+    "label": "other"
+  },
+  {
+    "text": "我问我姐姐 @其他成员 这人怎么样",
+    "label": "other"
+  },
+  {
+    "text": "弟弟说你觉得呢",
+    "label": "other"
+  },
+  {
+    "text": "弟弟说你觉得 @其他成员 怎么样",
+    "label": "other"
+  },
+  {
+    "text": "姐姐问你怎么看 @其他成员",
+    "label": "other"
+  },
+  {
+    "text": "我朋友问你 @其他成员 打得好吗",
+    "label": "other"
+  },
+  {
+    "text": "小赵 你觉得 @其他成员 他技术如何",
+    "label": "other"
+  },
+  {
+    "text": "小刘，帮我评价一下 @其他成员 这次表现",
+    "label": "other"
   }
 ]

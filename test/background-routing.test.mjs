@@ -48,3 +48,14 @@ test('host-bound child can use browser with original audience; revocation stops 
  valid=false;await assert.rejects(tool.execute({action:'inspect',tabId:'tab'},exec),/revoked/);assert.equal(operations,1)
  unbind();await assert.rejects(tool.execute({action:'tabs'},exec),/不能使用/)
 })
+
+
+test('publishing prepared space content stays foreground after lookups, but cannot repeat an accepted task',()=>{
+ const args={action:'call',operation:'send_qzone_msg',params:{text:'prepared'}}
+ const looked=[user,call('web_search'),call('web_fetch')]
+ assert.equal(backgroundRequired('partner_qq',args,looked),undefined)
+ assert.equal(backgroundRequired('partner_tools',{action:'call',name:'partner_qq',argumentsJson:JSON.stringify(args)},looked),undefined)
+ const accepted=[...looked,call('partner_background_task',{action:'start'},'b'),{type:'tool/result',data:{message:{toolCallId:'b',content:[{type:'text',text:JSON.stringify({kind:'partner-background-v1',taskId:'t',status:'running'})}]}}}]
+ assert.match(backgroundRequired('partner_qq',args,accepted),/不能重复/)
+ assert.match(backgroundRequired('generate_image',{},looked),/后台/)
+})

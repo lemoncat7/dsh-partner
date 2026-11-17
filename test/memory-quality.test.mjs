@@ -65,3 +65,11 @@ test('completion keeps the real evidence turn rather than a synthetic daily revi
   assert.equal(completed.evidence.at(-1).turnId, 'finished')
   assert.equal(completed.evidence.at(-1).excerpt, source.user)
 })
+
+test('reaffirm is accepted only for an existing preference target and remains grounded in user speech',async()=>{
+ const {parseReflection}=await import('../lib/memory-reflection.js')
+ const parsed=parseReflection(JSON.stringify({daily,memories:[{...candidate,targetMemoryId:'p',reaffirm:true,evidenceQuote:turn.user,sourceTurnId:turn.id},{...candidate,kind:'profile',subject:'常用环境',targetMemoryId:'q',reaffirm:true},{...candidate,reaffirm:true}],concerns:[]}))
+ assert.equal(parsed.memories[0].reaffirm,true)
+ assert.equal(parsed.memories[1].reaffirm,undefined);assert.equal(parsed.memories[2].reaffirm,undefined)
+ assert.equal(groundMemoryCandidates(parsed.memories,[turn]).length,1)
+})

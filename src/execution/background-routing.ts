@@ -31,6 +31,9 @@ export function backgroundRequired(name:string,args:unknown,events:readonly Sess
  if(start<0)return
  const tail=events.slice(start+1)
  if(backgroundHandoff(tail))return '当前任务已由后台接收，前台不能重复执行'
+ // Publishing prepared content is a single foreground delivery, even after lookups.
+ // Keep the handoff guard above: an accepted background task still owns its work.
+ if(action.name==='partner_qq'&&action.args.action==='call'&&action.args.operation==='send_qzone_msg')return
  let calls=0,multistep=false
  for(const e of tail){
   if(e.type!=='tool/call'||e.data.callId===callId)continue

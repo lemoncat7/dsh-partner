@@ -1,0 +1,94 @@
+[
+  {
+    "text": "弟弟 你觉得 @其他成员 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "搭档 你怎么看 @其他成员 这个人",
+    "label": "address"
+  },
+  {
+    "text": "姐姐，你认为 @其他成员 他技术怎么样",
+    "label": "address"
+  },
+  {
+    "text": "宝贝，你觉得 @其他成员 这张照片拍得好不好",
+    "label": "address"
+  },
+  {
+    "text": "朋友，帮我点评 @其他成员 的方案",
+    "label": "address"
+  },
+  {
+    "text": "哥哥你看 @其他成员 的视频剪得怎么样",
+    "label": "address"
+  },
+  {
+    "text": "小朋友，你觉得 @其他成员 的画好看吗",
+    "label": "address"
+  },
+  {
+    "text": "搭档，帮我看看 @其他成员 这段日志",
+    "label": "address"
+  },
+  {
+    "text": "弟弟，你觉得 @其他成员 的球技比我好吗",
+    "label": "address"
+  },
+  {
+    "text": "姐姐，你更赞同我还是 @其他成员 的说法",
+    "label": "address"
+  },
+  {
+    "text": "伙伴你觉得 @其他成员 有没有在吹牛",
+    "label": "address"
+  },
+  {
+    "text": "朋友，你说 @其他成员 能不能赢",
+    "label": "address"
+  },
+  {
+    "text": "弟弟 你觉得 他打球怎么样",
+    "label": "address"
+  },
+  {
+    "text": "小张，你觉得 @其他成员 的提议如何",
+    "label": "other"
+  },
+  {
+    "text": "他姐姐说 @其他成员 水平一般",
+    "label": "other"
+  },
+  {
+    "text": "你姐姐觉得 @其他成员 画得好看吗",
+    "label": "other"
+  },
+  {
+    "text": "我哥哥认为 @其他成员 这个人靠谱",
+    "label": "other"
+  },
+  {
+    "text": "弟弟问你喜不喜欢 @其他成员 的视频",
+    "label": "other"
+  },
+  {
+    "text": "我问过姐姐 @其他成员 这首歌唱得如何",
+    "label": "other"
+  },
+  {
+    "text": "你搭档觉得 @其他成员 这方案可行吗",
+    "label": "other"
+  },
+  {
+    "text": "小陈，你认为 @其他成员 能不能赢",
+    "label": "other"
+  },
+  {
+    "text": "@其他成员 你觉得他球技如何",
+    "label": "other"
+  },
+  {
+    "text": "@其他成员 弟弟你怎么看他",
+    "label": "other"
+  }
+]

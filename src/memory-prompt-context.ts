@@ -1,3 +1,4 @@
+import {preferenceEvidenceCount} from './profile-domain.js'
 import type { PartnerConcern } from './concern-domain.js'
 import type { ConversationTurn, DailyReflection, MemoryRelationReviewContext, PartnerMemory } from './memory-domain.js'
 
@@ -59,6 +60,7 @@ export function compactMemories(memories: PartnerMemory[], limit: number, charBu
       confidence: precision(memory.confidence),
       importance: precision(memory.importance),
       evidenceCount: memory.evidence.length,
+      ...(memory.kind==='preference'?{currentSupportCount:preferenceEvidenceCount(memory)}:{}),
       ...(memory.locked ? { locked: true } : {}),
     }
     return fitTextFields(base, entryBudget, [

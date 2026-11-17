@@ -1,3 +1,4 @@
+import {preferenceEvidenceCount} from './profile-domain.js'
 import type { PartnerMemory } from './memory-domain.js'
 
 export function memoryTerms(value: string): string[] {
@@ -17,7 +18,7 @@ export function rankMemories(memories: PartnerMemory[], query: string, now: numb
   return memories.map(item => {
     const lexical = memoryRelevance(item, terms)
     const recency = Math.max(0, 1 - (now - item.updatedAt) / (180 * 86_400_000))
-    return { item, lexical, score: lexical * .5 + item.importance * .22 + item.confidence * .18 + recency * .1 }
+    return { item, lexical, score: lexical * .5 + item.importance * .22 + item.confidence * .18 + recency * .1 + (item.kind==='preference'&&item.confidence>=.8 ? Math.min(2,Math.max(0,preferenceEvidenceCount(item)-1))*.04 : 0) }
   }).filter(entry => !relevantOnly || entry.lexical > 0)
     .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt).map(entry => entry.item)
 }

@@ -25,6 +25,21 @@ export function isProfileBaselineEntry(memory: PartnerMemory): boolean {
     && (memory.locked === true || (memory.confidence >= PROFILE_CONFIDENCE_MIN && memory.importance >= PROFILE_IMPORTANCE_MIN))
 }
 
+/** Distinct user evidence only; reprocessing a turn cannot reinforce it twice. */
+export function preferenceEvidenceCount(memory: PartnerMemory): number {
+  return memory.kind === 'preference' ? new Set(memory.evidence.filter(e => e.supportsCurrent !== false && e.excerpt.trim().length >= 2).map(e => e.turnId)).size : 0
+}
+export function preferenceEmphasis(memory: PartnerMemory): string {
+  const count = preferenceEvidenceCount(memory)
+  return count >= 3 ? '（反复强调，相关任务优先遵循）' : count >= 2 ? '（多次确认）' : ''
+}
+
+export function isStablePreference(item:PartnerMemory):boolean {
+  return item.kind === 'preference' && item.status === 'active'
+    && (item.locked === true || (item.confidence >= .8 && item.importance >= .65 && preferenceEvidenceCount(item) >= 2)
+      || (item.confidence >= .95 && item.importance >= .8 && item.evidence.some(source => source.supportsCurrent !== false && source.excerpt.trim().length >= 2)))
+}
+
 export function buildProfileSnapshot(companionId: string, scopeId: string, memories: PartnerMemory[]): UserProfileSnapshot {
   const now = Date.now()
   memories = memories.filter(item => item.companionId === companionId && item.scopeId === scopeId
@@ -38,13 +53,11 @@ export function buildProfileSnapshot(companionId: string, scopeId: string, memor
     entries.push(memory)
     if (entries.length >= PROFILE_ENTRY_LIMIT) break
   }
-  const preferences = memories.filter(item => item.kind === 'preference' && item.status === 'active'
-    && (item.locked || (item.confidence >= .8 && item.importance >= .65 && new Set(item.evidence.map(source => source.turnId)).size >= 2)
-      || (item.confidence >= .95 && item.importance >= .8 && item.evidence.some(source => source.excerpt.trim().length >= 2))))
-    .sort((a, b) => Number(Boolean(b.locked)) - Number(Boolean(a.locked)) || b.importance - a.importance || b.updatedAt - a.updatedAt).slice(0, 4)
+  const preferences = memories.filter(isStablePreference)
+    .sort((a, b) => Number(Boolean(b.locked)) - Number(Boolean(a.locked)) || Math.min(3,preferenceEvidenceCount(b)) - Math.min(3,preferenceEvidenceCount(a)) || b.importance - a.importance || b.updatedAt - a.updatedAt).slice(0, 4)
   const baseline = [...entries, ...preferences]
   const version = createHash('sha256').update(baseline.map(entry => [
-    entry.id, canonicalProfileSubject(entry.subject) ?? entry.subject, entry.content, entry.locked ? 1 : 0,
+    entry.id, canonicalProfileSubject(entry.subject) ?? entry.subject, entry.content, entry.locked ? 1 : 0, ...(entry.kind === 'preference' ? [preferenceEmphasis(entry)] : []),
   ].join('\u0000')).join('\u0001')).digest('hex').slice(0, 12)
   return {
     companionId,

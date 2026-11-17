@@ -7,7 +7,7 @@ import {assertObjectJsonSchema} from '@deepseek-ai/dsh-tools'
 import {NativeBackgroundTasks,PARTNER_BACKGROUND_PROVIDER} from '../lib/execution/native-background.js'
 import {qqSettings} from '../lib/channels/qq/settings.js'
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve:v=>resolve(v)}}
-async function fixture(t){
+async function fixture(t,preferences){
  const cwd=await mkdtemp(join(tmpdir(),'partner-native-'));t.after(()=>rm(cwd,{recursive:true,force:true}))
  const channel={id:'q',platform:'qq',accountId:'bot',companionId:'c',enabled:true,direct:{baseUrl:'ws://local',targetId:''},qq:qqSettings({groupReplies:true,groupIds:['12345678'],autonomousGroupIds:['12345678'],identityBinding:{enabled:true,qqIds:['22334455']}})}
  const event=id=>({type:'user/message',data:{id,source:{kind:'user'},content:[{type:'text',text:'整理当前 /tmp/reference.md，生成配图'}]}})
@@ -19,7 +19,7 @@ async function fixture(t){
  const store={snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn)},update:async fn=>{fn(state);for(const listener of subscribers)listener();return structuredClone(state)}}
  const native={getProvider:()=>PARTNER_BACKGROUND_PROVIDER,registerProvider:()=>()=>{},startActivation:async spec=>{calls.push(spec);return {childId:spec.childId,name:'agent-1',result:result.promise,dispose:async()=>{disposed++}}},resumeActivation:async spec=>{resumes.push(spec);return {childId:spec.childId,name:'agent-1',result:resumeResult.promise,dispose:async()=>{disposed++}}},sendMessage:async(...args)=>updates.push(args)}
  const ctx={get:()=>native,tools:{guard:fn=>{guards.push(fn);return()=>guards.splice(guards.indexOf(fn),1)}},logger:{warn(){}}},deliver=async(run,reply)=>sent.push({run:structuredClone(run),reply})
- const service=new NativeBackgroundTasks(ctx,store,deliver)
+ const service=new NativeBackgroundTasks(ctx,store,deliver,preferences)
  t.after(()=>service.close())
  const tool=service.tool('c'),exec={agent:parent,signal:new AbortController().signal}
  const start=()=>tool.execute({action:'start',label:'整理',input:'目标：整理 /tmp/reference.md 并生成配图'},exec)
@@ -206,4 +206,18 @@ test('ordinary companions can execute multiple foreground tools even with saved 
  assert.match(guard({...f.exec,name:'generate_image',arguments:{}}),/必须先/)
  c.characterCard.enabled=false
  assert.equal(guard({...f.exec,name:'generate_image',arguments:{}}),undefined,'revoking the role bundle removes its execution constraint immediately')
+})
+
+
+test('background receives bounded scoped preference data only when role chat and memory are enabled',async t=>{
+ let calls=0
+ const f=await fixture(t,async run=>{calls++;assert.equal(run.background.routeId,'route');return 'REFERENCE PREFERENCE'})
+ f.state.companions[0].automation={memory:{enabled:true}}
+ await f.start();assert.equal(calls,1);assert.equal(f.calls[0].prompt.length,2)
+ assert.equal(f.calls[0].prompt[1].text,'REFERENCE PREFERENCE')
+ const plain=await fixture(t,async()=>{throw Error('must not read preferences')})
+ plain.state.companions[0].characterCard.enabled=false;plain.state.companions[0].automation={memory:{enabled:true}}
+ await plain.start();assert.equal(plain.calls[0].prompt.length,1)
+ const disabled=await fixture(t,async()=>{throw Error('memory disabled')})
+ await disabled.start();assert.equal(disabled.calls[0].prompt.length,1)
 })
