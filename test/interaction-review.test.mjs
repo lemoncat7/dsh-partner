@@ -47,7 +47,10 @@ test('fabricated evidence, assistant quotes, policy fields and missing results n
 })
 test('unknown provenance, old jobs and repairs do not get retroactive awards',()=>{
  const f=fixture()
- for(const turn of [{...f.turn,userMessageIds:[]},{...f.turn,at:Date.now()-7200000}])assert.equal(f.service.prepare(turn),undefined)
+ assert.equal(f.service.prepare({...f.turn,userMessageIds:[]}),undefined)
+ const delayed=f.service.prepare({...f.turn,at:Date.now()-7200000})
+ assert.equal(delayed.request.affection,false);assert.ok(delayed.request.habits)
+ assert.equal(f.service.prepare({...f.turn,at:Date.now()-8*86400000}),undefined)
 })
 test('QQ guest, mixed turn, revoked binding and absent transport provenance fail closed',async()=>{
  const f=fixture();f.state.channels=[{id:'qq',companionId:'c',platform:'qq',enabled:true,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}}]

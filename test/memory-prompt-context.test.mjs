@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  dailyReviewMemories,
   DAILY_TURN_CHAR_BUDGET,
   REFLECTION_MEMORY_CHAR_BUDGET,
   compactMemories,
@@ -87,4 +88,20 @@ test('preserves daily open tasks while compacting review history', () => {
   }, []))
   assert.equal(parsed.reflection.openTasks.length, openTasks.length)
   assert.match(parsed.reflection.openTasks[0], /^待办 0/)
+})
+
+
+test('daily review includes relevant old facts and rotates older memory within the existing bound',()=>{
+ const memories=Array.from({length:90},(_,i)=>({...memory(i),subject:'无关事项'+i,content:'普通事项',evidence:[]}))
+ memories[0]={...memories[0],subject:'人物参考图',content:'生图必须使用人物参考图'}
+ const context={reflection,memories,existingRelations:[],turns:[{...turn(1),user:'生图一定用人物参考图',assistant:'记住了'}]}
+ const a=dailyReviewMemories('2026-11-17',context).slice(0,24)
+ const b=dailyReviewMemories('2026-11-18',context).slice(0,24)
+ assert.ok(a.some(m=>m.id==='memory-0'));assert.notDeepEqual(a.map(m=>m.id),b.map(m=>m.id))
+ assert.ok(JSON.parse(dailyReviewPromptInput('2026-11-17',context,[])).currentMemories.length<=24)
+})
+test('daily consolidation preserves identity and role boundaries in source turns',()=>{
+ const identityRelation={matched:false,qqId:'guest',boundQqId:'owner'}
+ const parsed=JSON.parse(dailyReviewPromptInput('2026-11-17',{reflection,memories:[],existingRelations:[],turns:[{...turn(1),characterEnabled:true,identityRelation}]},[]))
+ assert.equal(parsed.turns[0].characterEnabled,true);assert.deepEqual(parsed.turns[0].identityRelation,identityRelation)
 })

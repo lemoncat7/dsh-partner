@@ -435,6 +435,10 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       requiredCompanion(runtime.store, id)
       return sendJson(res, 200, runtime.heartbeat.manualStatus(id))
     }
+    if (id !== undefined && method === 'POST' && segments[2] === 'memory' && segments[3] === 'recover' && segments.length === 4) {
+      mutation(req); requiredCompanion(runtime.store, id)
+      return sendJson(res, 200, {recovered: await runtime.agents.recoverConversationMemory(id)})
+    }
     if (id !== undefined && method === 'POST' && segments[2] === 'memory' && segments[3] === 'review' && segments.length === 4) {
       mutation(req); requiredCompanion(runtime.store, id)
       return sendJson(res, 200, await runtime.dailyReview.trigger(id, true))

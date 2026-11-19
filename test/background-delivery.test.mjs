@@ -207,3 +207,48 @@ test('native/local file links, missing attachments and ordinary non-persona exec
  const normal=channelFixture(speech);normal.c.characterCard.enabled=false
  assert.equal(await composeBackgroundDelivery(normal.ctx,normal.store,normal.run,normal.agent,normal.reply),normal.reply)
 })
+
+test('foreground review decides inside original session and its JSON never enters ordinary channel delivery',async()=>{
+ const decision={action:'deliver',text:'先给你做好的这张',files:[0]},f=fixture(JSON.stringify(decision))
+ delete f.run.background.result
+ f.run.background.review={reason:'收尾缺少清单',tools:['generate_image (完成)'],files:[{name:'first.png',mediaType:'image/png',path:'/private/job/first.png'}],canResume:true}
+ const empty={text:'',attachments:[]}
+ assert.deepEqual(await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,empty),empty)
+ assert.deepEqual(f.run.background.review.decision,decision)
+ const notice=f.events.find(isInternalTaskNotice)
+ assert.equal(notice.data.source.summary,'伙伴后台任务待处置')
+ assert.match(notice.data.content[0].text,/收尾缺少清单/);assert.doesNotMatch(notice.data.content[0].text,/private\/job/)
+ assert.equal(channelReplyPartsAfter(f.events,1).text,'')
+ await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,empty);assert.equal(f.turns(),1)
+})
+test('invalid foreground selection remains pending for retry',async()=>{
+ const f=fixture(JSON.stringify({action:'deliver',text:'图片',files:[99]}));delete f.run.background.result
+ f.run.background.review={reason:'error',tools:[],files:[],canResume:false}
+ await assert.rejects(composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,{text:'',attachments:[]}),/处置格式无效/)
+ assert.equal(f.run.background.review.decision,undefined);assert.equal(channelReplyPartsAfter(f.events,1).text,'')
+})
+
+test('web results in a channel-linked session still render inside the original DSH conversation',async()=>{
+ const f=fixture('网页结果已经整理好')
+ const {localConversationRoute}=await import('../lib/channels/question-origin.js')
+ Object.assign(f.route,{kind:'channel',channelId:'qq',userId:'group:11111:22222',lastMessageAt:5})
+ const web=localConversationRoute('source',[f.route])
+ Object.assign(f.run.background,{routeId:web.id,sourceKind:'local',channelId:web.channelId,userId:web.userId})
+ const runtime={ctx:f.ctx,store:f.store,isArchived:()=>false,ensureAgent:async(_c,r)=>{
+   assert.equal(r.kind,'local');assert.equal(r.sessionId,'source');return f.agent
+ },replyQueue:new ReplyQueue(),queues:new Map()}
+ runtime.prepareBackgroundDelivery=(run,reply)=>PartnerAgentRuntime.prototype.prepareBackgroundDelivery.call(runtime,run,reply)
+ await PartnerAgentRuntime.prototype.deliverLocalBackgroundResult.call(runtime,f.run,f.reply)
+ assert.equal(f.turns(),1)
+ assert.match(f.events.find(isInternalTaskNotice).data.content[0].text,/本地对话/)
+})
+
+test('a quiet status-only sentence never becomes channel text or removes actual attachments',async()=>{
+ const f=channelFixture('这轮不打扰，安静收工。')
+ const answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+ assert.equal(answer.text,'')
+ assert.equal(answer.chatParts.length,1)
+ assert.equal(answer.chatParts[0].attachment,f.reply.attachments[0])
+ const events=[{seq:1,type:'user/message',data:{source:{kind:'user'}}},{seq:2,type:'assistant/message',data:{message:{content:[{type:'text',text:'这轮不打扰，安静收工。'}]}}},{seq:3,type:'turn/end',data:{reason:{kind:'completed'}}}]
+ assert.equal(channelReplyPartsAfter(events,0).text,'')
+})

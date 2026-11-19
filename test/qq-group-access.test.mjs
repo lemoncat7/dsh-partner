@@ -400,6 +400,19 @@ test('background completion stays on frozen source and uses one durable receipt 
  await assert.rejects(f.manager.deliverBackgroundResult({...run,id:'second-task'},reply),/变更/)
  assert.equal(f.sent.length,1)
 })
+test('ordinary member background result can be delivered after another speaker takes the foreground',async()=>{
+ const f=fixture();f.state.companions[0].capabilities=[]
+ f.manager.sender=()=>f.api
+ f.agents.prepareBackgroundDelivery=async(_run,reply)=>reply
+ const run={id:'member-job',ownerCompanionId:'c',background:{audience:'member',sourceKind:'channel',routeId:'r',sourceSessionId:'s',channelId:'qq',userId:f.peer,accountId:f.channel.accountId,baseUrl:'ws://local',targetId:f.target,capabilities:[]}}
+ f.state.sessions.push({...f.state.sessions[0],id:'newer',userId:'group:99887766:33445566'})
+ await f.manager.deliverBackgroundResult(run,{text:'画好了',attachments:[]})
+ assert.deepEqual(f.sent,[{userId:f.peer,text:'画好了'}])
+ f.state.pairings.push({channelId:'qq',userId:f.peer,status:'blocked'})
+ await assert.rejects(f.manager.deliverBackgroundResult({...run,id:'next'},{text:'已封禁',attachments:[]}),/授权/)
+ assert.equal(f.sent.length,1)
+})
+
 test('slow still-current ambient replies are sent; newer input replaces old chatter, never explicit tasks',async()=>{
  const f=fixture();f.manager.groupAutonomy.shouldReply=async()=>true
  const ambient={...f.event,id:'slow-ambient',timestamp:Date.now()-60000,receivedAt:Date.now()-60000,qqGroup:{...f.event.qqGroup,mentioned:false}}
@@ -434,5 +447,32 @@ test('working task still classifies a call and queues it without steering or adm
   await f.handle(e)
   assert.equal(calls,1);assert.equal(f.inputs.length,label==='address'?1:0);assert.equal(steers,0)
   if(label==='address')assert.equal(f.inputs[0][3].groupReply.kind,'direct')
+ }
+})
+
+test('a caption ten seconds after an admitted photo joins the unfinished reply or gets a protected turn',async()=>{
+ for(const accepted of [true,false]){
+  const f=fixture(),inputs=[],steered=[]
+  let started,finish
+  const ready=new Promise(resolve=>{started=resolve}),done=new Promise(resolve=>{finish=resolve})
+  f.api.receiveAttachments=async()=>[{kind:'image',name:'apple.png',data:Buffer.from('image')}]
+  f.agents.reply=async(_c,_ch,_u,message)=>{
+   inputs.push(message)
+   if(inputs.length===1){started();await done}
+   return {text:accepted?'一起回应':'补充后的回应',attachments:[]}
+  }
+  f.agents.steer=async(_c,_ch,_u,message)=>{steered.push(message);return accepted}
+  const at=Date.now()-10000
+  const photo={...f.event,text:'',media:[{kind:'image',source:'photo'}],receivedAt:at}
+  const first=f.handle(photo)
+  await ready
+  try{
+   await f.handle({...f.event,id:'caption',receivedAt:at+10000,text:'你群里戳一圈不就行了',qqGroup:{...f.event.qqGroup,mentioned:false}})
+   assert.equal(steered.length,1)
+   assert.match(steered[0].text,/你群里戳一圈不就行了/)
+   assert.equal(inputs.length,accepted?1:2)
+   if(!accepted)assert.equal(inputs[1].groupReply.kind,'direct')
+  }finally{finish();await first}
+  assert.equal(f.sent.length,1)
  }
 })

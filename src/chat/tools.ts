@@ -25,7 +25,7 @@ import type { PartnerStore } from '../store.js'
 import type { AttachmentDeliveryService } from '../attachments/service.js'
 import { questionOrigin } from '../channels/question-origin.js'
 import { safeMediaName } from '../channel-message.js'
-import { isInternalTaskNotice, isRequirementDeliveryReceipt } from '../channels/delivery-policy.js'
+import { isInternalTaskNotice, isRequirementDeliveryReceipt,isQuietStatus } from '../channels/delivery-policy.js'
 import { parseChatInput, segmentChatInput, withChatCompanionText, type ChatPart } from './protocol.js'
 import type { StickerLibrary } from './stickers.js'
 import { stickerMediaType } from './stickers.js'
@@ -142,7 +142,12 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
         return {kind:'partner-chat-v1',parts:[],silent:true,originRouteId:audience!.id}
       }
       if((raw as {expression?:unknown}).expression!==undefined||(raw as {workReply?:unknown}).workReply!==undefined)throw Error('不再二次生成人格回复；请直接按当前人物在 messages 写要发送的正文。')
-      const original=withChatCompanionText(parseChatInput(raw),events,exec.rootCallId??exec.callId)
+      const original=withChatCompanionText(parseChatInput(raw),events,exec.rootCallId??exec.callId).filter(p=>!('text'in p)||!isQuietStatus(p.text))
+      if(!original.length){
+        const audience=questionOrigin(agent.session.id,events,state.sessions)
+        if(!continuing){await saveNext();exec.concludeTurn()}
+        return {kind:'partner-chat-v1',...reviewMeta,parts:[],silent:true,originRouteId:audience?.id??null}
+      }
       let authored:WorkExpressionResult={parts:original}
       if(usesShortDeliveryPolicy(card)&&(raw as {inlineDetails?:boolean}).inlineDetails!==true&&authored.parts.reduce((n,p)=>n+('text'in p?p.text.length:0),0)>180)throw Error('短句接话：本次正文超过 180 字，尚未发送或结束回合。先交付完整报告或文档；用户明确要求详细/原文或附件失败时用 inlineDetails:true。')
       let personaDelivery:PersonaDeliveryAudit|undefined

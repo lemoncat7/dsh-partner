@@ -7,7 +7,7 @@ const event=(at,extra={})=>({id:'m',sender:peer,receivedAt:at,text:'还有一点
 test('confirmed first part remains interruptible; buffered chat is admitted after transport finishes',()=>{
  const windows=new GroupReplyWindows(),w=windows.begin('q',peer,1000)
  const route=e=>groupTaskInput(e,windows.focus('q',e,undefined,10000),'伙伴',10000)
- assert.equal(route(event(9000)),'normal','ordinary input queues while the model is generating instead of repeatedly steering it')
+ assert.equal(route(event(9000)),'steer','the same speaker can add a caption while the reply is being prepared')
  windows.sent(w,10000)
  assert.equal(route(event(10001)),'steer')
  windows.finish(w,11000)

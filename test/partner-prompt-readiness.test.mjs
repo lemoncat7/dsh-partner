@@ -577,3 +577,29 @@ test('one role policy selects actual composition, first request tools and protoc
  assert.ok(!restored.tools.some(t=>t.name==='partner_background_task'))
  assert.doesNotMatch(JSON.stringify(restored.sections),/必须先调用 partner_background_task/)
 })
+
+test('web message in a QQ-only binding receives normal partner tools before the first model request',async t=>{
+ const {Session}=await import('@deepseek-ai/dsh-session'),{createUserMessage}=await import('@deepseek-ai/dsh-llm')
+ const f=await fixture(t,{async compose(ctx){
+  const ds=['host_tool','partner_identity','partner_chat_reply'].map(name=>ctx.tools.register(defineContentToolFixture({name,description:name,parameters:{},execute:async()=>[]})))
+  return ()=>ds.forEach(d=>d())
+ }})
+ f.agent.session=Session.create('session-assembly')
+ await f.store.update(s=>{
+  const c=s.companions[0]
+  s.sessions=[{id:'group',companionId:c.id,sessionId:f.agent.session.id,kind:'channel',channelId:'qq',userId:'group:11111:22222',lastMessageAt:1,inboundMessageIds:[]}]
+  s.channels.push({id:'qq',platform:'qq',companionId:c.id,qq:{identityBinding:{enabled:true,qqIds:['12345678']}}})
+ })
+ const web=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'网页用户的当前任务'}]})
+ await f.runtime.prepareAgentTurn(f.agent,1,new AbortController().signal,[web])
+ const webAssembly=await f.assemble()
+ assert.ok(webAssembly.tools.some(t=>t.name==='host_tool'))
+ assert.ok(webAssembly.tools.some(t=>t.name==='partner_identity'))
+ const group=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'群成员的任务'}]})
+ await f.store.update(s=>{s.sessions[0].inboundMessageIds.push(group.id)})
+ await f.runtime.prepareAgentTurn(f.agent,2,new AbortController().signal,[group])
+ const groupAssembly=await f.assemble()
+ assert.ok(groupAssembly.tools.some(t=>t.name==='host_tool'))
+ assert.ok(!groupAssembly.tools.some(t=>t.name==='partner_identity'))
+ assert.ok(groupAssembly.tools.some(t=>t.name==='partner_chat_reply'))
+})

@@ -13,7 +13,8 @@ export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefine
  if(!event.qqGroup||!focus)return 'normal'
  const group=event.qqGroup,text=event.text.replace(/^\[对方 @ 了你\]\s*/u,'').trim()
  if(group.otherMention||group.replyTo==='other')return 'observe'
- const addressed=routeGroupReply(event,{name,now,seed:''})?.route==='direct'
+ const route=routeGroupReply(event,{name,now,seed:''})?.route
+ const addressed=route==='direct'
  const owner=event.sender===focus.userId
  const request=text.startsWith(name)&&name?text.slice(name.length).replace(/^[\s，,:：]+/u,''):text
  // Explicit changes from the task author remain interruptible even after minutes of work.
@@ -22,8 +23,12 @@ export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefine
  if(focus.working)return addressed?'queue':'observe'
  // Another member may offer a new shared topic; use normal selective judgment, never steer their words into this speaker's reply.
  if(!owner)return addressed?'queue':'normal'
- // During model generation, ordinary chatter updates the pending opportunity;
- // it must not continually extend the active request. Already-sending parts remain interruptible.
- if(owner&&(event.media?.length||text&&!/^[\s\p{P}\p{S}]+$/u.test(text)))return focus.sentAt!==undefined?'steer':'normal'
+ // Use arrival time so attachment preparation cannot age out a timely supplement.
+ const age=(event.receivedAt??now)-focus.startedAt
+ if(owner&&(event.media?.length||text&&!/^[\s\p{P}\p{S}]+$/u.test(text))){
+  if(focus.sentAt!==undefined)return 'steer'
+  if(route!=='closing'&&age>=0&&age<=30000)return 'steer'
+  return 'normal'
+ }
  return addressed?'queue':'observe'
 }

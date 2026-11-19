@@ -92,10 +92,12 @@ test('group attachment count is checked before downloads and each original post 
 test('inbound files exist before model handoff and paths precede user words in one message',async t=>{
   const cwd=await mkdtemp(join(tmpdir(),'partner-inbound-'))
   t.after(()=>rm(cwd,{recursive:true,force:true}))
+  t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-18T16:01:00Z')})
   const result=await PartnerAgentRuntime.prototype.persistInbound.call({defaultCwd:cwd},{cwd},{text:'请读这个文件',attachments:[{kind:'file',name:'资料.txt',data:Buffer.from('hello'),mediaType:'text/plain'}]})
   const visible=result.content[0].text
   assert.ok(visible.indexOf('已保存')<visible.indexOf('请读这个文件'))
   const saved=visible.match(/已保存：(.+)（text\/plain）/)[1]
+  assert.match(saved,/inbound\/2026-11-19\//)
   assert.equal(await readFile(saved,'utf8'),'hello')
   assert.equal(result.content.length,1)
 })

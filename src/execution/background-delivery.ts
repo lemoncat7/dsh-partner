@@ -1,3 +1,6 @@
+import {isQuietStatus} from '../channels/delivery-policy.js'
+import {backgroundRunRoute} from './background-routing.js'
+import {reviewDecision} from './background-review.js'
 import {isAbsolute,resolve,relative,sep} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {runtimeSnapshot,runtimePolicy} from '../companions/runtime-policy.js'
@@ -72,15 +75,17 @@ export function foregroundCompletionText(events:readonly SessionEvent[],id:strin
 export async function composeBackgroundDelivery(ctx:Context,store:PartnerStore,run:ExecutionRun,agent:Agent,reply:PartnerReply):Promise<PartnerReply>{
  const b=run.background!
  const current=()=>{
-  const s=runtimeSnapshot(store),c=s.companions.find(c=>c.id===run.ownerCompanionId),route=s.sessions.find(r=>r.id===b.routeId&&r.sessionId===agent.session.id&&r.companionId===run.ownerCompanionId)
-  if(!c||!route||store.isCompanionRemoving(c.id))throw Error('后台交付原会话已失效，成果已保存')
+  const s=runtimeSnapshot(store),c=s.companions.find(c=>c.id===run.ownerCompanionId),route=backgroundRunRoute(s.sessions,run)
+  if(!c||!route||route.sessionId!==agent.session.id||store.isCompanionRemoving(c.id))throw Error('后台交付原会话已失效，成果已保存')
   return {c,channel:s.channels.find(c=>c.id===b.channelId)}
  }
- if(!runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery){current();return reply}
+ const review=b.result?undefined:b.review
+ if(!review&&!runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery){current();return reply}
+ if(review?.decision)return {text:'',attachments:[]}
  const saved=runtimeSnapshot(store).executionRuns.find(r=>r.id===run.id)?.background
  const result=(text:string):PartnerReply=>{
   if(!runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery)return reply
-  text=channelBackgroundText(text,run,reply)
+  text=channelBackgroundText(text,run,reply).split('\n').filter(line=>!isQuietStatus(line)).join('\n').trim()
   // This path already supplies chatParts, so the ordinary delivery fallback cannot
   // split it later. Normalize the foreground's authored lines before adding files.
   const parts=segmentChatInput(text.trim()?[{text}]:[],!!current().c.characterCard?.segmentedReplies)
@@ -89,22 +94,25 @@ export async function composeBackgroundDelivery(ctx:Context,store:PartnerStore,r
   const bubbles=lines.length>4?[...lines.slice(0,3),lines.slice(3).join('\n')]:lines
   return {...reply,text,chatParts:[...bubbles.map(text=>({type:'text' as const,text})),...reply.attachments.map(attachment=>({type:'image' as const,attachment,url:attachment.path,label:attachment.name}))]}
  }
- if(saved?.foregroundReply)return result(saved.foregroundReply.text)
+ if(!review&&saved?.foregroundReply)return result(saved.foregroundReply.text)
  if(agent.status!=='idle')await agent.whenIdle()
  current()
  let text=saved?.foregroundMessageId?foregroundCompletionText(agent.session.snapshotEvents(),saved.foregroundMessageId):undefined
+ if(text&&review&&!(isQuietStatus(text)&&!review.files.length)){try{reviewDecision(text,review)}catch{text=undefined}}
  if(!text){
   const {c,channel}=current(),relation=renderIdentityRelationship(c,channel?.platform==='qq'?{channel:'qq',matched:!!qqIdentityRelation(channel.qq,b.userId)?.matched}:{channel:'default'})
-  const expression=renderBackgroundDeliveryExpression(c.characterCard,b.sourceKind==='channel')
-  const instruction='本轮是已完成后台任务交回原前台的交付回合。结合当前对话状态和当前伙伴人设，自然告诉原发起人成果；不回答几分钟前的旧消息，不复述后台报告，不重复执行任务。只输出要对原发起人说的自然简短文字；附件报告按需提供，图片或已有产物足够时直接交付，不另造报告。确需展开的详细分析或长资料可以附文件；明确说明实际未完成或失败。所有工具本轮暂停，不调用聊天发送工具或再次委派；你输出后平台统一送达原渠道，勿声称已发送。'+(reply.attachments.length?(b.sourceKind==='local'?'本地对话请在简短说明后附上资料中实际存在的附件 Markdown 链接。':'已有附件由平台随正文单独发送；只输出接话，不要输出本地文件路径、sandbox/file 地址或本地 Markdown 链接。'):'本次没有附件，直接说清结果，不声称有图片、文件、报告或下载链接。')
+  const expression=runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery?renderBackgroundDeliveryExpression(c.characterCard,b.sourceKind==='channel'):''
+  const instruction=review?
+   '本轮是后台未正常完成后交回原前台的判断回合。根据原请求、已核实的工具回执、候选文件与最新对话决定如何处置。候选文件是已经生成的版本，文件名不能证明视觉质量。需要核实或补做时选 continue，只写尚需完成的事项，尽量利用已有文件。已有足够证据可以交付时选 deliver，选定要发送的附件编号，text 是自然的用户可见回复，如实说明未完成部分。无需打扰或没有可安全执行的后续时选 hold，text 写内部理由。子任务自述仅作线索，不当作已核实成果。群聊没有可交付成果时选 hold，不播报系统错误。必须只输出 JSON 对象，action 为 deliver、hold 或 continue，text 为文字，files 为从 0 起的候选文件编号数组，只有 deliver 可选附件，最多八个。canResume 为 false 时只能 deliver 或 hold。本轮只作决定，平台会执行。':
+   '本轮是已完成后台任务交回原前台的交付回合。结合当前对话状态和当前伙伴人设，自然告诉原发起人成果；不回答几分钟前的旧消息，不复述后台报告，不重复执行任务。只输出要对原发起人说的自然简短文字；附件报告按需提供，图片或已有产物足够时直接交付，不另造报告。确需展开的详细分析或长资料可以附文件；明确说明实际未完成或失败。所有工具本轮暂停，不调用聊天发送工具或再次委派；你输出后平台统一送达原渠道，勿声称已发送。'+(reply.attachments.length?(b.sourceKind==='local'?'本地对话请在简短说明后附上资料中实际存在的附件 Markdown 链接。':'已有附件由平台随正文单独发送；只输出接话，不要输出本地文件路径、sandbox/file 地址或本地 Markdown 链接。'):'本次没有附件，直接说清结果，不声称有图片、文件、报告或下载链接。')
   const facts=b.result?.text??reply.text
   const source=agent.session.snapshotEvents().find(e=>e.type==='user/message'&&e.data.id===b.inputId)
-  const notice=createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴后台任务完成'},content:[{type:'text',text:instruction+'\n\n'+expression+'\n\n'+JSON.stringify({taskId:run.id,task:b.label,originalInputId:b.inputId,originalRequest:source?.type==='user/message'?source.data.content.filter(p=>p.type==='text'):[],result:facts.length<=64000?facts:(reply.attachments.length?'完整成果以已有附件与任务记录为准，不能推定任务全部成功。':'完整成果保存在任务结果中，当前没有附件；不要声称有报告或推定任务全部成功。'),files:reply.attachments.map(f=>({name:f.name,mediaType:f.mediaType,...(b.sourceKind==='local'?{link:'['+f.name.replace(/[\[\]]/g,'')+'](<'+f.path+'>)'}:{})}))})}]})
+  const notice=createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:review?'伙伴后台任务待处置':'伙伴后台任务完成'},content:[{type:'text',text:instruction+'\n\n'+expression+'\n\n'+JSON.stringify({taskId:run.id,task:b.label,originalInputId:b.inputId,...(review?{assignment:b.input,reason:review.reason,steps:review.tools,unverifiedChildStatement:review.lastStatement,canResume:review.canResume,candidates:review.files.map((f,index)=>({index,name:f.name,mediaType:f.mediaType})),group:channel?.platform==='qq'&&b.userId.startsWith('group:')}:{}),originalRequest:source?.type==='user/message'?source.data.content.filter(p=>p.type==='text'):[],result:facts.length<=64000?facts:(reply.attachments.length?'完整成果以已有附件与任务记录为准，不能推定任务全部成功。':'完整成果保存在任务结果中，当前没有附件；不要声称有报告或推定任务全部成功。'),files:reply.attachments.map(f=>({name:f.name,mediaType:f.mediaType,...(b.sourceKind==='local'?{link:'['+f.name.replace(/[\[\]]/g,'')+'](<'+f.path+'>)'}:{})}))})}]})
   // Prepend the middleware so this projection runs AFTER normal persona/context assembly,
   // including exclusive persona projection. No registration or permanent tool changes.
   const detach=ctx.on('system-prompt/assemble',async(assembly,context,next)=>{
    const value=await next();if(context.agent?.session.id!==agent.session.id)return value
-   return {...value,tools:[],sections:[...value.sections,{name:'partner-background-completion',text:[instruction,expression,relation].filter(Boolean).join('\n\n')}]}
+   return {...value,tools:[],sections:[...value.sections,{name:'partner-background-completion',text:[instruction,expression,expression?relation:''].filter(Boolean).join('\n\n')}]}
   },{prepend:true})
   const unguard=agent.ctx.tools.guard(exec=>exec.agent?.session.id===agent.session.id?'后台成果正在由前台交付，本轮不执行工具或重新开展工作':undefined)
   let released=false,claimed=false
@@ -118,6 +126,11 @@ export async function composeBackgroundDelivery(ctx:Context,store:PartnerStore,r
    text=foregroundCompletionText(agent.session.snapshotEvents(),notice.id)
    if(!text)throw Error('前台交付回合未生成完整答复，成果已保存等待重试')
   }finally{release()}
+ }
+ if(review){
+  const decision=isQuietStatus(text)&&!review.files.length?{action:'hold' as const,text:'前台选择保留任务状态',files:[]}:reviewDecision(text,review)
+  await store.update(s=>{const r=s.executionRuns.find(r=>r.id===run.id);if(r?.background?.review&&!r.background.review.doneAt&&(r.background.attempt??0)===(b.attempt??0))r.background.review.decision=decision})
+  return {text:'',attachments:[]}
  }
  await store.update(s=>{const r=s.executionRuns.find(r=>r.id===run.id);if(r?.background)r.background.foregroundReply={text:text!}})
  return result(text)

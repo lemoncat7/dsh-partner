@@ -25,6 +25,24 @@ export function CharacterMemoryEditor({ companionId, scopeId, enabled, roleEnabl
       .catch(e => { if (alive) setError(errorMessage(e)) }).finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
   }, [url, open, revision, scopeId])
+  // Follow automatic updates while viewing, but never replace an unsaved edit.
+  useEffect(() => {
+    if (!open || !scopeId || !saved || dirty || busy) return
+    const controller = new AbortController()
+    let running = false
+    const refresh = async () => {
+      if (running || document.hidden) return
+      running = true
+      try {
+        const data = await api<{state:CharacterState}>(url,{signal:controller.signal})
+        if (!controller.signal.aborted && data.state.updatedAt > saved.updatedAt) {setState(data.state);setSaved(data.state)}
+      } catch (e) {if (!controller.signal.aborted) setError(errorMessage(e))}
+      finally {running=false}
+    }
+    void refresh()
+    const timer=setInterval(()=>{void refresh()},15_000)
+    return ()=>{controller.abort();clearInterval(timer)}
+  },[url,open,scopeId,saved?.updatedAt,dirty,busy])
   const save = async () => {
     if (!state || busy) return
     setBusy(true); setError(undefined); setNotice('')

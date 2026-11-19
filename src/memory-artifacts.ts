@@ -9,6 +9,7 @@ export interface ExperienceDraft extends ExperienceProposal {
   id: string; scopeId: string; status: 'draft' | 'approved' | 'rejected'; updatedAt: number; version: string
 }
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex').slice(0, 24)
+export const confirmedSuccess = (value:string):boolean => /(?:已(?:经)?解决|问题解决了|测试通过|验收通过|验证通过|运行正常|恢复正常|确实可用|可以用了|已经能用|成功了|搞定了|works correctly|tests passed)/iu.test(value)
 const canonical = (value: string): string => value.normalize('NFKC').replace(/\s+/g, ' ').trim()
 const text = (value: unknown, limit: number): string => typeof value === 'string' ? canonical(value).slice(0, limit) : ''
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
@@ -32,20 +33,21 @@ export function parseArtifactProposals(value: Record<string, unknown>): { scenes
 }
 
 /** Repetition alone is not success. Require explicit positive user evidence in
- * at least two distinct sessions; the procedure still requires human review. */
+ * at least two distinct user turns; a long-lived session is valid evidence.
+ * The model must establish repeated independent successes; drafts need review. */
 export function groundExperiences(items: ExperienceProposal[], turns: ConversationTurn[]): ExperienceProposal[] {
   const byId = new Map(turns.map(turn => [turn.id, turn]))
   return items.filter(item => {
-    const sessions = new Set<string>()
+    const confirmations = new Set<string>()
     for (const evidence of item.evidence) {
       const turn = byId.get(evidence.turnId)
       if (!turn || !canonical(turn.user).includes(canonical(evidence.quote))) return false
       const speech = canonical(turn.user); const offset = speech.indexOf(canonical(evidence.quote))
       const surrounding = speech.slice(Math.max(0, offset - 12), offset + evidence.quote.length + 24)
       if (/(?:没|未|不|失败|还需|但是|不过|然而)/u.test(surrounding)) continue
-      if (/(?:已(?:经)?解决|测试通过|验收通过|验证通过|运行正常|确实可用|成功了|works correctly|tests passed)/iu.test(evidence.quote)) sessions.add(turn.sessionId)
+      if (confirmedSuccess(evidence.quote)) confirmations.add(turn.userMessageIds?.length ? [...turn.userMessageIds].sort().join('\0') : turn.id)
     }
-    return sessions.size >= 2
+    return confirmations.size >= 2
   })
 }
 

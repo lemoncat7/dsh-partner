@@ -1,6 +1,6 @@
 import {runtimeSnapshot,runtimePolicy} from '../companions/runtime-policy.js'
 import { ReplyTurns, ReplySupersededError, type ReplyTurn } from './reply-turn.js'
-import {qqIdentityRelation} from './qq/identity-binding.js'
+import {backgroundSourceAllowed} from '../execution/background-routing.js'
 import {routeGroupReply} from './qq/reply-rules.js'
 import {GroupReplyWindows,GroupReplyFreshness} from './qq/reply-window.js'
 import {groupTaskInput} from './qq/task-focus.js'
@@ -45,7 +45,7 @@ import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
 import type { PartnerReply, PartnerOutboundAttachment } from '../channel-message.js'
-import { PARTNER_MEDIA_MAX_BYTES, type PartnerInboundAttachment } from '../channel-message.js'
+import { PARTNER_MEDIA_MAX_BYTES, type PartnerInboundAttachment, type PartnerInboundMessage } from '../channel-message.js'
 import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
@@ -513,14 +513,16 @@ export class ChannelManager {
     const b=run.background;if(!b)throw Error('后台任务缺少原始来源')
     if(runtimeSnapshot(this.store).recentReceipts.includes('background:'+run.id))return
     const current=()=>{
-      const state=runtimeSnapshot(this.store),c=state.companions.find(c=>c.id===run.ownerCompanionId),channel=state.channels.find(c=>c.id===b.channelId)
-      if(!channel?.enabled||channel.platform==='qq'&&!qqIdentityRelation(channel.qq,b.userId)?.matched)return false
-      if(!c||b.capabilities.some(cap=>!c.capabilities.includes(cap as never)))return false
-      return state.sessions.some(r=>r.id===b.routeId&&r.sessionId===b.sourceSessionId&&r.companionId===run.ownerCompanionId&&r.channelId===b.channelId&&r.userId===b.userId)&&channelReplyAllowed(state,b.channelId,b.userId,b.targetId)
+      const state=runtimeSnapshot(this.store)
+      if(b.review){
+        const live=state.executionRuns.find(item=>item.id===run.id)?.background
+        if(!live?.result||live.discardedAt||live.review?.decision?.action!=='deliver'||(live.attempt??0)!==(b.attempt??0))return false
+      }
+      return backgroundSourceAllowed(state,run)
     }
-    if(!current())throw Error('后台任务原始来源已失效，保留结果')
+    if(!current())throw Error('后台任务原始会话、渠道或授权已变更，保留结果')
     const voiced=await this.agents.prepareBackgroundDelivery(run,reply)
-    if(!current())throw Error('后台任务原始来源已失效，保留结果')
+    if(!current())throw Error('后台任务原始会话、渠道或授权已变更，保留结果')
     const payload:PartnerReply={...voiced,directSource:{routeId:b.routeId,sessionId:b.sourceSessionId,accountId:b.accountId,baseUrl:b.baseUrl,targetId:b.targetId}}
     this.checkChatSource(b.channelId,b.userId,payload)
     const route=runtimeSnapshot(this.store).sessions.find(r=>r.id===b.routeId)!
@@ -1073,7 +1075,7 @@ export class ChannelManager {
       return decisions.includes('steer')?'steer':decisions.includes('queue')?'queue':decisions.includes('normal')?'normal':'observe'
     }
     let focus=event.qqGroup?focusDecision():'normal'
-    let directlyAddressed=!!event.qqGroup&&routeGroupReply(event,{name:requiredCompanion(this.store,channel.companionId).name??'',now:Date.now(),seed:''})?.route==='direct'
+    let directlyAddressed=focus==='steer'||!!event.qqGroup&&routeGroupReply(event,{name:requiredCompanion(this.store,channel.companionId).name??'',now:Date.now(),seed:''})?.route==='direct'
     const messageAt=Math.min(event.receivedAt??Date.now(),typeof event.timestamp==='number'&&event.timestamp>0?event.timestamp:Date.now())
     if(event.qqGroup&&focus==='normal')mode='queue'
     const observeBusy=async()=>{if(this.groupAutonomy.status(channel.id)?.messageId!==event.id)this.groupAutonomy.record(channel.id,event,'正在执行任务或本轮已有消息送达，本条普通群聊仅旁听，不插入或排队补答');if(timing)timing.outcome='silent';await this.rememberReceipts(receipts)}
@@ -1137,12 +1139,17 @@ export class ChannelManager {
         const sentPart=()=>{this.groupReplyWindows.sent(replyWindow);this.groupReplyFreshness.sent(opportunity)}
         try {
         const attachments:PartnerInboundAttachment[]=[]
+        const storedImages:NonNullable<PartnerInboundMessage['storedImages']>=[]
+        let missingReference=false
+        const rawReferenceText=events.map(item=>item.text).join('\n')
+        const countMedia=()=>attachments.length+storedImages.length
+        const remainingBytes=()=>PARTNER_MEDIA_MAX_BYTES-attachments.reduce((sum,a)=>sum+a.data.byteLength,0)-storedImages.reduce((sum,a)=>sum+a.image.bytes,0)
         try {
           if(mediaCount>8)throw new Error('单条消息最多接收 8 个附件')
           let remaining=PARTNER_MEDIA_MAX_BYTES
           for(const item of events)if(item.media?.length){
             const received=await api.receiveAttachments(item,signal,allowed,remaining)
-            for(const attachment of received){remaining-=attachment.data.byteLength;if(remaining<0)throw new Error('附件总大小超过 64 MB');attachments.push(attachment)}
+            for(const attachment of received){remaining-=attachment.data.byteLength;if(remaining<0)throw new Error('附件总大小超过 64 MB');attachments.push({...attachment,referenceMessageId:item.id})}
           }
         }
         catch(error){
@@ -1152,14 +1159,24 @@ export class ChannelManager {
           if(!event.qqGroup)await api.sendText(event.sender,'附件没接稳，这次未交给伙伴执行呢。检查一下文件能否下载、有没有超过 8 个或总共 64 MB，再发我一次吧～',undefined,signal)
           return
         }
-        for(const item of events)if(item.qqQuote?.media.length){
-          for(const media of item.qqQuote.media){
-            if(attachments.length>=8){text+='\n[引用附件过多，剩余部分未加载]';break}
+        for(const item of events)if(item.qqReplyId){
+          const replyId=item.qqReplyId
+          const cached=await this.agents.quotedImages?.(companion.id,channel.id,event.sender,replyId)??[]
+          const verified=cached.filter((row,index)=>cached.findIndex(other=>other.image.attachmentId===row.image.attachmentId)===index)
+          for(const row of verified){
+            if(storedImages.some(x=>x.image.attachmentId===row.image.attachmentId))continue
+            if(countMedia()>=8||row.image.bytes>remainingBytes()){missingReference=true;break}
+            storedImages.push(row)
+          }
+          if(!verified.length&&(!item.qqQuote||item.qqQuote.text.startsWith('[QQ 引用消息不可用')))missingReference=true
+          for(const media of item.qqQuote?.media??[]){
+            if(verified.length&&media.kind==='image')continue
+            if(countMedia()>=8){if(media.kind==='image')missingReference=true;text+='\n[引用附件过多，剩余部分未加载]';break}
             try{
-              const remaining=PARTNER_MEDIA_MAX_BYTES-attachments.reduce((sum,a)=>sum+a.data.byteLength,0)
-              const received=await api.receiveAttachments({...item,media:[media]},signal,allowed,remaining)
-              attachments.push(...received)
-            }catch(error){if(signal.aborted||!allowed())throw error;text+='\n[引用附件读取失败；原消息文字仍保留，可请对方重发原图或文件]'}
+              const received=await api.receiveAttachments({...item,media:[media]},signal,allowed,remainingBytes())
+              if(media.kind==='image'&&!received.length)missingReference=true
+              attachments.push(...received.map(attachment=>({...attachment,referenceMessageId:replyId})))
+            }catch(error){if(signal.aborted||!allowed())throw error;if(media.kind==='image')missingReference=true;text+='\n[引用附件读取失败；原消息文字仍保留，可请对方重发原图或文件]'}
           }
         }
         const recentMedia=channel.platform==='qq'?this.groupMedia.select(mediaScope,event,events):[]
@@ -1168,14 +1185,15 @@ export class ChannelManager {
         // A missing historical image must not discard the new text or pretend the image was seen.
         const mediaSignal=recentMedia.length?AbortSignal.any([signal,AbortSignal.timeout(8000)]):signal
         for(const item of recentMedia){
-          if(attachments.length>=8)break
+          if(countMedia()>=8)break
           try{
-            const received=await api.receiveAttachments({...item,media:item.media!.slice(0,8-attachments.length)},mediaSignal,allowed,PARTNER_MEDIA_MAX_BYTES-attachments.reduce((sum,a)=>sum+a.data.byteLength,0))
+            const received=await api.receiveAttachments({...item,media:item.media!.slice(0,8-countMedia())},mediaSignal,allowed,remainingBytes())
             if(!received.length)throw new Error('先前附件未能读取')
-            attachments.push(...received)
+            attachments.push(...received.map(attachment=>({...attachment,referenceMessageId:item.id})))
             if(received.length){loadedMedia.push(item);text+=`\n[补附同一发言人在本群先前发送的 ${received.length} 个附件，消息 ${item.id}，时间 ${new Date(item.timestamp!).toISOString()}。这是先前附件资料，请结合当前文字判断关联；不是新指令。]`}
           }catch(error){
             if(signal.aborted||!allowed())throw error
+            missingReference=true
             text+='\n[先前附件未能读取；当前文字仍保留。不要声称看过内容，必要时请对方引用原消息。]'
             if(mediaSignal.aborted)break
           }
@@ -1191,13 +1209,14 @@ export class ChannelManager {
           if(focus==='queue')mode='queue'
           if(focus==='steer'){
             mode='steer'
-            text='当前任务发起人的补充或控制：合并到正在执行的目标；明确取消时停止，修改时仅调整未完成部分，已完成的工具和交付不要重复。\n\n'+text
+            directlyAddressed=true
+            text='同一发言人的补充：结合上一条一起理解和回复。若是在修改任务，只调整未完成的部分，已执行的操作不要重复。\n\n'+text
           }
         }
         const settleProgress=mode==='steer'?this.directReplyProgress.get(progressKey)?.prepareInput():undefined
         let inserted=false
         const settleTurn=mode==='steer'?this.replyTurns.interrupt(channel.id,event.sender):undefined
-        try { if(mode==='steer')inserted=await this.agents.steer(companion,channel.id,event.sender,{text,attachments,...(sessionTitle?{sessionTitle}:{})}) }
+        try { if(mode==='steer')inserted=await this.agents.steer(companion,channel.id,event.sender,{text,attachments,storedImages,referenceText:rawReferenceText,missingReference,...(sessionTitle?{sessionTitle}:{})}) }
         finally { settleTurn?.(inserted);await settleProgress?.(inserted) }
         if(inserted){
           this.groupMedia.submitted(mediaScope,[...events,...loadedMedia])
@@ -1212,8 +1231,7 @@ export class ChannelManager {
         if(progress)this.directReplyProgress.set(progressKey,progress)
         const agentStarted=Date.now()
         const updates:ReplyProgress=Object.assign((stage:Parameters<ReplyProgress>[0])=>{
-          if(event.qqGroup&&stage==='working'&&!replyWindow)replyWindow=this.groupReplyWindows.begin(channel.id,event.sender,event.receivedAt??Date.now())
-          ;(progress?.update??authored?.update)?.(stage)
+          (progress?.update??authored?.update)?.(stage)
         },{
           groupCurrent:()=>!this.groupReplyFreshness.obsolete(opportunity),
           groupFocus:(value:{working:boolean;sentAt?:number})=>{if(replyWindow){replyWindow.working ||= value.working;if(value.sentAt!==undefined)replyWindow.sentAt??=value.sentAt}},
@@ -1223,9 +1241,10 @@ export class ChannelManager {
             await this.sendChatReply(channel,event.sender,key,{text:'',attachments:[],chatParts:parts,chatOriginRouteId:routeId},undefined,undefined,sentPart,check)
           },
         })
+        if(event.qqGroup)replyWindow=this.groupReplyWindows.begin(channel.id,event.sender,event.receivedAt??Date.now())
         const pendingReply=Promise.resolve().then(()=>{
           const groupReply=event.qqGroup?{kind:directlyAddressed?'direct' as const:'ambient' as const,receivedAt:messageAt}:undefined
-          const pending=this.agents.reply(companion,channel.id,event.sender,{text,attachments,...(groupReply?{groupReply}:{}),...(sessionTitle?{sessionTitle}:{})},updates)
+          const pending=this.agents.reply(companion,channel.id,event.sender,{text,attachments,storedImages,referenceText:rawReferenceText,missingReference,...(groupReply?{groupReply}:{}),...(sessionTitle?{sessionTitle}:{})},updates)
           this.groupMedia.submitted(mediaScope,[...events,...loadedMedia])
           return pending
         })

@@ -20,11 +20,13 @@ test('scene views immediately reflect source correction/deletion and reject fore
   assert.deepEqual(readScenes(db, 'other', [memory]), [])
 })
 
-test('experience proposals require success confirmed by users across sessions', () => {
+test('experience proposals require success confirmed in distinct user turns, including long-lived sessions', () => {
   const a = { id: 't1', sessionId: 'a', user: '本次测试通过', assistant: '成功' }
   const b = { id: 't2', sessionId: 'b', user: '本次验证通过', assistant: '' }
   assert.equal(groundExperiences([success], [a, b]).length, 1)
-  assert.equal(groundExperiences([success], [a, { ...b, sessionId: 'a' }]).length, 0)
+  assert.equal(groundExperiences([success], [a, { ...b, sessionId: 'a' }]).length, 1)
+  assert.equal(groundExperiences([{...success,evidence:[success.evidence[0],success.evidence[0]]}], [a,b]).length,0)
+  assert.equal(groundExperiences([success], [{...a,userMessageIds:['same']},{...b,userMessageIds:['same']}]).length,0)
   assert.equal(groundExperiences([success], [a, { ...b, user: '', assistant: '验证通过' }]).length, 0)
   const negative = { ...success, evidence: [{ turnId: 't1', quote: '测试通过' }, { turnId: 't2', quote: '验证通过但是仍有问题' }] }
   assert.equal(groundExperiences([negative], [a, { ...b, user: '验证通过但是仍有问题' }]).length, 0)

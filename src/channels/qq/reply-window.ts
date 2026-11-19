@@ -21,7 +21,7 @@ export class GroupReplyWindows {
   if(live){
    const window=windows.filter(w=>w.userId===live.userId).at(-1)
    if(window){window.working ||= live.working;if(live.sentAt!==undefined)window.sentAt??=live.sentAt}
-   return {...live,...(window?.sentAt!==undefined?{sentAt:window.sentAt}:{})}
+   return {...live,startedAt:window?.startedAt??live.startedAt,...(window?.sentAt!==undefined?{sentAt:window.sentAt}:{})}
   }
   const active=windows.at(-1);if(active)return {...active}
   const key=this.key(channelId,event.sender),recent=this.recent.get(key)

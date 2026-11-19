@@ -91,3 +91,34 @@ test('habit tool supports local activities, requires substantive completed evide
  await assert.rejects(tool.execute({action:'observe',text:'喜欢猫',sourceId:'bad',evidence:'记下'},exec),/真实依据/)
  events=[user];await assert.rejects(tool.execute({action:'observe',text:'变更',sourceId:'a',evidence:'画了'},exec),/自主活动/)
 })
+
+
+test('delayed habit learning uses original recent feedback without retroactive affection changes',async()=>{
+ const c=make(),now=Date.now(),route={id:'r',companionId:'c',sessionId:'s',kind:'local',channelId:'@local',userId:'owner'}
+ const state={companions:[c],sessions:[route],channels:[],pairings:[]}
+ const service=new InteractionReviewService({snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,update:async fn=>fn(state)})
+ const turn={id:'delayed',companionId:'c',sessionId:'s',scopeId:'scope',at:now-2*3600000,user:'别端着',assistant:'好',userMessageIds:['u'],sourceRouteIds:['r'],interactionEligible:true}
+ const review=service.prepare(turn,now);assert.ok(review?.request.habits);assert.equal(review.request.affection,false)
+ await service.apply(turn,{request:review.request,evaluation:{habits:{reason:'持续语气反馈',proposals:[{action:'observe',kind:'expression',feedbackTarget:'conversation',durable:true,text:'在这个会话中说话放松，不端着',sourceId:'delayed',evidence:'别端着'}]}}})
+ assert.equal(c.habits.length,1);assert.equal(c.habits[0].evidence[0].at,turn.at);assert.equal(c.habits[0].status,'candidate')
+ assert.equal(service.prepare({...turn,at:now-8*86400000},now),undefined)
+ assert.equal(service.prepare({...turn,at:now+1000},now),undefined)
+})
+test('semantic habit evidence still rejects empty acknowledgement and respects role disable',()=>{
+ const c=make();c.characterCard.enabled=false
+ assert.throws(()=>observeHabit(c,'s',{kind:'expression',durable:true,text:'简短说话'},{id:'e',at:Date.now(),excerpt:'短点'}),/未开启/)
+})
+
+
+test('durability cannot turn task execution rules into communication habits',async()=>{
+ for(const feedbackTarget of ['task',undefined]){
+  const c=make(),now=Date.now(),route={id:'r',companionId:'c',sessionId:'s',kind:'local',channelId:'@local',userId:'owner'}
+  const state={companions:[c],sessions:[route],channels:[],pairings:[]}
+  const service=new InteractionReviewService({snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,update:async fn=>fn(state)})
+  const turn={id:'reference',companionId:'c',sessionId:'s',scopeId:'scope',at:now-1000,user:'以后生图必须使用人物参考图',assistant:'好',userMessageIds:['u'],sourceRouteIds:['r'],interactionEligible:true}
+  const review=service.prepare(turn,now)
+  await service.apply(turn,{request:review.request,evaluation:{habits:{reason:'长期办事偏好',proposals:[{kind:'expression',durable:true,feedbackTarget,text:'生图必须使用人物参考图',sourceId:turn.id,evidence:turn.user}]}}})
+  assert.equal(c.habits,undefined)
+  assert.equal(c.habitCheck.outcome,'unchanged')
+ }
+})

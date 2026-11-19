@@ -6,7 +6,7 @@ import { isPluginSource } from '../message-source.js'
 const INTERNAL_TASK_NOTICES = new Set([
   '看板任务待验收', '看板任务已完成', '看板任务受阻', '伙伴执行看板任务', '伙伴核验看板任务', '伙伴汇总需求',
   '伙伴长任务续接',
-  '需求成果交付', '伙伴后台任务完成',
+  '需求成果交付', '伙伴后台任务完成', '伙伴后台任务待处置',
 ])
 
 export function isInternalTaskNotice(event: SessionEvent): boolean {
@@ -34,6 +34,11 @@ export function isAutonomousDeliveryTurn(events: readonly SessionEvent[], histor
   return events.some(event => event.type === 'user/message' && isPluginSource(event.data.source, 'tool-goal')
     && event.data.source.form === 'notice'
     && event.data.source.summary?.startsWith('complete:'))
+}
+
+export function isQuietStatus(text:string):boolean {
+  const phrase=text.trim().replace(/[\s，,。.!！…、：:“”"‘’']/gu,'')
+  return /^(?:这轮|本轮|这次|本次)?(?:我)?(?:(?:先|就)?不打扰(?:你|大家)?(?:了)?(?:安静(?:收工|结束|旁听|等交付))?|(?:先|就)?安静(?:收工|结束|旁听|等交付)|(?:先|就)?默默(?:收工|旁听))$/u.test(phrase)
 }
 
 export interface ChannelReplyParts {
@@ -83,13 +88,14 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
     }
     else if (direct && chatReplyFromEvent(event)) {
       const reply=chatReplyFromEvent(event)!
-      if(!reply.intermediate){chat = reply.parts; answer = ''}
+      if(!reply.intermediate){chat = reply.parts.filter(part=>part.type!=='text'||!isQuietStatus(part.text)); answer = ''}
       chatDelivered=chatDelivered||reply.delivered===true
       chatOriginRouteId = chatOriginRouteId === undefined ? reply.originRouteId : chatOriginRouteId === reply.originRouteId ? chatOriginRouteId : null
     }
     else if (direct && event.type === 'tool/result' && !chat) answer = ''
     else if (direct && event.type === 'assistant/message' && !event.data.interrupted) {
-      const text = event.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+      const raw = event.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+      const text=raw.split('\n').filter(line=>!isQuietStatus(line)).join('\n')
       if (text.trim()) references.push(text.trim())
       if (event.data.message.content.some(block => block.type === 'tool-call')) answer = ''
       else if (text.trim()) answer = text.trim()
@@ -102,4 +108,17 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
 /** whenIdle may encompass follow-up turns: don't append internal reviews to a user reply. */
 export function channelReplyTextAfter(events: readonly SessionEvent[], fromSeq: number): string {
   return channelReplyPartsAfter(events, fromSeq).text
+}
+
+/** Archive semantic speech separately from transport output: a confirmed voice
+ * reply has no outgoing text parts, but its exact spoken text is still history.
+ * Never change channelReplyPartsAfter or replay an already delivered message. */
+export function conversationReplyText(events: readonly SessionEvent[]): string {
+  const semantic = events.map(event => {
+    const reply = chatReplyFromEvent(event)
+    if (!reply || reply.deliveryKind !== 'voice' || !reply.delivered || reply.parts.length
+      || typeof reply.spokenText !== 'string' || !reply.spokenText.trim()) return event
+    return {...event, data: {...event.data, meta: {...reply, parts: [{type: 'text', text: reply.spokenText}]}}} as SessionEvent
+  })
+  return channelReplyPartsAfter(semantic, -1).text
 }

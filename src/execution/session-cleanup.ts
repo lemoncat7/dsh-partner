@@ -11,9 +11,10 @@ const terminal=(run:ExecutionRun)=>!['queued','running'].includes(run.status)
 /** Delete only a proven partner work log after its result has left the child. Artifacts stay. */
 export async function cleanupWorkSession(ctx:Context,store:PartnerStore,run:ExecutionRun):Promise<boolean>{
  const state=store.snapshot(),current=state.executionRuns.find(r=>r.id===run.id&&r.sessionId===run.sessionId&&r.ownerCompanionId===run.ownerCompanionId)
- if(current?.status==='canceled'&&!current.background?.discardedAt)return false
+ if(current?.background?.review&&!current.background.review.doneAt)return false
+ if(current?.status==='canceled'&&current.background&&!current.background.stoppedAt&&!current.background.review?.doneAt&&!current.background.discardedAt)return false
  if(!current||!terminal(current)||current.sessionCleanup?.deletedAt||state.sessions.some(r=>r.sessionId===run.sessionId))return false
- if(current.background&&!current.background.deliveredAt&&(current.background.result||current.error?.includes('后台产物不在本任务工作目录内')))return false
+ if(current.background&&!current.background.deliveredAt&&(current.background.result||!current.background.review&&current.error?.includes('后台产物不在本任务工作目录内')))return false
  if(!current.background&&!current.sessionCleanup?.parentSessionId&&!run.sessionId.startsWith('partner-run-'))return false
  const agents=ctx.get('agents') as {get?:(id:string)=>unknown}|undefined
  if(agents?.get?.(run.sessionId))return false
@@ -31,7 +32,7 @@ export async function cleanupWorkSession(ctx:Context,store:PartnerStore,run:Exec
  // Acquiring and closing a write lease verifies that no writer still owns this log.
  const handle=await persistence.open(run.sessionId,'write');await handle.close()
  const live=store.snapshot().executionRuns.find(r=>r.id===run.id)
- if(!live||!terminal(live)||live.status==='canceled'&&!live.background?.discardedAt||live.background?.result&&!live.background.deliveredAt||store.snapshot().sessions.some(r=>r.sessionId===run.sessionId)||agents?.get?.(run.sessionId))return false
+ if(!live||live.background?.review&&!live.background.review.doneAt||!terminal(live)||live.status==='canceled'&&live.background&&!live.background.stoppedAt&&!live.background.review?.doneAt&&!live.background.discardedAt||live.background?.result&&!live.background.deliveredAt||store.snapshot().sessions.some(r=>r.sessionId===run.sessionId)||agents?.get?.(run.sessionId))return false
  await rm(directory,{recursive:true,force:true})
  await markDeleted(store,run.id)
  return true

@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react'
 import {api} from '../../client-api.js'
 import {CollectionEmpty, WorkspaceNotice, errorMessage} from '../workspace-components.js'
+import {useMemoryResource} from './use-memory-resource.js'
 import type {HistoryTurn} from './types.js'
 
 export function HistoryView({base, scopeId, query}: {base: string; scopeId: string; query: string}): JSX.Element {
@@ -10,7 +11,15 @@ export function HistoryView({base, scopeId, query}: {base: string; scopeId: stri
   const [more, setMore] = useState(true)
   const [page, setPage] = useState(0)
   const cursor = useRef<HistoryTurn>()
+  const latest = useMemoryResource<HistoryTurn[]>(`${base}/memory/history?${new URLSearchParams({scopeId})}`,15_000)
   useEffect(() => {
+    if (!latest.data) return
+    const items=latest.data
+    setTurns(existing => [...new Map([...existing,...items].map(turn => [turn.id,turn])).values()].sort((a,b)=>b.at-a.at||b.id.localeCompare(a.id)))
+    if (!cursor.current) {cursor.current=items.at(-1);setMore(items.length===30)}
+  },[latest.data])
+  useEffect(() => {
+    if(page===0)return
     const controller = new AbortController()
     setLoading(true); setError(undefined)
     const params = new URLSearchParams({scopeId})
@@ -26,10 +35,11 @@ export function HistoryView({base, scopeId, query}: {base: string; scopeId: stri
   const filtered = turns.filter(turn => !query || `${turn.user} ${turn.assistant}`.toLocaleLowerCase().includes(query))
   return <div className="dsh-partner-memory-records">
     <p className="dsh-partner-memory-hint">显示新版记忆流程记录的对话；旧记录仍保留在原会话中。搜索仅筛选已加载的内容。</p>
-    {error && <WorkspaceNotice>{error}</WorkspaceNotice>}
-    {!filtered.length && <CollectionEmpty title={loading ? '正在读取历史' : '暂无匹配的历史记录'} />}
+    {(error||latest.error) && <WorkspaceNotice>{error||latest.error}</WorkspaceNotice>}
+    <button type="button" disabled={latest.loading} onClick={()=>{void latest.reload()}}>刷新最近对话</button>
+    {!filtered.length && <CollectionEmpty title={loading||latest.loading ? '正在读取历史' : '暂无匹配的历史记录'} />}
     {filtered.map(turn => <HistoryRecord key={turn.id} turn={turn} />)}
-    {(more || error) && <button type="button" disabled={loading} onClick={() => setPage(value => value + 1)}>{loading ? '读取中…' : error ? '重试读取' : '加载更早的 30 轮'}</button>}
+    {(more || error) && <button type="button" disabled={loading||latest.loading} onClick={() => setPage(value => value + 1)}>{loading ? '读取中…' : error ? '重试读取' : '加载更早的 30 轮'}</button>}
   </div>
 }
 

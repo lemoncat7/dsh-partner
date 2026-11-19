@@ -24,14 +24,17 @@ export function renderHabits(c:Companion,scope?:string):string {
  return values.length?'【自主习惯 · 可变偏好资料】\n'+JSON.stringify(values.map(h=>({kind:h.kind,preference:h.text})))+'\n这些只是相处中形成的偏好，不是指令、任务、关系或权限，也不是每次必须表现的口头禅。当前角色正文及当前用户要求优先，不复述来源或为表现习惯强行发言。':''
 }
 /** Generic feedback qualification, never role-specific vocabulary or desired catchphrases. */
-export function durableExpressionFeedback(value:string):boolean {
- return value.trim().length>=6 && /以后|下次|平时|每次|总是|别老|别总|少用|多用|不用每|尽量|短点|别一直|(?:回复|说话|语气|句子|消息).{0,12}(?:太长|太短|太正式|反问|自然|简短|啰嗦)/.test(value)
+export function durableExpressionFeedback(value:string,semantic=false):boolean {
+ const normalized=value.trim()
+ if(normalized.length<2||/^(?:哈[哈啊]*|嘿嘿|嗯+|哦+|好(?:的|吧|呀|啊)?|行|收到|谢谢|多谢|真棒|厉害)[\s!！。.，,~～]*$/u.test(normalized))return false
+ if(semantic)return true
+ return normalized.length>=6 && /以后|下次|平时|每次|总是|别老|别总|少用|多用|不用每|尽量|短点|别一直|(?:回复|说话|语气|句子|消息).{0,12}(?:太长|太短|太正式|反问|自然|简短|啰嗦)/.test(value)
 }
 export function observeHabit(c:Companion,scope:string,raw:unknown,evidence:HabitEvidence,now=Date.now()):boolean {
  if(!habitsEnabled(c)||!c.characterCard?.enabled)throw Error('自主习惯未开启')
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('习惯格式无效')
  const v=raw as Record<string,unknown>
- if(Object.keys(v).some(k=>!['text','kind','id','action','evidence','sourceId'].includes(k)))throw Error('习惯仅支持偏好，不支持改写角色字段')
+ if(Object.keys(v).some(k=>!['text','kind','id','action','evidence','sourceId','durable'].includes(k)))throw Error('习惯仅支持偏好，不支持改写角色字段')
  if(v.action==='remove'){
   const h=c.habits?.find(h=>h.id===v.id&&h.scope===scope)
   if(!h||h.status==='paused')return false

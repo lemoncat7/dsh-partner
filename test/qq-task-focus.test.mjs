@@ -15,8 +15,11 @@ test('work isolates ambient talk while explicit author corrections remain live',
 })
 test('chat fragments remain steerable during segmented delivery and chat tools do not mark work',()=>{
  const chatting={...focus,working:false}
- assert.equal(groupTaskInput(event('蓝色的'),chatting,'伙伴',2000),'normal')
- assert.equal(groupTaskInput(event('再加点'),chatting,'伙伴',7000),'normal')
+ assert.equal(groupTaskInput(event('蓝色的'),chatting,'伙伴',2000),'steer')
+ assert.equal(groupTaskInput(event('再加点'),chatting,'伙伴',7000),'steer')
+ assert.equal(groupTaskInput(event('再加点'),chatting,'伙伴',32000),'normal')
+ assert.equal(groupTaskInput(event('谢谢'),chatting,'伙伴',2000),'normal')
+ assert.equal(groupTaskInput(event('再加点',{replyTo:'other'}),chatting,'伙伴',2000),'observe')
  assert.equal(groupTaskInput(event('？'),chatting,'伙伴',2000),'observe')
  assert.equal(groupTaskInput(event('还有一点'),{...chatting,sentAt:2000},'伙伴',3000),'steer')
  assert.equal(groupTaskInput(event('取消任务'),{...chatting,sentAt:2000},'伙伴',3000),'steer')

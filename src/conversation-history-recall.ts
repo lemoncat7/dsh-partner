@@ -1,25 +1,20 @@
+import {inputOrigins,recordInputOrigin} from './channels/input-origin.js'
+import {localConversationRoute} from './channels/question-origin.js'
+export {inputOrigins,recordInputOrigin,type ImageInputOrigin} from './channels/input-origin.js'
 import {attachmentDeliveryReceipt} from './attachments/delivery-receipt.js'
 import {chatReplyFromEvent} from './chat/protocol.js'
-import {appendPluginRecord,pluginRecordOf,type Session,type SessionEvent} from '@deepseek-ai/dsh-session'
+import type {Session,SessionEvent} from '@deepseek-ai/dsh-session'
 import type {ChannelSession} from './domain.js'
 import {memoryTerms} from './memory-retrieval.js'
 
 type HistoryHit={id:string;at:number;user:string;assistant:string;score:number;deliveries:NonNullable<ReturnType<typeof attachmentDeliveryReceipt>>[]}
-type InputOrigin={messageId:string;routeId:string;channelId:string;userId:string}
-export function recordInputOrigin(session:Session,data:InputOrigin):void {appendPluginRecord(session,'plugin:dsh-partner/input-origin',data)}
-function inputOrigins(events:readonly SessionEvent[]):InputOrigin[]{
- return events.flatMap(e=>{const record=pluginRecordOf(e);if(record?.type!=='plugin:dsh-partner/input-origin')return [];const d=record.data as Partial<InputOrigin>|null;return d&&['messageId','routeId','channelId','userId'].every(k=>typeof d[k as keyof InputOrigin]==='string')?[d as InputOrigin]:[]})
-}
-declare module '@deepseek-ai/dsh-session/types' {
- interface PluginRecordMap { 'plugin:dsh-partner/input-origin': InputOrigin }
-}
-
 /** Search original user-authored turns in this session, including off-window history.
  * Never search another channel's shared-session turns or reinterpret summaries as facts. */
 export function recallConversationHistory(events:readonly SessionEvent[],routes:readonly ChannelSession[],sessionId:string,origin:ChannelSession|undefined,query:string,limit=6){
  const terms=memoryTerms(query),hits:Array<HistoryHit>=[]
  const durableOrigins=new Map(inputOrigins(events).map(d=>[d.messageId,d]))
  const shared=routes.some(r=>r.sessionId===sessionId&&r.kind==='channel')
+ const local=origin?.kind==='local'?origin:localConversationRoute(sessionId,routes)
  let current:HistoryHit|undefined
  const finish=()=>{if(current){const text=(current.user+'\n'+current.assistant+'\n'+current.deliveries.map(d=>d.name).join(' ')).normalize('NFKC').toLocaleLowerCase();current.score=terms.filter(t=>text.includes(t)).length;if(current.score)hits.push(current)}current=undefined}
  const text=(content:readonly {type:string;text?:string}[])=>content.filter(b=>b.type==='text').map(b=>b.text??'').join('\n')
@@ -31,7 +26,7 @@ export function recallConversationHistory(events:readonly SessionEvent[],routes:
    const route=routes.find(r=>r.kind==='channel'&&r.sessionId===sessionId&&r.inboundMessageIds?.includes(e.data.id))
    // Channel IDs retain only a bounded recent-origin index. Unknown old channel
    // turns are not assumed to belong to the current caller.
-   if(origin?.kind==='channel' ? (durable ? durable.routeId!==origin.id||durable.channelId!==origin.channelId||durable.userId!==origin.userId : route?.id!==origin.id) : durable ? !routes.some(r=>r.id===durable.routeId&&r.kind==='local'&&r.sessionId===sessionId) : route!==undefined||shared)continue
+   if(origin?.kind==='channel' ? (durable ? durable.routeId!==origin.id||durable.channelId!==origin.channelId||durable.userId!==origin.userId : route?.id!==origin.id) : durable ? !local||local.id!==durable.routeId||local.channelId!==durable.channelId||local.userId!==durable.userId : route!==undefined||shared)continue
    current={id:e.data.id,at:e.time,user:text(e.data.content).slice(0,12000),assistant:'',score:0,deliveries:[]}
   }else if(current&&e.type==='assistant/message'&&e.surfaceOp==='append'){
    if(!e.data.message.content.some(b=>b.type==='tool-call'))current.assistant=(current.assistant+'\n'+text(e.data.message.content)).trim().slice(-12000)
@@ -49,11 +44,13 @@ export function recallConversationHistory(events:readonly SessionEvent[],routes:
 
 /** Preserve local input provenance too, so raw recall works after route indexes roll off. */
 export function recordLocalInputOrigins(session:Session,messages:readonly {id:string;source:{kind:string}}[],routes:readonly ChannelSession[]):void {
- const local=routes.find(r=>r.kind==='local'&&r.sessionId===session.id)
+ const local=localConversationRoute(session.id,routes)
  if(!local||typeof session.append!=='function')return
+ const candidates=messages.filter(message=>message.source.kind==='user'&&!routes.some(r=>r.sessionId===session.id&&r.kind==='channel'&&r.inboundMessageIds?.includes(message.id)))
+ if(!candidates.length)return
  const known=new Set(inputOrigins(session.snapshotEvents()).map(d=>d.messageId))
- for(const message of messages){
-  if(message.source.kind!=='user'||known.has(message.id)||routes.some(r=>r.sessionId===session.id&&r.kind==='channel'&&r.inboundMessageIds?.includes(message.id)))continue
+ for(const message of candidates){
+  if(known.has(message.id))continue
   recordInputOrigin(session,{messageId:message.id,routeId:local.id,channelId:local.channelId,userId:local.userId})
  }
 }

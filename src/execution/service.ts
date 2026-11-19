@@ -174,7 +174,7 @@ export class EphemeralExecutionService {
       state.executionRuns = state.executionRuns.filter(item => item.id !== run.id)
       state.executionRuns.push(structuredClone(run))
       while(state.executionRuns.length>500){
-        const i=state.executionRuns.findIndex(r=>!r.background||!['queued','running'].includes(r.status)&&!(r.background.result&&!r.background.deliveredAt))
+        const i=state.executionRuns.findIndex(r=>!r.background||!['queued','running'].includes(r.status)&&!(r.background.review&&!r.background.review.doneAt)&&!(r.background.result&&!r.background.deliveredAt))
         if(i<0)break
         state.executionRuns.splice(i,1)
       }

@@ -168,3 +168,14 @@ test('task relevant preferences survive a full general baseline and reject forei
  assert.match(text,/实际传入参考图/);assert.doesNotMatch(text,/FOREIGN|WEAK/)
  assert.equal(JSON.parse(text.split('：\n')[1]).length,4)
 })
+
+test('query matches cannot crowd the reinforced baseline out of task preferences',async()=>{
+ const {renderTaskPreferences}=await import('../lib/execution/task-preferences.js')
+ const base={kind:'preference',status:'active',companionId:'c',scopeId:'s',confidence:1,importance:.98,evidence:[{turnId:'x',excerpt:'用户原话'}]}
+ const profile={companionId:'c',scopeId:'s',preferences:[{...base,id:'locked',subject:'形象一致',content:'沿用确认形象'},{...base,id:'latest',subject:'双方人物图',content:'涉及任一方必须使用人物参考图'}]}
+ const related=Array.from({length:3},(_,i)=>({...base,id:'match'+i,subject:'相关偏好'+i,content:'相关内容'}))
+ const entries=JSON.parse(renderTaskPreferences(profile,related).split('：\n')[1])
+ assert.equal(entries.length,4)
+ assert.equal(entries[0].subject,'相关偏好0')
+ assert.ok(entries.some(e=>e.subject==='双方人物图'))
+})

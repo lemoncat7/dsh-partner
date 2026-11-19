@@ -196,3 +196,68 @@ test('a completed cached job retries failed notification without another model c
   assert.equal((await store.recentReflections('c'))[0].turnCount, 1)
   assert.equal(await store.hasPendingTurns('c', 's'), false)
 })
+
+
+test('historical recovery backlog yields to recent chat, preserving order and pending older work',async t=>{
+ const {store}=await fixture(t)
+ await store.enqueue({...turn('historical-first'),at:at-3*86400000})
+ await store.enqueue({...turn('historical-second'),at:at-2*86400000})
+ await store.enqueue({...turn('recent-first'),at:at-1000})
+ await store.enqueue(turn('recent-second'))
+ const first=await store.claimJob('c',at);assert.equal(first.turn.id,'recent-first')
+ assert.equal(await store.claimJob('c',at),undefined)
+ await store.settleJob(first)
+ const second=await store.claimJob('c',at);assert.equal(second.turn.id,'recent-second');await store.settleJob(second)
+ const old=await store.claimJob('c',at);assert.equal(old.turn.id,'historical-first');await store.settleJob(old)
+ assert.equal((await store.claimJob('c',at)).turn.id,'historical-second')
+})
+
+
+test('daily review waits only for pending turns from the reviewed day',async t=>{
+ const {store}=await fixture(t)
+ await store.enqueue({...turn('older-backfill'),at:at-3*86400000})
+ assert.equal(await store.hasPendingTurns('c','s'),true)
+ assert.equal(await store.hasPendingTurns('c','s',store.day(at)),false)
+ assert.equal(await store.hasPendingTurns('c','s',store.day(at-3*86400000)),true)
+ await store.enqueue(turn('current'))
+ assert.equal(await store.hasPendingTurns('c','s',store.day(at)),true)
+})
+
+
+test('late historical evidence schedules a new daily review without replacing a newer summary',async t=>{
+ const {store}=await fixture(t)
+ const newer={...turn('newer-reviewed'),at:at-1000},older={...turn('older-arrival'),at:at-2000}
+ await store.consolidate(newer,{...result,daily:{...result.daily,summary:'保留最新总结'}})
+ const target={companionId:'c',scopeId:'s',date:store.day(at),attempts:0}
+ await store.completeDailyReview(target,{...result,relations:[]})
+ assert.equal((await store.pendingDailyReviews('c',target.date)).length,0)
+ await store.enqueue(newer);const job=await store.claimJob('c');await store.consolidate(newer,{...result,daily:{...result.daily,summary:'保留最新总结'}},job);await store.settleJob(job)
+ await store.completeDailyReview(target,{...result,daily:{...result.daily,summary:'保留最新总结'},relations:[]})
+ await store.consolidate(older,{...result,daily:{...result.daily,summary:'过时总结'}})
+ assert.equal((await store.recentReflections('c'))[0].summary,'保留最新总结')
+ assert.equal((await store.pendingDailyReviews('c',target.date)).length,1)
+})
+
+
+test('experience evidence spans days within the same scope without leaking later or foreign chat',async t=>{
+ const {store}=await fixture(t)
+ const older={...turn('success-before'),at:at-2*86400000,user:'这次部署验证通过'}
+ await store.enqueue(older);await store.enqueue({...turn('foreign','other'),user:'验证通过'})
+ await store.enqueue({...turn('future'),at:at+3*86400000,user:'测试通过'})
+ await store.consolidate(turn('today'),result)
+ const context=await store.dailyReviewContext({companionId:'c',scopeId:'s',date:store.day(at),attempts:0})
+ assert.deepEqual(context.experienceTurns.map(t=>t.id),['success-before']);assert.equal(context.turns.some(t=>t.id==='success-before'),false)
+})
+
+
+test('late backfill reopens an already reviewed day without replacing its newer summary',async t=>{
+ const {store}=await fixture(t)
+ const current=turn('newer');await store.enqueue(current);const job=await store.claimJob('c')
+ await store.consolidate(current,result,job);await store.settleJob(job)
+ const target={companionId:'c',scopeId:'s',date:store.day(at),attempts:0}
+ await store.completeDailyReview(target,{...result,relations:[],scenes:[],experiences:[]})
+ assert.equal((await store.pendingDailyReviews('c',target.date)).length,0)
+ await store.consolidate({...turn('late'),at:at-1000},{...result,daily:{...result.daily,summary:'旧总结'}})
+ assert.equal((await store.pendingDailyReviews('c',target.date)).length,1)
+ assert.equal((await store.recentReflections('c'))[0].summary,result.daily.summary)
+})

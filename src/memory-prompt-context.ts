@@ -1,3 +1,4 @@
+import {rankMemories} from './memory-retrieval.js'
 import {preferenceEvidenceCount} from './profile-domain.js'
 import type { PartnerConcern } from './concern-domain.js'
 import type { ConversationTurn, DailyReflection, MemoryRelationReviewContext, PartnerMemory } from './memory-domain.js'
@@ -14,6 +15,7 @@ interface DailyReviewSource {
   memories: PartnerMemory[]
   existingRelations: MemoryRelationReviewContext[]
   turns: ConversationTurn[]
+  experienceTurns?: ConversationTurn[]
 }
 
 export function reflectionPromptInput(
@@ -37,15 +39,28 @@ export function dailyReviewPromptInput(date: string, context: DailyReviewSource,
     date,
     reflection: compactReflection(context.reflection),
     currentMemories: compactMemories(
-      [...context.memories].sort((left, right) => right.updatedAt - left.updatedAt),
+      dailyReviewMemories(date, context),
       24,
       DAILY_MEMORY_CHAR_BUDGET,
     ),
     existingRelations: compactRelations(context.existingRelations, 40, DAILY_RELATION_CHAR_BUDGET),
     turns: compactTurns(context.turns, DAILY_TURN_CHAR_BUDGET),
+    experienceSources: compactTurns(context.experienceTurns ?? [], 8_000),
     existingConcerns: compactConcerns(concerns, 20, DAILY_CONCERN_CHAR_BUDGET),
     contextPolicy: '上下文经过无损索引和有界文本压缩；所有轮次均保留。未列出的旧记忆与旧关系由存储层继续保留。',
   })
+}
+
+/** Mix current-topic facts with a rotating part of older memory. Always
+ * selecting the latest 24 permanently starves older scenes and connections. */
+export function dailyReviewMemories(date: string, context: DailyReviewSource): PartnerMemory[] {
+  const recent = [...context.memories].sort((a,b) => b.updatedAt-a.updatedAt || a.id.localeCompare(b.id))
+  const query = [context.reflection.summary, ...context.turns.map(t => t.user)].join(' ').slice(0, 16_000)
+  const relevant = rankMemories(recent, query, Date.now()).slice(0, 12)
+  const ordered = [...recent].sort((a,b) => a.id.localeCompare(b.id))
+  const offset = ordered.length ? Math.abs(Math.floor(Date.parse(date)/86_400_000)*12) % ordered.length : 0
+  const rotated = [...ordered.slice(offset), ...ordered.slice(0,offset)]
+  return [...new Map([...relevant, ...rotated.slice(0,12), ...recent].map(m => [m.id,m])).values()]
 }
 
 export function compactMemories(memories: PartnerMemory[], limit: number, charBudget: number): Array<Record<string, unknown>> {
@@ -77,7 +92,7 @@ export function compactTurns(turns: ConversationTurn[], charBudget: number): Arr
   const minimumTurnBudget = 48
   const completeTurnBudget = Math.max(charBudget, turns.length * minimumTurnBudget + turns.length + 1)
   return fitEntries(turns, completeTurnBudget, (turn, entryBudget) => {
-    const base: Record<string, unknown> = { id: turn.id, sessionId: turn.sessionId, at: turn.at }
+    const base: Record<string, unknown> = { id: turn.id, sessionId: turn.sessionId, at: turn.at, ...(turn.characterEnabled ? {characterEnabled:true} : {}), ...(turn.identityRelation ? {identityRelation:turn.identityRelation} : {}) }
     if (turn.concernDirective !== undefined) base.concernDirective = {
       action: turn.concernDirective.action,
       subject: clip(turn.concernDirective.subject, 100),

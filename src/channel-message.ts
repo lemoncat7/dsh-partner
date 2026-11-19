@@ -1,3 +1,5 @@
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+
 export const PARTNER_MEDIA_MAX_BYTES = 64 * 1024 * 1024
 
 export interface PartnerInboundAttachment {
@@ -5,6 +7,7 @@ export interface PartnerInboundAttachment {
   data: Uint8Array
   name: string
   mediaType?: string
+  referenceMessageId?: string
 }
 
 export interface PartnerInboundMessage {
@@ -13,6 +16,9 @@ export interface PartnerInboundMessage {
   sessionTitle?: string
   text: string
   attachments: PartnerInboundAttachment[]
+  referenceText?: string
+  missingReference?: boolean
+  storedImages?: Array<{messageId:string;image:ImageAttachmentRef}>
 }
 
 export interface PartnerOutboundAttachment {

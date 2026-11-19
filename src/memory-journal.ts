@@ -44,16 +44,17 @@ export function enqueueMemoryJob(db: DatabaseSync, turn: ConversationTurn): void
 }
 
 export function claimMemoryJob(db: DatabaseSync, now: number): MemoryJob | undefined {
-  // Preserve ordering for transient errors; repeatedly failing jobs yield while
-  // backing off. They remain durable and become eligible at their retry time.
+  // Recent conversation must not wait behind a historical recovery backlog.
+  // Preserve source order within each age group and the single model lease.
+  // Late historical results cannot overwrite newer memory or character state.
   const token = randomUUID()
   const row = db.prepare(`UPDATE memory_jobs SET lease_token=?, lease_until=? WHERE id=(
     SELECT j.id FROM memory_jobs j WHERE j.done=0 AND j.next_at<=? AND j.lease_until<=?
     AND NOT EXISTS (SELECT 1 FROM memory_jobs WHERE done=0 AND lease_until>?)
-    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.repair=j.repair AND p.done=0 AND (p.attempts<3 OR p.next_at<=?)
+    AND NOT EXISTS (SELECT 1 FROM memory_jobs p WHERE p.scope_id=j.scope_id AND p.repair=j.repair AND (p.at>=?)=(j.at>=?) AND p.done=0 AND (p.attempts<3 OR p.next_at<=?)
       AND (p.at<j.at OR (p.at=j.at AND p.rowid<j.rowid)))
-    ORDER BY (j.repair>0), j.at, j.rowid LIMIT 1
-  ) RETURNING turn_json, result_json, attempts, repair`).get(token, now + LEASE_MS, now, now, now, now)
+    ORDER BY (j.repair>0), (j.at>=?) DESC, j.at, j.rowid LIMIT 1
+  ) RETURNING turn_json, result_json, attempts, repair`).get(token, now + LEASE_MS, now, now, now, now - 86_400_000, now - 86_400_000, now, now - 86_400_000)
   if (!row) return undefined
   return { turn: JSON.parse(String(row.turn_json)), token, attempts: Number(row.attempts),
     ...(Number(row.repair) > 0 ? { repair: true } : {}),

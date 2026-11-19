@@ -13,15 +13,17 @@ export function bilibiliTool(owner:string,store:PartnerStore,service:BilibiliSer
  output:{schema:{type:'object'},render:(_a,v)=>{const {personaDelivery,...visible}=v as Record<string,unknown>;return [{type:'text',text:JSON.stringify(visible)}]},presentationMeta:(_a,v)=>({kind:'partner-bilibili-v1',personaDelivery:typeof v==='object'&&v!==null&&!Array.isArray(v)?v.personaDelivery??null:null})},presentCall:()=>({card:'generic',title:'B 站渠道能力'}),
  async execute(raw,exec){const a=raw as {action:string;channelId?:string;operation?:string;params?:Record<string,unknown>;preserveText?:boolean};const agent=exec.agent
  const guard=()=>{exec.signal.throwIfAborted();if(!agent||store.isCompanionRemoving(owner)||!store.snapshot().sessions.some(r=>r.sessionId===agent.session.id&&r.companionId===owner)&&!backgroundToolScope(store,owner,agent.session.id))throw Error('当前会话无权使用此伙伴 B 站账号')}
- const autonomous=()=>{const last=agent?.session.snapshotEvents().filter(e=>e.type==='user/message').at(-1);return !!last&&isIdleContactNotice(last)}
+ const audience=()=>agent&&backgroundToolScope(store,owner,agent.session.id)?.audience
+ const chatOnly=()=>audience()==='member'||qqChatOnly(agent!,store.snapshot())
+ const autonomous=()=>{const last=agent?.session.snapshotEvents().filter(e=>e.type==='user/message').at(-1);return audience()==='activity'||!!last&&isIdleContactNotice(last)}
  guard();const channels=store.snapshot().channels.filter(c=>c.companionId===owner&&c.platform==='bilibili'&&c.enabled&&(!autonomous()||biliSettings(c.bilibili).autonomousActions))
- const available=(c:typeof channels[number])=>BILI_ACTIONS.filter(op=>biliSettings(c.bilibili).enabledActions.includes(op.id)&&(!op.login||(c.accountId&&biliSettings(c.bilibili).privateActions&&!qqChatOnly(agent!,store.snapshot()))))
+ const available=(c:typeof channels[number])=>BILI_ACTIONS.filter(op=>biliSettings(c.bilibili).enabledActions.includes(op.id)&&(!op.login||(c.accountId&&biliSettings(c.bilibili).privateActions&&!chatOnly())))
  if(a.action==='list')return {channels:channels.map(c=>({id:c.id,name:c.name,loggedIn:!!c.accountId,actions:available(c).map(({id,title,category,login,write})=>({id,title,category,login,write}))}))}
  const c=a.channelId?channels.find(c=>c.id===a.channelId):channels.length===1?channels[0]:undefined
  const op=BILI_ACTION_MAP.get(a.operation??'');if(!c||!op||!available(c).some(x=>x.id===op.id))throw Error('B 站能力未开启或需要重新登录，请先 list')
  if(a.action==='describe')return {channelId:c.id,operation:op.id,title:op.title,schema:op.schema,login:op.login,write:op.write,guidance:bilibiliOperationGuide(op.id),next:'通过 partner_tools action=call、name=partner_bilibili 执行；argumentsJson 内 action 固定为 call，channelId、operation 使用本返回值，params 按 schema 填写，再将整个对象序列化为 JSON 字符串。'}
  if(a.action!=='call')throw Error('操作无效')
- const liveGuard=()=>{guard();const current=store.snapshot().channels.find(x=>x.id===c.id);if(op.login&&qqChatOnly(agent!,store.snapshot()))throw Error('当前会话只能使用公开能力');if(!current||(autonomous()&&!biliSettings(current.bilibili).autonomousActions))throw Error('B 站自主活动已关闭')}
+ const liveGuard=()=>{guard();const current=store.snapshot().channels.find(x=>x.id===c.id);if(op.login&&chatOnly())throw Error('当前会话只能使用公开能力');if(!current||(autonomous()&&!biliSettings(current.bilibili).autonomousActions))throw Error('B 站自主活动已关闭')}
  const route=store.snapshot().sessions.find(r=>r.sessionId===agent!.session.id&&r.companionId===owner),cwd=route?.cwd??agent!.session.header.cwd
  let params=a.params??{},personaDelivery
  if(ctx&&op.id==='comment'&&typeof params.text==='string'){

@@ -17,7 +17,7 @@ import { initializeMemoryJournal, enqueueMemoryJob, claimMemoryJob, checkpointMe
 import {redactObservationError} from './observation-errors.js'
 import type { ReflectionResult } from './memory-domain.js'
 import { rankMemories, memoryRelevance, memoryTerms } from './memory-retrieval.js'
-import { initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
+import { confirmedSuccess, initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[]; characterState?: CharacterState }
@@ -123,8 +123,10 @@ export class PartnerMemoryStore {
     await this.journal(turn.companionId, db => { enqueueMemoryJob(db, turn); indexHistoryTurn(db, turn) })
   }
 
-  async hasPendingTurns(companionId: string, scopeId: string): Promise<boolean> {
-    return this.journal(companionId, db => Boolean(db.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND done=0 LIMIT 1').get(scopeId)))
+  async hasPendingTurns(companionId: string, scopeId: string, date?: string): Promise<boolean> {
+    return this.journal(companionId, db => date === undefined
+      ? Boolean(db.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND done=0 LIMIT 1').get(scopeId))
+      : db.prepare('SELECT at FROM memory_jobs WHERE scope_id=? AND done=0').all(scopeId).some(row => this.day(Number(row.at)) === date))
   }
 
   async memoryLayers(companionId: string, scopeId: string): Promise<{
@@ -220,7 +222,7 @@ export class PartnerMemoryStore {
         const date = localDay(turn.at, this.timeZone)
         const newer = database.prepare('SELECT 1 FROM memory_jobs WHERE scope_id=? AND committed=1 AND at>? LIMIT 1').get(turn.scopeId, turn.at)
         const previous = database.prepare('SELECT turn_count FROM daily_reflections WHERE scope_id = ? AND date = ?').get(turn.scopeId, date) as SqlRow | undefined
-        if (newer && previous) database.prepare('UPDATE daily_reflections SET turn_count=turn_count+1 WHERE scope_id=? AND date=?').run(turn.scopeId,date)
+        if (newer && previous) database.prepare('UPDATE daily_reflections SET turn_count=turn_count+1, reviewed_at=NULL, next_review_at=0 WHERE scope_id=? AND date=?').run(turn.scopeId,date)
         else
         database.prepare(`INSERT INTO daily_reflections
           (date, companion_id, scope_id, summary, events_json, open_tasks_json, completed_tasks_json, learnings_json, updated_at, turn_count)
@@ -365,7 +367,7 @@ export class PartnerMemoryStore {
     } finally { database.close() }
   }
 
-  async dailyReviewContext(target: DailyReviewTarget): Promise<{ reflection: DailyReflection; memories: PartnerMemory[]; existingRelations: MemoryRelationReviewContext[]; turns: ConversationTurn[] }> {
+  async dailyReviewContext(target: DailyReviewTarget): Promise<{ reflection: DailyReflection; memories: PartnerMemory[]; existingRelations: MemoryRelationReviewContext[]; turns: ConversationTurn[]; experienceTurns: ConversationTurn[] }> {
     const database = await this.open(target.companionId)
     let reflection: DailyReflection
     let memories: PartnerMemory[]
@@ -389,7 +391,14 @@ export class PartnerMemoryStore {
     const dateAt = Date.parse(target.date)
     const durable = await this.journal(target.companionId, db => (db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND at>=? AND at<? ORDER BY at, rowid')
       .all(target.scopeId, dateAt - 86_400_000, dateAt + 2 * 86_400_000)).map(row => JSON.parse(String(row.turn_json)) as ConversationTurn).filter(turn => this.day(turn.at) === target.date))
-    return { reflection, memories, existingRelations, turns: [...new Map([...turns, ...durable].map(turn => [turn.id, turn])).values()].sort((a, b) => a.at - b.at) }
+    // Reusable methods need successes from more than one day, including a
+    // single long-lived conversation. Keep a bounded, scope-isolated evidence set.
+    const experienceTurns = await this.journal(target.companionId, db => db.prepare(
+      'SELECT turn_json FROM memory_jobs WHERE scope_id=? AND at>=? AND at<? ORDER BY at DESC LIMIT 300')
+      .all(target.scopeId, dateAt-14*86_400_000, dateAt+2*86_400_000)
+      .map(row => JSON.parse(String(row.turn_json)) as ConversationTurn)
+      .filter(turn => this.day(turn.at) <= target.date && confirmedSuccess(turn.user)).slice(0,24))
+    return { reflection, memories, existingRelations, experienceTurns, turns: [...new Map([...turns, ...durable].map(turn => [turn.id, turn])).values()].sort((a, b) => a.at - b.at) }
   }
 
   async completeDailyReview(target: DailyReviewTarget, result: DailyReviewResult): Promise<void> {

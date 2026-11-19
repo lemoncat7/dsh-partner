@@ -1,16 +1,49 @@
 import type {SessionEvent} from '@deepseek-ai/dsh-session'
-import type {ChannelSession} from '../domain.js'
+import type {ChannelSession,PartnerState} from '../domain.js'
 import {actualAction} from '../chat/action-obligation.js'
-import {questionOrigin} from '../channels/question-origin.js'
+import type {ExecutionRun} from './domain.js'
+import {channelReplyAllowed,directReplyTarget} from '../channels/reply-access.js'
+import {qqIdentityRelation} from '../channels/qq/identity-binding.js'
+import {questionOrigin,webMessageRoute,attachedWebRoute} from '../channels/question-origin.js'
 import {isInternalTaskNotice} from '../channels/delivery-policy.js'
 import {isIdleContactNotice} from '../character/idle-contact.js'
 import {needsTaskPreamble} from './task-preamble.js'
 import {backgroundHandoff} from './background-receipt.js'
 
-export function backgroundOrigin(sessionId:string,events:readonly SessionEvent[],routes:readonly ChannelSession[]):ChannelSession|undefined {
- const last=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))
- if(last?.type!=='user/message'||last.data.source.kind!=='user')return
- return questionOrigin(sessionId,events,routes)??routes.find(r=>r.sessionId===sessionId&&r.kind==='local')
+/** Match the current work to a real input, including a scheduler-issued activity notice. */
+export function backgroundInput(events:readonly SessionEvent[]){
+ for(let i=events.length-1;i>=0;i--){
+  const e=events[i]!
+  if(e.type==='turn/start'||isInternalTaskNotice(e))return
+  if(e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)))return e
+ }
+}
+export function backgroundOrigin(sessionId:string,events:readonly SessionEvent[],routes:readonly ChannelSession[],input=backgroundInput(events)):ChannelSession|undefined {
+ if(!input)return
+ if(isIdleContactNotice(input))return routes.find(r=>r.sessionId===sessionId&&r.idleContactState?.messageId===input.data.id)
+ return questionOrigin(sessionId,events,routes)??webMessageRoute(sessionId,events,routes,input.data.id)
+}
+export function backgroundRunRoute(routes:readonly ChannelSession[],run:ExecutionRun):ChannelSession|undefined {
+ const b=run.background
+ if(!b)return
+ const candidate=routes.find(r=>r.id===b.routeId)??(b.sourceKind==='local'?attachedWebRoute(b.sourceSessionId,routes):undefined)
+ if(candidate?.id===b.routeId&&candidate.sessionId===b.sourceSessionId&&candidate.companionId===run.ownerCompanionId&&candidate.userId===b.userId&&candidate.channelId===b.channelId)return candidate
+}
+/** Both execution and final delivery use the frozen origin, even after other speakers enter the session. */
+export function backgroundSourceAllowed(state:PartnerState,run:ExecutionRun):boolean{
+ const b=run.background
+ if(!b)return false
+ const c=state.companions.find(c=>c.id===run.ownerCompanionId)
+ const route=backgroundRunRoute(state.sessions,run)
+ if(!c||!route||b.capabilities.some(cap=>!c.capabilities.includes(cap as never)))return false
+ if(b.audience==='activity'){
+  if(!c.characterCard?.enabled||route.idleContactState?.messageId===b.inputId&&route.idleContactState.cancelled)return false
+  if(b.activityKind==='continuous'?!c.browser?.autonomous:!c.idleContact?.enabled)return false
+ }
+ if(b.sourceKind==='local')return route.kind==='local'
+ const ch=state.channels.find(c=>c.id===b.channelId&&c.companionId===run.ownerCompanionId)
+ if(route.kind!=='channel'||!ch?.enabled||ch.accountId!==b.accountId||(ch.direct?.baseUrl??'')!==b.baseUrl||directReplyTarget(state,b.channelId,b.userId)!==b.targetId||!channelReplyAllowed(state,b.channelId,b.userId,b.targetId))return false
+ return ch.platform!=='qq'||b.audience==='member'||b.audience==='activity'||!!qqIdentityRelation(ch.qq,b.userId)?.matched
 }
 const control=new Set(['partner_background_task','partner_memory_recall','partner_tools','partner_channel_access','partner_stickers','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_continuous_task','partner_schedule','partner_task','partner_task_board','partner_requirement','partner_collaborate'])
 function work(name:string,args:Record<string,any>):boolean {
@@ -27,7 +60,7 @@ export function backgroundRequired(name:string,args:unknown,events:readonly Sess
  const action=actualAction(name,args)
  if(!work(action.name,action.args))return
  let start=-1
- for(let i=events.length-1;i>=0;i--){const e=events[i]!;if(e.type==='user/message'&&e.data.source.kind==='user'){start=i;break}}
+ for(let i=events.length-1;i>=0;i--){const e=events[i]!;if(e.type==='turn/start'||isInternalTaskNotice(e))return;if(e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e))){start=i;break}}
  if(start<0)return
  const tail=events.slice(start+1)
  if(backgroundHandoff(tail))return '当前任务已由后台接收，前台不能重复执行'

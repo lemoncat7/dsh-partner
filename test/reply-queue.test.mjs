@@ -58,3 +58,20 @@ test('completed background gets the next foreground slot without interrupting th
  const done=q.enqueue('s','delivery',undefined,async()=>seen.push('completion'),()=>null)
  assert.deepEqual(seen,['active']);gate.resolve();await Promise.all([active,chatter,user,done]);assert.deepEqual(seen,['active','finished','completion','user'])
 })
+
+test('steering waits for the admitted photo to enter the session before checking its origin',async()=>{
+ const {PartnerAgentRuntime}=await import('../lib/agent-runtime.js')
+ const runtime=new PartnerAgentRuntime({}, {snapshot:()=>({sessions:[],channels:[],companions:[]}),subscribe:()=>()=>{}},'/tmp')
+ const start=deferred(),finish=deferred(),sender='group:12345678:22334455',c={id:'c'}
+ runtime.enqueueReply=async(_c,_ch,_u,_message,_progress,inputReady)=>{start.resolve(inputReady);await finish.promise;return {text:'done',attachments:[]}}
+ runtime.ensureSession=async()=>({sessionId:'session'})
+ runtime.cancelPostReply=async()=>{}
+ const seen=[]
+ runtime.deliverSteering=async(_c,_ch,user,message)=>{seen.push([user,message.text]);return true}
+ const first=runtime.reply(c,'qq',sender,{text:'photo',attachments:[],groupReply:{kind:'direct',receivedAt:Date.now()}})
+ const inputReady=await start.promise
+ const caption=runtime.steer(c,'qq',sender,{text:'caption',attachments:[]})
+ await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(seen,[])
+ inputReady();assert.equal(await caption,true);assert.deepEqual(seen,[[sender,'caption']])
+ finish.resolve();await first;assert.equal(runtime.preparingGroupInputs.size,0)
+})

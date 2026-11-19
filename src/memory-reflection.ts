@@ -92,7 +92,7 @@ export class MemoryReflectionService {
   }
 
   private async runDailyReview(companion: Companion, target: DailyReviewTarget): Promise<PartnerConcern[]> {
-    if (await this.store.hasPendingTurns(companion.id, target.scopeId)) throw new Error('该会话还有待提炼轮次，完成后重试终审')
+    if (await this.store.hasPendingTurns(companion.id, target.scopeId, target.date)) throw new Error('该会话还有待提炼轮次，完成后重试终审')
     const context = await this.store.dailyReviewContext(target)
     const concerns = await this.concerns.list(companion.id, target.scopeId, false, 40)
     const selection = modelSelection(this.ctx, companion)
@@ -115,7 +115,7 @@ export class MemoryReflectionService {
     // diaries cannot create/modify executable watches; owner turn extraction still can.
     if (context.turns.some(turn => turn.identityRelation && !turn.identityRelation.matched)) result.concerns = []
     result.memories = groundMemoryCandidates(result.memories, context.turns)
-    result.experiences = groundExperiences(result.experiences ?? [], context.turns)
+    result.experiences = groundExperiences(result.experiences ?? [], [...context.turns,...(context.experienceTurns??[])])
     await this.store.completeDailyReview(target, result)
     return this.concerns.applyCandidates(companion.id, target.scopeId, result.concerns, 'implicit', Date.now(), {
       source: 'daily_review',
@@ -238,7 +238,7 @@ const DAILY_REVIEW_SYSTEM = `你是长期伙伴的每日记忆终审器。根据
 ${MEMORY_QUALITY_RULES}
 ${memoryCandidateContract()}
 还可输出 scenes:[{"title":"具体项目或场景名称","memoryIds":["输入中已有的记忆 id"]}]，每个场景只关联同一项目的有效事实，最多 8 个，不把不同项目因名称相似而混在一起；无可靠关联返回空数组。
-还可输出 experiences:[{"title":"可复用方法","steps":["带适用条件的操作步骤"],"evidence":[{"turnId":"原始轮次 id","quote":"用户明确确认成功的连续原话"}]}]。只有至少两个不同会话均有用户明确确认成功，且方法确实可复用时才提出，最多 3 个；重复尝试、反复失败、助手自称成功均不算。这里只生成待人工审核的草稿，不安装、不授权、不修改现有 Skill。没有足够证据返回空数组。
+experienceSources 是同一记忆范围近两周明确确认成功的历史原话，仅作经验依据，不当成今天的新对话；经验可引用 turns 或 experienceSources 的原始轮次 id。还可输出 experiences:[{"title":"可复用方法","steps":["带适用条件的操作步骤"],"evidence":[{"turnId":"原始轮次 id","quote":"用户明确确认成功的连续原话"}]}]。只有至少两个不同任务或不同尝试均有用户明确确认成功，且方法确实可复用时才提出；可以来自同一个长期会话的不同轮次，同一次成功的复述不能算两次，最多 3 个；重复尝试、反复失败、助手自称成功均不算。这里只生成待人工审核的草稿，不安装、不授权、不修改现有 Skill。没有足够证据返回空数组。
 只输出 JSON：{"daily":{"summary":"","events":[],"openTasks":[],"completedTasks":[],"learnings":[]},"memories":[与逐轮提炼相同的候选格式],"concerns":[与逐轮提炼相同的挂念格式],"relations":[{"sourceSubject":"必须等于已有或候选记忆主题","sourceKind":"profile|preference|task|event|relationship|emotion","targetSubject":"必须等于已有或候选记忆主题","targetKind":"同上","kind":"supports|depends_on|about|conflicts_with|follows","label":"有证据的简短关系说明","confidence":0.0,"operation":"upsert|remove"}]}
 要求：合并重复理解；人物画像只使用“基本身份、工作背景、长期职责、常用环境、长期目标”五个稳定槽位，并遵守逐轮提炼中的画像证据与隐私规则；结合所有轮次片段纠正逐轮偏差，对被压缩而证据不足的细节保持原状而非猜测；明确任务完成状态；复核并关闭已经完成或失效的挂念；只有对话原文证明事情会延续到当前轮次之后时才能新增挂念，一次性资料收集、搜索、总结、写作、即时执行和普通问答不得新增挂念；不创造对话中没有的事实；relations 只输出需要新增、更新或明确移除的关系，已有且仍成立的关系无需重复；关系两端必须填写准确 kind，upsert 必须有对话证据且 confidence 至少 0.62；remove 用于已有关系已被纠正或失效；conflicts_with 只用于无法同时为真的明确矛盾，不能把普通差异标成冲突；关系最多 80 条；无变化时 relations 返回空数组。`
 

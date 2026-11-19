@@ -1,3 +1,6 @@
+import {installLegacyImageTool} from './attachments/legacy-image-tool.js'
+import {backgroundRunRoute} from './execution/background-routing.js'
+import {PartnerImageReferences} from './attachments/image-references.js'
 import {renderTaskPreferences} from './execution/task-preferences.js'
 import {PartnerWorkSessionCleanup} from './execution/session-cleanup.js'
 import {NativeBackgroundTasks} from './execution/native-background.js'
@@ -184,6 +187,15 @@ export function apply(context: Context, config: PartnerConfig): void {
     executor.setMcpTools(id => mcp.definitions(id))
     const channelActivities=createChannelActivities((provider,error)=>ctx.logger.warn(`dsh-partner activity provider ${provider}: ${String(error)}`),()=>store.snapshot())
     ctx.provide('dshPartnerChannelActivities',channelActivities)
+    const images=new PartnerImageReferences(ctx,store)
+    ctx.provide('dshPartnerImageReferences',images)
+    ctx.effect(()=>ctx.on('agent/created',({agent})=>{installLegacyImageTool(agent,images);return undefined}))
+    ctx.effect(()=>ctx.on('system-prompt/assemble',async(_assembly,context,next)=>{
+      const result=await next()
+      const agent=context.agent
+      const referenceText=agent&&images.context(agent)
+      return referenceText?{...result,sections:[...result.sections,{name:'partner-image-references',text:referenceText}]}:result
+    },{prepend:true}))
     const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone)
     const continuous:ContinuousService=new ContinuousService(store,browser,{
       review:(c,t,signal,conversation)=>reviewContinuous(ctx,continuous,c,t,signal,conversation),
@@ -203,11 +215,11 @@ export function apply(context: Context, config: PartnerConfig): void {
     const workCleanup=new PartnerWorkSessionCleanup(ctx,store)
     ctx.effect(()=>()=>workCleanup.close())
     const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply),async (run,input)=>{
-      const state=store.snapshot(),route=state.sessions.find(r=>r.id===run.background?.routeId&&r.companionId===run.ownerCompanionId)
+      const state=store.snapshot(),route=backgroundRunRoute(state.sessions,run)
       if(!route)return ''
       const recalled=await memory.recallContext(run.ownerCompanionId,conversationMemoryScope(route,state.sessions.filter(r=>r.companionId===run.ownerCompanionId)),input,12,{includeHistory:false})
       return renderTaskPreferences(recalled.profile,recalled.relevant)
-    })
+    },run=>agents.prepareBackgroundDelivery(run,{text:'',attachments:[]}),images)
     scheduler.continuations.configure({
       execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
       notify: entry => channels.notifyContinuation(entry),
@@ -318,6 +330,10 @@ export function apply(context: Context, config: PartnerConfig): void {
     continuous.start()
     heartbeat.start()
     dailyReview.start()
+    // Catch up archival gaps after a restart independently of context renewal.
+    // The worker consumes the durable queue; this never replays user tools.
+    void (async () => {for (const c of store.snapshot().companions) await agents.recoverConversationMemory(c.id)})()
+      .catch(error => ctx.logger.warn('伙伴对话记忆补录失败：'+String(error)))
     memoryWorker.start()
     scheduler.start()
     requirementWorker.start()
