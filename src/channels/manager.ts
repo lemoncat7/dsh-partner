@@ -216,6 +216,8 @@ export class ChannelManager {
     else throw Error('请填写文字或选择表情')
   }
 
+  channelRuntimeStatus(id: string): ChannelView['runtimeStatus'] { return this.runtime.get(id)?.status ?? 'stopped' }
+
   async views(): Promise<ChannelView[]> {
     return Promise.all(runtimeSnapshot(this.store).channels.map(async channel => {
       const runtime = this.runtime.get(channel.id) ?? { status: 'stopped' as const }

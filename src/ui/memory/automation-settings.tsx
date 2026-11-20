@@ -1,3 +1,4 @@
+import type { MemorySection } from '../../settings/catalog.js'
 import {SettingsSections} from '../settings-sections.js'
 import {useRef, useState} from 'react'
 import {api, type CompanionView, type AutomationView, type ModelCatalogView} from '../../client-api.js'
@@ -5,9 +6,9 @@ import {FormField as Field} from '../partner-components.js'
 import {WorkspaceDialog, WorkspaceNotice, errorMessage} from '../workspace-components.js'
 import {useMemoryResource} from './use-memory-resource.js'
 
-export function AutomationSettings({companion, kind, close, onChanged}: {companion: CompanionView; kind: 'memory' | 'heartbeat'; close(): void; onChanged(): Promise<void>}): JSX.Element {
+export function AutomationSettings({companion, kind, close, onChanged, initialSection='learning'}: {initialSection?:MemorySection;companion: CompanionView; kind: 'memory' | 'heartbeat'; close(): void; onChanged(): Promise<void>}): JSX.Element {
  const [automation,setAutomation] = useState<AutomationView>(()=>structuredClone(companion.automation))
- const [section,setSection] = useState<'learning' | 'window' | 'review' | 'renewal'>('learning')
+ const [section,setSection] = useState<MemorySection>(initialSection)
  const lock = useRef(false)
  const [busy,setBusy] = useState(false)
  const [error,setError] = useState<string>()

@@ -1,3 +1,4 @@
+import type { QqSection as Page } from '../settings/catalog.js'
 import {QQ_ACTIONS} from '../channels/qq/action-catalog.js'
 import {QQ_PUBLIC_CHAT_ACTIONS,QQ_PUBLIC_SCOPED_ACTIONS} from '../channels/qq/chat-actions.js'
 import {QqConnectionGuide} from './qq-connection-guide.js'
@@ -10,11 +11,10 @@ import {qqSettings,qqGroupPeer,type QqSettings} from '../channels/qq/settings.js
 import {ChannelStatus} from './partner-components.js'
 import {errorMessage} from './workspace-components.js'
 
-type Page='chat'|'voice'|'capabilities'|'home'|'connection'|'private'|'group'|'groups'|'autonomy'|'sessions'|'media'|'access'|'send'
 type Face={kind?:'custom';nativeId?:string;id:string;name:string;category:string;image?:string}
 const titles:Record<Page,string>={chat:'聊天互动',voice:'QQ 原生语音',capabilities:'私有能力',home:'QQ 设置',connection:'连接与账号',private:'私聊回复',group:'群聊回复',groups:'选择群组',autonomy:'自主回复白名单',sessions:'会话与记忆',media:'表情与图片',access:'访问权限',send:'发送消息'}
-export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editState}:{editState:MutableRefObject<{dirty:boolean;busy:boolean}>;channel:ChannelView;pairings:PairingView[];onChanged():Promise<void>;onDeleted():void}):JSX.Element {
- const [page,setPage]=useState<Page>('home'),[policy,setPolicy]=useState(()=>qqSettings(channel.qq)),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(''),[failed,setFailed]=useState(false)
+export function QqChannelSettings({channel,pairings,onChanged,onDeleted,editState,initialPage='home'}:{initialPage?:Page;editState:MutableRefObject<{dirty:boolean;busy:boolean}>;channel:ChannelView;pairings:PairingView[];onChanged():Promise<void>;onDeleted():void}):JSX.Element {
+ const [page,setPage]=useState<Page>(initialPage),[policy,setPolicy]=useState(()=>qqSettings(channel.qq)),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(''),[failed,setFailed]=useState(false)
  const [url,setUrl]=useState(channel.direct?.baseUrl??''),[token,setToken]=useState(''),[confirmDelete,setConfirmDelete]=useState(false)
  const [groups,setGroups]=useState<{id:string;name:string}[]>([]),[groupsLoaded,setGroupsLoaded]=useState(false),[search,setSearch]=useState('')
  const [friends,setFriends]=useState<{id:string;name:string}[]>([]),[sessionKind,setSessionKind]=useState<'private'|'group'>('private')

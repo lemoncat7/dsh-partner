@@ -1,8 +1,9 @@
+import type { QqSection, SettingRequest } from '../settings/catalog.js'
 import {BrowserSettings} from './browser-settings-loader.js'
 import {TtsSettings} from './tts-settings-loader.js'
 import {BilibiliSettings} from './bilibili-settings.js'
 import {QqConnectionGuide} from './qq-connection-guide.js'
-import {useState, useRef, type ReactNode, type FormEvent} from 'react'
+import {useEffect, useState, useRef, type ReactNode, type FormEvent} from 'react'
 import {api, type CompanionView, type PartnerSnapshot} from '../client-api.js'
 import {NotificationSettings} from './notification-settings.js'
 import {SectionHeading, ChannelStatus} from './partner-components.js'
@@ -10,7 +11,7 @@ import {errorMessage, WorkspaceDialog, DiscardChangesDialog} from './workspace-c
 import {QqChannelSettings} from './qq-channel-settings.js'
 import {PushChannels} from './push-channels.js'
 
-export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:CompanionView;snapshot:PartnerSnapshot;onChanged():Promise<void>;weixin:ReactNode}):JSX.Element {
+export function ChannelsPanel({companion,snapshot,onChanged,weixin,settingRequest}: {settingRequest?:SettingRequest;companion:CompanionView;snapshot:PartnerSnapshot;onChanged():Promise<void>;weixin:ReactNode}):JSX.Element {
   const [platform,setPlatform]=useState<'matrix'|'mattermost'|'qq'>('matrix')
   const [name,setName]=useState('')
   const [baseUrl,setBaseUrl]=useState('')
@@ -25,6 +26,7 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   const [addingPush,setAddingPush]=useState(false)
   const [fixedPlatform,setFixedPlatform]=useState(false)
   const [configuring,setConfiguring]=useState<string>()
+  const [qqSection,setQqSection]=useState<QqSection>()
   const [ttsEdit,setTtsEdit]=useState({dirty:false,busy:false}),[discardTts,setDiscardTts]=useState(false)
   const [browserEdit,setBrowserEdit]=useState({dirty:false,busy:false}),[discardBrowser,setDiscardBrowser]=useState(false)
   const qqEdit=useRef({dirty:false,busy:false})
@@ -35,6 +37,29 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
   }
   const channels=snapshot.channels.filter(c=>c.companionId===companion.id)
   const pairings=snapshot.pairings.filter(p=>channels.some(c=>c.id===p.channelId))
+  useEffect(() => {
+    const destination = settingRequest?.entry.destination
+    if (destination?.page !== 'weixin') return
+    const target = destination.channel
+    if (target.dialog === 'channel') {
+      const matched = channels.find(c => c.platform === target.platform && c.id === settingRequest?.channelId)
+        ?? channels.find(c => c.platform === target.platform)
+      setQqSection(target.section)
+      if (matched) setConfiguring(matched.id)
+      else if (target.platform !== 'bilibili') openAdd(target.platform)
+      else {
+        const frame = requestAnimationFrame(() => document.getElementById('partner-setting-bilibili')?.focus())
+        return () => cancelAnimationFrame(frame)
+      }
+    } else if (target.dialog === 'bark') {
+      if (snapshot.pushChannels?.some(item => item.companionId === companion.id)) {
+        const frame = requestAnimationFrame(() => document.getElementById('partner-setting-bark')?.focus())
+        return () => cancelAnimationFrame(frame)
+      }
+      setAddingPush(true)
+    } else setConfiguring(target.dialog)
+  }, [settingRequest])
+
   const run=async(action:()=>Promise<void>)=>{if(busy)return;setBusy(true);setFeedback('');try{await action()}catch(error){setFeedback(errorMessage(error))}finally{setBusy(false)}}
   const configure=async(save:boolean)=>run(async()=>{
     const body={companionId:companion.id,platform,name:name.trim()||platform,baseUrl:baseUrl.trim(),targetId:targetId.trim(),authMode:platform==='qq'?'token':authMode,...(platform!=='qq'&&authMode==='password'?{username,password,mfaToken}:{botToken:botToken.trim()})}
@@ -67,19 +92,19 @@ export function ChannelsPanel({companion,snapshot,onChanged,weixin}: {companion:
     </WorkspaceDialog>}
     <div className="dsh-partner-channel-list">
     <h3 className="dsh-partner-channel-category">通知</h3>
-    <PushChannels companion={companion} snapshot={snapshot} onChanged={onChanged} adding={addingPush} closeAdd={()=>setAddingPush(false)}/>
+    <div id="partner-setting-bark" tabIndex={-1}><PushChannels companion={companion} snapshot={snapshot} onChanged={onChanged} adding={addingPush} closeAdd={()=>setAddingPush(false)}/></div>
     <div className="dsh-partner-channel-row"><span><strong>通知与交付</strong><small>{companion.notificationDelivery?.mode==='selected'?`已指定 ${companion.notificationDelivery.targets.length} 位接收人`:'默认跟随最近渠道与用户'}</small></span><button type="button" onClick={()=>setConfiguring('delivery')}>配置</button></div>
     <h3 className="dsh-partner-channel-category">消息</h3>
     <div className="dsh-partner-channel-row">
       <span><strong>微信</strong><small>{channels.some(c=>!c.platform||c.platform==='weixin')?'管理连接与私聊授权':'尚未连接 · 扫码接入'}</small></span>{channels.find(c=>!c.platform||c.platform==='weixin')&&<ChannelStatus channel={channels.find(c=>!c.platform||c.platform==='weixin')!}/>}<button type="button" aria-label="配置微信" onClick={()=>setConfiguring('weixin')}>配置</button>
       {configuring==='weixin'&&<WorkspaceDialog title="微信配置" detail="管理扫码登录、连接与联系人授权。" close={()=>setConfiguring(undefined)}>{weixin}</WorkspaceDialog>}
     </div>
-    {!channels.some(c=>c.platform==='bilibili')&&<div className="dsh-partner-channel-row"><span><strong>哔哩哔哩</strong><small>无需登录即可搜索浏览 · 可扫码开启互动</small></span><button type="button" disabled={busy} onClick={()=>void run(async()=>{const r=await api<{id:string}>('/channels/bilibili',{method:'POST',body:JSON.stringify({companionId:companion.id,name:'B 站'})});await onChanged();setConfiguring(r.id)})}>添加 B 站渠道</button></div>}
+    {!channels.some(c=>c.platform==='bilibili')&&<div className="dsh-partner-channel-row"><span><strong>哔哩哔哩</strong><small>无需登录即可搜索浏览 · 可扫码开启互动</small></span><button id="partner-setting-bilibili" type="button" disabled={busy} onClick={()=>void run(async()=>{const r=await api<{id:string}>('/channels/bilibili',{method:'POST',body:JSON.stringify({companionId:companion.id,name:'B 站'})});await onChanged();setConfiguring(r.id)})}>添加 B 站渠道</button></div>}
     {(['qq','matrix','mattermost'] as const).filter(platform=>!channels.some(c=>c.platform===platform)).map(platform=><div className="dsh-partner-channel-row" key={platform}><span><strong>{platform==='qq'?'QQ · SnowLuma':platform==='matrix'?'Matrix':'Mattermost'}</strong><small>尚未连接</small></span><button type="button" aria-label={`配置 ${platform}`} onClick={()=>openAdd(platform)}>配置</button></div>)}
     {channels.filter(c=>c.platform&&c.platform!=='weixin').map(channel=><div key={channel.id} className="dsh-partner-channel-row has-notice-slot">
-      <span><strong>{channel.name}</strong><small>{channel.platform==='bilibili'?(channel.accountId?'B 站 · 已登录':'B 站 · 公开浏览模式'):<>{channel.platform==='qq'?'QQ':channel.platform} · {pairings.filter(p=>p.channelId===channel.id&&p.status==='pending').length} 个待授权</>}</small></span><ChannelStatus channel={channel}/><button type="button" aria-label={`配置 ${channel.name}`} onClick={()=>{setFeedback('');setConfiguring(channel.id)}}>配置</button>
+      <span><strong>{channel.name}</strong><small>{channel.platform==='bilibili'?(channel.accountId?'B 站 · 已登录':'B 站 · 公开浏览模式'):<>{channel.platform==='qq'?'QQ':channel.platform} · {pairings.filter(p=>p.channelId===channel.id&&p.status==='pending').length} 个待授权</>}</small></span><ChannelStatus channel={channel}/><button type="button" aria-label={`配置 ${channel.name}`} onClick={()=>{setFeedback('');setQqSection(undefined);setConfiguring(channel.id)}}>配置</button>
       {configuring===channel.id&&<WorkspaceDialog title={`${channel.name} · 配置`} detail={channel.platform==='bilibili'?'管理 B 站账号、自主活动和 API 权限。':'管理连接状态及联系人访问权限。'} close={()=>{if(busy||qqEdit.current.busy)return;if((channel.platform==='qq'||channel.platform==='bilibili')&&qqEdit.current.dirty){setDiscardQq(true);return}setConfiguring(undefined);setDeleting(undefined)}}>
-      {channel.platform==='bilibili'?<BilibiliSettings channel={channel} onChanged={onChanged} onDeleted={()=>setConfiguring(undefined)} editState={qqEdit}/>:channel.platform==='qq'?<QqChannelSettings editState={qqEdit} channel={channel} pairings={pairings} onChanged={onChanged} onDeleted={()=>setConfiguring(undefined)}/>:<div className="dsh-partner-channel-detail dsh-partner-channel-manage">
+      {channel.platform==='bilibili'?<BilibiliSettings channel={channel} onChanged={onChanged} onDeleted={()=>setConfiguring(undefined)} editState={qqEdit}/>:channel.platform==='qq'?<QqChannelSettings {...(qqSection ? { initialPage: qqSection } : {})} editState={qqEdit} channel={channel} pairings={pairings} onChanged={onChanged} onDeleted={()=>setConfiguring(undefined)}/>:<div className="dsh-partner-channel-detail dsh-partner-channel-manage">
       <div className="dsh-partner-channel-connection"><span><small>登录账号</small><strong>{channel.accountId}</strong>{channel.direct?.targetId&&<small>{channel.direct.targetId}</small>}</span><ChannelStatus channel={channel}/></div>
       {channel.platform==='matrix'&&<p>仅支持未加密的双人会话。加密会话无法读取消息或发送配对码；请新建未开启端到端加密的会话，邀请机器人后发送文字消息。检测到加密会话时会在此提示，不影响其他未加密会话。</p>}
       {!channel.direct?.targetId&&<p>向机器人发私聊消息，在下方核对配对码后批准。请求会自动更新。</p>}

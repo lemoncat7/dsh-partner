@@ -1,0 +1,71 @@
+.dsh-partner-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.dsh-partner-settings-search {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.dsh-partner-settings-search > label { display: grid; flex: 1; min-width: 0; gap: 5px; }
+.dsh-partner-settings-search-label { color: var(--partner-text-secondary); font-size: 12px; }
+.dsh-partner-settings-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--partner-border);
+  border-radius: 10px;
+  background: var(--partner-control);
+  color: var(--partner-text);
+  font: inherit;
+}
+.dsh-partner-settings-search > button { min-height: 44px; flex-shrink: 0; white-space: nowrap; }
+.dsh-partner-settings-results {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dsh-partner-settings-results > li > button {
+  display: grid;
+  justify-content: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--partner-text);
+  line-height: 1.4;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dsh-partner-settings-results small,
+.dsh-partner-settings-results span,
+.dsh-partner-settings-empty { color: var(--partner-text-secondary); }
+.dsh-partner-settings-guide {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--partner-border);
+  border-radius: 12px;
+}
+.dsh-partner-settings-guide > p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dsh-partner-settings-trigger:focus-visible,
+.dsh-partner-settings-search input:focus-visible { outline: 2px solid var(--partner-text-secondary); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .dsh-partner-topbar:has(> .dsh-partner-settings-trigger) { grid-template-columns: 44px minmax(0, 1fr) auto; }
+  .dsh-partner-topbar > .dsh-partner-settings-trigger { grid-column: 3; grid-row: 1; min-height: 44px; padding-inline: 9px; }
+  .dsh-partner-settings-search input { font-size: 16px; }
+}
+
+
+@media (max-width: 380px) {
+  .dsh-partner-topbar:has(> .dsh-partner-settings-trigger) > .dsh-partner-mobile-controls > .dsh-partner-mobile-companion-row { grid-column: 1 / -1; grid-row: 2; }
+}

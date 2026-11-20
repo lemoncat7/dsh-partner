@@ -1,3 +1,4 @@
+import { explainSettings, settingsGuideFacts } from './settings/guide.js'
 import {withActivityDeliveries} from './character/activity-summary.js'
 import {dispatchBrowserApi} from './api/features/browser-api.js'
 import {dispatchContinuousApi} from './api/features/continuous-api.js'
@@ -147,6 +148,26 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     return sendJson(res, 200, await runtime.storage.inspect())
   }
   if (segments[0] === 'companions' && segments[1] && runtime.store.isCompanionRemoving(segments[1]) && !(method === 'DELETE' && segments.length === 2)) throw httpError(409, '伙伴正在删除，请稍后刷新')
+  if (method === 'POST' && segments.length === 3 && segments[0] === 'companions' && segments[1] && segments[2] === 'settings-guide') {
+    mutation(req)
+    const { question } = await readObject(req, 4096)
+    if (typeof question !== 'string' || !question.trim() || question.length > 500) throw httpError(400, '请输入 1–500 字的设置问题')
+    const state = runtime.store.snapshot(['companions', 'channels', 'pairings'])
+    const companion = state.companions.find(item => item.id === segments[1])
+    if (!companion) throw httpError(404, '伙伴不存在')
+    if (res.destroyed) return
+    const abort = new AbortController()
+    const onClose = () => abort.abort()
+    res.once('close', onClose)
+    try {
+      const facts = settingsGuideFacts(companion, state, id => runtime.channels.channelRuntimeStatus(id))
+      const guide = await explainSettings(runtime.ctx, companion, question.trim(), facts, abort.signal)
+      if (!abort.signal.aborted) sendJson(res, 200, guide)
+    } catch {
+      if (!abort.signal.aborted) throw httpError(503, 'AI 设置引导暂时无法生成，请稍后重试或使用设置搜索')
+    } finally { res.off('close', onClose) }
+    return
+  }
   if (runtime.stickers && await dispatchStickersApi(req,res,segments,runtime.stickers,runtime.store)) return
   if (await dispatchPendantApi(req, res, segments, runtime.inbox)) return
   if (runtime.deliveries && await dispatchAttachmentsApi(req,res,segments,runtime.deliveries,runtime.store)) return

@@ -1,3 +1,4 @@
+import type { CharacterSection, SettingRequest } from '../settings/catalog.js'
 import { SegmentDelayFields } from './segment-delay-fields.js'
 import { ExclusivePromptToggle } from './exclusive-prompt-toggle.js'
 import { renderExclusiveIdentity } from '../character/domain.js'
@@ -7,7 +8,7 @@ import { PERSONA_REQUEST_EXAMPLE } from '../character/identity-guide.js'
 import { StickerLibraryDialog } from './sticker-library.js'
 import { RoleReference } from './role-reference.js'
 import { SettingsSections } from './settings-sections.js'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, type CompanionView } from '../client-api.js'
 import { emptyCharacterCard, normalizeCharacterCard, renderCharacterCore, roleTextForCard, type CharacterCard } from '../character/domain.js'
 import { renderConversationBehavior, renderConversationTurn } from '../character/conversation-behavior.js'
@@ -36,9 +37,13 @@ const SAMPLE: CharacterCard = {
 避免：下雨天记得带伞哦！你可以在家看书、听音乐或者看电影。`,
 }
 
-export function CharacterEditor({ companion, card, disabled, onChange, relationshipText, active = false }: { active?: boolean; relationshipText: string; companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
+export function CharacterEditor({ companion, card, disabled, onChange, relationshipText, active = false, settingRequest }: { settingRequest?: SettingRequest; active?: boolean; relationshipText: string; companion: CompanionView; card?: CharacterCard; disabled: boolean; onChange(card: CharacterCard): void }): JSX.Element {
   const [wizard, setWizard] = useState(false)
-  const [section, setSection] = useState<'role' | 'chat' | 'trial'>('role')
+  const [section, setSection] = useState<CharacterSection>('role')
+  useEffect(() => {
+    const destination = settingRequest?.entry.destination
+    if (destination?.page === 'identity' && destination.character) setSection(destination.character)
+  }, [settingRequest])
   // An explicitly empty document remains editable rather than reopening the wizard.
   const hasContent = Boolean(card && (card.roleText !== undefined || roleTextForCard(card) || card.lore.length))
   return <section className="dsh-partner-character" aria-label="角色聊天">

@@ -231,10 +231,12 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 :where(.dsh-partner-feature-page.is-board) button,
 .dsh-partner-schedule-list button,
 .dsh-partner-feature-form button,
+.dsh-partner-settings-results > li > button,
 .dsh-partner-general-settings button,
 .dsh-partner-task-form button,
 .dsh-partner-schedule-form button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid var(--partner-border); border-radius: 9px; color: var(--partner-text-secondary); background: var(--partner-control); box-shadow: inset 0 1px 0 var(--partner-glass-highlight); font: 590 var(--partner-font-body)/1 var(--partner-font-family); cursor: pointer; transition: color .15s ease, border-color .15s ease, background .15s ease, transform .15s var(--partner-ease-out); }
-.dsh-partner-feature-page button:not(:disabled):hover { color: var(--partner-text); border-color: color-mix(in srgb, var(--partner-text) 24%, var(--partner-border)); background: var(--partner-hover); }
+.dsh-partner-feature-page button:not(:disabled):hover,
+.dsh-partner-settings-results > li > button:hover { color: var(--partner-text); border-color: color-mix(in srgb, var(--partner-text) 24%, var(--partner-border)); background: var(--partner-hover); }
 .dsh-partner-feature-page button:not(:disabled):active { transform: translateY(1px); }
 .dsh-partner-feature-block,
 .dsh-partner-capability-detail { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--partner-border); border-radius: 15px; background: color-mix(in srgb, var(--partner-raised) 66%, transparent); box-shadow: inset 0 1px 0 var(--partner-glass-highlight), var(--partner-shadow-sm); }
@@ -820,12 +822,17 @@ body[data-ds-dark-theme] .dsh-partner-workspace {
 .is-capability-resources .dsh-partner-collection-empty { min-height: 120px; padding: 20px 12px; }
 @media (pointer: coarse) { .dsh-partner-capabilities .dsh-partner-capability-manage { min-height: 44px; min-width: 44px; inset-block-start: 0; } }
 .dsh-partner-form-actions > button,
+.dsh-partner-settings-trigger,
+.dsh-partner-settings-search > button,
 .dsh-partner-state > button,
 .dsh-partner-weixin-connect > button { min-height: 34px; padding: 0 15px; border: 1px solid color-mix(in srgb, var(--partner-accent) 60%, transparent); border-radius: 10px; color: var(--partner-on-accent); background: var(--partner-accent-strong); font: 600 var(--partner-font-body)/1 var(--partner-font-family); cursor: pointer; }
 .dsh-partner-form-actions > button:hover,
+.dsh-partner-settings-trigger:hover,
+.dsh-partner-settings-search > button:hover:not(:disabled),
 .dsh-partner-state > button:hover,
 .dsh-partner-weixin-connect > button:hover { background: color-mix(in srgb, var(--partner-accent-strong) 88%, #000); }
 .dsh-partner-form-actions > button:disabled,
+.dsh-partner-settings-search > button:disabled,
 .dsh-partner-weixin-connect > button:disabled { opacity: .55; cursor: default; }
 .dsh-partner-identity-danger { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 34px; padding-top: 17px; border-top: 1px solid var(--partner-border); }
 .dsh-partner-identity-danger > span { display: grid; gap: 4px; }

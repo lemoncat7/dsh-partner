@@ -1,3 +1,6 @@
+import { SETTINGS_SEARCH_LABEL, SettingsSearch } from './ui/settings-search.js'
+import type { SettingRequest } from './settings/catalog.js'
+import settingsSearchCssText from './ui/settings-search.css'
 import { registerWorkProgressCards } from './execution/work-progress-card.js'
 import {ContinuousPanel} from './ui/continuous-panel.js'
 import { CompanionVitals } from './ui/companion-vitals.js'
@@ -12,7 +15,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { observePluginWorkspace } from './workspace-ownership.js'
 import {
   IconAgentPresetOutlineRegular as IconAgentPresetOutline16, IconChevronDownOutlineRegular as IconChevronDownOutline14, IconChevronLeftOutlineRegular as IconChevronLeftOutline14,
-  IconDataOutlineRegular as IconDataOutline16, IconEditOutlineRegular as IconEditOutline16, IconLinkOutlineRegular as IconLinkOutline16, IconPlusOutlineRegular as IconPlusOutline16,
+  IconSearchOutlineRegular as IconSearchOutline16, IconDataOutlineRegular as IconDataOutline16, IconEditOutlineRegular as IconEditOutline16, IconLinkOutlineRegular as IconLinkOutline16, IconPlusOutlineRegular as IconPlusOutline16,
   IconRefreshOutlineRegular as IconRefreshOutline16, IconUserOutlineRegular as IconUserOutline16, IconBrowseOutlineRegular as IconBrowseOutline16, IconListPenOutlineRegular as IconListPenOutline16, IconPlayOutlineRegular as IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QRCodeSVG } from 'qrcode.react'
@@ -61,7 +64,7 @@ import { registerDecisionCards } from './decision/conversation.js'
 
 const PLUGIN_ID = '@lemoncat7/dsh-partner'
 const STYLE_ID = `${PLUGIN_ID}/client`
-const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}\n${biliCssText}`
+const cssText = `${baseCssText}\n${workspaceCssText}\n${pickerCssText}\n${responsiveCssText}\n${requirementCssText}\n${pendantCssText}\n${pendantSettingsCssText}\n${memoryCssText}\n${identityCssText}\n${characterCssText}\n${formSurfaceCssText}\n${mcpCssText}\n${interactionThemeCssText}\n${controlSurfacesCssText}\n${qqChannelCssText}\n${biliCssText}\n${settingsSearchCssText}`
 type SidebarProps = PropsRuntime<'sidebar.footer.action'>
 type ConversationProps = PropsRuntime<'conversation'>
 type CompanionTab = 'home' | 'identity' | 'capabilities' | 'weixin' | 'memory' | 'concerns' | 'continuous'
@@ -117,8 +120,28 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const [snapshot, setSnapshot] = useState<PartnerSnapshot | undefined>(cachedPartner)
   useChannelStatus(setSnapshot)
   const [selectedId, setSelectedId] = useState(() => controller.selected() ?? cachedPartner()?.companions[0]?.id)
-  const [view, setView] = useState<View>(controller.destination()?.page ?? 'home')
+  const [view, setCurrentView] = useState<View>(controller.destination()?.page ?? 'home')
   const [requestedDestination, setRequestedDestination] = useState(controller.destination())
+  const [searching, setSearching] = useState(false)
+  const [settingRequest, setSettingRequest] = useState<SettingRequest>()
+  const setView = (page: View): void => { setSettingRequest(undefined); setCurrentView(page) }
+  const openSetting = (request: SettingRequest): void => {
+    setSearching(false)
+    setRequestedDestination(undefined)
+    setSettingRequest(request)
+    setCurrentView(request.entry.destination.page)
+  }
+  useEffect(() => {
+    const destination = settingRequest?.entry.destination
+    if (destination?.page !== 'capabilities' || !destination.anchor) return
+    const id = 'partner-setting-' + destination.anchor
+    const frame = requestAnimationFrame(() => {
+      const section = document.getElementById(id)
+      section?.scrollIntoView({ block: 'nearest' })
+      section?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [settingRequest])
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(() => !cachedPartner())
   const [creatingCompanion, setCreatingCompanion] = useState(false)
@@ -171,6 +194,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
   const workspacePage = WORKSPACE_PAGES.has(view)
   const openCompanion = (id: string): void => { setSelectedId(id); setView('home') }
   return <main className="dsh-partner-workspace">
+    {searching && selected && <SettingsSearch key={selected.id} companion={selected} channels={snapshot!.channels} onOpen={openSetting} onClose={() => setSearching(false)} />}
     {creatingCompanion && <CompanionCreateDialog close={() => setCreatingCompanion(false)} create={create} />}
     <header className="dsh-partner-topbar">
       <div className="dsh-partner-topbar-brand"><button type="button" data-xiaohei-workspace-close onClick={controller.close} aria-label="返回会话" title="返回会话"><IconChevronLeftOutline14 size={15} /></button><IconAgentPresetOutline16 size={18} /><span><strong>伙伴</strong><small>长期身份与消息渠道</small></span></div>
@@ -182,6 +206,7 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
         openPage={setView}
         createCompanion={() => setCreatingCompanion(true)}
       />
+      {selected && <button type="button" className="dsh-partner-settings-trigger" onClick={() => setSearching(true)}><IconSearchOutline16 size={17} aria-hidden="true" />{SETTINGS_SEARCH_LABEL}</button>}
     </header>
     <div className="dsh-partner-grid">
       <aside className="dsh-partner-roster">
@@ -219,10 +244,10 @@ function PartnerWorkspace({ controller }: ConversationProps & { controller: Cont
           <div className="dsh-partner-stage-scroll">
             {notice && <p className="dsh-partner-inline-notice" role="status">{notice}</p>}
             {view === 'home' && <><CompanionDeletion key={selected.id} companion={selected} count={snapshot?.companions.length ?? 1} channelCount={snapshot!.channels.filter(channel => channel.companionId === selected.id).length} onRemoved={companionRemoved} /><HomePanel companion={selected} snapshot={snapshot!} navigate={setView} openSession={openSession} startSession={startSession} renewSession={renewSession} /></>}
-            {view === 'identity' && <IdentityEditor companion={selected} onChanged={() => refresh(true)} />}
+            {view === 'identity' && <IdentityEditor companion={selected} {...(settingRequest ? { settingRequest } : {})} onChanged={() => refresh(true)} />}
             {view === 'capabilities' && <CapabilityEditor key={selected.id} companion={selected} presets={snapshot?.presets ?? []} onChanged={() => refresh(true)} />}
-            {view === 'weixin' && <ChannelsPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} weixin={<WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />} />}
-            {view === 'memory' && <MemoryPanel key={selected.id} companion={selected} snapshot={snapshot!} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
+            {view === 'weixin' && <ChannelsPanel key={selected.id} companion={selected} snapshot={snapshot!} {...(settingRequest ? { settingRequest } : {})} onChanged={refresh} weixin={<WeixinPanel companion={selected} snapshot={snapshot!} onChanged={refresh} />} />}
+            {view === 'memory' && <MemoryPanel key={selected.id} companion={selected} snapshot={snapshot!} {...(settingRequest ? { settingRequest } : {})} openSession={openSession} startSession={startSession} renewSession={renewSession} onChanged={refresh} />}
             {view === 'concerns' && <ConcernPanel key={selected.id} companion={selected} snapshot={snapshot!} onChanged={refresh} />}
             {view === 'continuous' && <ContinuousPanel key={selected.id} companionId={selected.id} />}
           </div>
