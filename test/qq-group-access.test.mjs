@@ -291,14 +291,14 @@ test('a cancellation at the end of a merged burst is not hidden by its opening c
  assert.equal(steered.length,1);assert.match(steered[0],/取消任务/);assert.deepEqual(f.sent,[])
 })
 
-test('same-speaker input is admitted after a confirmed segment and buffered chat stays eligible',{timeout:10000},async()=>{
+test('a verified supplement is admitted after a confirmed segment and buffered chat stays eligible',{timeout:10000},async()=>{
  const f=fixture();let release,secondReady,steers=0,replies=0
  const second=new Promise(r=>secondReady=r),finish=new Promise(r=>release=r)
  const api=Object.create(DirectTransport.prototype);api.config={platform:'qq',targetId:f.target}
  api.sendText=async(_peer,text)=>{f.sent.push(text);if(text==='第二段'){secondReady();await finish}}
  f.manager.directTransports.set('qq',{forTarget:()=>api})
  f.agents.steer=async()=>{steers++;return false}
- f.manager.groupAutonomy.shouldReply=async()=>true
+ f.manager.groupAutonomy=new QqGroupAutonomy({},()=>Date.now(),async()=>({label:'address',confidence:.75,margin:.4}))
  f.agents.reply=async(_c,_ch,_u,_m,progress)=>{replies++;progress('working');return replies===1?{text:'',attachments:[],chatParts:[{type:'text',text:'第一段'},{type:'text',text:'第二段'}]}:{text:'新的回复',attachments:[]}}
  const first={...f.event,id:'first-segments',receivedAt:Date.now()}
  const pending=f.manager.handleDirect(f.channel,f.api,first,new AbortController().signal,[first],()=>{},'steer')
@@ -373,17 +373,19 @@ test('silently observed file or video is attached to the later same-speaker expl
  }
 })
 
-test('real group intake gives the next participant shared-conversation guidance after confirmed delivery',async()=>{
+test('real group intake lets the shared topic breathe while a new explicit call still gets guidance',async()=>{
  const f=fixture();f.state.companions[0].characterCard={enabled:true}
  f.manager.groupAutonomy=new QqGroupAutonomy({},()=>Date.now(),async()=>({label:'engage',confidence:.41,margin:.21,contextSimilarity:.71}))
  await f.handle({...f.event,text:'来聊这个话题'})
  const b={...f.event,id:'second-participant',sender:'group:99887766:33445678',text:'我也觉得刚才这个很有意思',qqGroup:{...f.event.qqGroup,userId:'33445678',mentioned:false}}
  await f.handle(b)
+ assert.equal(f.inputs.length,1);assert.equal(f.sent.length,1)
+ await f.handle({...b,id:'direct-participant',qqGroup:{...b.qqGroup,mentioned:true}})
  assert.equal(f.inputs.length,2);assert.equal(f.sent.length,2)
  const prompt=f.inputs[1][3].text
- assert.match(prompt,/参与状态（真实发送记录）/);assert.match(prompt,/其他成员顺着话题/)
+ assert.match(prompt,/参与状态（真实发送记录）/);assert.match(prompt,/同一话题换人发言/)
  assert.doesNotMatch(prompt,/别人之间的交流安静旁听/);assert.match(prompt,/明确发给其他人的消息/)
- assert.equal(f.manager.groupAutonomy.status('qq').route,'continuation')
+ assert.equal(f.manager.groupAutonomy.status('qq').route,'direct')
 })
 
 test('background completion stays on frozen source and uses one durable receipt after other group speakers talk',async()=>{
@@ -456,6 +458,7 @@ test('a caption ten seconds after an admitted photo joins the unfinished reply o
   let started,finish
   const ready=new Promise(resolve=>{started=resolve}),done=new Promise(resolve=>{finish=resolve})
   f.api.receiveAttachments=async()=>[{kind:'image',name:'apple.png',data:Buffer.from('image')}]
+  f.manager.groupAutonomy=new QqGroupAutonomy({},()=>Date.now(),async()=>({label:'address',confidence:.75,margin:.4}))
   f.agents.reply=async(_c,_ch,_u,message)=>{
    inputs.push(message)
    if(inputs.length===1){started();await done}

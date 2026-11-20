@@ -49,7 +49,7 @@ export const CONVERSATION_EXPRESSION_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['intent'],
   properties: {
     intent: { type: 'string', minLength: 1, maxLength: 240, description: '这次想回应什么或准备做什么，不写成回复稿，不安排语气，不虚构已完成的事。表达器从当前人物设定与近期对话生成发言。' },
-    sourceCalls: { type: 'array', maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 300 }, description: '需说明实际结果时引用本轮真实工具结果的 callId（或 PTC subCallId），含失败项。不把结果另写在 intent 里。任务前告知不填。长工作结果可改用 workReply 精选真实事实。' },
+    sourceCalls: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 300 }, description: '需说明实际结果时引用本轮真实工具结果的 callId（或 PTC subCallId），含失败项。不把结果另写在 intent 里。任务前告知不填。长工作结果可改用 workReply 精选真实事实。' },
   },
 }
 export interface ExpressionOptions { beforeTools?: boolean; single?: boolean }
@@ -97,7 +97,7 @@ export const WORK_REPLY_SCHEMA = {
     purpose: { type: 'string', minLength: 1, maxLength: 240, description: '只说明当前回应目的，例如回答是否完成、解释目前进展。具体事实用 results 引用；不要复述工作过程、列回复提纲、安排措辞或设置人格。' },
     results: { type: 'array', minItems: 1, maxItems: 8, items: {
       type: 'object', additionalProperties: false, required: ['runId', 'facts', 'unknowns'],
-      properties: { runId: { type: 'string' }, ...Object.fromEntries(['facts', 'unknowns', 'evidence', 'artifacts'].map(key => [key, { type: 'array', maxItems: 30, uniqueItems: true, items: { type: 'integer', minimum: 0 }, description: referenceDescriptions[key] }])) },
+      properties: { runId: { type: 'string' }, ...Object.fromEntries(['facts', 'unknowns', 'evidence', 'artifacts'].map(key => [key, { type: 'array', maxItems: 30, items: { type: 'integer', minimum: 0 }, description: referenceDescriptions[key] }])) },
     } },
   },
 }

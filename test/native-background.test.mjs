@@ -6,13 +6,14 @@ import {join} from 'node:path'
 import {assertObjectJsonSchema} from '@deepseek-ai/dsh-tools'
 import {NativeBackgroundTasks,PARTNER_BACKGROUND_PROVIDER} from '../lib/execution/native-background.js'
 import {qqSettings} from '../lib/channels/qq/settings.js'
+import {markObservationAgent} from '../lib/observation-contract.js'
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve:v=>resolve(v)}}
-async function fixture(t,preferences){
+async function fixture(t,preferences,images){
  const cwd=await mkdtemp(join(tmpdir(),'partner-native-'));t.after(()=>rm(cwd,{recursive:true,force:true}))
  const channel={id:'q',platform:'qq',accountId:'bot',companionId:'c',enabled:true,direct:{baseUrl:'ws://local',targetId:''},qq:qqSettings({groupReplies:true,groupIds:['12345678'],autonomousGroupIds:['12345678'],identityBinding:{enabled:true,qqIds:['22334455']}})}
  const event=id=>({type:'user/message',data:{id,source:{kind:'user'},content:[{type:'text',text:'整理当前 /tmp/reference.md，生成配图'}]}})
  let events=[event('input')]
- const parent={session:{id:'parent',header:{cwd},snapshotEvents:()=>events}}
+ const parent={session:{id:'parent',header:{cwd},snapshotEvents:()=>events},ctx:{tools:{definitions:()=>[]}}}
  const route={id:'route',kind:'channel',sessionId:'parent',companionId:'c',channelId:'q',userId:'group:12345678:22334455',inboundMessageIds:['input','update']}
  const state={channels:[channel],companions:[{id:'c',capabilities:['work'],characterCard:{enabled:true}}],sessions:[route],pairings:[],executionRuns:[]}
  const subscribers=new Set(),guards=[],calls=[],sent=[],updates=[],resumes=[],resumeResult=deferred(),result=deferred();let disposed=0
@@ -20,7 +21,7 @@ async function fixture(t,preferences){
  const native={getProvider:()=>PARTNER_BACKGROUND_PROVIDER,registerProvider:()=>()=>{},startActivation:async spec=>{calls.push(spec);return {childId:spec.childId,name:'agent-1',result:result.promise,dispose:async()=>{disposed++}}},resumeActivation:async spec=>{resumes.push(spec);return {childId:spec.childId,name:'agent-1',result:resumeResult.promise,dispose:async()=>{disposed++}}},sendMessage:async(...args)=>updates.push(args)}
  const handlers=new Map()
  const ctx={get:()=>native,on:(name,fn)=>{handlers.set(name,fn);return()=>handlers.delete(name)},tools:{guard:fn=>{guards.push(fn);return()=>guards.splice(guards.indexOf(fn),1)}},logger:{warn(){}}},deliver=async(run,reply)=>sent.push({run:structuredClone(run),reply})
- const service=new NativeBackgroundTasks(ctx,store,deliver,preferences)
+ const service=new NativeBackgroundTasks(ctx,store,deliver,preferences,undefined,images)
  t.after(()=>service.close())
  const tool=service.tool('c'),exec={agent:parent,signal:new AbortController().signal}
  const start=()=>tool.execute({action:'start',label:'整理',input:'目标：整理 /tmp/reference.md 并生成配图'},exec)
@@ -51,9 +52,74 @@ test('only original source can update or cancel, accepted update leaves complete
  const f=await fixture(t),a=await f.start();f.setEvents([f.event('update')])
  await f.tool.execute({action:'update',taskId:a.taskId,input:'改为横版'},f.exec);assert.equal(f.updates.length,1)
  f.setEvents([f.event('other')]);f.state.sessions.push({...f.route,id:'other',userId:'group:12345678:99887766',inboundMessageIds:['other']})
- await assert.rejects(f.tool.execute({action:'cancel',taskId:a.taskId},f.exec),/没有这项/)
+ await assert.rejects(f.tool.execute({action:'cancel',taskId:a.taskId},f.exec),/发起人操作/)
  f.setEvents([f.event('update')]);await f.tool.execute({action:'cancel',taskId:a.taskId},f.exec);assert.equal(f.state.executionRuns[0].status,'canceled');assert.equal(f.disposed(),1)
  f.result.resolve({stopReason:'completed',structured:{text:'旧结果',files:[]}});await new Promise(r=>setTimeout(r,10));assert.equal(f.sent.length,0)
+})
+test('native task selection follows the live DSH subagent setting at start and at cold resume',async t=>{
+ const f=await fixture(t),configured={enabled:true,allowedModels:[{provider:'openai',model:'gpt-6.2-sol'}]}
+ const get=f.ctx.get
+ f.ctx.get=name=>name==='subagentModelSelection'?{current:()=>configured}:get(name)
+ const first=await f.start()
+ assert.deepEqual(f.calls[0].agentOptions,configured.allowedModels[0])
+ await f.tool.execute({action:'pause',taskId:first.taskId},f.exec)
+ configured.allowedModels=[{provider:'openai',model:'next-choice'}]
+ const selections=[]
+ const resume=f.native.resumeActivation
+ f.native.resumeActivation=async spec=>{
+  await f.handlers.get('agent/created')({agent:{
+   session:{id:spec.childId},model:{select:selection=>selections.push(selection)},
+   ctx:{systemPrompt:{section:()=>()=>{}},tools:{register:()=>()=>{},presentAs:()=>()=>{}}}
+  }})
+  return resume(spec)
+ }
+ f.setEvents([f.event('update')])
+ const resumed=await f.tool.execute({action:'resume',taskId:first.taskId},f.exec)
+ assert.equal(resumed.childSessionId,first.childSessionId)
+ assert.deepEqual(selections,configured.allowedModels)
+ assert.equal(f.calls.length,1)
+ configured.enabled=false
+ f.route.inboundMessageIds.push('new')
+ const fresh=f.event('new');fresh.data.content=[{type:'text',text:'另外开独立任务'}];f.setEvents([fresh])
+ await f.tool.execute({action:'start',label:'独立任务',input:'新工作'},f.exec)
+ assert.equal(f.calls[1].agentOptions,undefined)
+})
+test('QQ group tasks share visibility and reuse identical or compatible requests from another member',async t=>{
+ const f=await fixture(t)
+ f.state.channels[0].qq.identityBinding={enabled:false,qqIds:[]}
+ const first=await f.start()
+ const peer={...f.route,id:'peer',userId:'group:12345678:99887766',inboundMessageIds:['peer-input','peer-correction']}
+ f.state.sessions.push(peer)
+ f.setEvents([f.event('peer-input')])
+ const duplicate=await f.start()
+ assert.equal(duplicate.taskId,first.taskId);assert.equal(f.calls.length,1);assert.equal(f.updates.length,0)
+ const correction=f.event('peer-correction');correction.data.content=[{type:'text',text:'补充刚才那项，把配图改成横版'}];f.setEvents([correction])
+ const updated=await f.tool.execute({action:'start',label:'整理',input:'整理当前 /tmp/reference.md，配图改成横版'},f.exec)
+ assert.equal(updated.taskId,first.taskId);assert.equal(updated.updated,true);assert.equal(f.updates.length,1)
+ f.state.executionRuns[0].outputSummary='原流程的内部信息'
+ f.state.executionRuns[0].error='内部文件路径'
+ const status=await f.tool.execute({action:'status',taskId:first.taskId},f.exec)
+ assert.equal(status.status,'running');assert.equal(status.output,undefined);assert.equal(status.error,undefined)
+ f.state.executionRuns.push(...Array.from({length:13},(_,i)=>({...structuredClone(f.state.executionRuns[0]),id:'old'+i,status:'completed'})))
+ for(const userId of ['99887766','group:99887766:99887766']){
+  f.state.sessions.push({...peer,id:userId,userId,inboundMessageIds:['foreign-'+userId]})
+ }
+ f.state.channels[0].qq.privateReplies=true
+ f.state.channels[0].qq.groupIds.push('99887766');f.state.channels[0].qq.autonomousGroupIds.push('99887766')
+ f.state.pairings.push({channelId:'q',userId:'99887766',status:'approved'})
+ assert.equal((await f.tool.execute({action:'list'},f.exec)).tasks[0].taskId,first.taskId)
+ for(const userId of ['99887766','group:99887766:99887766']){
+  f.setEvents([f.event('foreign-'+userId)])
+  assert.deepEqual((await f.tool.execute({action:'list'},f.exec)).tasks,[])
+ }
+})
+test('QQ group members can see an owner task but cannot steer its elevated tools',async t=>{
+ const f=await fixture(t),first=await f.start()
+ f.state.sessions.push({...f.route,id:'peer',userId:'group:12345678:99887766',inboundMessageIds:['peer']})
+ f.setEvents([f.event('peer')])
+ assert.deepEqual((await f.tool.execute({action:'list'},f.exec)).tasks.map(r=>r.taskId),[first.taskId])
+ await assert.rejects(f.tool.execute({action:'update',taskId:first.taskId,input:'补充新的操作'},f.exec),/工具范围/)
+ assert.equal(f.updates.length,0)
 })
 test('invalid outputs and escaped artifacts fail without sending; restart retries only saved completion',async t=>{
  const f=await fixture(t);await f.start();const outside=join(tmpdir(),'outside.txt')
@@ -98,6 +164,19 @@ test('foreground image dispatch is refused before work; child and unrelated sess
 test('unapproved private routes cannot start work',async t=>{
  const f=await fixture(t);f.route.userId='22334455';f.state.channels[0].qq.privateReplies=true
  await assert.rejects(f.start(),/授权/);assert.equal(f.calls.length,0)
+})
+
+test('independent concern checks do not hit foreground delegation for the same session',async t=>{
+ const f=await fixture(t),guard=f.guards[0]
+ const work={...f.exec,name:'bash',arguments:{command:'dsh -V'}}
+ assert.match(guard(work),/必须先/)
+ const observation={...f.parent}
+ const release=markObservationAgent(observation)
+ try{
+  assert.equal(guard({...work,agent:observation}),undefined)
+  assert.match(guard(work),/必须先/)
+ }finally{release()}
+ assert.match(guard({...work,agent:observation}),/必须先/)
 })
 
 test('all local companions can use native background without a channel or foreground constraints',async t=>{
@@ -148,7 +227,7 @@ test('failed artifact validation recovers saved final output without rerunning w
  const f=await fixture(t);await f.start();const run=f.state.executionRuns[0];run.status='failed';run.error='Error: 后台产物不在本任务工作目录内'
  let closed=0,offset
  const originalGet=f.service.ctx.get
- f.service.ctx.get=name=>name==='sessionPersistence'?{open:async()=>({header:{parentSession:'parent'},inheritedEventCount:500,read:async n=>{offset=n;return {events:[{type:'tool/call',data:{name:'structured_output',arguments:{text:'已保存成果',files:[]}}},{type:'turn/end',data:{reason:{kind:'completed'}}}]}},close:async()=>{closed++}})}:originalGet(name)
+ f.service.ctx.get=name=>name==='sessionPersistence'?{open:async()=>({header:{parentSession:'parent'},inheritedEventCount:500,read:async n=>{offset=n;return {events:savedOutput()}},close:async()=>{closed++}})}:originalGet(name)
  await f.service.recoverDeliveries();await f.service.recoverDeliveries()
  assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);assert.equal(offset,500);assert.equal(closed,1);assert.equal(run.status,'completed');assert.equal(run.error,undefined)
 })
@@ -177,6 +256,63 @@ test('canceled work can cold-resume after adapter restart without a new child',a
  assert.equal(result.childSessionId,a.childSessionId);assert.equal(f.resumes.length,1);assert.equal(f.calls.length,1)
  f.resumeResult.resolve({stopReason:'completed',structured:{text:'重启后继续完成',files:[]}});await waitFor(()=>f.state.executionRuns[0].background.deliveredAt)
  assert.equal(f.sent.length,1)
+})
+
+test('the generic startup recovery leaves interrupted native background tasks for their own recovery',async t=>{
+ const f=await fixture(t)
+ const accepted=await f.start();await f.service.close()
+ const {EphemeralExecutionService}=await import('../lib/execution/service.js')
+ const execution=new EphemeralExecutionService({},f.store,f.parent.session.header.cwd)
+ assert.equal(await execution.reconcileInterruptedRuns(),0)
+ assert.equal(f.state.executionRuns[0].status,'running')
+ const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close())
+ await service.recoverDeliveries()
+ const run=f.state.executionRuns[0]
+ assert.equal(run.sessionId,accepted.childSessionId)
+ assert.equal(run.status,'canceled');assert.match(run.error,/重启/)
+ assert.ok(run.background.review);assert.ok(run.background.interruptedAt)
+ run.background.review.doneAt=Date.now()
+ const {cleanupWorkSession}=await import('../lib/execution/session-cleanup.js')
+ const previous=f.ctx.get
+ f.ctx.get=name=>name==='sessionPersistence'?{stat:()=>assert.fail('interrupted work stays recoverable'),open:async()=>{}}:previous(name)
+ assert.equal(await cleanupWorkSession(f.ctx,f.store,run),false)
+})
+
+const savedOutput=(confirmed=true)=>[
+ {type:'turn/start',data:{turn:1}},
+ {type:'tool/call',data:{name:'structured_output',callId:'output',arguments:{text:'已保存成果',files:[]}}},
+ ...(confirmed?[{type:'tool/result',data:{message:{toolCallId:'output',isError:false,content:[]}}}]:[]),
+ {type:'turn/end',data:{reason:{kind:'completed'}}},
+]
+
+test('restart delivers a committed result once and leaves an unconfirmed result for the original foreground',async t=>{
+ for(const confirmed of [true,false]){
+  const f=await fixture(t),accepted=await f.start()
+  await f.service.close()
+  childLog(f,savedOutput(confirmed))
+  const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close())
+  await service.recoverDeliveries();await service.recoverDeliveries()
+  const run=f.state.executionRuns[0]
+  assert.equal(run.sessionId,accepted.childSessionId)
+  assert.equal(f.calls.length,1);assert.equal(f.resumes.length,0)
+  assert.equal(run.status,confirmed?'completed':'canceled')
+  assert.equal(f.sent.length,confirmed?1:0)
+ }
+})
+
+test('pause and stop distinguish a resumable child from work the user has closed',async t=>{
+ const f=await fixture(t),accepted=await f.start(),taskId=accepted.taskId,run=f.state.executionRuns[0]
+ const paused=await f.tool.execute({action:'pause',taskId},f.exec)
+ assert.equal(paused.canResume,true);assert.equal(run.background.stoppedAt,undefined)
+ const {cleanupWorkSession}=await import('../lib/execution/session-cleanup.js')
+ const previous=f.ctx.get
+ f.ctx.get=name=>name==='sessionPersistence'?{stat:async()=>undefined,open:async()=>{}}:previous(name)
+ assert.equal(await cleanupWorkSession(f.ctx,f.store,run),false)
+ const stopped=await f.tool.execute({action:'stop',taskId},f.exec)
+ assert.equal(stopped.stopped,true);assert.equal(stopped.canResume,false)
+ f.setEvents([f.event('update')]);await assert.rejects(f.tool.execute({action:'resume',taskId},f.exec),/已回收/)
+ assert.equal(await cleanupWorkSession(f.ctx,f.store,run),true)
+ assert.ok(run.sessionCleanup.deletedAt)
 })
 test('resume rejects removed logs, foreign sources and revoked permissions; explicit discard is final',async t=>{
  const f=await fixture(t),a=await f.start();await f.tool.execute({action:'cancel',taskId:a.taskId},f.exec);f.setEvents([f.event('update')])
@@ -231,10 +367,31 @@ test('child receives source and task directories without parent history and desc
  const text=sections[0].text
  assert.ok(text.includes(JSON.stringify(f.parent.session.header.cwd)))
  assert.ok(text.includes(JSON.stringify(f.calls[0].cwd)))
- assert.match(text,/只使用本次确认的图片编号/)
- assert.match(text,/不要用符号链接/)
+ assert.match(text,/前台随任务交接参考图/)
+ assert.match(text,/由平台直接带入/)
  assert.equal(f.calls[0].prompt.length,1)
  assert.equal(f.calls[0].prompt[0].text,'目标：整理 /tmp/reference.md 并生成配图')
+})
+
+test('native background passes the reference selection from the foreground and preserves it on a plain resume',async t=>{
+ const first='IMG-11111111111111111111',second='IMG-22222222222222222222'
+ const f=await fixture(t,undefined,{plan:(_agent,_route,inputId,{references})=>references?{
+  inputId,selected:references.map(id=>({id})),requested:true,handedOff:true,
+ }:{inputId,selected:[],available:[{id:first}]}})
+ const accepted=await f.tool.execute({action:'start',label:'配图',input:'生成配图',referenceImages:[first,second]},f.exec)
+ const references=()=>f.state.executionRuns[0].background.imageReferences.selected.map(image=>image.id)
+ assert.deepEqual(references(),[first,second])
+ assert.match(f.calls[0].prompt[1].text,/前台已随任务传入参考图/)
+ f.setEvents([f.event('update')]);f.native.sendMessage=async()=>{throw Error('投递失败')}
+ await assert.rejects(()=>f.tool.execute({action:'update',taskId:accepted.taskId,input:'只用第二张',referenceImages:[second]},f.exec),/投递失败/)
+ assert.deepEqual(references(),[first,second])
+ f.native.sendMessage=async(...args)=>{f.updates.push(args)}
+ await f.tool.execute({action:'update',taskId:accepted.taskId,input:'只用第二张',referenceImages:[second]},f.exec)
+ assert.deepEqual(references(),[second])
+ await f.tool.execute({action:'cancel',taskId:accepted.taskId},f.exec)
+ await f.tool.execute({action:'resume',taskId:accepted.taskId,input:'继续'},f.exec)
+ assert.deepEqual(references(),[second])
+ assert.match(f.resumes[0].prompt[1].text,new RegExp(second))
 })
 
 test('ordinary QQ member hands off an image, keeps original tools and receives the result on the same route',async t=>{
@@ -463,11 +620,13 @@ test('manual native stop retires the child log without triggering any retry or g
  const run=f.state.executionRuns[0]
  await waitFor(()=>run.background.stoppedAt)
  assert.equal(run.status,'canceled');assert.equal(f.resumes.length,0);assert.equal(f.sent.length,0)
+ run.background.imageReferences={selected:[],requested:true}
  const {cleanupWorkSession}=await import('../lib/execution/session-cleanup.js')
  const previous=f.ctx.get
  f.ctx.get=name=>name==='sessionPersistence'?{stat:async()=>undefined,open:async()=>{}}:previous(name)
  assert.equal(await cleanupWorkSession(f.ctx,f.store,run),true)
  assert.ok(run.sessionCleanup.deletedAt)
+ assert.equal(run.background.imageReferences,undefined)
 })
 
 test('oversized body recovery selects native offload occurrences only from the failed child history',async()=>{

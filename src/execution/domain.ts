@@ -6,7 +6,7 @@ export interface ExecutionRun {
 
   background?: {
     imageReferences?:import('../attachments/image-references.js').ImageReferencePlan;
-    retries?:number; retryMode?:import('./background-retry.js').BackgroundRetryMode; stoppedAt?:number; supplementInputIds?:string[];
+    retries?:number; retryMode?:import('./background-retry.js').BackgroundRetryMode; stoppedAt?:number; interruptedAt?:number; supplementInputIds?:string[];
     review?:import('./background-review.js').BackgroundReview;reviewResumed?:boolean;
     audience?:'member'|'activity'; activityKind?:import('../character/idle-contact.js').IdleContactState['kind'];
     sourceKind?:'local'|'channel'; localMessageId?:string;sourceCwd?:string;foregroundMessageId?:string;foregroundReply?:{text:string};

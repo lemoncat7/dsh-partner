@@ -66,6 +66,7 @@ export class EphemeralExecutionService {
     await this.store.update(state => {
       const now = Date.now()
       for (const run of state.executionRuns) {
+        if (run.background) continue
         if (run.status !== 'queued' && run.status !== 'running') continue
         run.status = 'failed'
         run.completedAt = now

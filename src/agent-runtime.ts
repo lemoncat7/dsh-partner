@@ -36,7 +36,7 @@ import { installLiveSpeech } from './chat/live-speech.js'
 import { ReplyCompletionGuard, INCOMPLETE_REPLY } from './chat/reply-completion.js'
 import { conversationRecallQuery, conversationMemories, dreamContextRequested } from './chat/context-selection.js'
 import { renderReplyContinuity } from './chat/reply-continuity.js'
-import {rollConversationContext,ROLLING_CONTEXT_GUIDANCE} from './rolling-context.js'
+import {removePrivateMemorySnapshots,rollConversationContext,ROLLING_CONTEXT_GUIDANCE} from './rolling-context.js'
 import {recallConversationHistory,recordLocalInputOrigins,recordInputOrigin,inputOrigins,type ImageInputOrigin} from './conversation-history-recall.js'
 import { isActivitySilenceRequested } from './character/activity-tool.js'
 import { installTaskPreamble } from './execution/task-preamble.js'
@@ -68,7 +68,7 @@ import { continuationPrompt } from './scheduler/continuations.js'
 import { assertWakeTools } from './scheduler/wakeup-context.js'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import type { ScheduledPartnerTask } from './scheduler/domain.js'
-import { conversationMemoryScope } from './memory-scope.js'
+import { conversationMemoryScope, groupConversation } from './memory-scope.js'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -1232,6 +1232,7 @@ export class PartnerAgentRuntime {
   private readonly replyPresentations = new Map<Agent, () => void>()
   private readonly contextRevisions = new WeakMap<Agent, string>()
   private conversationClocks?: WeakMap<Agent, {originId:string|undefined;at:number}>
+  private groupMemoryWindows?: WeakSet<Session>
   private readonly admittedInputTimes = new WeakMap<UserMessage,number>()
   private readonly admittedInputs = new WeakMap<Agent, readonly UserMessage[]>()
 
@@ -1281,11 +1282,16 @@ export class PartnerAgentRuntime {
     const stickerOpportunity=access.sendTools&&(!access.allowedTools||access.allowedTools.includes('partner_qq'))?renderStickerOpportunity(state,companion.id,agent.session.id,events):''
     const webRoute=origin?.type==='user/message'&&origin.data.source.kind==='user'?webMessageRoute(agent.session.id,events,state.sessions,origin.data.id):undefined
     const activeRoute=stickerRoute??webRoute??state.sessions.find(r=>r.kind==='local'&&r.sessionId===agent.session.id&&r.companionId===companion.id)
+    const isGroup=groupConversation(activeRoute??route,state.sessions)
+    if(isGroup){
+      const windows=this.groupMemoryWindows??=new WeakSet()
+      if(!windows.has(agent.session)){removePrivateMemorySnapshots(agent.session);windows.add(agent.session)}
+    }else this.groupMemoryWindows?.delete(agent.session)
     const ongoing=companion.continuous?.tasks.filter(t=>t.routeId===activeRoute?.id&&t.sessionId===agent.session.id&&!['stopped','completed'].includes(t.status))??[]
     const continuousContext=ongoing.length?'【当前会话持续任务 · 状态事实】\n'+JSON.stringify(ongoing.map(t=>({id:t.id,title:t.title,status:t.status,phase:t.phase,until:t.until,checkedAt:t.checkedAt,scene:t.scene.slice(0,350)})))+'\n任务只提供观察场景，交流沿用当前人格、关系、时间与对话状态。用户明确结束陪看或主动交流时调用 partner_continuous_task stop 并提供原话 evidence；一轮说完、暂时没回不代表任务结束。':''
     const activityDecision=renderActivityDecisionContext(state,companion,agent.session.id,events,this.channelActivities.describe(state,companion.id))
     const taskContext=renderTaskFollowup(taskFollowup(state,companion.id,agent.session.id,events))
-    const replyContinuity = renderReplyContinuity(agent.session.id, events, state.sessions)
+    const replyContinuity = renderReplyContinuity(agent.session.id, events, state.sessions,!isGroup)
     const habitOrigin=activeRoute
     const habitContext=renderHabits(companion,habitOrigin?habitScope(habitOrigin):undefined)
     // Preserve exact input seconds without invalidating recall on every clock tick.
@@ -1295,10 +1301,11 @@ export class PartnerAgentRuntime {
     if(!clock||clock.originId!==originId||now<clock.at||now-clock.at>=60_000){clock={originId,at:now};clocks.set(agent,clock)}
     const timeContext=renderConversationTime(agent.session.id,events,state.sessions,this.timeZone,clock.at,state.notificationDeliveries??[])
     const revision = `${activityDecision}:${continuousContext}:${stickerOpportunity}:${stickerTags}:${timeContext}:${habitContext}:${createHash('sha256').update(replyContinuity+taskContext).digest('hex')}:${JSON.stringify(access)}:${JSON.stringify(identityRelation)}:${config.revision}:${last?.id ?? ''}:${autonomous&&origin?.type==='user/message'?origin.data.id:''}:${JSON.stringify([companion.sleepState?.episode, companion.sleepState?.reception, Math.round(fatigueValue(companion))])}:${companion.sleepState?.dreams?.at(-1)?.id ?? ''}:${affectionAudience}:${companion.affection?.updatedAt??0}`
-    if (this.contextRevisions.get(agent) === revision) return browserChanged
     const scope = conversationMemoryScope(activeRoute??route, state.sessions)
-    const story = companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
-    const recall = companion.automation.memory.enabled ? await this.memory?.recallContext(companion.id, scope, autonomous ? '' : query, 4, { includeHistory: !companion.characterCard?.enabled }) : undefined
+    const audienceRevision=String(isGroup)+':'+revision
+    if (this.contextRevisions.get(agent) === audienceRevision) return browserChanged
+    const story = !isGroup&&companion.characterCard?.enabled ? await this.memory?.characterState(companion.id, scope) : undefined
+    const recall = !isGroup&&companion.automation.memory.enabled ? await this.memory?.recallContext(companion.id, scope, autonomous ? '' : query, 4, { includeHistory: !companion.characterCard?.enabled }) : undefined
     const recalled = recall ? conversationMemories(recall, autonomous ? '' : query) : undefined
     let consecutiveUserMessages = 0
     for (const message of [...messages].reverse()) {
@@ -1323,15 +1330,15 @@ export class PartnerAgentRuntime {
       companion.characterCard?.enabled?renderQqIdentityRelation(identityRelation, autonomous && access.sendTools && !access.allowedTools):'',
       replyContinuity,
       taskContext,
-      renderSleepContext(companion, runtimeSnapshot(this.store).sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id), autonomous ? undefined : last?.id, Date.now(), {includeDream: dreamContextRequested(query, autonomous)}),
+      renderSleepContext(companion, runtimeSnapshot(this.store).sessions.filter(r => r.companionId === companion.id && r.sessionId === route.sessionId).map(r => r.id), autonomous ? undefined : last?.id, Date.now(), {includeDream: !isGroup&&dreamContextRequested(query, autonomous)}),
       renderConversationTurn(companion.characterCard, consecutiveUserMessages, autonomous),
     ].filter(Boolean).join('\n\n')
     this.characterContexts.get(agent.session.id)?.()
     // A changing .section() appends an entire system prompt on in-history routes.
     // Native context snapshots retain provenance without duplicating that prompt.
-    if (text) this.characterContexts.set(agent.session.id, agent.ctx.systemPrompt.context({ name: 'partner-conversation-memory', order: -5, text, interpolate: false, required: true }))
+    if (text) this.characterContexts.set(agent.session.id, agent.ctx.systemPrompt.context({ name: isGroup?'partner-group-conversation':'partner-conversation-memory', order: -5, text, interpolate: false, required: true }))
     else this.characterContexts.delete(agent.session.id)
-    this.contextRevisions.set(agent, revision)
+    this.contextRevisions.set(agent, audienceRevision)
     return true
   }
 
@@ -1615,8 +1622,10 @@ export class PartnerAgentRuntime {
     }
     const events=await saved().catch(()=>[])
     const admitted=new Set<string>(events.flatMap(e=>e.type==='user/message'&&e.data.source.kind==='user'?[e.data.id]:[]))
+    const channel=state.channels.find(c=>c.id===channelId&&c.companionId===companionId)
+    const originalMessageId=channel?.platform==='qq'?`qq:${channel.accountId}:${userId}:${messageId}`:messageId
     const sources=inputOrigins(events).filter(o=>o.routeId===route.id&&o.imageScope===scope&&admitted.has(o.messageId))
-      .flatMap(o=>o.imageSources??[]).filter(o=>o.messageId===messageId)
+      .flatMap(o=>o.imageSources??[]).filter(o=>o.messageId===messageId||o.messageId===originalMessageId)
     return [...new Map(sources.map(o=>[o.image.attachmentId,o])).values()].slice(0,8)
   }
 

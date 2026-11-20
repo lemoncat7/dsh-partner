@@ -20,7 +20,7 @@ import { observationFailure, ObservationModelError } from './observation-errors.
 import {observationBudget, observationFinalInstruction, OBSERVATION_CHECK_ROUNDS, OBSERVATION_PREPARATION_ROUNDS, OBSERVATION_MODEL_TIMEOUT_MS, OBSERVATION_TOOL_TIMEOUT_MS} from './observation-budget.js'
 import {resolve} from 'node:path'
 import {randomUUID} from 'node:crypto'
-import { observationCapabilityContext } from './observation-contract.js'
+import { markObservationAgent, observationCapabilityContext } from './observation-contract.js'
 import { validateObservationSources, type ObservationSourceRegistry } from './observation-sources.js'
 import {recordingCheckpointTool, SNAPSHOT_TOOL, type RecordingSnapshot} from './recording-snapshot.js'
 import {authenticatedObservationHosts,observationAuthDenial,observationHttpHint,observationSignature,redactProgress,resumeObservation,type ObservationProgress} from './observation-progress.js'
@@ -60,6 +60,7 @@ export async function executeObservationLoop(options: {
     inbox: conversation.inbox, status: 'idle', ctx: agentCtx, cancel: () => {},
     whenIdle: async () => {}, send: rejectMessage, followup: rejectMessage, steer: rejectMessage, inject: rejectMessage })
   const releaseAuthority = markAutonomousAgent(agent)
+  const releaseObservation = markObservationAgent(agent)
   const secrets = new Set<string>()
   for(const item of concerns)for(const m of `${item.reason}\n${item.executionInstructions??''}`.matchAll(/\b(?:gh[pousr]_|github_pat_|sk-|npm_)[\w-]+|(?:token|令牌|password|api[_-]?key)\s*[:：=]?\s*([A-Za-z0-9_./+-]{12,})/gi))secrets.add(m[1]??m[0])
   let toolSet: import('@deepseek-ai/dsh-tools').ResolvedToolSet | undefined
@@ -310,7 +311,7 @@ export async function executeObservationLoop(options: {
   finally {
     result.recording = concerns.filter(item => item.recordTarget && (syncing || checkpointed.has(item.id) || written.has(item.id) || item.recordingPending || result.error || result.candidates.some(candidate => candidate.concernId === item.id && candidate.changed))).map(item => ({concernId: item.id, state: written.has(item.id) ? 'synced' : 'pending'}))
     toolSet?.dispose()
-    result.completedAt = Date.now(); releaseAuthority(); await scope.dispose()
+    result.completedAt = Date.now(); releaseObservation(); releaseAuthority(); await scope.dispose()
   }
   return result
 }

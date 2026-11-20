@@ -118,6 +118,26 @@ test('terminal replies stay outside native process folding and leave tool result
     assert.deepEqual(node.data.blocks,nativeChatBlocks(meta))
   }
 })
+test('a reply receipt reuses identical visible text from its own native assistant step',()=>{
+  const make=(reply,assistant,kind='tool/result')=>{
+    const event={...result,type:kind,data:{...result.data,meta:reply,message:{...result.data.message,toolCallId:'reply-call'},rootCallId:'reply-call'}}
+    const location={kind:'step',step:{data:{get:key=>key==='assistant-step'?assistant:undefined}}}
+    const match=chatReplyDefinition.match(event)
+    return chatReplyDefinition.buildViewNode({key:'reply',id:match.id,state:reply,start:{event,location}})
+  }
+  const assistant={status:'settled',finalNode:{seq:3},blocks:[{kind:'text',text:'你可算来了\n还以为今天不来了'},{kind:'tool-call',callId:'reply-call'}]}
+  const textOnly={...meta,parts:meta.parts.filter(part=>part.type==='text')}
+  assert.equal(make(textOnly,assistant),null)
+  assert.deepEqual(make(meta,assistant)?.data.blocks,[nativeChatBlocks(meta)[1]])
+  assert.equal(make(textOnly,assistant,'tool/ptc-dispatch'),null)
+  assert.deepEqual(make(meta,undefined)?.data.blocks,nativeChatBlocks(meta))
+  assert.deepEqual(make(meta,{...assistant,blocks:[assistant.blocks[0],{kind:'tool-call',callId:'a different call'}]})?.data.blocks,nativeChatBlocks(meta))
+  assert.deepEqual(make(meta,{...assistant,status:'interrupted'})?.data.blocks,nativeChatBlocks(meta))
+  const different={...meta,parts:[{type:'text',text:'你终于回来了'}]}
+  assert.deepEqual(make(different,assistant)?.data.blocks,nativeChatBlocks(different))
+  const voice={...meta,parts:[],delivered:true,deliveryKind:'voice',originRouteId:'r',spokenText:assistant.blocks[0].text}
+  assert.deepEqual(make(voice,assistant)?.data.blocks,[{kind:'text',text:'[语音已发送]'}])
+})
 test('direct queued reply checks the original route and rechecks authorization between parts',async()=>{
   const channel={id:'c',companionId:'a',enabled:true,accountId:'account',direct:{baseUrl:'https://example.test',targetId:'room'}}
   const source={routeId:'r',sessionId:'s',accountId:'account',baseUrl:'https://example.test',targetId:'room'}

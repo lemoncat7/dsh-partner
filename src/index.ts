@@ -26,7 +26,7 @@ import {qqActionTools} from './channels/qq/actions.js'
 import { SleepService } from './character/sleep-service.js'
 import {ConcernExecutionDispatcher} from './concern-execution.js'
 import type { Context } from '@deepseek-ai/cordis'
-import { conversationMemoryScope } from './memory-scope.js'
+import { conversationMemoryScope, groupConversation } from './memory-scope.js'
 import {PersonaService} from './persona/service.js'
 import { dirname, join, resolve } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
@@ -216,7 +216,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     ctx.effect(()=>()=>workCleanup.close())
     const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply),async (run,input)=>{
       const state=store.snapshot(),route=backgroundRunRoute(state.sessions,run)
-      if(!route)return ''
+      if(!route||groupConversation(route,state.sessions))return ''
       const recalled=await memory.recallContext(run.ownerCompanionId,conversationMemoryScope(route,state.sessions.filter(r=>r.companionId===run.ownerCompanionId)),input,12,{includeHistory:false})
       return renderTaskPreferences(recalled.profile,recalled.relevant)
     },run=>agents.prepareBackgroundDelivery(run,{text:'',attachments:[]}),images)

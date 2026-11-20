@@ -34,6 +34,16 @@ function removeSupersededSnapshots(session:Session):number {
 function replaceRange(session:Session,seqs:SessionSeq[]):void {
  session.append('user/message',createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'snapshot',sections:[{name:ROLLING_CONTEXT_MARKER,text:'较早对话及已更新的上下文快照已移出工作窗口，原文仍保留；需要旧细节时调用 partner_memory_recall。'}]},content:[{type:'text',text:'较早对话及已更新的上下文快照已移出工作窗口，原文仍保留；需要旧细节时调用 partner_memory_recall。'}]}),{surfaceOp:{op:'replace',startSeq:seqs[0]!,endSeq:seqs.at(-1)!},sourceEventSeqs:seqs})
 }
+/** Shadow the old automatic memory projection while retaining the original event log. */
+export function removePrivateMemorySnapshots(session:Session):void {
+ for(const seq of [...session.surface.nodes]){
+  const e=session.eventAt(seq)
+  if(e?.type!=='user/message')continue
+  const source=e.data.source
+  if(String(source.kind)==='runtime-context'&&'form' in source&&source.form==='snapshot'&&source.sections.some(section=>section.name==='partner-conversation-memory'))replaceRange(session,[seq])
+ }
+}
+
 /** Logged surface replacements only: no provider interception, summary model or transcript deletion. */
 export function rollConversationContext(session:Session,settings:CompanionAutomation['memory']):number {
  if(!settings.rollingContextEnabled)return 0

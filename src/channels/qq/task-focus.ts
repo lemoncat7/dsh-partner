@@ -9,11 +9,11 @@ export function taskTool(name:string,args:unknown):boolean {
  return needsTaskPreamble(action.name,action.args)||action.name==='partner_chat_say'&&action.args.beforeTools===true||action.name==='partner_chat_reply'&&action.args.continueTurn===true||action.name==='partner_chat_progress'
 }
 /** Routing only: no model call, role text or durable conversation mutation. */
-export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefined,name:string,now=Date.now()):'normal'|'steer'|'queue'|'observe' {
+export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefined,name:string,now=Date.now(),verifiedFollowup=false):'normal'|'steer'|'queue'|'observe' {
  if(!event.qqGroup||!focus)return 'normal'
  const group=event.qqGroup,text=event.text.replace(/^\[对方 @ 了你\]\s*/u,'').trim()
- if(group.otherMention||group.replyTo==='other')return 'observe'
  const route=routeGroupReply(event,{name,now,seed:''})?.route
+ if(route==='other'||group.otherMention&&route!=='direct')return 'observe'
  const addressed=route==='direct'
  const owner=event.sender===focus.userId
  const request=text.startsWith(name)&&name?text.slice(name.length).replace(/^[\s，,:：]+/u,''):text
@@ -25,10 +25,10 @@ export function groupTaskInput(event:DirectMessage,focus:GroupTaskFocus|undefine
  if(!owner)return addressed?'queue':'normal'
  // Use arrival time so attachment preparation cannot age out a timely supplement.
  const age=(event.receivedAt??now)-focus.startedAt
- if(owner&&(event.media?.length||text&&!/^[\s\p{P}\p{S}]+$/u.test(text))){
+ if(addressed||verifiedFollowup||event.media?.length&&!text){
   if(focus.sentAt!==undefined)return 'steer'
   if(route!=='closing'&&age>=0&&age<=30000)return 'steer'
-  return 'normal'
+  return addressed?'queue':'normal'
  }
- return addressed?'queue':'observe'
+ return text&&!/^[\s\p{P}\p{S}]+$/u.test(text)?'normal':'observe'
 }

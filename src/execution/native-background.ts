@@ -1,5 +1,5 @@
 import {MAX_BACKGROUND_RETRIES,backgroundFollowup,offloadBackgroundImages,retryMode} from './background-retry.js'
-import {renderBackgroundImageReferences,type PartnerImageReferences} from '../attachments/image-references.js'
+import {renderBackgroundImageReferences,type ImageReferencePlan,type PartnerImageReferences} from '../attachments/image-references.js'
 import {runtimeSnapshot,runtimePolicy,runtimeSessionPolicy} from '../companions/runtime-policy.js'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
 import type {SessionEvent} from '@deepseek-ai/dsh-session'
@@ -22,13 +22,17 @@ import {isPartnerMcpOperation} from '../mcp/tool-entry.js'
 import {nativePresentation} from '../compat/native-presentation.js'
 import {channelReplyAllowed,directReplyTarget} from '../channels/reply-access.js'
 import {qqIdentityRelation} from '../channels/qq/identity-binding.js'
+import {qqGroupPeer} from '../channels/qq/settings.js'
 import {isPartnerOwnedTool} from './tool-ownership.js'
 import {actualAction} from '../chat/action-obligation.js'
 import {hasTaskPreamble} from './task-preamble.js'
 import {record,requiredText} from '../core/validation.js'
+import {isObservationAgent} from '../observation-contract.js'
 
 interface Activation {childId:string;name:string;result:Promise<{stopReason:string;structured?:unknown}>;dispose():Promise<void>}
-interface ActiveChild {run:ExecutionRun;parent:Agent;agent?:Agent;finalizing?:boolean;fault?:string;activation?:Activation|undefined;disposeScope?:()=>void;disposers?:Array<()=>void>}
+type ChildModel=Pick<Parameters<Agent['model']['select']>[0],'provider'|'model'>
+interface ModelSelectionSettings {current():{enabled:boolean;allowedModels:ChildModel[]}}
+interface ActiveChild {run:ExecutionRun;parent:Agent;resumeModel?:ChildModel;agent?:Agent;finalizing?:boolean;fault?:string;activation?:Activation|undefined;disposeScope?:()=>void;disposers?:Array<()=>void>}
 interface NativeRuntime {
  resolveMaxDepth?(configured?:number):number|undefined
  getProvider(name:string):unknown
@@ -40,6 +44,19 @@ interface NativeRuntime {
 const workTools=new Set(['partner_workflow','partner_skill','partner_browser','partner_mcp','partner_bilibili'])
 const forbidden=new Set(['partner_background_task','partner_chat_reply','partner_chat_say','partner_chat_progress','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_habits','partner_sleep','partner_agreement','partner_access_grants','partner_collaborate','partner_requirement','partner_task','partner_schedule'])
 const outputSchema={type:'object',additionalProperties:false,required:['text','files'],properties:{text:{type:'string'},files:{type:'array',description:'本次交付附件，最多八个',items:{type:'object',additionalProperties:false,required:['path','name','mediaType'],properties:{path:{type:'string'},name:{type:'string'},mediaType:{type:'string'}}}}}}
+function canResume(run:ExecutionRun):boolean{
+ const b=run.background
+ return !!b&&run.status==='canceled'&&!run.sessionCleanup?.deletedAt&&!b.discardedAt&&!b.stoppedAt&&!b.result&&!b.deliveredAt
+}
+function active(run:ExecutionRun):boolean{
+ return run.status==='queued'||run.status==='running'
+}
+function sameGroupReferenceImages(current:ImageReferencePlan|undefined,next:ImageReferencePlan|undefined):boolean{
+ if(current?.files||next?.files||next?.issue)return false
+ if(!next?.requested&&!next?.selected.length)return true
+ const previous=current?.selected??[]
+ return previous.length===next.selected.length&&previous.every((image,index)=>image.id===next.selected[index]?.id)
+}
 const instruction='只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
 export const PARTNER_BACKGROUND_PROVIDER={name:'partner-task',capabilities:{agentOptions:true,agentPreset:false,outputSchema:true,depthLimit:true},inheritsParentContext:false,prepareContinuable:async()=>({})}
 
@@ -58,13 +75,13 @@ export class NativeBackgroundTasks {
   this.detachGuard=(ctx.tools as ToolRuntime).guard(exec=>{
    const child=exec.agent&&this.children.get(exec.agent.session.id)
    if(!child){
-    if(!exec.agent||!runtimeSessionPolicy(this.store,exec.agent.session.id)?.rules.forceBackground)return
+    if(!exec.agent||isObservationAgent(exec.agent)||!runtimeSessionPolicy(this.store,exec.agent.session.id)?.rules.forceBackground)return
     if(exec.agent&&backgroundWork(exec.name,exec.arguments)){
      const events=exec.agent.session.snapshotEvents();if(!backgroundRequired(exec.name,exec.arguments,events,exec.callId))return
      const state=runtimeSnapshot(this.store),input=backgroundInput(events),route=backgroundOrigin(exec.agent.session.id,events,state.sessions,input),channel=state.channels.find(c=>c.id===route?.channelId)
      const eligible=route&&(route.kind==='local'||channel?.enabled&&channelReplyAllowed(state,route.channelId,route.userId))
      if(!eligible&&input&&isIdleContactNotice(input))return '当前自主活动的投递来源已失效，本次工作未执行'
-     if(eligible)return '本次工作尚未执行：这是执行型或连续多步任务，必须先通过 partner_background_task action=start 交给原生后台；同一任务正在执行且本轮是补充或修正时使用 update 和原 taskId；新任务的 input 带完整要求、引用编号和已完成进度。接收后前台简短确认并结束，不等待、轮询或重复执行。'
+     if(eligible)return '本次工作尚未执行：这是执行型或连续多步任务，必须先通过 partner_background_task action=start 交给原生后台；同一任务正在执行且本轮是补充或修正时使用 update 和原 taskId。input 带完整要求和已完成进度，referenceImages 按顺序传需要使用的会话图片。接收后前台简短确认并结束，不等待、轮询或重复执行。'
     }
     return
    }
@@ -84,8 +101,9 @@ export class NativeBackgroundTasks {
   this.detachCreated=typeof ctx.on==='function'?ctx.on('agent/created',async({agent})=>{
    const child=this.children.get(agent.session.id);if(!child)return
    this.authorize(child.run,child.parent)
+   if(child.resumeModel)agent.model.select(child.resumeModel)
    const definitions=child.parent.ctx.tools.definitions(child.parent).filter(t=>this.childToolAllowed(child.run,t.name)&&(workTools.has(t.name)||isPartnerMcpOperation(this.store,child.run.ownerCompanionId,t.name)))
-   const workspace='\n任务文件位置（路径资料，不是额外授权）：'+JSON.stringify({sourceDirectory:child.run.background!.sourceCwd,taskDirectory:child.run.background!.cwd})+'\n按任务需要在源目录核对已有素材。generate_image 只使用本次确认的图片编号或明确授权的文件，由平台直接读取；不要用符号链接绕过目录校验，不因路径不同就省略参考图或改用无关图片。'
+   const workspace='\n任务文件位置：'+JSON.stringify({sourceDirectory:child.run.background!.sourceCwd,taskDirectory:child.run.background!.cwd})+'\n前台随任务交接参考图时，调用 generate_image 留空 referenceImages，由平台直接带入。任务列出可用的历史图编号时，可按要求选取。'
    child.disposers=[agent.ctx.systemPrompt.section({name:'partner-background-task',order:-8,interpolate:false,text:instruction+workspace}),...definitions.map(t=>agent.ctx.tools.register({...t}))]
    child.agent=agent
    if(child.run.background!.retryMode==='images')offloadBackgroundImages(agent.session)
@@ -119,9 +137,16 @@ export class NativeBackgroundTasks {
   if(this.closing)throw Error('伙伴正在停止')
   if(this.store.isCompanionRemoving(run.ownerCompanionId)||parent.session.id!==run.background?.sourceSessionId||!backgroundSourceAllowed(runtimeSnapshot(this.store),run))throw Error('后台任务原会话或能力授权已变化')
  }
+ private configuredModel():ChildModel|undefined {
+  const settings=(this.ctx.get('subagentModelSelection' as never) as ModelSelectionSettings|undefined)?.current?.()
+  if(!settings?.enabled)return
+  const model=settings.allowedModels[0]
+  if(!model)throw Error('DSH 已开启子智能体模型选择，请先设置可用模型')
+  return model
+ }
  tool(owner:string):ToolDefinition {
-  return {name:'partner_background_task',description:'任何发言人交办或伙伴自主活动决定执行的调查、整理文档、生图、编程等工作（包括一次生图），一旦识别必须先用 start 交给 DSH 原生后台子任务，立刻返回前台；普通闲聊、轻量直接提问、准备好内容后的一次渠道发布（例如发说说）不创建任务，后者由原会话调用渠道工具。input 只写自包含的任务要求、约束和必要文件路径；不要复制聊天记录、人设、原始消息 JSON 或工具回执。后台从空白会话开始，不继承前台历史。后台独立完成并在交付时按原伙伴人设简短接话并按需将已有产物或确有必要的详细资料作为附件送回原会话，不为每个任务额外生成报告，无需轮询、等待或前台重复执行。list/status 查询当前发起人的任务；同一发起人补充或修正正在做的同一个任务时必须用 update 和原 taskId，只提交调整项；只在明确其他目标时 start。取消或放弃按原发起人要求执行。cancel 停止运行但保留任务进度，原发起人明确要求继续时用 resume 和原 taskId，可在 input 补充未完成目标；不另建任务或重复已完成操作。只有明确要求彻底放弃并删除任务时用 discard；完成交付后自动回收。',
-   parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','cancel','resume','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120}}},
+  return {name:'partner_background_task',description:'任何发言人交办或伙伴自主活动决定执行的调查、整理文档、生图、编程等工作（包括一次生图），一旦识别必须先用 start 交给 DSH 原生后台子任务，立刻返回前台；普通闲聊、轻量直接提问、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
+   parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','pause','cancel','resume','stop','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120},referenceImages:{type:'array',maxItems:8,items:{type:'string',minLength:1,maxLength:4096},description:'start、update、resume 时，按顺序交接任务需要的同会话图片编号或归档文件路径。没有参考图变更时省略；明确改为文生图时传空数组。'}}},
    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'原生后台任务'}),
    execute:async(raw,exec)=>{
     const args=record(raw),offered=exec.agent;if(!offered)throw Error('任务缺少原会话')
@@ -134,22 +159,70 @@ export class NativeBackgroundTasks {
     if(activity&&(!c||!activityPolicyCurrent(state,c,route)))throw Error('自主活动授权已变化')
     if(route.kind==='channel'&&(!channel?.enabled||channel.companionId!==owner||!channelReplyAllowed(state,route.channelId,route.userId)))throw Error('渠道授权已变化')
     const audience=activity?'activity':channel?.platform==='qq'&&!qqIdentityRelation(channel.qq,route.userId)?.matched?'member':undefined
-    const owned=()=>runtimeSnapshot(this.store).executionRuns.filter(r=>r.ownerCompanionId===owner&&r.background?.routeId===route.id&&(r.background.audience===audience||audience===undefined&&r.background.audience==='member'))
-    if(args.action==='list')return {tasks:owned().slice(-12).map(r=>({taskId:r.id,label:r.background!.label,status:r.status,retries:r.background!.retries??0,canResume:r.status==='canceled'&&!r.sessionCleanup?.deletedAt&&!r.background!.discardedAt&&!r.background!.stoppedAt,delivered:!!r.background!.deliveredAt}))}
+    const group=channel?.platform==='qq'&&route.kind==='channel'&&!activity?qqGroupPeer(route.userId):undefined
+    const owned=(r:ExecutionRun)=>r.ownerCompanionId===owner&&r.background?.routeId===route.id&&(r.background.audience===audience||audience===undefined&&r.background.audience==='member')
+    const inGroup=(r:ExecutionRun)=>{
+     const b=r.background
+     return !!group&&!!channel&&r.ownerCompanionId===owner&&!!b&&b.audience!=='activity'&&b.sourceKind!=='local'
+      &&b.channelId===route.channelId&&b.accountId===channel.accountId&&b.baseUrl===(channel.direct?.baseUrl??'')
+      &&b.targetId==='group:'+group.groupId&&qqGroupPeer(b.userId)?.groupId===group.groupId
+    }
+    const visible=(runs:readonly ExecutionRun[])=>runs.filter(r=>owned(r)||inGroup(r))
+    const admittedTools=()=>{
+     if(!exec.toolSet)return parent.ctx.tools.definitions(parent).map(t=>t.name)
+     let admitted=exec.toolSet.view(offered)
+     if(!admitted.size&&parent!==offered)admitted=exec.toolSet.view(parent)
+     if(!admitted.size)throw Error('当前回合的工具授权已结束')
+     return [...admitted.keys()]
+    }
+    const references=args.referenceImages
+    if(references!==undefined&&(!Array.isArray(references)||references.length>8||references.some(value=>typeof value!=='string'||!value.trim()||value.length>4096)))throw Error('参考图需要提供最多 8 个图片编号或文件路径')
+    const planImages=(inputId:string,input:string)=>this.images?.plan(parent,route,inputId,{references:references?.map(value=>value.trim()),input,signal:exec.signal})
+    const supplement=(r:ExecutionRun,input:string,images:NonNullable<ExecutionRun['background']>['imageReferences'])=>{
+     const b=r.background!
+     if(!owned(r)){
+      if(b.imageReferences?.files||images?.files)throw Error('任务涉及私照，由原发起人修改；本群可以查进度')
+      if(audience==='member'){
+       const allowed=new Set(admittedTools())
+       if(b.audience!=='member'||r.toolNames.some(name=>!allowed.has(name)))throw Error('任务已在本群后台运行，当前发言人的工具范围不足以直接修改')
+      }
+     }
+     const original=this.children.get(r.sessionId)?.parent??parent
+     return this.adoptSupplement(r,original,exec.signal,user.data.id,input,images)
+    }
+    if(args.action==='list'){
+     const tasks=visible(runtimeSnapshot(this.store).executionRuns)
+     return {tasks:[...tasks.filter(active),...tasks.filter(r=>!active(r)).slice(-12).reverse()].map(r=>({taskId:r.id,label:r.background!.label,status:r.status,...(r.background!.interruptedAt?{interrupted:true}:{}),retries:r.background!.retries??0,canResume:owned(r)&&canResume(r),delivered:!!r.background!.deliveredAt}))}
+    }
     if(args.action!=='start'){
-     const id=requiredText(args.taskId,'taskId',120),run=owned().find(r=>r.id===id);if(!run)throw Error('此发起人在当前会话没有这项后台任务')
-     if(args.action==='status')return {taskId:id,status:run.status,retries:run.background!.retries??0,canResume:run.status==='canceled'&&!run.sessionCleanup?.deletedAt&&!run.background!.discardedAt&&!run.background!.stoppedAt,...(run.outputSummary!==undefined?{output:run.outputSummary}:{}),...(run.error!==undefined?{error:run.error}:{}),delivered:!!run.background!.deliveredAt}
+     const id=requiredText(args.taskId,'taskId',120),run=visible(runtimeSnapshot(this.store).executionRuns).find(r=>r.id===id);if(!run)throw Error('当前会话没有这项后台任务')
+     if(args.action==='status')return {taskId:id,label:run.background!.label,status:run.status,...(run.background!.interruptedAt?{interrupted:true}:{}),retries:run.background!.retries??0,canResume:owned(run)&&canResume(run),...(owned(run)&&run.outputSummary!==undefined?{output:run.outputSummary}:{}),...(owned(run)&&run.error!==undefined?{error:run.error}:{}),delivered:!!run.background!.deliveredAt}
+     if(args.action==='update'){
+      if(!active(run))throw Error('任务当前不在执行，明确要求继续时使用 resume')
+      const input=requiredText(args.input,'input',16000)
+      return supplement(run,input,await planImages(user.data.id,input))
+     }
+     if(!owned(run))throw Error('停止、暂停和恢复由任务发起人操作')
      this.authorize(run,parent)
      if(args.action==='resume'){
       const user=[...events].reverse().find(e=>e.type==='user/message'&&e.data.source.kind==='user')
       if(user?.type!=='user/message')throw Error('恢复任务需要当前发起人的明确请求')
       if(['queued','running'].includes(run.status)&&run.background!.resumeInputId===user.data.id)return {kind:'partner-background-v1',taskId:id,childSessionId:run.sessionId,status:run.status,alreadyAccepted:true}
-      if(run.status!=='canceled'||run.sessionCleanup?.deletedAt||run.background!.discardedAt||run.background!.stoppedAt)throw Error('此任务未暂停或已回收，不能恢复；已删除的任务日志不能重建')
+      if(!canResume(run))throw Error('此任务未暂停或已回收，不能恢复；已删除的任务日志不能重建')
       if(!this.native().resumeActivation)throw Error('当前宿主尚未提供同一后台任务的原生恢复入口')
       const supplement=args.input===undefined?'':requiredText(args.input,'input',16000)
-      const imageReferences=this.images?.plan(parent,route,user.data.id)
+      const imageReferences=await planImages(user.data.id,supplement)
       let claimed=false
-      await this.store.update(s=>{const r=s.executionRuns.find(r=>r.id===id);if(!r||r.status!=='canceled'||r.sessionCleanup?.deletedAt||r.background!.discardedAt)throw Error('任务状态已变化，请重新查看');if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&['queued','running'].includes(r.status)).length>=3)throw Error('当前发起人已有三项执行中的后台任务');r.status='queued';delete r.completedAt;delete r.error;r.background!.attempt=(r.background!.attempt??0)+1;r.background!.resumeInputId=user.data.id;delete r.background!.retryMode;r.background!.retries=0;if(imageReferences)r.background!.imageReferences=imageReferences;else if(r.background!.imageReferences?.files)delete r.background!.imageReferences;delete r.background!.review;delete r.background!.foregroundMessageId;delete r.background!.foregroundReply;claimed=true})
+      await this.store.update(s=>{
+       const r=s.executionRuns.find(r=>r.id===id),b=r?.background
+       if(!r||!b||!canResume(r))throw Error('任务状态已变化，请重新查看')
+       if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&['queued','running'].includes(r.status)).length>=3)throw Error('当前发起人已有三项执行中的后台任务')
+       r.status='queued';delete r.completedAt;delete r.error
+       b.attempt=(b.attempt??0)+1;b.resumeInputId=user.data.id;delete b.retryMode;b.retries=0
+       if(imageReferences&&(imageReferences.requested||imageReferences.issue||!b.imageReferences||b.imageReferences.files))b.imageReferences=imageReferences
+       else if(b.imageReferences?.files)delete b.imageReferences
+       delete b.review;delete b.foregroundMessageId;delete b.foregroundReply;claimed=true
+      })
       if(!claimed)throw Error('任务恢复未接收')
       const restored=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)!
       try{
@@ -158,46 +231,53 @@ export class NativeBackgroundTasks {
       }catch(error){await this.save(id,r=>{if(r.background?.attempt===restored.background!.attempt){r.status='canceled';r.error='恢复未接收：'+String(error).slice(0,800)}});throw error}
      }
      const child=this.children.get(run.sessionId)
-     if(args.action==='cancel'||args.action==='discard'){
+     if(args.action==='pause'||args.action==='cancel'||args.action==='stop'||args.action==='discard'){
       if(!['queued','running','canceled','failed'].includes(run.status))throw Error('任务已完成，不能再次取消或删除')
-      await this.save(id,r=>{r.status='canceled';r.completedAt=Date.now();delete r.background!.retryMode;delete r.background!.review;if(!r.background!.deliveredAt)delete r.background!.result;if(args.action==='discard')r.background!.discardedAt=Date.now()})
+      const retire=args.action==='stop'||args.action==='discard'
+      await this.save(id,r=>{
+       const b=r.background!
+       if(r.status==='completed'||!retire&&(b.stoppedAt||b.discardedAt||r.sessionCleanup?.deletedAt))return
+       const now=Date.now()
+       r.status='canceled';r.completedAt??=now
+       delete b.retryMode;delete b.review;delete b.interruptedAt
+       if(!b.deliveredAt)delete b.result
+       if(args.action==='stop')b.stoppedAt??=now
+       if(args.action==='discard')b.discardedAt??=now
+      })
       await child?.activation?.dispose()
       if(child&&this.children.get(run.sessionId)===child)this.releaseChild(run.sessionId)
-      return {taskId:id,canceled:true,canResume:args.action!=='discard'&&!run.sessionCleanup?.deletedAt&&!run.background!.discardedAt&&!run.background!.stoppedAt,completedActionsPreserved:true,...(args.action==='discard'?{discarded:true}:{})}
+      const current=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)
+      return {taskId:id,canceled:current?.status==='canceled',canResume:!!current&&canResume(current),completedActionsPreserved:true,...(args.action==='stop'&&current?.background?.stoppedAt?{stopped:true}:{}),...(args.action==='discard'&&current?.background?.discardedAt?{discarded:true}:{})}
      }
-     if(!child?.activation||!['queued','running'].includes(run.status))throw Error('任务当前不在执行，明确要求继续时使用 resume')
-     this.authorize(run,parent)
-     if(args.action!=='update')throw Error('未知后台任务操作')
-     const input=requiredText(args.input,'input',16000)
-     const imageReferences=this.images?.plan(parent,route,user.data.id)
-     return this.adoptSupplement(run,parent,exec.signal,user.data.id,input,imageReferences)
+     throw Error('未知后台任务操作')
     }
-    const native=this.native(),label=requiredText(args.label,'label',80)
+    const label=requiredText(args.label,'label',80)
     if(typeof args.input!=='string'||!args.input.trim()||args.input.length>16000)throw Error('input 需要 1–16000 字的自包含任务')
     const input=args.input.trim()
-    const imageReferences=this.images?.plan(parent,route,user.data.id)
-    const prior=owned().find(r=>r.background!.inputId===user.data.id||r.background!.supplementInputIds?.includes(user.data.id));if(prior)return {kind:'partner-background-v1',taskId:prior.id,status:prior.status,alreadyAccepted:true}
-    const followup=backgroundFollowup(owned(),label,input,events,user.data.id)
-    if(followup)return this.adoptSupplement(followup,parent,exec.signal,user.data.id,input,imageReferences)
+    const fromInput=(r:ExecutionRun)=>r.background!.inputId===user.data.id||r.background!.supplementInputIds?.includes(user.data.id)
+    const receipt=(r:ExecutionRun)=>({kind:'partner-background-v1',taskId:r.id,status:r.status,alreadyAccepted:true})
+    const prior=visible(state.executionRuns).find(fromInput);if(prior)return receipt(prior)
+    const imageReferences=await planImages(user.data.id,input)
+    const matches=(runs:readonly ExecutionRun[])=>backgroundFollowup(visible(runs).filter(r=>owned(r)||sameGroupReferenceImages(r.background!.imageReferences,imageReferences)),label,input,events,user.data.id)
+    const reuse=(r:ExecutionRun)=>fromInput(r)||!owned(r)&&r.background!.input?.trim()===input&&!imageReferences?.issue
+     ? receipt(r)
+     : supplement(r,input,imageReferences)
+    const followup=matches(runtimeSnapshot(this.store).executionRuns)
+    if(followup)return reuse(followup)
+    this.native()
     const id='background-'+randomUUID(),childId='session-'+randomUUID(),cwd=join(parent.session.header.cwd??'/tmp','.partner-background',id)
-    let toolNames:string[]=[]
-    if(audience){
-     if(exec.toolSet){
-      let admitted=exec.toolSet.view(offered)
-      if(!admitted.size&&parent!==offered)admitted=exec.toolSet.view(parent)
-      if(!admitted.size)throw Error('当前回合的工具授权已结束，后台任务未启动')
-      toolNames=[...admitted.keys()]
-     }else toolNames=parent.ctx.tools.definitions(parent).map(t=>t.name)
-    }
+    const toolNames=audience?admittedTools():[]
     const run:ExecutionRun={id,kind:'work',ownerCompanionId:owner,sessionId:childId,sourceId:id,status:'queued',destroyAfterRun:false,startedAt:Date.now(),toolNames,background:{...(imageReferences?{imageReferences}:{}),...(audience?{audience}:{}),...(activity?{activityKind:route.idleContactState?.kind}:{}),routeId:route.id,sourceSessionId:route.sessionId,channelId:route.channelId,userId:route.userId,inputId:user.data.id,sourceKind:route.kind,sourceCwd:parent.session.header.cwd??'/tmp',accountId:channel?.accountId??'',baseUrl:channel?.direct?.baseUrl??'',targetId:route.kind==='local'?'':directReplyTarget(state,route.channelId,route.userId),label,input,cwd,capabilities:[...c.capabilities]}}
-    this.authorize(run,parent);await mkdir(cwd,{recursive:true,mode:0o700})
+    this.authorize(run,parent)
     let existing:ExecutionRun|undefined
-    await this.store.update(s=>{existing=s.executionRuns.find(r=>r.ownerCompanionId===owner&&r.background?.routeId===route.id&&(r.background.inputId===user.data.id||r.background.supplementInputIds?.includes(user.data.id)));if(existing)return;existing=backgroundFollowup(s.executionRuns.filter(r=>r.ownerCompanionId===owner&&r.background?.routeId===route.id&&r.background.audience===audience),label,input,events,user.data.id);if(existing)return;if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&['queued','running'].includes(r.status)).length>=3)throw Error('当前发起人已有三项执行中的后台任务');if(s.executionRuns.length>=500){const i=s.executionRuns.findIndex(r=>!['queued','running'].includes(r.status)&&(r.status!=='canceled'||!!r.background?.discardedAt)&&!(r.background?.review&&!r.background.review.doneAt)&&!(r.background?.result&&!r.background.deliveredAt));if(i<0)throw Error('任务记录已满');s.executionRuns.splice(i,1)}s.executionRuns.push(run)})
-    if(existing){
-     if(existing.background!.inputId!==user.data.id&&!existing.background!.supplementInputIds?.includes(user.data.id))
-      return this.adoptSupplement(existing,parent,exec.signal,user.data.id,input,imageReferences)
-     return {kind:'partner-background-v1',taskId:existing.id,status:existing.status,alreadyAccepted:true}
-    }
+    await this.store.update(s=>{
+     existing=visible(s.executionRuns).find(fromInput)??matches(s.executionRuns)
+     if(existing)return
+     if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&active(r)).length>=3)throw Error('当前发起人已有三项执行中的后台任务')
+     if(s.executionRuns.length>=500){const i=s.executionRuns.findIndex(r=>!active(r)&&(r.status!=='canceled'||!!r.background?.discardedAt)&&!(r.background?.review&&!r.background.review.doneAt)&&!(r.background?.result&&!r.background.deliveredAt));if(i<0)throw Error('任务记录已满');s.executionRuns.splice(i,1)}
+     s.executionRuns.push(run)
+    })
+    if(existing)return reuse(existing)
     const activation=await this.activate(run,parent,events,exec.signal,input,false)
     if(runtimePolicy(this.store,owner)?.rules.taskPreamble&&hasTaskPreamble(parent.session.snapshotEvents()))exec.concludeTurn()
     return {kind:'partner-background-v1',taskId:id,childSessionId:childId,name:activation.name,status:'running',independent:true}
@@ -207,25 +287,42 @@ export class NativeBackgroundTasks {
   this.authorize(run,parent)
   const child=this.children.get(run.sessionId)
   if(!child?.activation)throw Error('同一后台任务正在启动或恢复；补充还未送达，请稍后对原 taskId 使用 update。')
-  let claimed=false
+  let claimed=false,previousReferences:typeof referencePlan
   await this.save(run.id,r=>{
    const b=r.background!
    if(r.status!=='running'||b.supplementInputIds?.includes(inputId))return
    b.supplementInputIds=[...b.supplementInputIds??[],inputId];claimed=true
-   if(referencePlan?.requested||!b.imageReferences&&referencePlan)b.imageReferences=referencePlan
+   if(referencePlan&&(referencePlan.requested||referencePlan.issue||!b.imageReferences)){
+    previousReferences=b.imageReferences
+    b.imageReferences=referencePlan
+   }
   })
   if(claimed){
-   if(referencePlan?.requested)child.run.background!.imageReferences=referencePlan
-   try{await this.native().sendMessage(parent,run.sessionId,[{type:'text',text:'原发起人补充同一项任务。以下是修正后的要求；保留可用进展，只改受影响部分。\n'+input+(referencePlan?.requested?'\n'+renderBackgroundImageReferences(referencePlan):'')}],{signal})}
-   catch(error){await this.save(run.id,r=>{const ids=r.background?.supplementInputIds;if(ids)r.background!.supplementInputIds=ids.filter(id=>id!==inputId)});throw error}
+   const referenceContext=referencePlan&&(referencePlan.requested||referencePlan.issue)?renderBackgroundImageReferences(referencePlan):''
+   try{await this.native().sendMessage(parent,run.sessionId,[{type:'text',text:'原会话补充同一项任务。以下是修正后的要求；保留可用进展，只改受影响部分。\n'+input+(referenceContext?'\n'+referenceContext:'')}],{signal})}
+   catch(error){
+    await this.save(run.id,r=>{
+     const b=r.background!
+     if(b.supplementInputIds)b.supplementInputIds=b.supplementInputIds.filter(id=>id!==inputId)
+     if(b.imageReferences?.inputId===inputId){
+      if(previousReferences)b.imageReferences=previousReferences
+      else delete b.imageReferences
+     }
+    })
+    throw error
+   }
   }
-  return {kind:'partner-background-v1',taskId:run.id,childSessionId:run.sessionId,status:'running',alreadyAccepted:true,updated:claimed}
+  const status=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===run.id)?.status??run.status
+  return {kind:'partner-background-v1',taskId:run.id,childSessionId:run.sessionId,status,alreadyAccepted:true,updated:claimed}
  }
  private async activate(run:ExecutionRun,parent:Agent,events:ReturnType<Agent['session']['snapshotEvents']>,signal:AbortSignal,input:string,resume:boolean):Promise<Activation>{
   const native=this.native(),childId=run.sessionId,id=run.id,attempt=run.background!.attempt??0,route=backgroundRunRoute(runtimeSnapshot(this.store).sessions,run)!
   const child:ActiveChild={run,parent};this.children.set(childId,child)
   const release=()=>{if(this.children.get(childId)===child)this.releaseChild(childId)}
   try{
+   const model=this.configuredModel()
+   if(resume&&model)child.resumeModel=model
+   else if(!resume)await mkdir(run.background!.cwd,{recursive:true,mode:0o700})
    child.disposeScope=bindBackgroundScope(this.store,childId,{owner:run.ownerCompanionId,audience:run.background!.audience,browserScope:browserAudience(run.ownerCompanionId,parent.session.id,events,runtimeSnapshot(this.store))??JSON.stringify([route.channelId,route.userId]),authorize:()=>this.authorize(run,parent)})
    const companion=runtimeSnapshot(this.store).companions.find(c=>c.id===run.ownerCompanionId)
    const preferences=companion?.characterCard?.enabled&&companion.automation?.memory?.enabled?await this.preferences?.(run,input):undefined
@@ -233,7 +330,7 @@ export class NativeBackgroundTasks {
    const images=run.background!.imageReferences
    const referenceContext=images?renderBackgroundImageReferences(images):''
    const prompt=[{type:'text',text:input},...(referenceContext?[{type:'text',text:referenceContext}]:[]),...(preferences?[{type:'text',text:preferences}]:[])]
-   const spec={provider:PARTNER_BACKGROUND_PROVIDER.name,childId,parent,signal,delivery:'caller',label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,maxDepth:Math.min(1,native.resolveMaxDepth?.()??1)}
+   const spec={provider:PARTNER_BACKGROUND_PROVIDER.name,childId,parent,signal,delivery:'caller',label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,maxDepth:Math.min(1,native.resolveMaxDepth?.()??1),...(!resume&&model?{agentOptions:model}:{})}
    child.activation=resume?await native.resumeActivation!(spec):await native.startActivation(spec)
    this.authorize(run,parent)
    if(runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)?.status==='canceled')throw Error('任务已被取消')
@@ -265,6 +362,7 @@ export class NativeBackgroundTasks {
   await this.save(id,r=>{
    if(r.status==='canceled'||r.background!.result||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return
    r.status=restart?'canceled':'failed';r.completedAt=Date.now();r.error=review.reason;r.background!.review=review
+   if(restart)r.background!.interruptedAt=r.completedAt
    if(retry)r.background!.retryMode=retry
    else delete r.background!.retryMode
    if((r.background!.retries??0)>=MAX_BACKGROUND_RETRIES)r.background!.review.canResume=false
@@ -381,7 +479,7 @@ export class NativeBackgroundTasks {
    files.push({path,name:requiredText(file.name,'name',240)||basename(path),mediaType:requiredText(file.mediaType,'mediaType',200)})
   }
   let committed=false
-  await this.save(id,r=>{if(r.status==='canceled'||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return;committed=true;r.status='completed';delete r.error;r.completedAt=Date.now();r.outputSummary=text;r.background!.result={text,files};delete r.background!.retryMode;delete r.background!.review})
+  await this.save(id,r=>{if(r.status==='canceled'||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return;committed=true;r.status='completed';delete r.error;r.completedAt=Date.now();r.outputSummary=text;r.background!.result={text,files};delete r.background!.retryMode;delete r.background!.review;delete r.background!.interruptedAt})
   if(committed)await this.deliverResult(id)
  }
  private deliverResult(id:string):Promise<void>{
@@ -393,18 +491,19 @@ export class NativeBackgroundTasks {
   const b=run.background,reply:PartnerReply={text:b.result!.text,attachments:b.result!.files.map(f=>({...f,kind:'file'}))}
   try{await this.deliver(run,reply);await this.save(id,r=>{r.background!.deliveredAt=Date.now();delete r.background!.deliveryError})}catch(error){await this.save(id,r=>{r.background!.deliveryError=String(error).slice(0,1000)})}
  }
- private async recoverSavedOutput(run:ExecutionRun):Promise<void>{
-  const persistence=this.ctx.get('sessionPersistence') as {open?:(id:string,mode:'read')=>Promise<{header:{parentSession?:string};inheritedEventCount:number;read(offset?:number):Promise<{events:import('@deepseek-ai/dsh-session').SessionEvent[]}>;close():Promise<void>}>}|undefined
-  if(!persistence?.open)return
-  const handle=await persistence.open(run.sessionId,'read')
-  try{
-   if(handle.header.parentSession!==run.background!.sourceSessionId)throw Error('后台恢复来源不匹配')
-   const {events}=await handle.read(handle.inheritedEventCount)
-   const end=[...events].reverse().find(e=>e.type==='turn/end')
-   if(end?.type!=='turn/end'||end.data.reason.kind!=='completed')return
-   const call=[...events].reverse().find(e=>e.type==='tool/call'&&e.data.name==='structured_output')
-   if(call?.type==='tool/call')await this.finished(run.id,{stopReason:'completed',structured:typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments})
-  }finally{await handle.close()}
+ private async recoverSavedOutput(run:ExecutionRun):Promise<boolean>{
+  const events=[...await this.readChildEvents(run)].reverse()
+  const endIndex=events.findIndex(e=>e.type==='turn/end'||e.type==='turn/start')
+  const end=events[endIndex]
+  if(end?.type!=='turn/end'||end.data.reason.kind!=='completed')return false
+  const startIndex=events.findIndex((event,index)=>index>endIndex&&event.type==='turn/start')
+  const turn=events.slice(endIndex+1,startIndex<0?undefined:startIndex)
+  const callIndex=turn.findIndex(e=>e.type==='tool/call'&&e.data.name==='structured_output')
+  const call=turn[callIndex]
+  if(call?.type!=='tool/call'||!turn.slice(0,callIndex).some(e=>e.type==='tool/result'&&e.data.message.toolCallId===call.data.callId&&!e.data.message.isError))return false
+  const structured=typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments
+  await this.finished(run.id,{stopReason:'completed',structured},run.background!.attempt??0)
+  return runtimeSnapshot(this.store).executionRuns.find(r=>r.id===run.id)?.status==='completed'
  }
  async recoverDeliveries():Promise<void>{
   if(this.closing||this.recovering)return
@@ -414,8 +513,10 @@ export class NativeBackgroundTasks {
     const b=run.background
     if(!b||b.discardedAt)continue
     if(['queued','running'].includes(run.status)){
-     if(!this.children.has(run.sessionId)&&!(this.ctx.get('agents') as {get?:(id:string)=>unknown}|undefined)?.get?.(run.sessionId))
-      await this.failed(run.id,'服务已重启，任务保留进度，转回原前台判断',b.attempt??0,true)
+     if(this.children.has(run.sessionId)||(this.ctx.get('agents') as {get?:(id:string)=>unknown}|undefined)?.get?.(run.sessionId))continue
+     let recoveryError='服务已重启，任务保留进度，转回原前台判断'
+     try{if(await this.recoverSavedOutput(run))continue}catch(error){recoveryError+='；'+diagnostic(error)}
+     await this.failed(run.id,recoveryError,b.attempt??0,true)
     }else if(run.status==='completed'&&b.result&&!b.deliveredAt){
      await this.deliverResult(run.id)
     }else if(b.review){

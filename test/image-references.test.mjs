@@ -94,16 +94,68 @@ test('image-reference private files require exact current authorization and neve
 })
 test('image-reference background task uses frozen references with no task-directory copy',async t=>{
  const {session,state,service,store,ctx,agent}=fixture(t)
- const id=add(session,'改这张图',[one]),imageReferences=service.plan(agent,route,id)
- const run={id:'work',ownerCompanionId:'c',sessionId:'child',status:'running',background:{sourceKind:'local',sourceSessionId:'source',routeId:'web',userId:route.userId,channelId:route.channelId,capabilities:[],imageReferences}}
+ add(session,'稍后用这张',[two])
+ const id=add(session,'改这张图',[one]),imageReferences=await service.plan(agent,route,id)
+ const run={id:'work',ownerCompanionId:'c',sessionId:'child',status:'running',background:{sourceKind:'local',sourceSessionId:'source',routeId:'web',userId:route.userId,channelId:route.channelId,inputId:id,capabilities:[],imageReferences}}
  state.executionRuns.push(run)
  const child={session:{id:'child',header:{cwd:'/tmp/task'},snapshotEvents:()=>[]}}
  await assert.rejects(()=>service.resolve(child,[],signal()),/授权已失效/)
  const dispose=bindBackgroundScope(store,'child',{owner:'c',browserScope:'local',authorize(){}});t.after(dispose)
- add(session,'新消息与旧任务无关',[two])
+ const later=pic('3','后来的图.png');add(session,'新消息与旧任务无关',[later])
  const resolved=await service.resolve(child,[],signal())
  assert.equal(resolved.uploads[0].source,imageReferenceId(one))
+ assert.equal((await service.resolve(child,[imageReferenceId(two)],signal())).uploads[0].source,imageReferenceId(two))
+ await assert.rejects(()=>service.resolve(child,[imageReferenceId(later)],signal()),/同一会话里的引用记录/)
  assert.equal(ctx.agents.get('source'),agent)
+})
+
+test('background uses the ordered foreground handoff even when the current message carries another image',async t=>{
+ const cwd=await mkdtemp(join(tmpdir(),'partner-image-handoff-'));t.after(()=>rm(cwd,{recursive:true,force:true}))
+ const {session,state,service,store,ctx,agent}=fixture(t,cwd)
+ const sourceBytes=Buffer.from('abc'),earlier=pic(createHash('sha256').update(sourceBytes).digest('hex'),'原图.png')
+ const archived=join(cwd,'stored-image.png');await writeFile(archived,sourceBytes)
+ const unknown=join(cwd,'other-image.png');await writeFile(unknown,'xyz')
+ add(session,'这两张是原图',[earlier,one])
+ const inputId=add(session,'用先前的两张做配图',[two])
+ const handoff=references=>service.plan(agent,route,inputId,{references,input:'做配图',signal:signal()})
+ await assert.rejects(()=>handoff([unknown]),/前台交接的参考图在原会话中找不到/)
+ const imageReferences=await handoff([imageReferenceId(one),archived])
+ assert.deepEqual(imageReferences.selected.map(r=>r.id),[imageReferenceId(one),imageReferenceId(earlier)])
+ const implicit=await service.plan(agent,route,inputId,{input:'参考 '+imageReferenceId(earlier),references:undefined,signal:signal()})
+ assert.equal(implicit.selected[0].id,imageReferenceId(earlier))
+ state.executionRuns.push({id:'work',ownerCompanionId:'c',sessionId:'child',status:'running',background:{sourceKind:'local',sourceSessionId:'source',routeId:'web',userId:route.userId,channelId:route.channelId,inputId,capabilities:[],imageReferences}})
+ const child={session:{id:'child',header:{cwd:'/tmp/task'}}}
+ const dispose=bindBackgroundScope(store,'child',{owner:'c',browserScope:'local',authorize(){}});t.after(dispose)
+ ctx.agents.get=()=>undefined
+ for(const requested of [[],[imageReferenceId(two)]]){
+  const resolved=await service.resolve(child,requested,signal())
+  assert.deepEqual(resolved.uploads.map(r=>r.source),[imageReferenceId(one),imageReferenceId(earlier)])
+ }
+ const exact=add(session,'只用 '+imageReferenceId(one),[two])
+ const exactPlan=await service.plan(agent,route,exact,{references:[imageReferenceId(two)],input:'做配图',signal:signal()})
+ assert.deepEqual(exactPlan.selected.map(i=>i.id),[imageReferenceId(one)])
+ const noReference=add(session,'这次纯文字生图',[two])
+ const textOnly=await service.plan(agent,route,noReference,{references:[imageReferenceId(two)],input:'做配图',signal:signal()})
+ assert.deepEqual(textOnly.selected,[])
+})
+
+test('foreground can hand off a received public room image but never another room or private chat image',async t=>{
+ const {session,state,service,agent,ctx,store}=fixture(t)
+ const first={...route,id:'member-a',kind:'channel',channelId:'qq',userId:'group:1129721318:22334455'}
+ const second={...first,id:'member-b',userId:'group:1129721318:33445566'}
+ const outside={...first,id:'elsewhere',userId:'group:99887766:22334455'}
+ const channel={id:'qq',platform:'qq',enabled:true,accountId:'55667788',companionId:'c',qq:{groupReplies:true,groupIds:['1129721318'],autonomousGroupIds:['1129721318']}}
+ state.channels=[channel];state.pairings=[];state.sessions=[first,second,outside]
+ const origin=(r,extra)=>({routeId:r.id,channelId:r.channelId,userId:r.userId,imageScope:'["55667788","",""]',...extra})
+ const imageMessageId='qq:55667788:'+second.userId+':-1004'
+ add(session,'发给群里的图',[one],origin(second,{imageSources:[{messageId:imageMessageId,image:one}]}))
+ add(session,'另一个群的图',[two],origin(outside))
+ const inputId=add(session,'用群里那张图',[],origin(first,{imageRequest:'用群里那张图'}))
+ const handoff=references=>service.plan(agent,first,inputId,{references,input:'做配图',signal:signal()})
+ assert.deepEqual((await handoff([imageReferenceId(one)])).selected.map(i=>i.id),[imageReferenceId(one)])
+ await assert.rejects(()=>handoff([imageReferenceId(two)]),/原会话中找不到/)
+ const cached=await PartnerAgentRuntime.prototype.quotedImages.call({ctx,store,handles:new Map()},'c','qq',second.userId,'-1004')
+ assert.equal(cached[0].image.attachmentId,one.attachmentId)
 })
 test('image-reference archive reuses only today and works after the old dated folder is cleared',async t=>{
  const cwd=await mkdtemp(join(tmpdir(),'partner-saved-images-'));t.after(()=>rm(cwd,{recursive:true,force:true}))

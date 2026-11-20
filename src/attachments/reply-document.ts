@@ -7,7 +7,7 @@ export const REPLY_DOCUMENT_SCHEMA = {
 }
 export const WORK_REPORT_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['runIds'],
-  properties: { name: { type: 'string', maxLength: 120, description: '按本轮任务主题命名的 .md 文件名，例如“视频接口核验.md”，不要固定叫工作结果。' }, runIds: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: '当前回合 partner_work_execute 返回的真实 runId；程序原样收录事实、未知、依据和产物。' } },
+  properties: { name: { type: 'string', maxLength: 120, description: '按本轮任务主题命名的 .md 文件名，例如“视频接口核验.md”，不要固定叫工作结果。' }, runIds: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: '当前回合 partner_work_execute 返回的不重复的真实 runId；程序原样收录事实、未知、依据和产物。' } },
 }
 export function replyDocument(raw: unknown, work: unknown, events: readonly SessionEvent[]): {name: string; content: string} {
   if (raw !== undefined) {

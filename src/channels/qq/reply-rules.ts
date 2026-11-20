@@ -2,7 +2,8 @@ import type { DirectMessage } from '../direct/transport.js'
 import { isAttentionCall, isClearScene, type AttentionPrediction } from './attention-classifier.js'
 
 export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[]; route:'direct'|'continuation'|'semantic'|'fallback'|'other'|'closing'|'opportunity' }
-export interface ReplyScoreContext { name:string; recent?:{at:number;text:string}; now:number; seed:string; semantic?:AttentionPrediction; quickContinuation?:boolean; otherConversation?:boolean; quietRecent?:{at:number;text:string}; groupRecent?:{at:number;text:string} }
+interface ReplyEvidence {at:number;text:string;input?:string}
+export interface ReplyScoreContext { name:string; recent?:ReplyEvidence; now:number; seed:string; semantic?:AttentionPrediction; quickContinuation?:boolean; otherConversation?:boolean; quietRecent?:ReplyEvidence; groupRecent?:ReplyEvidence }
 const normalized=(text:string)=>text.slice(0,1200).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'').slice(0,160)
 export function topicSimilarity(left:string,right:string):number {
  const grams=(text:string)=>{const chars=Array.from(normalized(text)),out=new Set<string>();for(let i=1;i<chars.length;i++)out.add(chars[i-1]!+chars[i]!);return out}
@@ -12,6 +13,15 @@ export function topicSimilarity(left:string,right:string):number {
 }
 export const CONVERSATION_WINDOW_MS=5*60_000
 export const GROUP_CONVERSATION_WINDOW_MS=3*60_000
+export function topicContinues(text:string,context:ReplyScoreContext):boolean {
+ const anchor=context.groupRecent
+ if(!anchor||context.now-anchor.at<0||context.now-anchor.at>=GROUP_CONVERSATION_WINDOW_MS)return false
+ const scene=context.semantic?.scene
+ const freshTopic=scene?.label==='topic'&&isClearScene(scene)
+ return (context.semantic?.replySimilarity??0)>=(freshTopic ? .6 : .4)
+  || Math.max(topicSimilarity(text,anchor.text),topicSimilarity(text,anchor.input??''))>=.24
+  || !freshTopic&&context.semantic?.replySimilarity===undefined&&(context.semantic?.contextSimilarity??0)>=.55
+}
 export function activeConversation(context:ReplyScoreContext):boolean {
  const age=context.recent?context.now-context.recent.at:Infinity
  return age>=0&&age<CONVERSATION_WINDOW_MS
@@ -46,62 +56,74 @@ export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  if(group?.mentioned)return decide(true,'direct','明确 @ 伙伴')
  if(group?.replyTo==='self')return decide(true,'direct','引用伙伴已确认发送的消息')
  if(mentionsOtherRecipient(event)||group?.replyTo==='other')return decide(false,'other','消息明确发给其他成员')
+ if(group?.hasReply)return decide(false,'other','引用对象未确认，先旁听')
  if(!group?.hasReply&&directAddress(text,context.name.trim()))return decide(true,'direct','直接叫到角色名字')
  if(group?.otherMention)return undefined // Ambiguous recipient: require the local model, never a recency/public-question shortcut.
  if(!event.media?.length&&/^(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了|晚安|拜拜|下次聊|先走了)[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
  if(!event.media?.length&&/^[\s\p{P}\p{S}]+$/u.test(text)&&!activeConversation(context))return decide(false,'fallback','孤立标点或符号，没有明确对话对象')
  if(/(?:大家|各位|你们).{0,16}(?:觉得|怎么看|谁会|能不能|来看看|帮忙)|(?:有没有人|有人(?:知道|会|能|懂))/u.test(text))return decide(true,'opportunity','面向全群的询问或交流邀请，进入接话判断')
- if(context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员刚收到回复，连续补充直接接入当前对话')
+ if(!text&&event.media?.length&&context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员紧接着补发了附件')
  return undefined
 }
 export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore {
  const routed=routeGroupReply(event,context);if(routed)return routed
  const text=event.text.trim(),semantic=context.semantic
  const decide=(reply:boolean,route:ReplyScore['route'],reason:string,score=reply?100:0):ReplyScore=>({reply,route,score,probability:reply?1:0,reasons:[reason]})
+ const opportunity=(probability:number,score:number,reason:string):ReplyScore=>{
+  let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
+  const reply=(hash>>>0)/4294967296<probability
+  return {reply,route:'opportunity',score,probability,reasons:[reason+(reply?'':'，本次旁听')]}
+ }
  if(event.qqGroup?.otherMention)return isAttentionCall(semantic)
   ?decide(true,'semantic','本地语义识别为向伙伴提问，@ 的成员是谈论对象',Math.round(semantic!.confidence*100))
   :decide(false,'other','提及其他成员，但缺少向伙伴说话的明确语义依据')
- // Recency alone cannot make unrelated group chatter a continuation.
- // Require semantic evidence tied to the partner's actual delivered reply.
- if(activeConversation(context)&&(semantic?.replySimilarity??0)>=.4&&(text||event.media?.length))return decide(true,'continuation','内容承接伙伴刚才的实际回复，进入上下文判断')
  if(semantic){
   const score=Math.round(semantic.confidence*100)
   const scene=semantic.scene,sceneClear=isClearScene(scene)
-  if(isAttentionCall(semantic))return decide(true,'semantic','本地语义识别为呼唤，按呼唤证据接入',score)
+  const called=isAttentionCall(semantic)
+  const otherScene=scene?.label==='other'&&(context.otherConversation||semantic.label==='other'||sceneClear&&(!called||scene.confidence>=.6))
+  const otherIntent=semantic.label==='other'&&(context.otherConversation||semantic.confidence>=.72&&semantic.margin>=.35)
+  if(otherScene||otherIntent)
+   return decide(false,'other','场景指向其他成员，先旁听',score)
+  if(called)return decide(true,'semantic','本地语义识别为呼唤，按呼唤证据接入',score)
+  const question=sceneClear&&scene?.label==='question'
+  if(activeConversation(context)&&text&&(semantic.replySimilarity??0)>=.4&&(!context.otherConversation||question&&(semantic.replySimilarity??0)>=.55))
+   return decide(true,'continuation','内容承接伙伴刚才的实际回复，进入上下文判断',score)
   // A scene is an opportunity, never a replacement for explicit addressing/stop facts.
-  if(sceneClear&&['other','close','background'].includes(scene!.label))return decide(false,'semantic',`场景识别：${scene!.label==='other'?'内容指向其他人':scene!.label==='close'?'确认或收尾':'没有交流内容'}，先旁听`,Math.round(scene!.confidence*100))
-  const groupAge=context.groupRecent?context.now-context.groupRecent.at:Infinity
+  if(sceneClear&&['close','background'].includes(scene!.label))return decide(false,'semantic',`场景识别：${scene!.label==='close'?'确认或收尾':'没有交流内容'}，先旁听`,Math.round(scene!.confidence*100))
   const strongNegative=['other','close','background'].includes(semantic.label)&&semantic.confidence>=.72&&semantic.margin>=.35
-  if((groupAge>=0&&groupAge<GROUP_CONVERSATION_WINDOW_MS||context.quietRecent)&&!strongNegative&&(semantic.contextSimilarity??0)>=.45){
-   return decide(true,'continuation','伙伴已参与本群话题，其他成员的相关补充按共同续聊处理',score)
+  if(context.quietRecent&&!context.groupRecent&&!context.otherConversation&&!strongNegative&&(semantic.contextSimilarity??0)>=.45){
+   return decide(true,'continuation','群聊停顿后继续刚才有送达记录的话题',score)
   }
   if(sceneClear&&['question','banter','share','topic'].includes(scene!.label)){
-   const related=(semantic.replySimilarity??0)>=.4||!!context.quietRecent&&(semantic.contextSimilarity??0)>=.4
-   const interested=(semantic.profileSimilarity??0)>=.45
-   const established=activeConversation(context)||groupAge>=0&&groupAge<GROUP_CONVERSATION_WINDOW_MS
-   const probability = established || related ? 1 : (scene!.label==='question' || scene!.label==='topic') ? .75 : interested ? .65 : context.otherConversation ? .25 : .5
-   let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
-   const reply=(hash>>>0)/4294967296<probability
+   const related=topicContinues(text,{...context,semantic})
    const names={question:'求助或观点交流',banter:'玩笑、接梗或吐槽',share:'分享见闻或情绪',topic:'开启新话题'}
-   return {reply,route:established||related?'continuation':'opportunity',score:Math.round(scene!.confidence*100),probability,reasons:[`场景识别：${names[scene!.label as keyof typeof names]}；${established||related?'顺着已参与的话题接话':interested?'与当前伙伴设定相关，选择是否参与':context.otherConversation?'其他成员正在交流，克制插话':'有参与机会，选择是否接话'}${reply?'':'，本次旁听'}`]}
+   const reason=`场景识别：${names[scene!.label as keyof typeof names]}`
+   if(!context.otherConversation&&!context.groupRecent&&(semantic.replySimilarity??0)>=.4)
+    return decide(true,'continuation',reason+'；与已送达的回复相关',score)
+   if(related)return opportunity(question ? .45 : .28,score,reason+'；群里正在聊同一话题，选择性接话')
+   const interested=(semantic.profileSimilarity??0)>=.45
+   const priority=question||scene!.label==='topic'
+   const probability=priority ? (context.otherConversation ? .5 : .75) : interested ? .65 : context.otherConversation ? .25 : .5
+   return opportunity(probability,Math.round(scene!.confidence*100),reason+'；'+(interested?'与当前伙伴设定相关，选择是否参与':context.otherConversation?'其他成员正在交流，克制插话':'有参与机会，选择是否接话'))
+  }
+  if(['engage','address'].includes(semantic.label)&&topicContinues(text,{...context,semantic})){
+   return opportunity(.28,score,'与群内已经参与过的话题相关，选择性接话')
   }
   const clear=semantic.confidence>=.65&&semantic.margin>=.15||semantic.confidence>=.58&&semantic.margin>=.2||semantic.confidence>=.52&&semantic.margin>=.25
   const related=semantic.confidence>=.48&&semantic.margin>=.12&&(semantic.contextSimilarity??0)>=.4
   if(['address','engage'].includes(semantic.label)&&(clear||related)){
-   if(semantic.label==='engage'&&context.otherConversation&&!activeConversation(context)&&!/大家|各位|有没有人|有人(?:知道|会|能)|你们(?:觉得|怎么看)/u.test(text)){
+   if(semantic.label==='engage'&&context.otherConversation&&!/大家|各位|有没有人|有人(?:知道|会|能)|你们(?:觉得|怎么看)/u.test(text)){
     // A chance to join shared chatter, not an obligation to answer every participant.
-    let hash=2166136261;for(const char of context.seed)hash=Math.imul(hash^char.charCodeAt(0),16777619)
-    const probability=.65,reply=(hash>>>0)/4294967296<probability
-    return {reply,route:'opportunity',score,probability,reasons:[reply?'本地语义发现可交流内容，选择进入自然接话判断':'有接话机会，本次选择旁听']}
+    return opportunity(context.groupRecent ? .28 : .45,score,'本地语义发现可交流内容，选择是否加入群友对话')
    }
    return decide(true,'semantic',clear?'本地语义识别为呼唤或交流':'结合近期群聊话题，识别到接话机会',score)
   }
-  if(['close','background'].includes(semantic.label)&&!(semantic.confidence>=.72&&semantic.margin>=.35)&&((semantic.contextSimilarity??0)>=.6||semantic.confidence<.58&&semantic.margin<.2&&(semantic.contextSimilarity??0)>=.32)){
+  if(!context.otherConversation&&['close','background'].includes(semantic.label)&&!strongNegative&&((semantic.contextSimilarity??0)>=.6||semantic.confidence<.58&&semantic.margin<.2&&(semantic.contextSimilarity??0)>=.32)){
    return {reply:true,route:'opportunity',score,probability:1,reasons:['单句意图不确定，但与近期群聊高度相关，交给当前对话判断']}
   }
   if(semantic.confidence>=.72&&semantic.margin>=.35&&['other','close','background'].includes(semantic.label))return decide(false,'semantic',`本地语义明确识别为 ${semantic.label}`,score)
  }
- if(activeConversation(context)&&(text||event.media?.length))return decide(true,'continuation','结合正在进行的对话判断是否需要接话，不强制逐条回答')
  if(text||event.media?.length)return decide(false,'fallback',semantic?'没有明确接话依据，继续旁听':'本地语义暂不可用且未被呼唤，继续旁听')
  return decide(false,'fallback','空消息')
 }

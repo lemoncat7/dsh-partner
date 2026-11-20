@@ -7,6 +7,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { executeObservationLoop, observationToolNames } from '../lib/observation-loop.js'
+import { installLiveSpeech } from '../lib/chat/live-speech.js'
+import { attachmentTool } from '../lib/attachments/tool.js'
+import { isObservationAgent } from '../lib/observation-contract.js'
 
 test('observation inherits session plugin capabilities without granting absent tools', () => {
   const names = observationToolNames(['read', 'ssh_exec', 'custom_authorized_lookup', 'write', 'edit', 'str_replace_editor'].map(name => ({name})), false, false)
@@ -90,6 +93,26 @@ const call=(name,args)=>({type:'tool-call',id:Math.random().toString(),name,argu
 const final=()=>[{type:'text',text:JSON.stringify({observations:[{concernId:'c',checkStatus:'completed',changed:false,outcome:'unchanged',executionNeeded:false}]})}]
 const plannedStep={id:'verify',phase:'check',instruction:'核验来源',source:'concern',method:'原始来源只读核验',criterion:'已完整取得目标数据'}
 
+test('inherited chat and attachment tools compile on providers that reject uniqueItems', async t=>{
+  const {result}=await runScript(t,(round,input)=>{
+    for(const name of ['partner_chat_say','partner_send_attachment']){
+      const tool=input.tools.find(tool=>tool.name===name)
+      assert.ok(tool)
+      assert.doesNotMatch(JSON.stringify(tool.parameters),/"uniqueItems":/)
+    }
+    if(round===0)return [
+      call('heartbeat_check_workflow',{concernId:'c',operation:'plan',steps:[plannedStep]}),
+      call('heartbeat_check_workflow',{concernId:'c',operation:'update',stepId:'verify',status:'completed',evidence:'核验完成'}),
+    ]
+    return final()
+  },[],(ctx,conversation)=>{
+    t.after(installLiveSpeech(conversation,async()=>assert.fail('no chat sends'),()=>undefined))
+    t.after(conversation.ctx.tools.register(attachmentTool('c',{}, {},ctx,{},'/api')))
+  })
+  assert.equal(result.error,undefined)
+  assert.deepEqual(result.blocked,[])
+})
+
 test('private checks keep original session permissions but cannot wake its agent via background jobs',async t=>{
   let executed=0
   const {result}=await runScript(t,round=>{
@@ -103,6 +126,7 @@ test('private checks keep original session permissions but cannot wake its agent
       assert.notEqual(exec.agent.id,conversation.id)
       assert.match(exec.agent.id,/^observation-/)
       assert.equal(exec.agent.session,conversation.session)
+      assert.equal(isObservationAgent(exec.agent),true)
       assert.equal(args.run_in_background,false)
       assert.equal(args.timeoutMs,50000)
       return [{type:'text',text:'ok'}]

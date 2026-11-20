@@ -22,18 +22,20 @@ test('explicit calling and validated reply relationships take precedence over se
  assert.equal(routeGroupReply(input('弟弟人呢？'),context),undefined,'relationship terms are not hardcoded routing aliases')
 })
 test('recent conversation keeps substantive followups but leaves closing acknowledgements quiet',async()=>{
- let calls=0;const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return undefined})
+ let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return {label:'engage',confidence:.65,margin:.25,replySimilarity:.7}})
  const first=input('小明？');gate.observe('c',first);assert.equal(await gate.shouldReply('c',first,companion,signal()),true);gate.replied('c',first,'刚刚回来了')
+ now+=13000
  for(const text of ['哇 太棒了','然后呢','我都没说那个','😀','That is awesome!','え、すごいね']){
   const e=input(text);gate.observe('c',e);assert.equal(await gate.shouldReply('c',e,companion,signal()),true,text)
   assert.equal(gate.status('c').route,'continuation')
  }
  assert.equal(await gate.shouldReply('c',input('好的'),companion,signal()),false)
- assert.equal(calls,0,'immediate same-speaker followups do not await another classification')
+ assert.equal(calls,6,'a recent speaker still needs evidence of a continuation')
 })
 test('another speaker does not erase a thread or inherit it; channels, groups and expiry are separate',async()=>{
- let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return undefined})
+ let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async text=>{calls++;return {label:'background',confidence:.4,margin:.08,replySimilarity:.6,...(text==='太棒了'&&calls===2?{scene:{label:'question',confidence:.85,margin:.5}}:{})}})
  const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'刚刚回来了')
+ now+=13000
  const other=input('天气不错',{userId:'33445678'});gate.observe('c',other);await gate.shouldReply('c',other,companion,signal());assert.equal(gate.status('c').route,'fallback')
  const follow=input('太棒了');gate.observe('c',follow);await gate.shouldReply('c',follow,companion,signal());assert.equal(gate.status('c').route,'continuation')
  await gate.shouldReply('other-channel',follow,companion,signal());assert.equal(gate.status('other-channel').route,'fallback')
@@ -54,7 +56,7 @@ test('only delivery establishes continuity, redirect and explicit stopping close
 test('uncertain new group chatter stays quiet; direct requests and genuine continuations remain reachable',()=>{
  for(const semantic of [undefined,{label:'other',confidence:.6,margin:.3},{label:'close',confidence:.8,margin:.15},{label:'engage',confidence:.5,margin:.2}]){
   assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic}).reply,false)
-  assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic,recent:{at:context.now,text:'看什么'}}).reply,true)
+  assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic,recent:{at:context.now,text:'看什么'}}).reply,false)
  }
  for(const label of ['address','engage'])assert.equal(scoreGroupReply(input('给你看看'),{...context,semantic:{label,confidence:.8,margin:.5}}).reply,true)
  for(const label of ['other','close','background'])for(const recent of [undefined,{at:context.now,text:'你好'}])assert.equal(scoreGroupReply(input('普通消息'),{...context,recent,semantic:{label,confidence:.9,margin:.6}}).reply,false)
@@ -78,13 +80,14 @@ test('bounded observations exclude the current and later events from the context
 })
 
 test('shared sleep stops an ongoing hot group thread before semantic classification',async()=>{
- let calls=0;const gate=new QqGroupAutonomy(forbidden,()=>context.now,async()=>{calls++;return undefined})
+ let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return {label:'engage',confidence:.65,margin:.25,replySimilarity:.6}})
  const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'聊着呢')
  const sleeping={...companion,sleepPolicy:{enabled:true},sleepState:{episode:{wakeAt:context.now+60000}}}
  assert.equal(await gate.shouldReply('c',input('然后呢'),sleeping,signal()),false)
  assert.equal(calls,0);assert.match(gate.status('c').reason,/睡眠/)
  assert.equal(await gate.shouldReply('c',input('醒醒',{mentioned:true}),sleeping,signal()),true)
  sleeping.sleepState.episode.wokeAt=context.now
+ now+=13000
  assert.equal(await gate.shouldReply('c',input('然后呢'),sleeping,signal()),true)
 })
 
@@ -137,11 +140,11 @@ test('room history includes factual seconds and delivered partner turns, and exp
  assert.deepEqual(JSON.parse(gate.context('c',later)),[])
 })
 
-test('fast followups stop after redirects and cancellation; decision history is bounded metadata only',async()=>{
- let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return undefined})
+test('verified followups stop after redirects and cancellation; decision history is bounded metadata only',async()=>{
+ let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return {label:'background',confidence:.4,margin:.08,replySimilarity:.6}})
  const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'你好')
- now+=2000;const follow=input('前面那张呢');gate.observe('c',follow)
- assert.equal(await gate.shouldReply('c',follow,companion,signal()),true);assert.equal(calls,0)
+ now+=13000;const follow=input('前面那张呢');gate.observe('c',follow)
+ assert.equal(await gate.shouldReply('c',follow,companion,signal()),true);assert.equal(calls,1)
  const stop=input('你们先聊，不用回我');gate.observe('c',stop)
  assert.equal(await gate.shouldReply('c',stop,companion,signal()),false)
  assert.equal(await gate.shouldReply('c',follow,companion,signal()),false)
@@ -193,29 +196,37 @@ test('real local-model misses recover for open invitations and related reactions
  assert.equal(scoreGroupReply(input('晚安'),{...context,semantic:{label:'close',confidence:.63,margin:.33,contextSimilarity:.7}}).reply,false)
 })
 
-test('delivered group conversation continues across speakers without random admission or spontaneous delay',async()=>{
- let now=context.now;const prediction={label:'engage',confidence:.410724,margin:.209213,contextSimilarity:.711855}
+test('one confirmed reply leaves room for the same or a different speaker to finish the topic',async()=>{
+ let now=context.now
+ let prediction={label:'engage',confidence:.75,margin:.45,replySimilarity:.72,scene:{label:'banter',confidence:.8,margin:.5}}
  const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>prediction)
- const a=input('小明？');gate.observe('c',a);await gate.shouldReply('c',a,companion,signal());gate.replied('c',a,'3050这就要当公众号美工了')
- now+=1000
- for(const [i,label] of ['engage','close','other'].entries()){
-  Object.assign(prediction,label!=='engage'?{label,confidence:.382166,margin:.092136,contextSimilarity:.516466}:{label})
-  const e=input('其他成员顺着话题补充',{userId:'3344567'+i},'shared-'+i);gate.observe('c',e)
-  assert.equal(await gate.shouldReply('c',e,companion,signal()),true)
-  assert.equal(gate.status('c').route,'continuation');assert.equal(gate.status('c').probability,1)
-  assert.match(gate.guidance('c',e),/1 秒前/);assert.match(gate.guidance('c',e),/共同对话/)
+ const a=input('小明？');gate.observe('c',a);gate.replied('c',a,'3050这就要当公众号美工了')
+ now+=2000
+ const same=input('哈哈我也觉得',{},'same-speaker')
+ gate.observe('c',same);assert.equal(await gate.shouldReply('c',same,companion,signal()),false)
+ assert.match(gate.status('c').reason,/连续几句留一点停顿/)
+ for(let i=0;i<15;i++){
+  const e=input('其他成员顺着话题补充',{userId:'33445678'},'shared-'+i)
+  gate.observe('c',e);assert.equal(await gate.shouldReply('c',e,companion,signal()),false)
  }
+ assert.match(gate.guidance('c',same),/同一话题换人发言也仍是一场对话/)
+ const direct=input('小明看看我这个',{userId:'33445678',mentioned:true})
+ gate.observe('c',direct);assert.equal(await gate.shouldReply('c',direct,companion,signal()),true)
+ prediction={...prediction,scene:{label:'question',confidence:.85,margin:.5}}
+ const actualQuestion=input('所以这张显卡能跑哪些模型？')
+ gate.observe('c',actualQuestion);assert.equal(await gate.shouldReply('c',actualQuestion,companion,signal()),true)
 })
-test('shared conversation requires delivery, expires without sends, stays scoped and does not inherit future replies',async()=>{
+test('shared conversation stays selective and cannot inherit silence, another room or a future send',async()=>{
  let now=context.now;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>({label:'engage',confidence:.41,margin:.21,contextSimilarity:.71}))
  const a=input('小明？'),b=input('接着刚才的话',{userId:'33445678'},'b');gate.observe('c',a);gate.observe('c',b)
  await gate.shouldReply('c',a,companion,signal());assert.equal(await gate.shouldReply('c',b,companion,signal()),false,'admission is not delivery')
- gate.replied('c',a,'已经参与话题');assert.equal(await gate.shouldReply('c',b,companion,signal()),true)
+ gate.replied('c',a,'已经参与话题');assert.equal(await gate.shouldReply('c',b,companion,signal()),false)
+ const latest=gate.status('c')
+ assert.equal(latest.route,'opportunity')
  assert.equal(await gate.shouldReply('other',b,companion,signal()),false)
  assert.equal(await gate.shouldReply('c',{...b,qqGroup:{...b.qqGroup,groupId:'87654321'}},companion,signal()),false)
  assert.equal(await gate.shouldReply('c',{...b,receivedAt:now-1},companion,signal()),false,'queued input cannot inherit a later send')
- now+=179999;assert.equal(await gate.shouldReply('c',b,companion,signal()),true)
- now+=1;assert.equal(await gate.shouldReply('c',b,companion,signal()),false,'silent admissions did not extend the group window')
+ now+=180000;assert.equal(await gate.shouldReply('c',b,companion,signal()),false,'silent admissions did not extend the group window')
  assert.match(gate.guidance('c',b),/尚无近期参与依据/)
 })
 test('shared participation never overrides other-person targets, stops, strong negatives or unrelated weak scores',()=>{
@@ -283,7 +294,7 @@ test('social scenes create selective opportunities and use delivered topic or ac
   const semantic={label:'background',confidence:.4,margin:.08,scene:{label,confidence:.8,margin:.6}}
   const decisions=Array.from({length:100},(_,i)=>scoreGroupReply(input('一段可以交流的新内容'),{...context,seed:'scene-'+i,otherConversation:true,semantic}))
   assert.ok(decisions.some(d=>d.reply),label);assert.ok(decisions.some(d=>!d.reply),label)
-  const related=scoreGroupReply(input('一段可以交流的新内容'),{...context,otherConversation:true,semantic:{...semantic,replySimilarity:.5}})
+  const related=scoreGroupReply(input('一段可以交流的新内容'),{...context,semantic:{...semantic,replySimilarity:.5}})
   assert.equal(related.reply,true,label);assert.equal(related.route,'continuation',label)
   if(['share','banter'].includes(label)){
    assert.equal(scoreGroupReply(input('新内容'),{...context,otherConversation:true,semantic}).probability,.25)
@@ -343,13 +354,26 @@ test('persona-supported agreement admits the actual repeated call without requir
  for(const suffix of ['first','again']){const e={...input('弟弟 出来冒泡'),id:'call-'+suffix};gate.observe('c',e);assert.equal(await gate.shouldReply('c',e,companion,signal(),undefined,true),true)}
  for(const group of [{otherMention:true},{replyTo:'other'}])assert.equal(scoreGroupReply(input('弟弟 出来冒泡',group),{...context,semantic}).reply,false)
 })
-test('reply-related continuations survive scene disagreement but recency alone does not bypass classification',()=>{
+test('reply-related continuations cannot override a confirmed other-person scene',()=>{
  for(const label of ['other','close','background']){
   const result=scoreGroupReply(input('你刚才那句是什么意思'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'},semantic:{label,confidence:.95,margin:.9,replySimilarity:.8,scene:{label,confidence:.95,margin:.9}}})
-  assert.equal(result.reply,true);assert.equal(result.route,'continuation')
+  assert.equal(result.reply,label!=='other');assert.equal(result.route,label==='other'?'other':'continuation')
   assert.equal(scoreGroupReply(input('无关的新话题'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'},semantic:{label,confidence:.95,margin:.9,replySimilarity:.05,scene:{label,confidence:.95,margin:.9}}}).reply,false)
  }
  assert.equal(scoreGroupReply(input('不用回复了'),{...context,recent:{at:context.now-45000,text:'上一条实际回复'}}).reply,false)
+})
+
+test('a recent exchange cannot turn a group member’s invitation to another member into a call',async()=>{
+ let now=context.now,calls=0
+ const semantic={label:'address',confidence:.52,margin:.3,contextSimilarity:.88,replySimilarity:.79,scene:{label:'other',confidence:.45,margin:.1}}
+ const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return semantic})
+ const initial=input('小明看看');gate.observe('c',initial);gate.replied('c',initial,'我看见了')
+ now+=1000;gate.observe('c',input('我礼拜六回余姚了',{userId:'33445678'},'other'))
+ now+=1000;const follow=input('那我礼拜天来宁波找你',{},'follow');gate.observe('c',follow)
+ assert.equal(await gate.shouldReply('c',follow,companion,signal()),false)
+ assert.equal(gate.status('c').route,'other');assert.equal(calls,1)
+ assert.equal(await gate.shouldReply('c',input('你怎么看',{hasReply:true}),companion,signal()),false)
+ assert.equal(await gate.shouldReply('c',input('你怎么看',{hasReply:true,replyTo:'self'}),companion,signal()),true)
 })
 
 test('weak correlated address labels alone cannot admit unrelated chatter',()=>{

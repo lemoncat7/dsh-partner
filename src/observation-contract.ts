@@ -2,6 +2,15 @@
 export const CHECK_OUTCOMES = ['changed', 'unchanged', 'already_processed', 'baseline_initialized', 'blocked'] as const
 export const FAILURE_KINDS = ['capability_missing', 'authentication', 'rate_limited', 'network', 'source_incomplete', 'unknown'] as const
 
+const observationAgents = new WeakSet<object>()
+export function markObservationAgent(agent: object): () => void {
+  observationAgents.add(agent)
+  return () => { observationAgents.delete(agent) }
+}
+export function isObservationAgent(agent: object): boolean {
+  return observationAgents.has(agent)
+}
+
 export function observationCapabilityContext(available: string[], inherited: string[]): string {
   return JSON.stringify({
     availableTools: [...new Set(available)].sort(),

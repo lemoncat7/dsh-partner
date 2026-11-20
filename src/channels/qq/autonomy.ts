@@ -6,20 +6,23 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Companion } from '../../domain.js'
 import type { DirectMessage } from '../direct/transport.js'
 import type { QqSettings } from './settings.js'
-import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, routeGroupReply, scoreGroupReply, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
-import { isAttentionCall, localAttentionClassifier, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
+import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, routeGroupReply, scoreGroupReply, topicContinues, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
+import { isAttentionCall, isClearScene, localAttentionClassifier, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
 type Observation={id:string;sender:string;qqId:string;text:string;redirect:boolean;at:number;sequence:number}
-type Conversation={at:number;text:string;observedSequence:number}
-export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;decisionMs?:number;contextSize?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
+type Conversation={at:number;text:string;input:string;observedSequence:number}
+type Group={messages:Observation[];replies:Map<string,Conversation>;roomReplies:Array<Conversation&{messageId:string}>;sequence:number;lastSpontaneousAt?:number}
+export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;decisionMs?:number;contextSize?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
 const CONTEXT_TTL_MS=10*60_000
+const ROOM_REPLY_GAP_MS=12_000
+const ROOM_REPLY_BURST_MS=45_000
 export const SPONTANEOUS_INTERVAL_MS=5000
 export const QUIET_CONVERSATION_WINDOW_MS=2*60*60_000
 /** Per-speaker threads plus optional local semantic routing. No remote LLM gate or tools. */
 export class QqGroupAutonomy {
  private readonly decisions=new Map<string,GroupDecision>()
  private readonly decisionHistory=new Map<string,GroupDecision[]>()
- private readonly groups=new Map<string,{messages:Observation[];replies:Map<string,Conversation>;sequence:number;lastSpontaneousAt?:number}>()
+ private readonly groups=new Map<string,Group>()
  constructor(_ctx:Context,private readonly now=()=>Date.now(),private readonly classify:AttentionClassifier=localAttentionClassifier()){}
  status(channelId:string){return this.decisions.get(channelId)}
  history(channelId:string){return structuredClone(this.decisionHistory.get(channelId)??[])}
@@ -34,7 +37,7 @@ export class QqGroupAutonomy {
   if(!event.qqGroup)return
   const key=channelId+':'+event.qqGroup.groupId
   let group=this.groups.get(key)
-  if(!group){group={messages:[],replies:new Map(),sequence:0};this.groups.set(key,group)}
+  if(!group){group={messages:[],replies:new Map(),roomReplies:[],sequence:0};this.groups.set(key,group)}
   const redirect=(!event.qqGroup.mentioned&&event.qqGroup.replyTo!=='self'&&(mentionsOtherRecipient(event)||event.qqGroup.replyTo==='other'))||conversationEnded(event.text)
   if(redirect)group.replies.delete(event.qqGroup.userId)
   const now=this.now(),sourceAt=event.timestamp??event.receivedAt
@@ -52,8 +55,12 @@ export class QqGroupAutonomy {
   if(!group)return
   const latest=group.messages.filter(m=>m.qqId===event.qqGroup!.userId).at(-1)
   if(latest?.redirect)return
+  const reply={at:this.now(),text:text.slice(0,1200),input:event.text.slice(0,1200),observedSequence:group.sequence,messageId:event.id}
   group.replies.delete(event.qqGroup.userId)
-  group.replies.set(event.qqGroup.userId,{at:this.now(),text:text.slice(0,1200),observedSequence:group.sequence})
+  group.replies.set(event.qqGroup.userId,reply)
+  group.roomReplies=group.roomReplies.filter(item=>item.messageId!==event.id)
+  group.roomReplies.push(reply)
+  if(group.roomReplies.length>8)group.roomReplies.shift()
   if(group.replies.size>64)group.replies.delete(group.replies.keys().next().value!)
  }
  context(channelId:string,event:DirectMessage):string {
@@ -92,8 +99,11 @@ export class QqGroupAutonomy {
  private groupRecent(channelId:string,event:DirectMessage):Conversation|undefined {
   if(!event.qqGroup)return
   const now=this.now(),inputAt=event.receivedAt??event.timestamp??now
-  return [...(this.groups.get(channelId+':'+event.qqGroup.groupId)?.replies.values()??[])]
-   .filter(r=>r.at<=inputAt&&now-r.at>=0&&now-r.at<GROUP_CONVERSATION_WINDOW_MS).sort((a,b)=>b.at-a.at)[0]
+  const replies=this.groups.get(channelId+':'+event.qqGroup.groupId)?.roomReplies??[]
+  for(let index=replies.length-1;index>=0;index--){
+   const reply=replies[index]!
+   if(reply.at<=inputAt&&now-reply.at>=0&&now-reply.at<GROUP_CONVERSATION_WINDOW_MS)return reply
+  }
  }
  guidance(channelId:string,event:DirectMessage):string {
   const recent=this.groupRecent(channelId,event)??this.quietRecent(channelId,event)
@@ -105,16 +115,20 @@ export class QqGroupAutonomy {
   if(event.qqGroup && isSleeping(companion,this.now()) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self')return this.record(channelId,event,'伙伴正在睡眠，暂停群聊自主接话')
   if(!event.qqGroup?.autonomous)return true
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId)
-  const recent=group?.replies.get(event.qqGroup.userId),groupRecent=this.groupRecent(channelId,event)
+  const now=this.now(),inputAt=event.receivedAt??event.timestamp??now
+  const lastSpeakerReply=group?.replies.get(event.qqGroup.userId)
+  const recent=lastSpeakerReply&&lastSpeakerReply.at<=inputAt?lastSpeakerReply:undefined
+  const groupRecent=this.groupRecent(channelId,event)
   const quietRecent=this.quietRecent(channelId,event)
-  const context:ReplyScoreContext={name:companion.name??'',now:this.now(),seed:channelId+':'+event.id,...(recent?{recent}:{}),...(groupRecent?{groupRecent}:{}),...(quietRecent?{quietRecent}:{})}
+  const context:ReplyScoreContext={name:companion.name??'',now,seed:channelId+':'+event.id,...(recent?{recent}:{}),...(groupRecent?{groupRecent}:{}),...(quietRecent?{quietRecent}:{})}
 
   const index=group?.messages.findIndex(m=>m.id===event.id)??-1
   const before=(group?.messages??[]).slice(0,index<0?undefined:index)
   const other=before.filter(m=>m.qqId!==event.qqGroup!.userId).at(-1)
-  const lastReply=group?Math.max(0,...[...group.replies.values()].map(r=>r.at)):0
-  context.quickContinuation=!!recent&&context.now-recent.at>=0&&context.now-recent.at<=30_000&&(!other||other.at<recent.at)
-  context.otherConversation=!!other&&context.now-other.at>=0&&context.now-other.at<=30_000&&!activeConversation(context)&&(!lastReply||context.now-lastReply>60_000)
+  const roomTrafficAfterReply=!!other&&(!recent||other.at>=recent.at&&other.sequence>recent.observedSequence)
+  context.quickContinuation=!!recent&&now-recent.at>=0&&now-recent.at<=30_000&&!roomTrafficAfterReply
+  context.otherConversation=!!other&&context.now-other.at>=0&&context.now-other.at<=30_000
+   &&roomTrafficAfterReply
   const started=performance.now()
   let result=routeGroupReply(event,context)
   let semantic,classification:AttentionDiagnostic|undefined
@@ -124,7 +138,8 @@ export class QqGroupAutonomy {
    // text belongs only to the transport-verified bound speaker, not the whole room.
    const relationship=qqIdentityRelation(settings,event.qqGroup.userId)?.matched?relationshipTextForIdentity(companion):''
    const profile=[companion.name,[companion.role,companion.description,companion.characterCard?.enabled?companion.characterCard.roleText:''].filter(Boolean).join('；'),relationship].filter((v):v is string=>!!v?.trim()).map(t=>t.slice(0,160))
-   const frame:AttentionFrame={profile,partnerText:(groupRecent?.text??quietRecent?.text??'').slice(0,160)}
+   const speakerText=activeConversation(context)?recent?.text:undefined
+   const frame:AttentionFrame={profile,partnerText:(speakerText||groupRecent?.text||quietRecent?.text||'').slice(0,160)}
    try{semantic=await this.classify(attentionMessageText(event),signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
    signal.throwIfAborted()
    result=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
@@ -139,6 +154,18 @@ export class QqGroupAutonomy {
   // Busy work still lets the local model recognize a call; only calls queue.
   const recognizedCall=isAttentionCall(semantic)
   if(addressOnly&&result.route!=='direct'&&!(result.reply&&recognizedCall))result={...result,reply:false,probability:0,reasons:[...result.reasons,'任务执行期间普通群聊仅旁听，不插入或排队补答']}
+  if(result.reply&&result.route!=='direct'&&!recognizedCall&&group&&groupRecent){
+   const sameTopic=topicContinues(event.text,{...context,...(semantic?{semantic}:{})})
+   const scene=semantic?.scene
+   const question=scene?.label==='question'&&isClearScene(scene)
+   const meaningfulFollowup=question&&!!recent&&(semantic?.replySimilarity??0)>=.55
+   const freshTopic=scene?.label==='topic'&&isClearScene(scene)&&!sameTopic
+   const roomBurst=group.roomReplies.filter(reply=>reply.at<=inputAt&&now-reply.at>=0&&now-reply.at<ROOM_REPLY_BURST_MS).length
+   const quickExtra=!!recent&&now-recent.at<ROOM_REPLY_GAP_MS&&!event.media?.length&&!question
+   if(!freshTopic&&!meaningfulFollowup&&(quickExtra||sameTopic&&(now-groupRecent.at<ROOM_REPLY_GAP_MS||roomBurst>=2))){
+    result={...result,reply:false,probability:0,reasons:[quickExtra?'刚回过这位成员，连续几句留一点停顿':'伙伴刚在同一话题里说过话，先让群友接着聊']}
+   }
+  }
   // Bound unsolicited admissions per room, including while an earlier reply is still queued.
   // Explicit addressing and an established speaker thread are not subject to this interval.
   if(result.reply&&!recognizedCall&&!activeConversation(context)&&(result.route==='opportunity'||result.route==='semantic'&&semantic?.label==='engage')&&group){
@@ -150,7 +177,7 @@ export class QqGroupAutonomy {
    if(statusText)result={...result,reasons:[...result.reasons,statusText]}
   }
   this.record(channelId,event,`${result.reply?'进入回复流程':'决定旁听'} · ${result.reasons.join('；')}`)
-  Object.assign(this.decisions.get(channelId)!,{method:'local',score:result.score,probability:result.probability,reasons:result.reasons,route:result.route,decisionMs:Math.round(performance.now()-started),contextSize:attentionContext.length,...(classification?{classification}:{}),...(semantic?{semantic}:{})})
+  Object.assign(this.decisions.get(channelId)!,{method:'local',score:result.score,probability:result.probability,reasons:result.reasons,route:result.route,addressed:result.reply&&(result.route==='direct'||recognizedCall),decisionMs:Math.round(performance.now()-started),contextSize:attentionContext.length,...(classification?{classification}:{}),...(semantic?{semantic}:{})})
   return result.reply
  }
 }

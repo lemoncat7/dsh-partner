@@ -58,6 +58,24 @@ test('memory off skips recall and clears its old snapshot on the next preparatio
   assert.equal(f.contexts.size,1);assert.match(f.contexts.values().next().value.text,/交流时间/);assert.doesNotMatch(f.contexts.values().next().value.text,/当前账号是这层关系|联系人画像|长期记忆|用户配置的表达选项/)
 })
 
+test('a QQ group projects no private memories even when its configured search scope is shared',async()=>{
+ const f=fixture(),session=f.agent.session,signal=new AbortController().signal
+ const route={...f.config.route,id:'group',kind:'channel',channelId:'qq',userId:'group:1129721318:22334455',memoryScopeId:'@local:owner:c'}
+ f.config.route=route
+ f.runtime.store.snapshot=()=>({sessions:[route],companions:[f.config.companion],channels:[{id:'qq',platform:'qq',companionId:route.companionId}],pairings:[]})
+ f.runtime.memory.characterState=async()=>assert.fail('do not read the private scene in the group')
+ const sections=[{name:'partner-conversation-memory',text:'old private scene'}]
+ session.append('user/message',createUserMessage({content:[{type:'text',text:'old private scene'}],source:{kind:'runtime-context',form:'snapshot',sections}}),{surfaceOp:'append'})
+ const current=f.input('群友说的话')
+ route.inboundMessageIds=[current.data.id]
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.equal(f.calls.length,0)
+ assert.match(JSON.stringify(session.snapshotEvents()),/old private scene/)
+ assert.doesNotMatch(JSON.stringify(session.deriveMessages()),/old private scene/)
+ assert.match(JSON.stringify(session.deriveMessages()),/群友说的话/)
+ assert.ok(f.contexts.has('partner-group-conversation'))
+})
+
 test('automatic history opt-out preserves explicit historical detail lookup and legacy recall',async t=>{
   const dir=await mkdtemp(join(tmpdir(),'partner-recall-optout-'));t.after(()=>rm(dir,{recursive:true,force:true}))
   const memory=new PartnerMemoryStore(dir)
