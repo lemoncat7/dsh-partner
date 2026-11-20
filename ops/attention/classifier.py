@@ -2,6 +2,7 @@ import json, hashlib, time
 from collections import OrderedDict
 import numpy as np
 from encoder import Encoder
+from dialogue import CONTEXT_FEATURES, MAX_TURNS, features, predict
 
 class Classifier:
     def __init__(self, model_dir, head_path):
@@ -16,13 +17,23 @@ class Classifier:
         if self.scene:
             self.scene['weights']=np.array(self.scene['weights'],dtype=np.float32)
             self.scene['bias']=np.array(self.scene['bias'],dtype=np.float32)
+        head_file = head_path.with_name('dialogue-head.json')
+        self.dialogue_head = None
+        if head_file.exists():
+            model = json.loads(head_file.read_text())
+            if model['version'] != 2 or len(model['weights']) != 2 * self.weights.shape[0] + CONTEXT_FEATURES:
+                raise ValueError('Incompatible dialogue ranker')
+            self.dialogue_head = {'weights': np.array(model['weights'], dtype=np.float32)}
 
     def classify(self, text, context=None, frame=None):
         context=list(context or [])[:4]
         frame=frame or {}
         profile=list(frame.get('profile',[]))[:3]
         partner=frame.get('partnerText','')
-        texts=[text]+context+profile+([partner] if partner else [])
+        legacy_texts=[text]+context+profile+([partner] if partner else [])
+        head = getattr(self, 'dialogue_head', None)
+        dialogue = frame.get('dialogue', [])[-MAX_TURNS:] if head else []
+        texts = legacy_texts + [turn['text'] for turn in dialogue]
         now=time.monotonic()
         for key, (_, at) in list(self.cache.items()):
             if now-at>120: del self.cache[key]
@@ -48,7 +59,9 @@ class Classifier:
         def similarity(rows):return float(np.clip(max(vectors[0] @ v for v in rows),0,1))
         if context:result['contextSimilarity']=similarity(vectors[1:1+len(context)])
         if profile:result['profileSimilarity']=similarity(vectors[1+len(context):1+len(context)+len(profile)])
-        if partner:result['replySimilarity']=similarity(vectors[-1:])
+        if partner:result['replySimilarity']=similarity(vectors[len(legacy_texts)-1:len(legacy_texts)])
+        if dialogue:
+            result['link'] = predict(head, *features(vectors[0], dialogue, vectors[len(legacy_texts):], text))
         scene=getattr(self,'scene',None)
         if scene:
             z=x @ scene['weights']+scene['bias'];p=np.exp(z-z.max());p=(p/p.sum())[0];order=np.argsort(p)

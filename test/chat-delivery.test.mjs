@@ -152,6 +152,39 @@ test('direct queued reply checks the original route and rechecks authorization b
   assert.throws(()=>manager.checkChatSource('c','u',reply),/变更/)
 })
 
+test('QQ reply delivery holds one group lane through all parts, across different speakers',async()=>{
+  const manager=new ChannelManager({}, {}, {}, {})
+  const sent=[]
+  const firstPart=Promise.withResolvers(),finish=Promise.withResolvers()
+  manager.performNotificationTarget=async(_channel,_peer,reply)=>{
+    for(const part of reply.chatParts){
+      sent.push(part.text)
+      if(part.text==='先发的第一段'){
+        firstPart.resolve()
+        await finish.promise
+      }
+    }
+    if(reply.text==='fail')throw Error('delivery failed')
+  }
+  const deliver=(peer,parts,channel='qq',text='')=>manager.sendNotificationTarget(channel,peer,{
+    text,attachments:[],chatParts:parts.map(text=>({type:'text',text})),
+  },async(_index,send)=>send())
+  const earlier=deliver('group:12345:11111',['先发的第一段','先发的第二段'],'qq','fail')
+  const failure=assert.rejects(earlier,/delivery failed/)
+  await firstPart.promise
+  const later=deliver('group:12345:22222',['后一轮'])
+  try{
+    await Promise.all([
+      deliver('group:67890:11111',['另一群']),
+      deliver('11111',['私聊']),
+    ])
+    assert.deepEqual(sent,['先发的第一段','另一群','私聊'])
+  }finally{finish.resolve()}
+  await Promise.all([failure,later])
+  assert.deepEqual(sent,['先发的第一段','另一群','私聊','先发的第二段','后一轮'])
+  assert.equal(manager.messageSendQueues.size,0)
+})
+
 test('DSH tool runtime commits terminal success and presentation metadata, but never concludes a rejected call',async t=>{
   const {Context}=await import('@deepseek-ai/cordis'),{ToolRuntime}=await import('@deepseek-ai/dsh-tools'),{createScope}=await import('@deepseek-ai/dsh-scope')
   const ctx=new Context();ctx.provide('systemPrompt',{tools:()=>()=>{}});new ToolRuntime(ctx)

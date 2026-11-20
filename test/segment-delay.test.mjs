@@ -55,10 +55,12 @@ test('real manager delivery sends first immediately, paces later parts and skips
  await running;assert.equal(f.sent.length,3);assert.ok(f.sent[1].at-f.sent[0].at>=70);assert.ok(f.sent[2].at-f.sent[1].at>=70)
  f.sent.length=0;await f.send(reply,async(i,fn)=>{if(i!==0&&i!==1)await fn()});assert.deepEqual(f.sent.map(s=>s.text),['third'])
 })
-test('a waiting recipient does not block another and live permission revocation fences delivery',async()=>{
+test('a waiting QQ group does not block another group and live permission revocation fences delivery',async()=>{
  const f=fixture(configured(5,5));let allowed=true
+ f.state.channels[0].qq.groupIds.push('88776655')
+ f.state.channels[0].qq.autonomousGroupIds.push('88776655')
  const slow=f.send(reply,undefined,()=>{if(!allowed)throw new ReplySupersededError()});const rejected=assert.rejects(slow,ReplySupersededError)
- await new Promise(r=>setImmediate(r));await f.send({...reply,chatParts:[{type:'text',text:'other'}]},undefined,undefined,'group:99887766:33445566')
+ await new Promise(r=>setImmediate(r));await f.send({...reply,chatParts:[{type:'text',text:'other'}]},undefined,undefined,'group:88776655:33445566')
  assert.deepEqual(f.sent.map(s=>s.text),['first','other']);allowed=false;await rejected
  const g=fixture();const revoked=g.send(reply);const check=assert.rejects(revoked,/停用/);await new Promise(r=>setImmediate(r));g.state.channels[0].enabled=false;await check;assert.equal(g.sent.length,1)
 })

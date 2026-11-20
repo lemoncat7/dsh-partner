@@ -18,7 +18,7 @@
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-bili-toggle { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 0; margin:0; border-bottom:1px solid var(--partner-separator); }
 .dsh-partner-bili-toggle strong { margin-bottom:5px; font-size:14px; }
 .dsh-partner-bili-qr { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin:0; padding:16px; background:var(--partner-interaction-well); border-radius:12px; }
-.dsh-partner-bili-qr img { max-width:100%; object-fit:contain; }
+.dsh-partner-bili-qr svg { max-width:100%; height:auto; border-radius:6px; background:white; }
 .dsh-partner-bili-qr figcaption { flex:1; min-width:150px; font-size:13px; line-height:1.7; }
 .dsh-partner-bili-record { padding:12px 0; border-bottom:1px solid var(--partner-separator); }
 @media(max-width:600px) { .dsh-partner-bili-capabilities { grid-template-columns:1fr; } .dsh-partner-bili-account { gap:10px; padding:14px; } .dsh-partner-bili-account strong { font-size:17px; } }

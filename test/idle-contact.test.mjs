@@ -116,6 +116,28 @@ function deliveryFixture(){
   manager.queueProactive=async(route,receipt,reply,valid,exact)=>{if(valid())sent.push({route,receipt,reply,exact})}
   return {...f,events,manager,sent,session:{id:'s',snapshotEvents:()=>events},end:events.at(-1)}
 }
+test('autonomous delivery suppresses already confirmed wording in the same destination',async()=>{
+ const {state,route}=fixture()
+ const store={snapshot:()=>state,update:async apply=>{apply(state);return state}}
+ const manager=new ChannelManager({},store,{},{},'/tmp'),sent=[]
+ manager.sendNotificationTarget=async(_channel,_user,reply,sendPart)=>{
+  const parts=reply.chatParts??[{type:'text',text:reply.text}]
+  for(const [index,part] of parts.entries())await sendPart(index,async()=>{sent.push(part.text)})
+ }
+ const origin={routeId:route.id,sessionId:route.sessionId,messageId:'first',userMessageId:user.id,policyRevision:1}
+ const reply={text:'下周五晚上你要不要一起来看发布会？',attachments:[],idleContactOrigin:origin}
+ assert.equal(await manager.queueProactive(route,'idle:first',reply,undefined,true),true)
+ const split={...reply,chatParts:[{type:'text',text:'下周五晚上'},{type:'text',text:'你要不要一起来看发布会！'}]}
+ assert.equal(await manager.queueProactive(route,'idle:later',split,undefined,true),false)
+ assert.equal(await manager.queueProactive(route,'idle-intermediate:later',split,undefined,true),false)
+ assert.ok(state.recentReceipts.includes('idle:later'))
+ assert.deepEqual(sent,[reply.text])
+ const another={...route,id:'another',userId:'another'}
+ assert.equal(await manager.queueProactive(another,'idle:another',split,undefined,true),true)
+ assert.equal(await manager.queueProactive(route,'idle:angle',{...reply,text:'发布会居然要演示双人模式，我想看那个实机。'},undefined,true),true)
+ assert.equal(sent.length,4)
+})
+
 test('native completed reply delivers once to explicit origin, not notification broadcasts',async()=>{
   const f=deliveryFixture();await f.manager.observeAutonomousResult(f.session,f.end)
   assert.equal(f.sent.length,1);assert.equal(f.sent[0].exact,true);assert.equal(f.sent[0].route.id,'r');assert.equal(f.sent[0].receipt,'idle:idle-1');assert.match(f.sent[0].reply.text,/刚想起/)

@@ -14,5 +14,9 @@
       "bytes": 17082913,
       "sha256": "b60b6b43406a48bf3638526314f3d232d97058bc93472ff2de930d43686fa441"
     }
-  ]
+  ],
+  "npm": {
+    "name": "@lemoncat7/dsh-partner-attention-model",
+    "version": "1.0.0"
+  }
 }

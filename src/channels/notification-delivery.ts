@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { ReplySupersededError } from './reply-turn.js'
 import { replyDeliveryParts } from '../chat/protocol.js'
 import type {PartnerReply} from '../channel-message.js'
@@ -15,9 +16,20 @@ export interface NotificationDeliveryRecord {
   createdAt:number
   completedAt?:number
   supersededAt?:number
+  idleTextDigest?:string
   reply:PartnerReply
   targets:(Target & {sentParts:number[];lastAttemptAt?:number;lastError?:string;retrySafe?:boolean})[]
 }
+/** Compare the whole autonomous text regardless of how the same words were segmented. */
+export function idleTextDigest(reply:PartnerReply):string|undefined {
+  if(!reply.idleContactOrigin)return
+  const parts=replyDeliveryParts(reply)
+  if(parts.some(part=>part.type!=='text'))return
+  const text=parts.map(part=>part.type==='text'?part.text:'').join('').normalize('NFKC').replace(/[\s\p{P}]/gu,'')
+  if([...text].length<10)return
+  return createHash('sha256').update(text).digest('hex')
+}
+
 export interface DeliveryTiming {storeMs:number;partMs:number;totalMs:number;commits:number}
 type Send = (target:Target, reply:PartnerReply, part:(index:number, send:()=>Promise<unknown>)=>Promise<void>)=>Promise<void>
 
@@ -50,7 +62,8 @@ export class NotificationDelivery {
         while(records.length>=1000){const index=records.findIndex(r=>r.completedAt!==undefined);if(index<0)throw new Error('待投递通知已达上限，请检查渠道连接');records.splice(index,1)}
         firstAttempt=true
         const now=Date.now()
-        records.push({id,companionId,createdAt:now,reply:structuredClone(reply),targets:targets.map(t=>({...t,sentParts:[],lastAttemptAt:now}))})
+        const digest=idleTextDigest(reply)
+        records.push({id,companionId,createdAt:now,...(digest?{idleTextDigest:digest}:{}),reply:structuredClone(reply),targets:targets.map(t=>({...t,sentParts:[],lastAttemptAt:now}))})
       })
       record=saved.notificationDeliveries!.find(r=>r.id===id)!
     }

@@ -1,3 +1,4 @@
+import {GroupAttentionTraining} from './channels/qq/attention-group-training.js'
 import {installLegacyImageTool} from './attachments/legacy-image-tool.js'
 import {backgroundRunRoute} from './execution/background-routing.js'
 import {PartnerImageReferences} from './attachments/image-references.js'
@@ -15,6 +16,8 @@ import {installContinuousBudget} from './continuous/runtime.js'
 import {TtsService} from './voice/service.js'
 import {TtsCredentials} from './voice/credentials.js'
 import {voiceReplyTool} from './voice/tool.js'
+import {ManagedAttention} from './channels/qq/managed-attention.js'
+import {NativeBilibili} from './channels/bilibili/native.js'
 import {BilibiliService} from './channels/bilibili/service.js'
 import {bilibiliTool} from './channels/bilibili/tools.js'
 import { createChannelActivities } from './channels/activity-defaults.js'
@@ -211,7 +214,12 @@ export function apply(context: Context, config: PartnerConfig): void {
     const sleep = new SleepService(ctx, store, memory, { busy: (id, exceptSessionId) => agents.companionActivity(id).some(a => a.kind !== 'memory' && a.kind !== 'observation' && (!exceptSessionId || a.sessionId !== exceptSessionId)), archived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id as import('@deepseek-ai/dsh-session').SessionId) })
     agents.setSleepService(sleep)
     composer.setSleepToolFactory(id => sleep.tool(id))
-    const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd)
+    const attention=new ManagedAttention(join(dirname(resolved.statePath),'qq-attention'))
+    ctx.effect(()=>()=>{void attention.close()},'dsh-partner.attention')
+    await attention.restore()
+    const channels = new ChannelManager(ctx, store, credentials, agents, resolved.defaultCwd,attention.classify)
+    const groupTraining=new GroupAttentionTraining(ctx,join(dirname(resolved.statePath),'qq-attention','group-samples'),attention)
+    ctx.effect(()=>()=>{void groupTraining.close()},'dsh-partner.group-training')
     const workCleanup=new PartnerWorkSessionCleanup(ctx,store)
     ctx.effect(()=>()=>workCleanup.close())
     const background = new NativeBackgroundTasks(ctx,store,(run,reply)=>run.background?.sourceKind==='local'?agents.deliverLocalBackgroundResult(run,reply):channels.deliverBackgroundResult(run,reply),async (run,input)=>{
@@ -260,7 +268,9 @@ export function apply(context: Context, config: PartnerConfig): void {
         return renderStickerTags(items)
       }finally{if(timer)clearTimeout(timer)}
     })
-    const bilibili = new BilibiliService(store)
+    const biliBackend=new NativeBilibili(credentials,dirname(resolved.statePath))
+    ctx.effect(()=>()=>{void biliBackend.close()},'dsh-partner.bilibili')
+    const bilibili = new BilibiliService(store,biliBackend.call)
     composer.setChatToolFactory(id => [background.tool(id),continuousTool(id,store,continuous),browserTool(id,store,browser,ctx),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)),bilibiliTool(id,store,bilibili,ctx),agreementTool(id,store),...chatTools(id, store, stickers, deliveries, ctx, resolved.apiPrefix,stickerAdapters,(...args)=>channels.sendIdleIntermediate(...args)),...qqActionTools(id,store,(...args)=>channels.qqActionCall(...args),channelId=>qqCatalogs.invalidate(channelId)),qqReplyTool(id,store,(...args)=>channels.qqActionCall(...args),voiceReplyTool(id,store,tts,(...args)=>channels.qqActionCall(...args),(...args)=>channels.sendTtsAudio(...args)))])
     composer.setAttachmentToolFactory(id => attachmentTool(id, store, deliveries, ctx, channels, resolved.apiPrefix))
     channels.setRequirementDelivery(deliveries, resolved.apiPrefix)
@@ -314,7 +324,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if (!resolved.exposeWeb) return
       const webServer = runtime.webServer ?? runtime.get('webServer') as WebServerLike | undefined
       if (webServer === undefined) throw new Error('dsh-partner exposeWeb requires webServer')
-      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili, tts, browser, continuous })
+      disposeApi = registerPartnerApi(webServer, resolved.apiPrefix, { ctx, store, credentials, channels, agents, login, memory, concerns, heartbeat, concernExecution, dailyReview, skills, tasks, requirements, collaboration, scheduler, companions, inbox, deliveries, storage, mcp, push, stickers, sleep, bilibili, tts, browser, continuous, attention, groupTraining })
     }
     if (ctx.inject !== undefined) ctx.inject(['webServer'], mountApi)
     else if (ctx.webServer !== undefined) mountApi(ctx)
@@ -342,6 +352,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     function closeRuntime(removeApi=true):Promise<void> {
       if(removeApi)disposeApi?.()
       return closing ??= (async()=>{
+      await Promise.all([attention.close(),groupTraining.close(),biliBackend.close()])
       await background.close()
       collaboration.beginShutdown()
       await continuous.close()

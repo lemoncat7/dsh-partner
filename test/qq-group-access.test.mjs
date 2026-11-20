@@ -294,21 +294,32 @@ test('a cancellation at the end of a merged burst is not hidden by its opening c
 test('a verified supplement is admitted after a confirmed segment and buffered chat stays eligible',{timeout:10000},async()=>{
  const f=fixture();let release,secondReady,steers=0,replies=0
  const second=new Promise(r=>secondReady=r),finish=new Promise(r=>release=r)
+ const supplementGenerated=Promise.withResolvers()
  const api=Object.create(DirectTransport.prototype);api.config={platform:'qq',targetId:f.target}
  api.sendText=async(_peer,text)=>{f.sent.push(text);if(text==='第二段'){secondReady();await finish}}
  f.manager.directTransports.set('qq',{forTarget:()=>api})
  f.agents.steer=async()=>{steers++;return false}
  f.manager.groupAutonomy=new QqGroupAutonomy({},()=>Date.now(),async()=>({label:'address',confidence:.75,margin:.4}))
- f.agents.reply=async(_c,_ch,_u,_m,progress)=>{replies++;progress('working');return replies===1?{text:'',attachments:[],chatParts:[{type:'text',text:'第一段'},{type:'text',text:'第二段'}]}:{text:'新的回复',attachments:[]}}
+ f.agents.reply=async(_c,_ch,_u,_m,progress)=>{
+  replies++;progress('working')
+  if(replies===1)return {text:'',attachments:[],chatParts:[{type:'text',text:'第一段'},{type:'text',text:'第二段'}]}
+  supplementGenerated.resolve()
+  return {text:'新的回复',attachments:[]}
+ }
  const first={...f.event,id:'first-segments',receivedAt:Date.now()}
  const pending=f.manager.handleDirect(f.channel,f.api,first,new AbortController().signal,[first],()=>{},'steer')
  await second
  const receivedAt=Date.now()
  const noise={...f.event,id:'during-segments',receivedAt,text:'还有一点随口说的',qqGroup:{...f.event.qqGroup,mentioned:false}}
- await f.manager.handleDirect(f.channel,f.api,noise,new AbortController().signal,[noise],()=>{},'steer')
- assert.equal(replies,2);assert.equal(steers,1,'only input during acknowledged delivery tries steering; first input queues normally')
+ const supplement=f.manager.handleDirect(f.channel,f.api,noise,new AbortController().signal,[noise],()=>{},'steer')
+ try{
+  await supplementGenerated.promise
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(replies,2);assert.equal(steers,1,'only input during acknowledged delivery tries steering; first input queues normally')
+  assert.deepEqual(f.sent,['第一段','第二段'],'generation can finish while the current QQ send is still pending')
+ }finally{release()}
+ await Promise.all([pending,supplement])
  assert.equal(f.sent.at(-1).text,'新的回复')
- release();await pending
  const buffered={...noise,id:'already-buffered',receivedAt}
  await f.manager.handleDirect(f.channel,f.api,buffered,new AbortController().signal,[buffered],()=>{},'steer')
  assert.equal(replies,3);assert.equal(f.manager.groupReplyWindows.active.size,0)

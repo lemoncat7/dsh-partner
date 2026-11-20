@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import { createServer } from 'node:http'
 import { PartnerStore } from '../lib/store.js'
+import { ttsProfile } from '../lib/voice/domain.js'
 import { SkillRepository } from '../lib/skills/repository.js'
 import { SkillService } from '../lib/skills/service.js'
 import { loadSkill } from '../lib/skills/loader.js'
@@ -497,20 +498,35 @@ test('Skill binding commits without tearing down an executing agent', async t =>
   assert.ok(skills.bindings('companion-default').some(skill => skill.id === installed.id))
 })
 
-test('capability API saves while a companion is running, without reload or automation loss', async t => {
+test('capability API saves while a companion is running, without reload or loss of channel settings', async t => {
   const item = await fixture(); t.after(item.close)
   let handler
   registerPartnerApi({ register(route) { handler = route.handler; return () => {} } }, '/partner', {
     store: item.store,
     agents: { isCompanionBusy() { return true }, async reloadCompanion() { throw new Error('must not reload during save') } },
   })
+  await item.store.update(state => {
+    const companion = state.companions[0]
+    companion.browser = { enabled: true, autonomous: false, endpoint: 'http://chromium:9222/', updatedAt: 1 }
+    companion.ttsProfiles = [ttsProfile({
+      name: 'Voice', provider: 'openai', endpoint: 'https://example.test', model: 'tts', voice: 'voice',
+    }, 'old-voice', 1, 'credential-reference')]
+    companion.provider = 'previous-provider'
+    companion.model = 'previous-model'
+  })
   const before = item.store.snapshot().companions[0]
+  const { browser, ttsProfiles, provider, model, ...form } = before
   const res = response()
-  await handler(request('PUT', '/partner/companions/' + before.id, { companion: { ...before, capabilities: ['administration', 'skills'] } }), res)
+  await handler(request('PUT', '/partner/companions/' + before.id, { companion: { ...form, capabilities: ['administration', 'skills'] } }), res)
   assert.equal(res.statusCode, 200)
   const saved = JSON.parse(res.body)
   assert.deepEqual(saved.capabilities, ['administration', 'skills'])
   assert.deepEqual(saved.automation, before.automation)
+  const current = item.store.snapshot().companions[0]
+  assert.deepEqual(current.browser, browser)
+  assert.deepEqual(current.ttsProfiles, ttsProfiles)
+  assert.equal(current.provider, undefined)
+  assert.equal(current.model, undefined)
   assert.ok(saved.updatedAt > before.updatedAt)
   assert.equal(item.store.hasCapability(before.id, 'administration'), true)
 })

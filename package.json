@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.27.14",
+  "version": "2.28.0",
   "description": "Long-lived AI companions with QQ, WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -193,6 +193,16 @@
     "docs/releases/2.21.1.md",
     "docs/releases/2.21.2.md",
     "docs/qq-attention.md",
+    "docs/bilibili-channel.md",
+    "resources/attention/worker.mjs",
+    "ops/attention/*-head.json",
+    "ops/attention/head.json",
+    "ops/attention/model-manifest.json",
+    "ops/attention/training.json",
+    "ops/attention/scene-training.json",
+    "ops/attention/evaluation.json",
+    "ops/attention/scene-evaluation.json",
+    "ops/attention/MODEL-LICENSE",
     "docs/releases/2.21.3.md",
     "docs/releases/2.21.4.md",
     "docs/releases/2.21.5.md",
@@ -231,9 +241,6 @@
     "docs/releases/2.23.22.md",
     "docs/releases/2.23.23.md",
     "docs/releases/2.23.24.md",
-    "resources/bilibili/*.py",
-    "resources/bilibili/requirements.txt",
-    "resources/bilibili/Dockerfile",
     "docs/releases/2.24.0-rc.2.md",
     "docs/releases/2.24.0-rc.3.md",
     "docs/releases/2.24.0-rc.4.md",
@@ -264,7 +271,8 @@
     "docs/releases/2.27.11.md",
     "docs/releases/2.27.12.md",
     "docs/releases/2.27.13.md",
-    "docs/releases/2.27.14.md"
+    "docs/releases/2.27.14.md",
+    "docs/releases/2.28.0.md"
   ],
   "dsh": {
     "bundle": {

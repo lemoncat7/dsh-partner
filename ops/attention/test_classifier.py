@@ -42,4 +42,20 @@ class Tests(unittest.TestCase):
         before=len(m.encoder.calls);m.classify('related current',['unrelated group'],{'profile':['related configured persona'],'partnerText':'related delivered reply'})
         self.assertEqual(len(m.encoder.calls),before)
 
+    def test_reply_ranker_reads_ordered_dialogue_with_legacy_similarity_preserved(self):
+        m = self.fixture()
+        # Prefer an actual preceding text with shared semantics.
+        m.dialogue_head = {'weights': np.array([0.] * 4 + [-2., 6.] + [0.] * 10)}
+        result = m.classify('related current', frame={
+            'partnerText': 'unrelated partner', 'dialogue': [
+                {'speaker': 1, 'text': 'related own'},
+                {'speaker': 0, 'text': 'related previous', 'replyTo': 0},
+                {'speaker': 2, 'text': 'unrelated newer'},
+            ],
+        })
+        self.assertEqual(result['link']['index'], 1)
+        self.assertEqual(result['replySimilarity'], 0)
+        self.assertGreater(result['link']['confidence'], .9)
+
+
 if __name__=='__main__':unittest.main()

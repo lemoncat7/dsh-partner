@@ -64,6 +64,8 @@ interface ApiRuntime {
   continuous?:import('./continuous/service.js').ContinuousService
   browser?:import('./browser/service.js').BrowserService
   tts?:TtsService
+  groupTraining?: import('./channels/qq/attention-group-training.js').GroupAttentionTraining
+  attention?: import('./channels/qq/managed-attention.js').ManagedAttention
   bilibili?: import('./channels/bilibili/service.js').BilibiliService
   sleep?: import('./character/sleep-service.js').SleepService
   stickers?: StickerLibrary
@@ -115,6 +117,38 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
   const relative = url.pathname.slice(prefix.length).replace(/^\/+|\/+$/g, '')
   const segments = relative ? relative.split('/').map(decodeURIComponent) : []
   const method = req.method ?? 'GET'
+  if(segments.length===2&&segments[0]==='qq-attention'&&segments[1]&&runtime.groupTraining){
+    const channelId=segments[1]
+    let body:Record<string,unknown>={}
+    if(method==='POST'){mutation(req);body=await readObject(req)}
+    if(method!=='GET'&&method!=='POST')throw httpError(405,'请求方法无效')
+    const ids=method==='GET'?url.searchParams.getAll('group'):body.groupIds??[]
+    if(!Array.isArray(ids)||ids.length>24||ids.some(id=>typeof id!=='string'))throw httpError(400,'请选择最多 24 个 QQ 群')
+    const targets=[...new Set(ids as string[])].map(id=>runtime.channels.qqTrainingTarget(channelId,id))
+    if(method==='POST')await runtime.groupTraining.batchAction(channelId,targets,body)
+    return sendJson(res,200,runtime.groupTraining.batchView(channelId,targets))
+  }
+  if(segments.length===3&&segments[0]==='qq-attention'&&segments[1]&&segments[2]&&runtime.groupTraining){
+    const target=runtime.channels.qqTrainingTarget(segments[1],segments[2])
+    if(method==='GET')return sendJson(res,200,await runtime.groupTraining.view(target.scope))
+    if(method==='POST'){
+      mutation(req)
+      await runtime.groupTraining.action(target,await readObject(req))
+      return sendJson(res,200,await runtime.groupTraining.view(target.scope))
+    }
+  }
+  if(segments.length===1&&segments[0]==='qq-attention'&&runtime.attention){
+    if(method==='GET')return sendJson(res,200,await runtime.attention.details())
+    if(method==='POST'){
+      mutation(req)
+      const {action}=await readObject(req)
+      if(action!=='enable'&&action!=='disable'&&action!=='reset')throw httpError(400,'未知本地识别操作')
+      if(action==='disable'){
+        await Promise.all([runtime.attention.change(action),runtime.groupTraining?.suspend()])
+      }else await runtime.attention.change(action)
+      return sendJson(res,200,await runtime.attention.details())
+    }
+  }
   if (runtime.browser && await dispatchBrowserApi(req,res,segments,runtime.browser)) return
   if (runtime.continuous && runtime.browser && await dispatchContinuousApi(req,res,segments,runtime.continuous,runtime.store,runtime.browser)) return
   if (runtime.tts && await dispatchTtsApi(req,res,segments,runtime.tts)) return
@@ -296,7 +330,8 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
       const saved = await runtime.store.update(state => {
         const previous = state.companions.find(item => item.id === id)
         if (!previous) throw httpError(404, '伙伴不存在')
-        const next: Companion = { ...draft, ...(previous.habitDismissals?{habitDismissals:previous.habitDismissals}:{}), ...(previous.habits?{habits:previous.habits}:{}), ...(previous.habitCheck?{habitCheck:previous.habitCheck}:{}), ...(previous.activityJournal?{activityJournal:previous.activityJournal}:{}), ...(previous.activityPlan?{activityPlan:previous.activityPlan}:{}), ...(previous.thoughts?{thoughts:previous.thoughts}:{}), ...(previous.interactionReview?{interactionReview:previous.interactionReview}:{}), ...(previous.personaHistory?{personaHistory:previous.personaHistory}:{}), ...(previous.temporaryAgreements?{temporaryAgreements:previous.temporaryAgreements}:{}), ...(previous.affection ? {affection:previous.affection} : {}), ...(draft.toolDiscovery===undefined&&previous.toolDiscovery!==undefined?{toolDiscovery:previous.toolDiscovery}:{}), ...(draft.relationshipText === undefined && previous.relationshipText !== undefined ? {relationshipText:previous.relationshipText} : {}), ...(previous.sleepState ? {sleepState:previous.sleepState} : {}), ...(draft.sleepPolicy === undefined && previous.sleepPolicy ? {sleepPolicy:previous.sleepPolicy} : {}), ...(draft.idleContact === undefined && previous.idleContact ? {idleContact:previous.idleContact} : {}), ...(draft.characterCard === undefined && previous.characterCard ? {characterCard: previous.characterCard} : {}), ...(previous.notificationDelivery ? {notificationDelivery: previous.notificationDelivery} : {}), automation: previous.automation, id, createdAt: previous.createdAt, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
+        const { presetId, provider, model, identityDraft, ...existing } = previous
+        const next: Companion = { ...existing, ...draft, updatedAt: Math.max(Date.now(), previous.updatedAt + 1) }
         if (next.idleContact?.enabled && !idleContactRouteAllowed(state, next, next.idleContact.routeId)) throw httpError(400, '请选择本伙伴可用的会话；渠道联系人须已授权')
         state.companions = state.companions.map(item => item.id === id ? next : item)
       })
