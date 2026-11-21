@@ -71,7 +71,7 @@ test('sync-only scheduler never records observations or sends notifications',asy
  concerns.recordObservations=()=>assert.fail('sync must not re-ingest observations')
  let called=0
  const runtime={heartbeat:async(_c,_r,items)=>{called++;assert.equal(items[0].recordingSnapshot.data,'verified');return {concerns:items,tools:[],candidates:[],startedAt:1,completedAt:2,recording:[{concernId:item.id,state:'synced'}]}},recordHeartbeatActivity:async()=>{}}
- const scheduler=new HeartbeatScheduler({logger:{warn(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false},runtime,{sendProactive:()=>assert.fail('sync must not notify')},concerns)
+ const scheduler=new HeartbeatScheduler({logger:{warn(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false},runtime,concerns)
  const response=await scheduler.trigger('c',{recordingOnly:true})
  assert.equal(response.sent,false)
  assert.equal(called,1)

@@ -8,7 +8,7 @@ process.on('disconnect',()=>process.exit(0))
 const [workerData]=await once(process,'message')
 const send=value=>process.send(value)
 
-const {modelDir, packages, assets, training, custom, groupModels, groupTraining} = workerData
+const {modelDir, packages, assets, training, custom, groupModels, groupTraining, profileTraining} = workerData
 const require = createRequire(join(packages, 'package.json'))
 const ort = require('onnxruntime-node')
 const tokenizerModule = await import(require.resolve('@huggingface/tokenizers'))
@@ -113,26 +113,34 @@ function dialogueLink(head,query,turns,vectors,text) {
 const defaults = { intent:await json(assets,'head.json'), scene:await json(assets,'scene-head.json'),
   dialogue:await json(assets,'dialogue-head.json').catch(error=>{if(error.code!=='ENOENT')throw error}) }
 const baseHeads = {...defaults,...custom}
-async function classify({text,context=[],profile=[],partnerText,dialogue=[],groupScope,boundRelationship}) {
+const currentCue=(group,fallback,revision)=>
+  group&&group.revision===revision?group:fallback?.revision===revision?fallback:undefined
+async function classify({text,context=[],profile=[],partnerText,dialogue=[],groupScope,defaultScope,boundRelationship,roleRevision,relationshipRevision}) {
   const scoped=groupScope?groupModels?.[groupScope]:undefined
-  const heads=scoped?.builtin?defaults:{...baseHeads,...scoped?.heads}
-  if(boundRelationship&&scoped?.relationshipAliases?.length){
+  const fallback=defaultScope?groupModels?.[defaultScope]:undefined
+  const heads={...(scoped?.builtin?defaults:baseHeads),...fallback?.heads,...scoped?.heads}
+  const learnedRole=currentCue(scoped?.profile?.role,fallback?.profile?.role,roleRevision)
+  const learnedRelation=currentCue(scoped?.profile?.relationship,fallback?.profile?.relationship,relationshipRevision)
+  const legacyAliases=boundRelationship?(scoped?.relationshipAliases??[]).filter(alias=>boundRelationship.normalize('NFKC').includes(alias)):[]
+  const aliases=[...new Set([...(learnedRole?.aliases??[]),...(learnedRelation?.aliases??[]),...legacyAliases])]
+  if(aliases.length){
     const original=text.normalize('NFKC')
     const prefix=/^[@＠]?\s*/u.exec(original)?.[0]??''
-    for(const alias of [...scoped.relationshipAliases].sort((a,b)=>b.length-a.length)){
-      if(!boundRelationship.normalize('NFKC').includes(alias)||!original.slice(prefix.length).startsWith(alias))continue
+    for(const alias of aliases.sort((a,b)=>b.length-a.length)){
+      if(!original.slice(prefix.length).startsWith(alias))continue
       const tail=original.slice(prefix.length+alias.length)
-      if(!tail||/^[\s\p{P}]/u.test(tail)||/^你/u.test(tail)){text=prefix+'伙伴'+tail;break}
+      if(!tail||/^[\s\p{P}你]/u.test(tail)){text=prefix+'伙伴'+tail;break}
     }
   }
   const legacy=[text,...context,...profile,...(partnerText?[partnerText]:[])]
   const vectors=await vectorsFor([...legacy,...dialogue.map(t=>t.text)])
   const query=vectors[0]
   const similarity = others => Math.max(0,Math.min(1,Math.max(...others.map(vector=>dot(query,vector)))))
+  const identityVectors=[...vectors.slice(context.length+1,1+context.length+profile.length),...(learnedRole?.vectors??[]),...(boundRelationship?learnedRelation?.vectors??[]:[])]
   return {
     ...predict(heads.intent,query),scene:predict(heads.scene,query),
     ...(context.length?{contextSimilarity:similarity(vectors.slice(1,context.length+1))}:{}),
-    ...(profile.length?{profileSimilarity:similarity(vectors.slice(context.length+1,1+context.length+profile.length))}:{}),
+    ...(identityVectors.length?{profileSimilarity:similarity(identityVectors)}:{}),
     ...(partnerText?{replySimilarity:similarity([vectors[legacy.length-1]])}:{}),
     ...(heads.dialogue&&dialogue.length?{link:dialogueLink(heads.dialogue,query,dialogue,vectors.slice(legacy.length),text)}:{}),
   }
@@ -149,8 +157,11 @@ async function train(name, samples, evaluation) {
   const additions=groupTraining?.samples.train[name]??[]
   const bundled=await json(assets,samples)
   const rows=await dataset(groupTraining?additions:bundled)
-  const scoped=groupTraining?groupModels?.[groupTraining.scope]:undefined
-  const incumbent=groupTraining&&!scoped?.builtin?(scoped?.heads?.[name]??baseHeads[name]):baseline
+  const fallback=groupTraining?.defaultScope?groupModels?.[groupTraining.defaultScope]?.heads?.[name]:undefined
+  const incumbents=groupTraining?(groupTraining.scopes??[groupTraining.scope]).map(scope=>{
+    const scoped=groupModels?.[scope]
+    return scoped?.heads?.[name]??fallback??(scoped?.builtin?baseline:baseHeads[name])
+  }):[baseline]
   const width=rows[0].vector.length
   const count=baseline.labels.length
   const weights=groupTraining?baseline.weights.map(row=>row.slice()):Array.from({length:width},()=>Array(count).fill(0))
@@ -158,7 +169,11 @@ async function train(name, samples, evaluation) {
   let head={...baseline,weights,bias,trainingCount:rows.length}
   const targets=rows.map(row=>baseline.labels.indexOf(row.label))
   if(targets.includes(-1))throw Error('训练样本包含未知分类')
-  const weightsByRow=rows.map(row=>row.persona||row.personaScene?2:1)
+  const counts=targets.reduce((counts,target)=>{counts[target]++;return counts},Array(count).fill(0))
+  const weightsByRow=rows.map((row,i)=>{
+    const balance=groupTraining&&name==='scene'?Math.sqrt(rows.length/counts[targets[i]]/count):1
+    return Math.min(2.5,Math.max(.75,balance)*(row.persona||row.personaScene?2:1))
+  })
   const totalWeight=weightsByRow.reduce((sum,value)=>sum+value,0)
   const gradient=weights.map(row=>row.slice())
   const biasGradient=bias.slice()
@@ -178,9 +193,11 @@ async function train(name, samples, evaluation) {
   }
   const accuracy=(checks,model)=>checks.filter(row=>predict(model,row.vector).label===row.label).length
   const generic=await dataset(await json(assets,evaluation))
-  const previousAccuracy=accuracy(generic,incumbent)
+  const baselineAccuracy=checks=>Math.max(...incumbents.map(model=>accuracy(checks,model)))
+  const previousAccuracy=baselineAccuracy(generic)
   if(groupTraining&&accuracy(generic,head)<previousAccuracy-2){
     const learned=head
+    const incumbent=incumbents.find(model=>accuracy(generic,model)===previousAccuracy)
     for(const strength of [.5,.25,.125,.0625]){
       const blend=(trained,original)=>original+strength*(trained-original)
       head={...learned,weights:learned.weights.map((row,i)=>row.map((value,j)=>blend(value,incumbent.weights[i][j]))),
@@ -188,7 +205,7 @@ async function train(name, samples, evaluation) {
       if(accuracy(generic,head)>=previousAccuracy-2)break
     }
   }
-  const check=checks=>({total:checks.length,correct:accuracy(checks,head),baseline:accuracy(checks,incumbent),training:rows.length})
+  const check=checks=>({total:checks.length,correct:accuracy(checks,head),baseline:baselineAccuracy(checks),training:rows.length})
   const result=check(generic)
   const signature=text=>text.normalize('NFKC').toLowerCase().replace(/[\p{Z}\p{P}\p{S}]/gu,'')
   const builtIns=new Set(bundled.map(row=>signature(row.text)))
@@ -201,7 +218,7 @@ async function train(name, samples, evaluation) {
   const personaCheck=labelMatches=>{
     const selected=checks.filter(row=>row.persona&&labelMatches(row.label))
     const correct=model=>selected.filter(row=>labelMatches(predict(model,row.vector).label)).length
-    return {total:selected.length,correct:correct(head),baseline:correct(incumbent),
+    return {total:selected.length,correct:correct(head),baseline:Math.max(...incumbents.map(correct)),
       training:rows.filter(row=>row.persona&&labelMatches(row.label)).length}
   }
   const persona=checks&&(name==='intent'?{
@@ -209,11 +226,21 @@ async function train(name, samples, evaluation) {
     personaNonCalls:personaCheck(label=>label!=='address'),
   }:{
     personaScenes:{...check(checks.filter(row=>row.personaScene)),training:rows.filter(row=>row.personaScene).length},
+    ...Object.fromEntries(baseline.labels.map(label=>['scene.'+label,{
+      ...check(checks.filter(row=>row.label===label)),training:rows.filter(row=>row.label===label).length,
+    }])),
   })
   return {head,result,held,persona}
 }
 
-if(training){
+if(profileTraining){
+  const learn=async({revision,aliases,scenes})=>{
+    const vectors=[]
+    for(let i=0;i<scenes.length;i+=4)vectors.push(...await encode(scenes.slice(i,i+4)))
+    return {revision,aliases,vectors:vectors.map(vector=>Array.from(vector))}
+  }
+  send({learnedProfile:{role:await learn(profileTraining.role),relationship:await learn(profileTraining.relationship)}})
+}else if(training){
   const intent=await train('intent','training.json','evaluation.json')
   const scene=await train('scene','scene-training.json','scene-evaluation.json')
   send({trained:{intent:intent.head,scene:scene.head},results:{intent:intent.result,scene:scene.result,...(groupTraining?{groupIntent:intent.held,groupScene:scene.held,...intent.persona,...scene.persona}:{})}})

@@ -102,7 +102,7 @@ import { taskWorkContext } from './tasks/context.js'
 import type { PartnerInboundMessage, PartnerReply } from './channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, safeMediaName } from './channel-message.js'
 import { listConcernFileSources, type ConcernSource } from './concern-sources.js'
-import { CONCERN_CREATED_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
+import { CONCERN_CREATED_NOTICE, CONCERN_EXECUTION_NOTICE, renderConcernCreatedNotice } from './concern-notification.js'
 import { type NoteRecordingBridge } from './concern-recording.js'
 import {concernExecutionNotes} from './concern-execution-notes.js'
 import { bindTaskSshAccess, type SshTaskAccessBridge } from './collaboration/ssh-task-access.js'
@@ -313,8 +313,6 @@ export class PartnerAgentRuntime {
       try {void agent.runMaintenance(signal=>this.prepareAgentAssembly(agent,signal)).catch(error=>this.ctx.logger.warn('伙伴配置准备失败：'+String(error)))}catch { /* Another maintenance owner will release the next idle boundary. */ }
     }
     if(typeof this.ctx.on==='function'&&typeof this.ctx.tools?.resolve==='function'){
-      const beforeTools=this.ctx.on.bind(this.ctx) as unknown as (name:string,fn:(info:{agent:Agent;turn:number;signal:AbortSignal;messages:readonly UserMessage[]})=>Promise<void>)=>()=>void
-      preparations.push(beforeTools('agent/prepare-tools',async({agent,turn,signal,messages})=>{await this.prepareAgentTurn(agent,turn,signal,messages)}))
       preparations.push(this.ctx.on('agent/created',async ({agent})=>{await this.prepareAgentAssembly(agent,AbortSignal.timeout(60000))}))
       preparations.push(this.ctx.on('agent/status',({agent,status})=>{if(status==='idle')refreshIdle(agent)}))
       const claimedTurns=new WeakMap<Agent,number>()
@@ -643,14 +641,6 @@ export class PartnerAgentRuntime {
     if (questionOrigin(agent.session.id, agent.session.snapshotEvents(), runtimeSnapshot(this.store).sessions)?.id !== route.id) return false
     const owner=this.channelReplyFocus.get(route.sessionId)
     const inbound = await this.persistInbound(route, message)
-    const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
-    if (deferred && deferred.length > 0) {
-      agent.inject(createUserMessage({
-        content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
-        source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
-      }))
-      await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
-    }
     const userMessage = createUserMessage({ content: inbound.content, source: { kind: 'user' } })
     await this.rememberMessageOrigin(route, userMessage.id, agent.session, inbound.images)
     // Preparation may outlive the original reply; fall back to a fresh reply.
@@ -818,8 +808,8 @@ export class PartnerAgentRuntime {
 
   async canResumeConcern(receipt: ConcernExecutionReceipt): Promise<boolean> {
     const state = runtimeSnapshot(this.store), companion = state.companions.find(c => c.id === receipt.companionId)
-    const route = state.sessions.find(r => r.sessionId === receipt.sessionId && r.companionId === receipt.companionId)
-    if (!companion || !route) return false
+    const route = state.sessions.find(r => r.kind === 'local' && r.sessionId === receipt.sessionId && r.companionId === receipt.companionId)
+    if (!companion || !route || this.isArchived(route)) return false
     const agent = await this.ensureAgent(companion, route)
     return agent.status === 'idle' && concernDisposed(agent.session.snapshotEvents(), receipt.messageId)
   }
@@ -830,8 +820,14 @@ export class PartnerAgentRuntime {
     const current = previous.catch(() => {}).then(async () => {
       const state = runtimeSnapshot(this.store)
       const companion = state.companions.find(c => c.id === receipt.companionId)
-      const route = state.sessions.find(r => r.sessionId === key && r.companionId === receipt.companionId)
-      if (!companion || !route || !this.concerns) throw new Error('关注执行会话不可用')
+      const route = state.sessions.find(r => r.kind === 'local' && r.sessionId === key && r.companionId === receipt.companionId)
+      if (!companion || !this.concerns) throw new Error('关注执行会话不可用')
+      if (!route || this.isArchived(route)) {
+        const summary = await this.reconcileConcern(receipt)
+        if (summary === undefined) throw new Error('这次旧执行的会话已不是伙伴主会话，请先核对原执行结果')
+        await this.store.update(s => {const r=s.concernExecutions?.find(r=>r.id===receipt.id);if(r&&r.messageId===receipt.messageId){r.status='completed';r.resultSummary=summary;r.updatedAt=Date.now();delete r.error}})
+        return
+      }
       const agent = await this.ensureAgent(companion, route)
       if (agent.status !== 'idle') await agent.whenIdle()
       const latest = (await this.concerns.list(companion.id)).find(c => c.id === concern.id)
@@ -851,7 +847,8 @@ export class PartnerAgentRuntime {
       try {
         disposers.push(trackPartnerTools(this.store,companion.id,access.tools.map(tool=>tool.name)))
         for (const tool of access.tools) disposers.push((agent.ctx as RuntimeContext).tools.register(tool))
-        const message = createUserMessage({content:[{type:'text',text:prompt+access.prompt}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'关注变化 · 直接执行'}})
+        if (!this.isCurrentConcernSession(route)) throw new Error('关注执行前主会话已变化')
+        const message = createUserMessage({content:[{type:'text',text:prompt+access.prompt}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:CONCERN_EXECUTION_NOTICE}})
         agent.followup({...message,id:receipt.messageId as typeof message.id})
         try { await agent.whenIdle() } catch (error) {
           if (concernDisposed(agent.session.snapshotEvents(), receipt.messageId)) throw concernMissingReply(agent.session.snapshotEvents(), receipt.messageId)
@@ -1081,17 +1078,33 @@ export class PartnerAgentRuntime {
 
   async recordConcernCreatedNotice(companion: Companion, scopeId: string, concerns: PartnerConcern[]): Promise<boolean> {
     if (concerns.length === 0) return false
-    const route = runtimeSnapshot(this.store).sessions
-      .filter(item => item.companionId === companion.id && memoryScope(item.channelId, item.userId) === scopeId)
-      .sort((left, right) => right.lastMessageAt - left.lastMessageAt)[0]
-    if (route === undefined) return false
+    if (!runtimeSnapshot(this.store).sessions.some(item => item.companionId === companion.id && memoryScope(item.channelId, item.userId) === scopeId)) return false
+    await this.appendConcernNotice(companion, renderConcernCreatedNotice(concerns), CONCERN_CREATED_NOTICE)
+    return true
+  }
+
+  async recordConcernNotification(companion: Companion, observation: ConcernObservation): Promise<void> {
+    const receipt = 'concern-notification-' + createHash('sha256').update(JSON.stringify([companion.id, observation.id])).digest('hex')
+    await this.appendConcernNotice(companion, observation.event, '持续关注 · 重要变化', receipt)
+  }
+
+  private isCurrentConcernSession(route: ChannelSession): boolean {
+    return !this.closed && !this.store.isCompanionRemoving(route.companionId) && !this.isArchived(route)
+      && runtimeSnapshot(this.store).sessions.some(row => row.kind === 'local' && row.companionId === route.companionId && row.id === route.id && row.sessionId === route.sessionId)
+  }
+
+  private async appendConcernNotice(companion: Companion, text: string, summary: string, receipt?: string): Promise<Agent> {
+    const route = await this.ensureLocalSessionRecord(companion.id)
     const conversation = await this.ensureAgent(companion, route)
     if (conversation.status !== 'idle') await conversation.whenIdle()
-    conversation.session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: renderConcernCreatedNotice(concerns) }],
-      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: CONCERN_CREATED_NOTICE },
-    }), { surfaceOp: 'append' })
-    return true
+    if (!this.isCurrentConcernSession(route)) throw new Error('伙伴主会话已变化，关注通知等待重试')
+    if (receipt && conversation.session.snapshotEvents().some(e => e.type === 'user/message' && e.data.id === receipt)) return conversation
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary },
+    })
+    conversation.session.append('user/message', receipt ? {...message, id:receipt as typeof message.id} : message, { surfaceOp: 'append' })
+    return conversation
   }
 
   /** Append a visible receipt without starting another agent turn; its receipt survives restarts. */
@@ -1122,22 +1135,11 @@ export class PartnerAgentRuntime {
 
   async recordHeartbeatActivity(
     companion: Companion,
-    route: ChannelSession,
     execution: HeartbeatExecution,
     outcome: HeartbeatOutcome,
     deliveryError?: string,
   ): Promise<void> {
-    const conversation = await this.ensureAgent(companion, route)
-    if (conversation.status !== 'idle') await conversation.whenIdle()
-    conversation.session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: renderHeartbeatActivity(execution, outcome, deliveryError) }],
-      source: {
-        kind: 'plugin:@lemoncat7/dsh-partner',
-        plugin: '@lemoncat7/dsh-partner',
-        form: 'notice',
-        summary: '伙伴正在进行低打扰心跳检查',
-      },
-    }), { surfaceOp: 'append' })
+    const conversation = await this.appendConcernNotice(companion, renderHeartbeatActivity(execution, outcome, deliveryError), '伙伴正在进行低打扰心跳检查')
     normalizeBackgroundContext(conversation.session)
   }
 
@@ -1177,7 +1179,7 @@ export class PartnerAgentRuntime {
     if (!this.configurations.companion(companionId)) throw new Error('伙伴不存在')
   }
 
-  /** Awaited by the host before prompt/tool assembly, never from a running tool. */
+  /** Prepare per-turn context after the Agent's scoped tool registrations are committed. */
   async prepareAgentTurn(agent: Agent, turn: number, signal: AbortSignal, messages: readonly UserMessage[] = []): Promise<void> {
     if (this.closed) throw new Error('伙伴运行时已关闭')
     this.admittedInputs.set(agent, messages)
@@ -1531,11 +1533,6 @@ export class PartnerAgentRuntime {
     const agent = await this.ensureAgent(companion, session)
     if (agent.status !== 'idle') await agent.whenIdle()
     const inbound = await this.persistInbound(session, message)
-    const deferred = await this.concerns?.deferred(companion.id, memoryScope(channelId, userId), inbound.query, 2).catch(() => [])
-    if (deferred && deferred.length > 0) agent.inject(createUserMessage({
-      content: [{ type: 'text', text: renderDeferredMentions(deferred) }],
-      source: { kind: 'plugin:@lemoncat7/dsh-partner', plugin: '@lemoncat7/dsh-partner', form: 'notice', summary: '伙伴想起了与当前消息相关的挂念' },
-    }))
     const startSeq = agent.session.seq
     let deliveredUserMessageId = ''
     let directProgress=false
@@ -1595,7 +1592,6 @@ export class PartnerAgentRuntime {
       for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()
     })
     const stateEnded=Date.now()
-    if (deferred && deferred.length > 0) await this.concerns?.markMentioned(companion.id, deferred.map(item => item.id)).catch(() => {})
     const liveCard=runtimeSnapshot(this.store).companions.find(c=>c.id===companion.id)?.characterCard
     const reply=await prepareChannelReply(response, session.cwd ?? this.defaultCwd,Boolean(liveCard?.enabled&&liveCard.segmentedReplies))
     if(completion.failed)reply.failureNotice=true
@@ -1957,12 +1953,6 @@ function renderProfile(profile: UserProfileSnapshot, update = false, emphasize =
   ].join('\n')
 }
 
-function renderDeferredMentions(entries: ConcernObservation[]): string {
-  return [
-    '伙伴之前发现了与用户当前消息相关的新变化。若自然且确实有帮助，可以在本次回答末尾顺手提一句；不要抢占当前问题，也不要声称刚刚搜索。',
-    ...entries.map(item => `- ${item.event}${item.evidence ? `（依据：${item.evidence}）` : ''}`),
-  ].join('\n')
-}
 
 export function canReuseSession(route: ChannelSession, companionId: string, archivedSessionIds: readonly SessionId[]): boolean {
   return route.companionId === companionId && !archivedSessionIds.includes(route.sessionId as SessionId)

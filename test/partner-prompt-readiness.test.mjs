@@ -528,11 +528,11 @@ test('speaker changes select tools without re-registering and presentation does 
 })
 
 
-test('before-tool preparation admits and executes restored partner tools in the very first frozen set',async t=>{
+test('native agent creation admits and executes restored partner tools in the very first frozen set',async t=>{
  const f=await fixture(t,{async compose(ctx){return ctx.tools.register(defineContentToolFixture({name:'partner_chat_reply',description:'chat',parameters:{},execute:async()=>[{type:'text',text:'first call succeeded'}]}))}})
  const signal=new AbortController().signal
- // Reproduce the host's exact new boundary: pending input -> prepare -> resolve -> assemble -> execute.
- await f.agent.ctx.serial('agent/prepare-tools',{agent:f.agent,turn:1,messages:[],signal})
+ // The host awaits creation before it resolves the first step's tool set.
+ await f.agent.ctx.serial('agent/created',{agent:f.agent})
  const toolSet=await f.root.tools.resolve({agent:f.agent,modelSelection:{provider:'fixture',model:'test'},signal})
  try{
   const assembly=await f.root.systemPrompt.assemble({agent:f.agent,scope:f.agent,toolSet,signal})

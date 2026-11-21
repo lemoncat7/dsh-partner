@@ -125,8 +125,9 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     const ids=method==='GET'?url.searchParams.getAll('group'):body.groupIds??[]
     if(!Array.isArray(ids)||ids.length>24||ids.some(id=>typeof id!=='string'))throw httpError(400,'请选择最多 24 个 QQ 群')
     const targets=[...new Set(ids as string[])].map(id=>runtime.channels.qqTrainingTarget(channelId,id))
-    if(method==='POST')await runtime.groupTraining.batchAction(channelId,targets,body)
-    return sendJson(res,200,runtime.groupTraining.batchView(channelId,targets))
+    const defaults=runtime.channels.qqDefaultTrainingTarget(channelId)
+    if(method==='POST')await runtime.groupTraining.batchAction(channelId,targets,body,defaults)
+    return sendJson(res,200,runtime.groupTraining.batchView(channelId,targets,defaults.scope))
   }
   if(segments.length===3&&segments[0]==='qq-attention'&&segments[1]&&segments[2]&&runtime.groupTraining){
     const target=runtime.channels.qqTrainingTarget(segments[1],segments[2])
@@ -186,7 +187,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     mutation(req)
     const { question } = await readObject(req, 4096)
     if (typeof question !== 'string' || !question.trim() || question.length > 500) throw httpError(400, '请输入 1–500 字的设置问题')
-    const state = runtime.store.snapshot(['companions', 'channels', 'pairings'])
+    const state = runtime.store.snapshot(['companions', 'channels', 'pairings', 'sessions'])
     const companion = state.companions.find(item => item.id === segments[1])
     if (!companion) throw httpError(404, '伙伴不存在')
     if (res.destroyed) return
@@ -195,7 +196,8 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     res.once('close', onClose)
     try {
       const facts = settingsGuideFacts(companion, state, id => runtime.channels.channelRuntimeStatus(id))
-      const guide = await explainSettings(runtime.ctx, companion, question.trim(), facts, abort.signal)
+      const main = state.sessions.find(route => route.companionId === companion.id && route.kind === 'local' && !runtime.agents?.isArchived?.(route))
+      const guide = await explainSettings(runtime.ctx, companion, question.trim(), facts, abort.signal, main?.sessionId)
       if (!abort.signal.aborted) sendJson(res, 200, guide)
     } catch {
       if (!abort.signal.aborted) throw httpError(503, 'AI 设置引导暂时无法生成，请稍后重试或使用设置搜索')

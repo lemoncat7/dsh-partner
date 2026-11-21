@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import { registerPartnerApi } from '../lib/api.js'
 import { findSettings, settingsCatalog } from '../lib/settings/catalog.js'
-import { parseSettingsGuideReply } from '../lib/settings/guide.js'
+import { explainSettings, parseSettingsGuideReply } from '../lib/settings/guide.js'
 
 test('setting search matches everyday questions without asking a model', () => {
   for (const wording of ['不 @ 也回', '群里不用艾特也能回吗', '为什么只有＠才回？']) {
@@ -45,8 +45,10 @@ test('settings guide API passes only current partner configuration facts and kee
       { id: 'qq-b', companionId: 'partner-b', enabled: true, platform: 'qq' },
     ],
     pairings: [{ channelId: 'qq-a', status: 'pending', userId: 'PRIVATE_CONTACT' }],
+    sessions: [{kind:'local',companionId:companion.id,sessionId:'main-session'}],
   }
   const before = structuredClone(state)
+  const defaultSelection = Object.freeze({ provider: 'default-provider', model: 'default-model', reasoningEffort: 'high' })
   const modelCalls = []
   let successful = true
   let handler
@@ -54,7 +56,7 @@ test('settings guide API passes only current partner configuration facts and kee
     store: {
       isCompanionRemoving: () => false,
       snapshot(keys) {
-        assert.deepEqual(keys, ['companions', 'channels', 'pairings'])
+        assert.deepEqual(keys, ['companions', 'channels', 'pairings', 'sessions'])
         return state
       },
     },
@@ -62,7 +64,11 @@ test('settings guide API passes only current partner configuration facts and kee
       channelRuntimeStatus(id) { assert.equal(id, 'qq-a'); return 'running' },
     },
     ctx: {
-      get: () => ({ currentSelection: () => ({ provider: 'default-provider', model: 'default-model' }) }),
+      get: () => ({ currentSelection: () => defaultSelection }),
+      agents: {get(id) {
+        assert.equal(id,'main-session')
+        return {model:{current:()=>({provider:'session-provider',model:'session-model',reasoningEffort:'high'})}}
+      }},
       llm: {
         async *stream(options) {
           modelCalls.push(options)
@@ -94,8 +100,10 @@ test('settings guide API passes only current partner configuration facts and kee
   assert.equal(result.statusCode, 200)
   assert.deepEqual(result.body, { answer: '可以先检查通用 TTS。', settingIds: ['tts'] })
   const [request] = modelCalls
-  assert.equal(request.provider, 'selected-provider')
-  assert.equal(request.model, 'selected-model')
+  assert.equal(request.provider, 'session-provider')
+  assert.equal(request.model, 'session-model')
+  assert.equal(request.reasoningEffort, 'high')
+  assert.equal(request.maxTokens, undefined)
   assert.equal(request.tools, undefined)
   assert.equal(request.messages.length, 1)
   const input = request.messages[0].content[0].text
@@ -115,4 +123,36 @@ test('settings guide API passes only current partner configuration facts and kee
   assert.equal(error.statusCode, 503)
   assert.match(error.body.error, /设置搜索/)
   assert.doesNotMatch(error.body.error, /PRIVATE_PROVIDER_ERROR/)
+})
+
+test('settings guide uses a cold session selection before falling back to companion defaults', async () => {
+  const signal=AbortSignal.timeout(1000)
+  const defaultSelection = { provider: 'p', model: 'm', reasoningEffort: 'high' }
+  const selected = { provider: 'saved-provider', model: 'saved-model', reasoningEffort: 'max' }
+  const models=[]
+  let closed=false
+  const ctx = {
+    get: name=>name==='agentDefaultModel'?{currentSelection:()=>defaultSelection}:name==='sessionQuery'?{
+      async observeSession(id,options){
+        assert.equal(options.signal,signal)
+        if(id==='missing')throw Object.assign(Error('not found'),{code:'SESSION_QUERY_SESSION_NOT_FOUND'})
+        return {events:[{type:'model/selection',data:selected}],[Symbol.dispose](){closed=true}}
+      }
+    }:undefined,
+    llm: {
+      async *stream(options) {
+        assert.equal(options.maxTokens,undefined)
+        assert.equal(options.signal,signal)
+        models.push([options.provider,options.model,options.reasoningEffort])
+        yield { type: 'text-delta', text: '{"answer":"去渠道设置。","settingIds":[]}' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    },
+  }
+  for (const [sessionId,companion] of [['cold',{}],['missing',{model:'companion-model'}],[undefined,{}]]) {
+    const result = await explainSettings(ctx, { id: 'guide', ...companion }, '从哪设置？', {}, signal, sessionId)
+    assert.equal(result.answer, '去渠道设置。')
+  }
+  assert.ok(closed)
+  assert.deepEqual(models,[['saved-provider','saved-model','max'],['p','companion-model',undefined],['p','m','high']])
 })

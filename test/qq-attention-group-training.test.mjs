@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {setTimeout as wait} from 'node:timers/promises'
+import {extractAttentionProfile} from '../lib/channels/qq/attention-profile-training.js'
 import {chooseCandidates,editedLabels,labelSamples,splitSamples} from '../lib/channels/qq/attention-samples.js'
-import {qqHistorySamples,readQqTrainingHistory} from '../lib/channels/qq/attention-group-training.js'
+import {GroupAttentionTraining,qqHistorySamples,readQqTrainingHistory} from '../lib/channels/qq/attention-group-training.js'
 
 test('sample prompts expose local speaker numbers and scrub common identifiers',async()=>{
  const at=Date.now()
@@ -44,8 +46,11 @@ test('history ignores other rooms and marks only verified group reply targets',(
   {message_id:2,group_id:'12345',user_id:'70000',message:[segment(1),text]},
   {message_id:3,group_id:'88888',user_id:'60000',message:[text]},
   {message_id:4,group_id:'12345',user_id:'70000',message:[segment(3),text]},
+  {message_id:5,group_id:'12345',user_id:'70000',message:[{type:'at',data:{qq:'80000'}},text]},
+  {message_id:6,group_id:'12345',user_id:'70000',message:[text,{type:'at',data:{qq:'80000'}}]},
  ].map(row=>({...row,time:Math.floor(Date.now()/1000)}))
- assert.deepEqual(qqHistorySamples({messages:rows},'12345','60000').map(row=>[row.id,row.recipient]),[['2','partner'],['4','unknown']])
+ assert.deepEqual(qqHistorySamples({messages:rows},'12345','60000').map(row=>[row.id,row.recipient]),
+  [['2','partner'],['4','unknown'],['5','member'],['6','unknown']])
 })
 
 test('aliases come from settings and private relationships only reach verified samples',async()=>{
@@ -62,7 +67,7 @@ test('aliases come from settings and private relationships only reach verified s
   yield {type:'text-delta',text:JSON.stringify(input.rows.map(row=>({id:row.id,intent:'address',scene:'address',alias:row.text.split('，')[0]})))}
   yield {type:'finish',reason:{kind:'stop'}}
  }}}
- const rows=await labelSamples(ctx,{name:'伙伴',role:'外号叫小泡',relationshipText:'对方私下喊我私称'},candidates,AbortSignal.timeout(1000),()=>{})
+ const rows=await labelSamples(ctx,{name:'伙伴',role:'外号叫小泡',relationshipText:'对方私下喊我私称',characterCard:{enabled:true,roleText:''}},candidates,AbortSignal.timeout(1000),()=>{})
  assert.equal(inputs.length,2)
  assert.equal(inputs[0].relationshipNames,undefined)
  assert.deepEqual(inputs[1].relationshipNames,['对方私下喊我私称'])
@@ -93,20 +98,21 @@ test('merged candidate context stays within the original group',()=>{
  assert.deepEqual(selected[2].context.map(item=>item.text),['第一群前文'])
 })
 
-test('prioritizes grounded persona candidates without treating private names as public',()=>{
+test('sample selection balances learned calls and non-calls across the history without an account restriction',()=>{
  const at=Date.now()-1_000_000
  const history=Array.from({length:256},(_,id)=>({id:String(id),sender:'60000',
   text:'旁白'+id,at:at+id*1000,recipient:'unknown'}))
  history[1].text='小泡，到这里来'
- history[5].text='私称，来看看'
+ history[5].text='私称，你来看看'
  history[5].sender='70000'
- history[13].text='私称，其他人随口提'
- const selected=chooseCandidates(history,at,['70000'],
-  {name:'伙伴',role:'外号叫小泡',relationshipText:'对方私下喊我私称'})
+ history[9].text='我认识一个朋友也叫私称'
+ history[13].text='私称，你来吗'
+ const companion={name:'伙伴',role:'外号叫小泡',relationshipText:'对方私下喊我私称',characterCard:{enabled:true,roleText:''}}
+ const before=chooseCandidates(history,at,['70000'],companion)
+ const selected=chooseCandidates(history,at,['70000'],companion,{role:['小泡'],relationship:['私称']})
  assert.equal(selected.length,64)
- assert.ok(selected.some(row=>row.id===1))
- assert.ok(selected.some(row=>row.id===5))
- assert.ok(!selected.some(row=>row.id===13))
+ assert.ok(!before.some(row=>row.id===13))
+ assert.ok([1,5,9,13].every(id=>selected.some(row=>row.id===id)))
 })
 
 test('role evaluation marks real calls and mentions separately after the chronological split',()=>{
@@ -136,7 +142,7 @@ test('annotates a grounded role scenario and limits relationship scenario cues t
    scene:row.id===0?'question':'share',personaScene:row.id===0?0:1})))}
   yield {type:'finish',reason:{kind:'stop'}}
  }}}
- const companion={name:'小泡',role:'最喜欢拆解机关盒',relationshipText:'我们总在窗边一起看晚霞'}
+ const companion={name:'小泡',role:'最喜欢拆解机关盒',relationshipText:'我们总在窗边一起看晚霞',characterCard:{enabled:true,roleText:''}}
  const rows=await labelSamples(ctx,companion,candidates,AbortSignal.timeout(1000),()=>{})
  assert.deepEqual(seen,[['最喜欢拆解机关盒'],['最喜欢拆解机关盒','我们总在窗边一起看晚霞']])
  assert.equal(rows[0].intent,'address')
@@ -150,11 +156,207 @@ test('training history follows the oldest message anchor and resolves quotes acr
  const text={type:'text',data:{text:'有一件事'}}
  const anchor=message(-20,'70000',now-60,[text])
  const pages=[
-  [anchor,message(-30,'70000',now-30,[{type:'reply',data:{id:-10}},text])],
-  [message(-10,'60000',now-120,[text]),anchor],
+  [anchor,message(-30,'70000',now-30,[{type:'reply',data:{id:-10}},{type:'text',data:{text:'那我晚点去确认'}}])],
+  [message(-10,'60000',now-160,[text]),anchor],
  ]
  const samples=await readQqTrainingHistory(async id=>{calls.push(id);return {messages:pages.shift()}},'12345','60000',(now-100)*1000)
  assert.deepEqual(calls,[undefined,-20])
  assert.equal(samples.find(row=>row.id==='-30').recipient,'partner')
  assert.equal(samples.filter(row=>row.id==='-20').length,1)
+ const prompts=chooseCandidates(samples,(now-170)*1000)
+ const current=prompts.find(row=>row.recipient==='partner')
+ assert.equal(prompts.length,2)
+ assert.ok(current.context.some(turn=>turn.speaker===-1&&turn.text==='有一件事'))
+})
+
+test('natural role and relationship wording provides name evidence without keywords',async()=>{
+ const at=Date.now()
+ const companion={name:'小舟',role:'整理机械零件',characterCard:{enabled:true,roleText:'我是海边小铺的阿榆。'},
+  relationshipText:'我是你的搭档，咱俩一起做木工。'}
+ const candidates=chooseCandidates([
+  {id:'a',sender:'50000',text:'阿榆，过来一下',at,recipient:'unknown'},
+  {id:'b',sender:'50001',text:'搭档，你来看看这个',at:at+1,recipient:'unknown'},
+  {id:'c',sender:'50002',text:'搭档，你也看看',at:at+2,recipient:'unknown'},
+  {id:'d',sender:'50001',text:'搭档，你说呢',at:at+3,recipient:'member'},
+ ],at,['50001'],companion)
+ const inputs=[]
+ const ctx={get:()=>({currentSelection:()=>({provider:'p',model:'m'})}),llm:{async *stream(options){
+  const payload=JSON.parse(options.messages[0].content[0].text)
+  inputs.push(payload)
+  yield {type:'text-delta',text:JSON.stringify(payload.rows.map(row=>({id:row.id,intent:'address',scene:'address',alias:row.text.split('，')[0]})))}
+  yield {type:'finish',reason:{kind:'stop'}}
+ }}}
+ const labels=await labelSamples(ctx,companion,candidates,AbortSignal.timeout(1000),()=>{})
+ const get=id=>labels.find(row=>row.id===id)
+ assert.deepEqual(inputs[0].roleNames,['我是海边小铺的阿榆'])
+ assert.equal(inputs[0].relationshipNames,undefined)
+ assert.ok(!JSON.stringify(inputs[0]).includes('一起做木工'))
+ assert.deepEqual(inputs[1].relationshipNames,['我是你的搭档，咱俩一起做木工'])
+ assert.equal(get(0).alias,'阿榆')
+ assert.equal(get(1).alias,'搭档')
+ assert.equal(get(1).relationshipAlias,true)
+ assert.equal(get(2).alias,undefined)
+ assert.equal(get(3).intent,'other')
+ assert.equal(get(3).scene,'other')
+ assert.equal(get(3).alias,undefined)
+})
+
+test('a legacy role card contributes its active identity; a disabled relationship is excluded',async()=>{
+ const at=Date.now()
+ const companion={name:'小舟',characterCard:{enabled:true,identity:'我是海边小铺的阿榆',examples:[]},relationshipText:'我是你的搭档'}
+ const input=chooseCandidates([{id:'a',sender:'50001',text:'阿榆，你在吗',at,recipient:'partner'}],at,[],companion)
+ let payload
+ const ctx={get:()=>({currentSelection:()=>({provider:'p',model:'m'})}),llm:{async *stream(options){
+  payload=JSON.parse(options.messages[0].content[0].text)
+  yield {type:'text-delta',text:'[{"id":0,"intent":"address","scene":"address","alias":"阿榆"}]'}
+  yield {type:'finish',reason:{kind:'stop'}}
+ }}}
+ const result=await labelSamples(ctx,companion,input,AbortSignal.timeout(1000),()=>{})
+ assert.equal(result[0].alias,'阿榆')
+ const disabled={...companion,characterCard:{...companion.characterCard,enabled:false}}
+ await labelSamples(ctx,disabled,chooseCandidates([{id:'b',sender:'50001',text:'搭档，你在吗',at,recipient:'partner'}],at,['50001'],disabled),AbortSignal.timeout(1000),()=>{})
+ assert.equal(payload.relationshipNames,undefined)
+ assert.ok(!payload.settings.includes(disabled.relationshipText))
+})
+
+const profileFixture={
+ name:'小舟',role:'整理资料',characterCard:{enabled:true,roleText:'我是档案馆的阿榆。喜欢修理旧收音机'},
+ relationshipText:'我是你的搭档。我们常常一起做木工'
+}
+const profileResponse={
+ role:{aliases:[{alias:'阿榆',evidence:'我是档案馆的阿榆'},{alias:'搭档',evidence:'我是你的搭档'}],
+  scenes:['喜欢修理旧收音机','我们常常一起做木工']},
+ relationship:{aliases:[{alias:'搭档',evidence:'我是你的搭档'}],scenes:['我们常常一起做木工']}
+}
+function profileContext(){
+ return {get:()=>({currentSelection:()=>({provider:'p',model:'m',reasoningEffort:'high'})}),llm:{
+  async *stream(options){
+  assert.equal(options.reasoningEffort,'high')
+  assert.equal(options.maxTokens,undefined)
+  const input=JSON.parse(options.messages[0].content[0].text)
+  yield {type:'text-delta',text:JSON.stringify(input.rows?input.rows.map(row=>{
+   const call=row.text.startsWith('搭档，你')
+   return {id:row.id,intent:call?'address':row.id%2?'engage':'other',scene:call?'address':row.id%2?'question':'other'}
+  }):profileResponse)}
+  yield {type:'finish',reason:{kind:'stop'}}
+ }}}
+}
+test('setting extraction grounds public and relationship cues in their own sources',async()=>{
+ const profile=await extractAttentionProfile(profileContext(),profileFixture,AbortSignal.timeout(1000))
+ assert.deepEqual(profile.role.aliases,['小舟','阿榆'])
+ assert.deepEqual(profile.role.scenes,['喜欢修理旧收音机'])
+ assert.deepEqual(profile.relationship.aliases,['搭档'])
+ assert.deepEqual(profile.relationship.scenes,['我们常常一起做木工'])
+ const disabled={...profileFixture,characterCard:{enabled:false}}
+ const inactive=await extractAttentionProfile(profileContext(),disabled,AbortSignal.timeout(1000))
+ assert.deepEqual(inactive.relationship.aliases,[])
+ assert.deepEqual(inactive.relationship.scenes,[])
+ assert.notEqual(inactive.role.revision,profile.role.revision)
+})
+
+test('multiple rooms use their own model and reasoning for history labels with no plugin token cap',async()=>{
+ const calls=[]
+ const ctx={llm:{async *stream(options){
+  const {rows}=JSON.parse(options.messages[0].content[0].text)
+  calls.push([options.provider,options.model,options.reasoningEffort,options.maxTokens,rows.map(row=>row.id)])
+  yield {type:'text-delta',text:JSON.stringify(rows.map(row=>({id:row.id,intent:'engage',scene:'question'})))}
+  yield {type:'finish',reason:{kind:'stop'}}
+ }}}
+ const input=['first','second'].map((room,id)=>({room,id,text:'场景样本 '+id,at:id,recipient:'unknown',bound:false,context:[]}))
+ const models=new Map([['first',{provider:'one',model:'m1',reasoningEffort:'high'}],['second',{provider:'two',model:'m2'}]])
+ const result=await labelSamples(ctx,profileFixture,input,AbortSignal.timeout(1000),()=>{},models)
+ assert.deepEqual(calls,[['one','m1','high',undefined,[0]],['two','m2',undefined,undefined,[1]]])
+ assert.equal(result.length,2)
+})
+
+test('one-click learns settings before history and retains them when there are no group samples',async t=>{
+ const events=[]
+ const attention={
+  trainProfile:async(_scopes,cues)=>{events.push('settings');assert.deepEqual(cues.relationship.aliases,['搭档'])},
+  trainGroups:async()=>assert.fail('empty history must not train a classifier'),
+  groupStatus:()=>({versions:[]})
+ }
+ const service=new GroupAttentionTraining(profileContext(),'/unused',attention)
+ t.after(()=>service.close())
+ const target={scope:'g',companion:profileFixture,boundIds:[],guard(){},async history(){events.push('history');return []}}
+ await service.batchAction('q',[target],{action:'train',days:3,confirm:true})
+ while(service.batchView('q',[target]).busy)await wait(5)
+ const {job}=service.batchView('q',[target])
+ assert.deepEqual(events,['settings','history'])
+ assert.equal(job.phase,'done')
+ assert.equal(job.history,'skipped')
+ assert.equal(job.profile.relationshipAliases,1)
+ assert.equal(job.samples,0)
+})
+
+test('zero selected groups trains the companion defaults without a history range or a group head',async t=>{
+ const events=[]
+ const attention={
+  trainDefault:async(scope,cues,guard)=>{
+   assert.equal(scope,'default:partner')
+   assert.deepEqual(cues.relationship.aliases,['搭档'])
+   guard()
+   events.push('default')
+  },
+  trainProfile:async()=>assert.fail('no group profile should be written'),
+  trainGroups:async()=>assert.fail('no group head should be trained'),
+  groupStatus:()=>({versions:[]}),
+ }
+ const service=new GroupAttentionTraining(profileContext(),'/unused',attention)
+ t.after(()=>service.close())
+ const target={scope:'default:partner',companion:profileFixture,guard(){}}
+ await service.batchAction('q',[],{action:'train',confirm:true},target)
+ while(service.batchView('q',[],target.scope).busy)await wait(5)
+ const {job}=service.batchView('q',[],target.scope)
+ assert.deepEqual(events,['default'])
+ assert.equal(job.phase,'done')
+ assert.equal(job.groups,0)
+ assert.equal(job.history,undefined)
+ assert.equal(job.profile.relationshipAliases,1)
+})
+
+test('one-click history learns calls by other members and retains the settings if evaluation fails',async t=>{
+ const events=[]
+ const attention={
+  trainProfile:async()=>{events.push('settings')},
+  trainGroups:async(_scopes,samples)=>{
+   events.push('classifier')
+   assert.deepEqual(samples.train.intent.filter(row=>row.persona),[{text:'伙伴,你看一下收音机',label:'address',persona:true}])
+   assert.deepEqual(samples.holdout.intent.filter(row=>row.persona),[
+    {text:'伙伴,你会换旋钮吗',label:'address',persona:true},
+    {text:'我家搭档也有收音机',label:'other',persona:true},
+   ])
+   throw Error('历史留出评估未通过')
+  },
+  groupStatus:()=>({versions:[]})
+ }
+ const ctx=profileContext()
+ const stream=ctx.llm.stream
+ ctx.llm.stream=function(options){
+  const input=JSON.parse(options.messages[0].content[0].text)
+  if(input.rows){
+   assert.deepEqual(input.aliases,['小舟','阿榆','搭档'])
+   assert.equal(input.relationshipNames,undefined)
+   assert.ok(!JSON.stringify(input).includes('一起做木工'))
+  }
+  return stream(options)
+ }
+ const service=new GroupAttentionTraining(ctx,'/unused',attention)
+ t.after(()=>service.close())
+ const at=Date.now()-7200000
+ const target={scope:'g',companion:profileFixture,boundIds:[],guard(){},async history(){
+  events.push('history')
+  const examples={1:'搭档，你看一下收音机',42:'搭档，你会换旋钮吗',44:'我家搭档也有收音机'}
+  return Array.from({length:52},(_,id)=>({id:String(id),sender:'50000',text:examples[id]??'群聊样本 '+id,at:at+id*100000,recipient:'unknown'}))
+ }}
+ await service.batchAction('q',[target],{action:'train',days:3,confirm:true})
+ while(service.batchView('q',[target]).busy)await wait(5)
+ const {job}=service.batchView('q',[target])
+ assert.deepEqual(events,['settings','history','classifier'])
+ assert.equal(job.phase,'done')
+ assert.equal(job.history,'rejected')
+ assert.match(job.warning,/留出评估/)
+ assert.equal(job.profile.roleScenes,1)
+ assert.equal(job.personaSamples,1)
+ assert.deepEqual(job.sceneCoverage.find(row=>row.scene==='address'),{scene:'address',training:1,holdout:1})
 })

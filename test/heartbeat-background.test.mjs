@@ -4,7 +4,7 @@ import { HeartbeatScheduler } from '../lib/heartbeat.js'
 
 function fixture() {
   const store = {snapshot: () => ({companions: [{id:'c'}]}), isCompanionRemoving: () => false}
-  return new HeartbeatScheduler({}, store, {}, {}, {})
+  return new HeartbeatScheduler({}, store, {}, {})
 }
 
 test('manual trigger returns immediately and deduplicates until completion', async () => {

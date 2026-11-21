@@ -3,6 +3,7 @@ import {createHash, randomUUID} from 'node:crypto'
 import type {PartnerStore} from './store.js'
 import type {PartnerConcernStore} from './concern-store.js'
 import type {PartnerConcern, ConcernObservation} from './concern-domain.js'
+import type {ChannelSession} from './domain.js'
 
 export interface ConcernExecutionReceipt {
   id: string; companionId: string; concernId: string; fingerprint: string; sessionId: string; messageId: string
@@ -16,6 +17,7 @@ export interface ConcernExecutionReceipt {
   recoveryAttempts?: number
 }
 export interface ConcernConversationExecutor {
+  ensureLocalSessionRecord?(companionId:string):Promise<ChannelSession>
   canResumeConcern?(receipt:ConcernExecutionReceipt):Promise<boolean>
   reconcileConcern?(receipt:ConcernExecutionReceipt):Promise<string|undefined>
   executeConcern(receipt: ConcernExecutionReceipt, concern: PartnerConcern, prompt: string): Promise<void>
@@ -108,12 +110,13 @@ export class ConcernExecutionDispatcher {
           if (state.concernExecutions?.some(r => r.concernId === concern.id && r.companionId === companionId && r.fingerprint === event.fingerprint)) continue
           const key = prefix + createHash('sha256').update(event.fingerprint).digest('hex').slice(0,24)
           if (legacy.some(r => r.key === key && r.tasks.length && r.tasks.every(t => state.tasks.some(task => task.id === t.id && task.status === 'done')))) continue
-          const route = state.sessions.find(r => r.companionId === companionId && r.channelId + ':' + r.userId === concern.scopeId)
-            ?? (concern.scopeId === '*' ? state.sessions.find(r => r.companionId === companionId && r.kind === 'local') : undefined)
+          const route = await this.executor.ensureLocalSessionRecord?.(companionId)
+            ?? state.sessions.find(r => r.companionId === companionId && r.kind === 'local')
           if (!route) continue
           receipt = {id: randomUUID(), companionId, concernId: concern.id, fingerprint: event.fingerprint, sessionId: route.sessionId, messageId: randomUUID(), status:'pending', authorizationKey:concernAuthorizationKey(concern), createdAt:Date.now(), updatedAt:Date.now()}
           const next = receipt
           await this.store.update(s => {
+            if (!s.sessions.some(row => row.kind === 'local' && row.companionId === companionId && row.id === route.id && row.sessionId === route.sessionId)) throw new Error('伙伴主会话已变化，等待重新调度')
             if ((s.concernExecutions?.length ?? 0) >= 10000) throw new Error('关注执行回执已达上限，请清理历史后继续')
             ;(s.concernExecutions ??= []).push(next)
           })

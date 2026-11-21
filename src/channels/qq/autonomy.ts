@@ -1,7 +1,7 @@
 import {qqIdentityRelation} from './identity-binding.js'
 import {relationshipTextForIdentity} from '../../character/relationship-adapter.js'
 import {renderGroupConversationGuidance} from './conversation-guidance.js'
-import {qqPersonaClauses,qqRoleText} from './attention-persona.js'
+import {defaultAttentionScope,qqPersonaClauses,qqRoleText,roleSettingsForAttention,settingsRevision} from './attention-persona.js'
 import { isSleeping } from '../../character/sleep.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Companion } from '../../domain.js'
@@ -189,16 +189,22 @@ export class QqGroupAutonomy {
    // Persona is topical relevance, never proof of identity or authority. Relationship
    // text belongs only to the transport-verified bound speaker, not the whole room.
    const boundRelationship=qqIdentityRelation(settings,event.qqGroup.userId)?.matched===true
-   const relationship=boundRelationship?relationshipTextForIdentity(companion):''
+   const relationshipSettings=relationshipTextForIdentity(companion)
+   const relationship=boundRelationship?relationshipSettings:''
    const profile=[companion.name?.slice(0,160),...qqPersonaClauses(qqRoleText(companion),7),...qqPersonaClauses(relationship,3)]
     .filter((v):v is string=>!!v?.trim())
    const speakerText=activeConversation(context)?recent?.text:undefined
    const dialogue=this.attentionDialogue(group,event,before,current,quietRecent)
-   const frame:AttentionFrame={groupScope:JSON.stringify([channelId,accountId,event.qqGroup.groupId]),...(relationship?{boundRelationship:relationship.slice(0,4096)}:{}),profile,partnerText:(latestRoomReply?.text||speakerText||groupRecent?.text||quietRecent?.text||'').slice(0,160),dialogue:dialogue.turns}
+   const frame:AttentionFrame={groupScope:JSON.stringify([channelId,accountId,event.qqGroup.groupId]),
+    defaultScope:defaultAttentionScope(channelId,accountId,companion.id),
+    ...(companion.characterCard?.enabled?{roleRevision:settingsRevision(roleSettingsForAttention(companion))}:{}),
+    ...(relationshipSettings?{relationshipRevision:settingsRevision(relationshipSettings)}:{}),
+    ...(relationship?{boundRelationship:relationship.slice(0,4096)}:{}),
+    profile,partnerText:(latestRoomReply?.text||speakerText||groupRecent?.text||quietRecent?.text||'').slice(0,160),dialogue:dialogue.turns}
    try{semantic=await this.classify(attentionMessageText(event),signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
    signal.throwIfAborted()
    const link=semantic?.link,index=link?.index
-   if(semantic&&link&&typeof index==='number'&&recognizedLink(link)){
+   if(semantic&&!semantic.learnedCall&&link&&typeof index==='number'&&recognizedLink(link)){
     const turn=dialogue.turns[index]
     if(turn&&turn.speaker!==1){
      linkedMessageId=dialogue.ids[index]
@@ -217,7 +223,7 @@ export class QqGroupAutonomy {
   }
   // Busy work still lets the local model recognize a call; only calls queue.
   const recipient=recognizedRecipient(semantic?.recipient)
-  const recognizedCall=recipient==='partner'||(recipient!=='member'&&isAttentionCall(semantic))
+  const recognizedCall=!!semantic?.learnedCall||recipient==='partner'||(recipient!=='member'&&isAttentionCall(semantic))
   if(addressOnly&&result.route!=='direct'&&!(result.reply&&recognizedCall))result={...result,reply:false,probability:0,reasons:[...result.reasons,'任务执行期间普通群聊仅旁听，不插入或排队补答']}
   if(!semantic&&classification){
    const statusText={empty:'当前只有附件，没有文字可供本地语义识别',busy:'本地识别并发已满',backoff:'本地识别短暂退避',timeout:'本地识别请求超时',transport:'本地识别连接异常',http:'本地识别服务返回错误',invalid:'本地识别返回无效结果',unconfigured:'未配置本地识别服务',ok:''}[classification.status]

@@ -105,7 +105,7 @@ test('claim survives disk reopening',async t=>{
 })
 test('existing heartbeat timer checks idle contact even when concerns heartbeat is disabled',async()=>{
   const f=fixture();let calls=0
-  const scheduler=new HeartbeatScheduler({logger:{warn:()=>{}}},{snapshot:()=>f.state},{idleContact:async()=>calls++},{},{})
+  const scheduler=new HeartbeatScheduler({logger:{warn:()=>{}}},{snapshot:()=>f.state},{idleContact:async()=>calls++},{})
   await scheduler.tick();await new Promise(r=>setImmediate(r));assert.equal(calls,1);await scheduler.close()
 })
 function deliveryFixture(){
@@ -156,7 +156,7 @@ test('idle contact never starves concern continuations when both features are en
   const f=fixture();f.companion.automation.heartbeat.enabled=true
   f.state.heartbeatStates=[{companionId:'c',nextCheckAt:Date.now()+3600_000}]
   const calls=[]
-  const scheduler=new HeartbeatScheduler({logger:{warn:()=>{}}},{snapshot:()=>f.state},{idleContact:async()=>calls.push('idle')},{},{pendingRecording:async()=>undefined})
+  const scheduler=new HeartbeatScheduler({logger:{warn:()=>{}}},{snapshot:()=>f.state},{idleContact:async()=>calls.push('idle')},{pendingRecording:async()=>undefined})
   scheduler.setExecutionDispatcher(async()=>calls.push('work'))
   await scheduler.tick();await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['work','idle']);await scheduler.close()
 })

@@ -1,292 +1,524 @@
 {
-  "examples": 40,
-  "accepted": 27,
-  "acceptedErrors": [],
-  "accuracy": 0.9,
-  "positiveRecall": 1.0,
-  "p95Ms": 14.227412641048431,
-  "meanMs": 10.582763375714421,
-  "maxRssMb": 545.85546875,
+  "examples": 72,
+  "accepted": 28,
+  "acceptedErrors": [
+    {
+      "text": "修得真快，我刚数完第三季的片尾",
+      "label": "banter",
+      "prediction": "share",
+      "confidence": 0.847,
+      "margin": 0.776
+    }
+  ],
+  "accuracy": 0.7777777777777778,
+  "positiveRecall": 0.9574468085106383,
+  "p95Ms": 48.35242684930563,
+  "meanMs": 19.97756523390611,
+  "maxRssMb": 544.765625,
   "results": [
     {
       "text": "小家伙出来说句话",
       "label": "address",
       "prediction": "address",
-      "confidence": 0.357,
-      "margin": 0.142
+      "confidence": 0.338,
+      "margin": 0.154
     },
     {
-      "text": "弟弟～",
+      "text": "喂，小领队你在群里吗",
       "label": "address",
       "prediction": "address",
-      "confidence": 0.805,
-      "margin": 0.757
+      "confidence": 0.889,
+      "margin": 0.848
     },
     {
       "text": "喂喂还活着不",
       "label": "address",
       "prediction": "address",
-      "confidence": 0.42,
-      "margin": 0.291
+      "confidence": 0.364,
+      "margin": 0.196
     },
     {
       "text": "在不在呀搭档",
       "label": "address",
       "prediction": "address",
-      "confidence": 0.639,
-      "margin": 0.479
+      "confidence": 0.741,
+      "margin": 0.646
     },
     {
       "text": "小可爱人去哪儿啦",
       "label": "address",
       "prediction": "address",
-      "confidence": 0.773,
-      "margin": 0.712
+      "confidence": 0.742,
+      "margin": 0.677
     },
     {
       "text": "群里有人懂这个部署错误吗",
       "label": "question",
-      "prediction": "question",
-      "confidence": 0.399,
+      "prediction": "banter",
+      "confidence": 0.323,
       "margin": 0.046
     },
     {
       "text": "怎么把这个服务重启呀",
       "label": "question",
       "prediction": "question",
-      "confidence": 0.363,
-      "margin": 0.164
+      "confidence": 0.279,
+      "margin": 0.068
     },
     {
       "text": "这两台笔记本选哪个合适",
       "label": "question",
       "prediction": "question",
-      "confidence": 0.526,
-      "margin": 0.423
+      "confidence": 0.596,
+      "margin": 0.484
     },
     {
       "text": "能不能教我用这个功能",
       "label": "question",
       "prediction": "question",
-      "confidence": 0.574,
-      "margin": 0.431
+      "confidence": 0.578,
+      "margin": 0.45
     },
     {
       "text": "大家有什么建议没有",
       "label": "question",
       "prediction": "question",
-      "confidence": 0.447,
-      "margin": 0.243
+      "confidence": 0.331,
+      "margin": 0.093
     },
     {
       "text": "声称戒糖的人已经喝完第二杯奶茶了",
       "label": "banter",
       "prediction": "banter",
-      "confidence": 0.592,
-      "margin": 0.368
+      "confidence": 0.43,
+      "margin": 0.181
     },
     {
       "text": "刚吹完牛就被现实教育了",
       "label": "banter",
       "prediction": "banter",
-      "confidence": 0.549,
-      "margin": 0.3
+      "confidence": 0.498,
+      "margin": 0.231
     },
     {
       "text": "这代码是用脚写的吗笑死",
       "label": "banter",
       "prediction": "question",
-      "confidence": 0.343,
-      "margin": 0.041
+      "confidence": 0.385,
+      "margin": 0.111
     },
     {
       "text": "上分没我的份掉分一次不落",
       "label": "banter",
-      "prediction": "banter",
-      "confidence": 0.539,
-      "margin": 0.432
+      "prediction": "background",
+      "confidence": 0.272,
+      "margin": 0.007
     },
     {
       "text": "你这嘴硬程度简直能当防弹板",
       "label": "banter",
       "prediction": "banter",
-      "confidence": 0.904,
-      "margin": 0.88
+      "confidence": 0.838,
+      "margin": 0.796
     },
     {
       "text": "今天面试过啦开心",
       "label": "share",
       "prediction": "address",
-      "confidence": 0.25,
-      "margin": 0.02
+      "confidence": 0.387,
+      "margin": 0.219
     },
     {
       "text": "刚拍到一只小橘猫太可爱了",
       "label": "share",
       "prediction": "share",
-      "confidence": 0.848,
-      "margin": 0.807
+      "confidence": 0.785,
+      "margin": 0.717
     },
     {
       "text": "我的新鼠标终于送来了",
       "label": "share",
       "prediction": "share",
-      "confidence": 0.76,
-      "margin": 0.664
+      "confidence": 0.68,
+      "margin": 0.575
     },
     {
       "text": "我刚追的这集给我看哭了",
       "label": "share",
       "prediction": "share",
-      "confidence": 0.781,
-      "margin": 0.653
+      "confidence": 0.747,
+      "margin": 0.618
     },
     {
       "text": "总算把折腾一周的程序跑起来了",
       "label": "share",
       "prediction": "share",
-      "confidence": 0.566,
-      "margin": 0.294
+      "confidence": 0.427,
+      "margin": 0.147
     },
     {
       "text": "说个脑洞如果人能飞会怎样",
       "label": "topic",
       "prediction": "topic",
-      "confidence": 0.566,
-      "margin": 0.312
+      "confidence": 0.443,
+      "margin": 0.137
     },
     {
       "text": "要不大家聊聊各自养过的宠物",
       "label": "topic",
       "prediction": "topic",
-      "confidence": 0.413,
-      "margin": 0.26
+      "confidence": 0.428,
+      "margin": 0.276
     },
     {
       "text": "来聊点轻松的怎么样",
       "label": "topic",
       "prediction": "topic",
-      "confidence": 0.629,
-      "margin": 0.47
+      "confidence": 0.603,
+      "margin": 0.473
     },
     {
       "text": "换个话头你们周末准备干嘛",
       "label": "topic",
       "prediction": "topic",
-      "confidence": 0.481,
-      "margin": 0.117
+      "confidence": 0.515,
+      "margin": 0.217
     },
     {
       "text": "谁愿意讲件有意思的小事",
       "label": "topic",
       "prediction": "topic",
-      "confidence": 0.908,
-      "margin": 0.881
+      "confidence": 0.88,
+      "margin": 0.845
     },
     {
       "text": "懂啦不用再解释了",
       "label": "close",
       "prediction": "close",
-      "confidence": 0.62,
-      "margin": 0.512
+      "confidence": 0.665,
+      "margin": 0.579
     },
     {
       "text": "今天就聊到这儿吧",
       "label": "close",
-      "prediction": "address",
-      "confidence": 0.266,
-      "margin": 0.036
+      "prediction": "close",
+      "confidence": 0.326,
+      "margin": 0.067
     },
     {
       "text": "行我先撤了",
       "label": "close",
       "prediction": "close",
-      "confidence": 0.451,
-      "margin": 0.275
+      "confidence": 0.542,
+      "margin": 0.398
     },
     {
       "text": "我想安静一下不用回",
       "label": "close",
       "prediction": "close",
-      "confidence": 0.424,
-      "margin": 0.264
+      "confidence": 0.544,
+      "margin": 0.456
     },
     {
       "text": "谢谢先去忙了",
       "label": "close",
       "prediction": "close",
-      "confidence": 0.605,
-      "margin": 0.493
+      "confidence": 0.666,
+      "margin": 0.547
     },
     {
       "text": "我弟弟刚刚打电话给我",
       "label": "share",
-      "prediction": "share",
-      "confidence": 0.514,
-      "margin": 0.291
+      "prediction": "other",
+      "confidence": 0.403,
+      "margin": 0.041
     },
     {
       "text": "那是她的哥哥不是在叫你",
       "label": "other",
       "prediction": "other",
-      "confidence": 0.503,
-      "margin": 0.298
+      "confidence": 0.602,
+      "margin": 0.441
     },
     {
       "text": "老刘你跟小陈商量一下",
       "label": "other",
       "prediction": "other",
-      "confidence": 0.78,
-      "margin": 0.697
+      "confidence": 0.858,
+      "margin": 0.796
     },
     {
       "text": "我家妹妹也这么觉得",
       "label": "share",
       "prediction": "share",
-      "confidence": 0.634,
-      "margin": 0.51
+      "confidence": 0.454,
+      "margin": 0.228
     },
     {
       "text": "小张刚才是在问他同学",
       "label": "other",
       "prediction": "other",
-      "confidence": 0.818,
-      "margin": 0.741
+      "confidence": 0.833,
+      "margin": 0.761
     },
     {
       "text": "临时测试消息",
       "label": "background",
       "prediction": "background",
-      "confidence": 0.731,
-      "margin": 0.661
+      "confidence": 0.682,
+      "margin": 0.589
     },
     {
       "text": "这条纯占位",
       "label": "background",
       "prediction": "background",
-      "confidence": 0.507,
-      "margin": 0.339
+      "confidence": 0.388,
+      "margin": 0.182
     },
     {
       "text": "[语音]",
       "label": "background",
       "prediction": "background",
-      "confidence": 0.67,
-      "margin": 0.521
+      "confidence": 0.549,
+      "margin": 0.283
     },
     {
       "text": "留个记录",
       "label": "background",
       "prediction": "background",
-      "confidence": 0.683,
-      "margin": 0.578
+      "confidence": 0.586,
+      "margin": 0.462
     },
     {
       "text": "签到第七天",
       "label": "background",
       "prediction": "share",
-      "confidence": 0.379,
-      "margin": 0.184
+      "confidence": 0.257,
+      "margin": 0.059
+    },
+    {
+      "text": "嘿，那位戴帽子的伙伴来签到",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.577,
+      "margin": 0.424
+    },
+    {
+      "text": "有没有听见我叫你，报个到呀",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.641,
+      "margin": 0.444
+    },
+    {
+      "text": "喂，屏幕那头在吗",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.434,
+      "margin": 0.282
+    },
+    {
+      "text": "值班员，出来喘口气",
+      "label": "address",
+      "prediction": "address",
+      "confidence": 0.527,
+      "margin": 0.388
+    },
+    {
+      "text": "那段字幕做成两行会不会挡住画面",
+      "label": "question",
+      "prediction": "banter",
+      "confidence": 0.3,
+      "margin": 0.087
+    },
+    {
+      "text": "关于上一条你说的临时方案，什么时候能撤",
+      "label": "question",
+      "prediction": "topic",
+      "confidence": 0.348,
+      "margin": 0.146
+    },
+    {
+      "text": "谁知道这副眼镜鼻托松了怎么装",
+      "label": "question",
+      "prediction": "question",
+      "confidence": 0.277,
+      "margin": 0.007
+    },
+    {
+      "text": "能帮我核一下总计和这几笔小数吗",
+      "label": "question",
+      "prediction": "question",
+      "confidence": 0.561,
+      "margin": 0.426
+    },
+    {
+      "text": "说好是轻量版，打开像接了一单搬家",
+      "label": "banter",
+      "prediction": "banter",
+      "confidence": 0.371,
+      "margin": 0.14
+    },
+    {
+      "text": "你把三分钟热度活活煮成了隔夜饭",
+      "label": "banter",
+      "prediction": "share",
+      "confidence": 0.38,
+      "margin": 0.064
+    },
+    {
+      "text": "它找文件的样子像我月底找零花钱",
+      "label": "banter",
+      "prediction": "share",
+      "confidence": 0.42,
+      "margin": 0.099
+    },
+    {
+      "text": "修得真快，我刚数完第三季的片尾",
+      "label": "banter",
+      "prediction": "share",
+      "confidence": 0.847,
+      "margin": 0.776
+    },
+    {
+      "text": "昨晚记到一段蛙声，我把原声留在群相册了",
+      "label": "share",
+      "prediction": "share",
+      "confidence": 0.414,
+      "margin": 0.266
+    },
+    {
+      "text": "给你们瞧瞧修好后的门牌，油漆刚干",
+      "label": "share",
+      "prediction": "share",
+      "confidence": 0.431,
+      "margin": 0.124
+    },
+    {
+      "text": "刚到馆里，展览时间表贴在入口右侧",
+      "label": "share",
+      "prediction": "share",
+      "confidence": 0.495,
+      "margin": 0.274
+    },
+    {
+      "text": "把上个月读完的书单和笔记一起放这儿",
+      "label": "share",
+      "prediction": "share",
+      "confidence": 0.328,
+      "margin": 0.073
+    },
+    {
+      "text": "换个题，要是你们能看见一种声音，会挑哪种",
+      "label": "topic",
+      "prediction": "topic",
+      "confidence": 0.376,
+      "margin": 0.021
+    },
+    {
+      "text": "大家聊聊学生时代最有用的一门课呗",
+      "label": "topic",
+      "prediction": "topic",
+      "confidence": 0.485,
+      "margin": 0.342
+    },
+    {
+      "text": "周末只留一件有趣的事做，你会选什么",
+      "label": "topic",
+      "prediction": "topic",
+      "confidence": 0.769,
+      "margin": 0.622
+    },
+    {
+      "text": "你们心里最有生活感的街道长什么样",
+      "label": "topic",
+      "prediction": "topic",
+      "confidence": 0.46,
+      "margin": 0.146
+    },
+    {
+      "text": "好了我先撤，经理叫我开会了",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.277,
+      "margin": 0.032
+    },
+    {
+      "text": "这个误会说开就好，咱不翻了",
+      "label": "close",
+      "prediction": "banter",
+      "confidence": 0.37,
+      "margin": 0.145
+    },
+    {
+      "text": "先不用考虑我，我决定明早再办",
+      "label": "close",
+      "prediction": "close",
+      "confidence": 0.362,
+      "margin": 0.203
+    },
+    {
+      "text": "行，收摊了，改天我请各位喝茶",
+      "label": "close",
+      "prediction": "question",
+      "confidence": 0.215,
+      "margin": 0.006
+    },
+    {
+      "text": "禾子，你那句话明显是回阿桥的，他还在等你补截图",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.327,
+      "margin": 0.129
+    },
+    {
+      "text": "@阿骆 你替小唯把交接表发到你们那边",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.791,
+      "margin": 0.633
+    },
+    {
+      "text": "那是阿书跟我的暗号，在等他回呢",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.335,
+      "margin": 0.03
+    },
+    {
+      "text": "阿洛，如果小云找你就把剩下那页转给她",
+      "label": "other",
+      "prediction": "other",
+      "confidence": 0.37,
+      "margin": 0.217
+    },
+    {
+      "text": "屋里的风扇还吱吱响",
+      "label": "background",
+      "prediction": "banter",
+      "confidence": 0.301,
+      "margin": 0.072
+    },
+    {
+      "text": "我先占个位慢慢爬楼",
+      "label": "background",
+      "prediction": "banter",
+      "confidence": 0.378,
+      "margin": 0.032
+    },
+    {
+      "text": "啧，开灯才知道屋里这么暗",
+      "label": "background",
+      "prediction": "background",
+      "confidence": 0.212,
+      "margin": 0.011
+    },
+    {
+      "text": "刚好翻到这本旧册子了",
+      "label": "background",
+      "prediction": "share",
+      "confidence": 0.353,
+      "margin": 0.056
     }
   ]
 }

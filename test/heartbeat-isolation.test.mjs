@@ -14,7 +14,7 @@ test('a rate-limited concern wakes at reset instead of the six-hour default', as
   const scheduler = new HeartbeatScheduler({}, {snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {
     heartbeat:async (_c,_r,items)=>({concerns:items,candidates:[],tools:[],startedAt:0,completedAt:1,blocked:['a'],blockedReasons:{a:'upstream limit'},failures:{a:{kind:'rate_limited',retryAt}}}),
     recordHeartbeatActivity:async()=>{},
-  }, {}, {pendingNotifications:async()=>[],due:async()=>[{id:'a',subject:'source'}],deferFailedCheck:async (_item,at)=>{deferred=at}})
+  }, {pendingNotifications:async()=>[],due:async()=>[{id:'a',subject:'source'}],deferFailedCheck:async (_item,at)=>{deferred=at}})
   const result=await scheduler.trigger('c',{manual:true})
   assert.equal(deferred,retryAt)
   assert.equal(state.heartbeatStates[0].nextCheckAt,retryAt)
@@ -26,23 +26,24 @@ test('a rate-limited concern wakes at reset instead of the six-hour default', as
 for (const failure of ['blocked', 'throw']) test(`healthy notifications are sent in the same batch as a ${failure} concern`, async () => {
   const companion = {id:'c',automation:{heartbeat:{enabled:true,intervalMinutes:30,dailyLimit:0}}}
   const state={companions:[companion],heartbeatStates:[{companionId:'c',consecutiveFailures:10,sentCount:0}],sessions:[{companionId:'c',channelId:'w',userId:'u',lastMessageAt:0}],channels:[{id:'w',enabled:true}],pairings:[{channelId:'w',userId:'u',status:'approved'}]}
-  const deferred=[], sent=[], mentioned=[]
+  const deferred=[], sent=[], notifications=[], mentioned=[]
   const scheduler=new HeartbeatScheduler({}, {snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {
     heartbeat:async (_c,_r,items)=>{
       if(items[0].id==='bad' && failure==='throw')throw Error('unavailable')
       return {concerns:items,candidates:[],startedAt:0,completedAt:1,...(items[0].id==='bad'?{blocked:['bad'],blockedReasons:{bad:'unavailable'}}:{})}
-    },recordHeartbeatActivity:async()=>{},
-  },{sendProactive:async (_c,_u,message)=>sent.push(message)}, {
+    },recordHeartbeatActivity:async()=>{},recordConcernNotification:async(c,item)=>sent.push([c.id,item.event]),
+  }, {
     pendingNotifications:async()=>[],due:async()=>[{id:'bad',subject:'bad'},{id:'good',subject:'good'}],
     deferFailedCheck:async item=>deferred.push(item.id),
     recordObservations:async()=>({observations:[],notifications:[{id:'event',event:'verified change'}]}),
     markMentioned:async (_c,ids)=>mentioned.push(...ids),
-  })
+  }, 'Asia/Shanghai', async (...args) => notifications.push(args))
   const result=await scheduler.trigger('c',{manual:true})
   assert.equal(result.sent,true)
   assert.equal(result.outcome,'partial')
   assert.match(result.reason,/unavailable/)
-  assert.deepEqual(sent,['verified change'])
+  assert.deepEqual(sent,[['c','verified change']])
+  assert.deepEqual(notifications,[['c','verified change','concern-notification:event']])
   assert.deepEqual(mentioned,['event'])
   assert.deepEqual(deferred,['bad'])
   assert.equal(state.heartbeatStates[0].consecutiveFailures,0)
@@ -91,7 +92,7 @@ test('commits individual concerns, continues after failure and retries only unfi
       return { concerns: items, candidates: [], startedAt: 0, completedAt: 1 }
     },
     recordHeartbeatActivity: async () => {},
-  }, {}, concerns)
+  }, concerns)
   const partial = await scheduler.trigger('c', { manual: true })
   assert.match(partial.reason, /model unavailable/)
   assert.deepEqual(calls, ['a', 'b', 'c'])
@@ -110,7 +111,7 @@ test('early wake schedules actual concern deadline; old six-hour drift is repair
  const companion={id:'c',automation:{heartbeat:{enabled:true,intervalMinutes:360,dailyLimit:0}}}
  const state={companions:[companion],heartbeatStates:[{companionId:'c',nextCheckAt:now,consecutiveFailures:0,sentCount:0}],sessions:[{kind:'local',companionId:'c',channelId:'@local',userId:'u',lastMessageAt:0}],channels:[],pairings:[]}
  let deadline=next,calls=0
- const scheduler=new HeartbeatScheduler({logger:{warn(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {heartbeat:async()=>{calls++;throw Error('not yet due')}},{},{pendingNotifications:async()=>[],pendingRecording:async()=>undefined,due:async()=>[],nextDueAt:async()=>deadline})
+ const scheduler=new HeartbeatScheduler({logger:{warn(){}}},{snapshot:()=>state,isCompanionRemoving:()=>false,update:async fn=>fn(state)}, {heartbeat:async()=>{calls++;throw Error('not yet due')}},{pendingNotifications:async()=>[],pendingRecording:async()=>undefined,due:async()=>[],nextDueAt:async()=>deadline})
  await scheduler.trigger('c')
  assert.equal(state.heartbeatStates[0].nextCheckAt,next);assert.equal(calls,0)
  let triggered=0;scheduler.trigger=async()=>{triggered++;return {checked:false,sent:false}}

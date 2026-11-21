@@ -27,12 +27,15 @@ test('execution configuration persists atomically, defaults off, preserves omiss
 test('direct concern delivery creates no board task and keeps persistent deduplication',async t=>{
   const root=await mkdtemp(join(tmpdir(),'concern-execution-'));t.after(()=>rm(root,{recursive:true,force:true}))
   const path=join(root,'state.json'),store=await PartnerStore.open(path),id=store.snapshot().companions[0].id
-  await store.update(s=>s.sessions.push({id:'r',companionId:id,kind:'local',channelId:'@local',userId:'u',sessionId:'s',lastMessageAt:0}))
-  const concern={id:'watch',subject:'选题草稿',state:'watching',scopeId:'@local:u',resources:[]}
+  await store.update(s=>s.sessions.push(
+    {id:'r-channel',companionId:id,kind:'channel',channelId:'qq',userId:'u',sessionId:'channel',lastMessageAt:10},
+    {id:'r',companionId:id,kind:'local',channelId:'@local',userId:'u',sessionId:'s',lastMessageAt:0},
+  ))
+  const concern={id:'watch',subject:'选题草稿',state:'watching',scopeId:'qq:u',resources:[]}
   const event={concernId:'watch',fingerprint:'first',event:'项目更新',evidence:'项目更新',source:'https://github.com/example/repo'}
   const concerns={activity:async()=>({concerns:[concern],observations:[event]})}
   let calls=0,finish
-  const executor={executeConcern:async(receipt)=>{calls++;await new Promise(r=>finish=r);await store.update(s=>s.concernExecutions.find(r=>r.id===receipt.id).status='completed')}}
+  const executor={executeConcern:async(receipt)=>{assert.equal(receipt.sessionId,'s');calls++;await new Promise(r=>finish=r);await store.update(s=>s.concernExecutions.find(r=>r.id===receipt.id).status='completed')}}
   const dispatch=new ConcernExecutionDispatcher(store,concerns,executor)
   await dispatch.dispatch(id);assert.equal(calls,0)
   concern.executionInstructions='仅生成并上传公众号草稿，不公开发布。'

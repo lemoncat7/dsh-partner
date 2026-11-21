@@ -67,7 +67,7 @@ export function QqAttentionSettings({channelId,groups}:{channelId:string;groups:
       {status?.custom&&status.usable&&<button type="button" disabled={pending||working} onClick={()=>void apply('reset')}>恢复内置分类头</button>}
     </div>
     {showTraining&&<WorkspaceDialog title="训练识别模型" width="wide"
-      detail="勾选群后，一次完成历史整理、标注和本地训练。称呼从角色设定和关系设定识别。"
+      detail="可直接训练默认模型，也可勾选群，用群历史训练场景。"
       close={()=>setShowTraining(false)}>
       <QqAttentionTraining channelId={channelId} groups={groups} working={working} enabled={status?.enabled===true}/>
     </WorkspaceDialog>}

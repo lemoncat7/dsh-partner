@@ -1,4 +1,6 @@
 import {readQqTrainingHistory} from './qq/attention-group-training.js'
+import {defaultAttentionScope,roleSettingsForAttention,settingsRevision} from './qq/attention-persona.js'
+import {relationshipTextForIdentity} from '../character/relationship-adapter.js'
 import {runtimeSnapshot,runtimePolicy} from '../companions/runtime-policy.js'
 import { ReplyTurns, ReplySupersededError, type ReplyTurn } from './reply-turn.js'
 import {backgroundSourceAllowed} from '../execution/background-routing.js'
@@ -16,7 +18,7 @@ import { QqGroupAutonomy } from './qq/autonomy.js'
 import {QqGroupBursts,groupBurstEvent} from './qq/inbound-burst.js'
 import {QqRecentMedia} from './qq/recent-media.js'
 import { qqFaceCatalog, qqCustomCatalog } from './qq/catalog.js'
-import { parseQqSettings, qqSettings, qqGroupPeer, qqPeerLabel, validQqId, boundQqIds } from './qq/settings.js'
+import { parseQqSettings, qqSettings, qqGroupPeer, qqPeerLabel, qqSessionTarget, validQqId, boundQqIds } from './qq/settings.js'
 import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
 import { isActivitySilenceRequested } from '../character/activity-tool.js'
@@ -34,7 +36,8 @@ import { DirectTransport, directConfig, ChannelHttpError, type ChannelSender, ty
 import { collectDirectBatch, groupDirectMessages } from './direct/inbound-batch.js'
 import { DirectDispatcher } from './direct/dispatcher.js'
 import {matrixTransientFailure} from './direct/retry-policy.js'
-import { notificationRoutes } from './notification-route.js'
+import { companionNotificationRoutes, notificationRoutes } from './notification-route.js'
+import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import { NotificationDelivery, NotificationDeferredError, idleTextDigest } from './notification-delivery.js'
 import { waitForSegment } from './segment-delay.js'
 import { sendNotificationPart } from './notification-timeout.js'
@@ -48,7 +51,6 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { completedTurnEvents, extractOutboundAttachments, partnerCwd, selectTaskNotificationRoute } from '../agent-runtime.js'
 import type { PartnerReply, PartnerOutboundAttachment } from '../channel-message.js'
 import { PARTNER_MEDIA_MAX_BYTES, type PartnerInboundAttachment, type PartnerInboundMessage } from '../channel-message.js'
-import { concernCreatedNoticeFromEvent } from '../concern-notification.js'
 import type { BoardTask } from '../tasks/domain.js'
 import { prepareTaskResultDelivery } from '../tasks/result.js'
 import type { BoardRequirement } from '../requirements/domain.js'
@@ -163,17 +165,42 @@ export class ChannelManager {
     }) } finally { if(runtimeSnapshot(this.store).channels.find(c=>c.id===channelId)?.enabled)await this.start(channelId) }
   }
 
+  qqDefaultTrainingTarget(channelId:string){
+    const selected=requiredChannel(this.store,channelId)
+    if(selected.platform!=='qq')throw Error('不是 QQ 渠道')
+    const companion=requiredCompanion(this.store,selected.companionId)
+    const revision=(value:Companion)=>settingsRevision(JSON.stringify([
+      value.characterCard?.enabled===true,roleSettingsForAttention(value),relationshipTextForIdentity(value),
+    ]))
+    const expected=revision(companion)
+    const guard=()=>{
+      const channel=requiredChannel(this.store,channelId)
+      if(channel.platform!=='qq'||channel.accountId!==selected.accountId||channel.companionId!==selected.companionId||
+       revision(requiredCompanion(this.store,channel.companionId))!==expected)throw Error('渠道或伙伴设定已变化，请重新开始训练')
+    }
+    const main=this.store.snapshot(['sessions']).sessions.find(r=>r.companionId===selected.companionId&&r.kind==='local'&&!this.agents.isArchived?.(r))
+    return {scope:defaultAttentionScope(channelId,selected.accountId,companion.id),companion,guard,...(main?{mainSessionId:main.sessionId}:{})}
+  }
+
   qqTrainingTarget(channelId:string,groupId:string){
     const selected=requiredChannel(this.store,channelId)
+    const defaults=this.qqDefaultTrainingTarget(channelId)
     const boundIds=boundQqIds(selected.qq?.identityBinding)
     const guard=()=>{
+      defaults.guard()
       const channel=requiredChannel(this.store,channelId),policy=qqSettings(channel.qq)
       if(!validQqId(groupId)||channel.platform!=='qq'||!channel.enabled||channel.accountId!==selected.accountId||
        channel.companionId!==selected.companionId||JSON.stringify(boundQqIds(policy.identityBinding))!==JSON.stringify(boundIds)||!policy.groupReplies||!policy.groupIds.includes(groupId)||!policy.autonomousGroupIds.includes(groupId))
         throw Error('请选择已启用自主回复的 QQ 群')
     }
     guard()
-    return {scope:JSON.stringify([channelId,selected.accountId,groupId]),companion:requiredCompanion(this.store,selected.companionId),guard,boundIds,
+    const routes=this.store.snapshot(['sessions']).sessions.filter(r=>r.companionId===selected.companionId&&!this.agents.isArchived?.(r))
+    const main=routes.find(r=>r.kind==='local')
+    const target='group:'+groupId
+    const route=qqSettings(selected.qq).mainSessionPeers.includes(target)?main:
+      routes.find(r=>r.kind==='channel'&&r.channelId===channelId&&qqSessionTarget(r.userId)===target&&r.qqSessionMode!=='main')
+    return {scope:JSON.stringify([channelId,selected.accountId,groupId]),defaultScope:defaults.scope,companion:defaults.companion,guard,boundIds,
+      ...(route?{sessionId:route.sessionId}:{}),...(main?{mainSessionId:main.sessionId}:{}),
       history:async(signal:AbortSignal,from:number)=>{
         const result=await readQqTrainingHistory(anchor=>this.qqActionCall(channelId,'get_group_msg_history',{
           group_id:Number(groupId),count:100,...(anchor===undefined?{}:{message_id:anchor,reverse_order:true}),
@@ -355,6 +382,16 @@ export class ChannelManager {
     await this.sendProactiveReply(channelId, userId, { text, attachments: [] }, receipt)
   }
 
+  async notifyConcern(companionId: string, text: string, receipt: string): Promise<void> {
+    const state = runtimeSnapshot(this.store)
+    const deliveryId = JSON.stringify([companionId, receipt])
+    if (state.notificationDeliveries?.some(row => row.id === deliveryId && row.completedAt)) return
+    const main = state.sessions.find(r => r.companionId === companionId && r.kind === 'local')
+    if (!main || this.agents.isArchived(main) || this.store.isCompanionRemoving(companionId)) throw new Error('关注通知的伙伴主会话已变化')
+    const targets = companionNotificationRoutes(state, companionId)
+    if (targets.length) await this.deliverNotification(companionId, receipt, () => targets, { text, attachments: [] })
+  }
+
   async sendExplicitAttachment(sessionId: string, file: PartnerOutboundAttachment, signal: AbortSignal, channelRouteId?: string): Promise<void> {
     const route=runtimeSnapshot(this.store).sessions.find(s=>s.sessionId===sessionId&&s.id===channelRouteId)
     if(!route||route.kind==='local')throw new Error('当前会话没有绑定渠道')
@@ -455,6 +492,12 @@ export class ChannelManager {
   }
 
   async observeAutonomousResult(session: Session, event: SessionEvent): Promise<void> {
+    const concernNotice = concernCreatedNoticeFromEvent(event)
+    if (concernNotice !== undefined) {
+      const main = runtimeSnapshot(this.store).sessions.find(r => r.kind === 'local' && r.sessionId === session.id)
+      if (main) await this.notifyConcern(main.companionId, concernNotice, `concern-created:${session.id}:${event.seq}`)
+      return
+    }
     // Idle greetings have an explicit route; don't broadcast through notification preferences.
     if (event.type === 'turn/end' && event.data.reason.kind === 'completed') {
       const events=completedTurnEvents(session.snapshotEvents(),event)
@@ -501,11 +544,6 @@ export class ChannelManager {
     }
     const route = this.routeForSession(session.id)
     if (route === undefined || (route.kind === 'local' && !runtimeSnapshot(this.store).companions.find(c=>c.id===route.companionId)?.notificationDelivery)) return
-    const concernNotice = concernCreatedNoticeFromEvent(event)
-    if (concernNotice !== undefined) {
-      await this.queueProactive(route, `concern-created:${session.id}:${event.seq}`, { text: concernNotice, attachments: [] })
-      return
-    }
     if (event.type !== 'turn/end' || event.data.reason.kind !== 'completed') return
     const history = session.snapshotEvents().filter(item => item.seq < event.seq)
     const events = completedTurnEvents(history, event)
@@ -594,8 +632,12 @@ export class ChannelManager {
     const state = runtimeSnapshot(this.store)
     const companionId = exactOrigin ? owner : state.channels.find(c => c.id === channelId)?.companionId ?? owner
     if (!companionId) throw new Error('通知来源伙伴不存在')
-    await this.notificationDelivery.deliver(receipt ?? randomBytes(16).toString('hex'), companionId,
-      () => exactOrigin ? [{channelId, userId}] : notificationRoutes(runtimeSnapshot(this.store),channelId,userId,companionId), reply,
+    await this.deliverNotification(companionId, receipt ?? randomBytes(16).toString('hex'),
+      () => exactOrigin ? [{channelId, userId}] : notificationRoutes(runtimeSnapshot(this.store),channelId,userId,companionId), reply, validate)
+  }
+
+  private async deliverNotification(companionId: string, receipt: string, targets: () => { channelId:string; userId:string }[], reply: PartnerReply, validate?:()=>void): Promise<void> {
+    await this.notificationDelivery.deliver(receipt, companionId, targets, reply,
       async (target, payload, sendPart) => {
         validate?.()
         const current = runtimeSnapshot(this.store)

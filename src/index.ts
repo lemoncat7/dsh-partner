@@ -313,7 +313,8 @@ export function apply(context: Context, config: PartnerConfig): void {
       void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
-    const heartbeat = new HeartbeatScheduler(ctx, store, agents, channels, concerns, resolved.timeZone)
+    const heartbeat = new HeartbeatScheduler(ctx, store, agents, concerns, resolved.timeZone,
+      (id, text, receipt) => channels.notifyConcern(id, text, receipt))
     const concernExecution = new ConcernExecutionDispatcher(store, concerns, agents)
     heartbeat.setExecutionDispatcher(id => concernExecution.dispatch(id))
     const dailyReview = new DailyReviewScheduler(ctx, store, memory, reflection, agents, resolved.timeZone)

@@ -28,22 +28,14 @@ import {actualAction} from '../chat/action-obligation.js'
 import {hasTaskPreamble} from './task-preamble.js'
 import {record,requiredText} from '../core/validation.js'
 import {isObservationAgent} from '../observation-contract.js'
+import {backgroundResult,PartnerBackgroundAgents,type BackgroundActivation,type BackgroundActivationSpec,type BackgroundAgentRuntime} from './background-agent.js'
 
-interface Activation {childId:string;name:string;result:Promise<{stopReason:string;structured?:unknown}>;dispose():Promise<void>}
 type ChildModel=Pick<Parameters<Agent['model']['select']>[0],'provider'|'model'>
 interface ModelSelectionSettings {current():{enabled:boolean;allowedModels:ChildModel[]}}
-interface ActiveChild {run:ExecutionRun;parent:Agent;resumeModel?:ChildModel;agent?:Agent;finalizing?:boolean;fault?:string;activation?:Activation|undefined;disposeScope?:()=>void;disposers?:Array<()=>void>}
-interface NativeRuntime {
- resolveMaxDepth?(configured?:number):number|undefined
- getProvider(name:string):unknown
- registerProvider(provider:Record<string,unknown>):()=>void
- startActivation(spec:Record<string,unknown>):Promise<Activation>
- resumeActivation?(spec:Record<string,unknown>):Promise<Activation>
- sendMessage(parent:Agent,child:string,content:{type:'text';text:string}[],options:{signal:AbortSignal}):Promise<unknown>
-}
+interface ActiveChild {run:ExecutionRun;parent:Agent;startup:AbortController;resumeModel?:ChildModel;agent?:Agent;finalizing?:boolean;fault?:string;activation?:BackgroundActivation|undefined;disposeScope?:()=>void;disposers?:Array<()=>void>}
 const workTools=new Set(['partner_workflow','partner_skill','partner_browser','partner_mcp','partner_bilibili'])
 const forbidden=new Set(['partner_background_task','partner_chat_reply','partner_chat_say','partner_chat_progress','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_habits','partner_sleep','partner_agreement','partner_access_grants','partner_collaborate','partner_requirement','partner_task','partner_schedule'])
-const outputSchema={type:'object',additionalProperties:false,required:['text','files'],properties:{text:{type:'string'},files:{type:'array',description:'本次交付附件，最多八个',items:{type:'object',additionalProperties:false,required:['path','name','mediaType'],properties:{path:{type:'string'},name:{type:'string'},mediaType:{type:'string'}}}}}}
+const outputSchema:BackgroundActivationSpec['outputSchema']={type:'object',additionalProperties:false,required:['text','files'],properties:{text:{type:'string'},files:{type:'array',description:'本次交付附件，最多八个',items:{type:'object',additionalProperties:false,required:['path','name','mediaType'],properties:{path:{type:'string'},name:{type:'string'},mediaType:{type:'string'}}}}}}
 function canResume(run:ExecutionRun):boolean{
  const b=run.background
  return !!b&&run.status==='canceled'&&!run.sessionCleanup?.deletedAt&&!b.discardedAt&&!b.stoppedAt&&!b.result&&!b.deliveredAt
@@ -58,20 +50,17 @@ function sameGroupReferenceImages(current:ImageReferencePlan|undefined,next:Imag
  return previous.length===next.selected.length&&previous.every((image,index)=>image.id===next.selected[index]?.id)
 }
 const instruction='只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
-export const PARTNER_BACKGROUND_PROVIDER={name:'partner-task',capabilities:{agentOptions:true,agentPreset:false,outputSchema:true,depthLimit:true},inheritsParentContext:false,prepareContinuable:async()=>({})}
-
-/** Native activations own execution. The adapter owns frozen channel provenance and delivery receipts. */
+/** DSH Agents execute the work. The plugin owns task identity and channel delivery. */
 export class NativeBackgroundTasks {
  private readonly children=new Map<string,ActiveChild>()
  private readonly reviews=new Map<string,Promise<void>>()
  private readonly detachGuard:()=>void
  private readonly detachStore:()=>void
  private readonly detachCreated:()=>void
- private detachProvider:(()=>void)|undefined
  private closing=false
  private recovering=false
  private readonly delivering=new Map<string,Promise<void>>()
- constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>,private readonly review?:(run:ExecutionRun)=>Promise<unknown>,private readonly images?:PartnerImageReferences){
+ constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>,private readonly review?:(run:ExecutionRun)=>Promise<unknown>,private readonly images?:PartnerImageReferences,private readonly agents:BackgroundAgentRuntime=new PartnerBackgroundAgents(ctx)){
   this.detachGuard=(ctx.tools as ToolRuntime).guard(exec=>{
    const child=exec.agent&&this.children.get(exec.agent.session.id)
    if(!child){
@@ -118,14 +107,10 @@ export class NativeBackgroundTasks {
    }))
    child.disposers.push(nativePresentation(agent.ctx,tools=>tools.filter(t=>this.childToolAllowed(child.run,t.name)&&(!isPartnerOwnedTool(this.store,child.run.ownerCompanionId,t.name)||workTools.has(t.name)||isPartnerMcpOperation(this.store,child.run.ownerCompanionId,t.name)))))
   }):()=>{}
-  this.detachStore=store.subscribe(()=>{for(const c of this.children.values())try{this.authorize(c.run,c.parent)}catch{void c.activation?.dispose().catch(()=>{})}},()=>{})
- }
- private native():NativeRuntime {
-  const service=this.ctx.get('subagents') as unknown as NativeRuntime|undefined
-  if(!service?.startActivation||!service.registerProvider)throw Error('当前宿主未提供原生后台任务')
-  if(!this.detachProvider){this.detachProvider=service.registerProvider(PARTNER_BACKGROUND_PROVIDER)}
-  if(!service.getProvider(PARTNER_BACKGROUND_PROVIDER.name))throw Error('伙伴后台执行器未注册')
-  return service
+  this.detachStore=store.subscribe(()=>{for(const c of this.children.values())try{this.authorize(c.run,c.parent)}catch{
+   c.startup.abort()
+   void c.activation?.dispose().catch(()=>{})
+  }},()=>{})
  }
  private childToolAllowed(run:ExecutionRun,name:string):boolean{
   if(run.background?.audience&&name!=='structured_output'&&!run.toolNames.includes(name))return false
@@ -209,7 +194,7 @@ export class NativeBackgroundTasks {
       if(user?.type!=='user/message')throw Error('恢复任务需要当前发起人的明确请求')
       if(['queued','running'].includes(run.status)&&run.background!.resumeInputId===user.data.id)return {kind:'partner-background-v1',taskId:id,childSessionId:run.sessionId,status:run.status,alreadyAccepted:true}
       if(!canResume(run))throw Error('此任务未暂停或已回收，不能恢复；已删除的任务日志不能重建')
-      if(!this.native().resumeActivation)throw Error('当前宿主尚未提供同一后台任务的原生恢复入口')
+      if(!this.agents.resumeActivation)throw Error('当前宿主未提供后台会话恢复')
       const supplement=args.input===undefined?'':requiredText(args.input,'input',16000)
       const imageReferences=await planImages(user.data.id,supplement)
       let claimed=false
@@ -244,6 +229,7 @@ export class NativeBackgroundTasks {
        if(args.action==='stop')b.stoppedAt??=now
        if(args.action==='discard')b.discardedAt??=now
       })
+      child?.startup.abort()
       await child?.activation?.dispose()
       if(child&&this.children.get(run.sessionId)===child)this.releaseChild(run.sessionId)
       const current=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)
@@ -264,7 +250,6 @@ export class NativeBackgroundTasks {
      : supplement(r,input,imageReferences)
     const followup=matches(runtimeSnapshot(this.store).executionRuns)
     if(followup)return reuse(followup)
-    this.native()
     const id='background-'+randomUUID(),childId='session-'+randomUUID(),cwd=join(parent.session.header.cwd??'/tmp','.partner-background',id)
     const toolNames=audience?admittedTools():[]
     const run:ExecutionRun={id,kind:'work',ownerCompanionId:owner,sessionId:childId,sourceId:id,status:'queued',destroyAfterRun:false,startedAt:Date.now(),toolNames,background:{...(imageReferences?{imageReferences}:{}),...(audience?{audience}:{}),...(activity?{activityKind:route.idleContactState?.kind}:{}),routeId:route.id,sourceSessionId:route.sessionId,channelId:route.channelId,userId:route.userId,inputId:user.data.id,sourceKind:route.kind,sourceCwd:parent.session.header.cwd??'/tmp',accountId:channel?.accountId??'',baseUrl:channel?.direct?.baseUrl??'',targetId:route.kind==='local'?'':directReplyTarget(state,route.channelId,route.userId),label,input,cwd,capabilities:[...c.capabilities]}}
@@ -299,7 +284,7 @@ export class NativeBackgroundTasks {
   })
   if(claimed){
    const referenceContext=referencePlan&&(referencePlan.requested||referencePlan.issue)?renderBackgroundImageReferences(referencePlan):''
-   try{await this.native().sendMessage(parent,run.sessionId,[{type:'text',text:'原会话补充同一项任务。以下是修正后的要求；保留可用进展，只改受影响部分。\n'+input+(referenceContext?'\n'+referenceContext:'')}],{signal})}
+   try{await this.agents.sendMessage(parent,run.sessionId,[{type:'text',text:'原会话补充同一项任务。以下是修正后的要求；保留可用进展，只改受影响部分。\n'+input+(referenceContext?'\n'+referenceContext:'')}],{signal})}
    catch(error){
     await this.save(run.id,r=>{
      const b=r.background!
@@ -315,24 +300,30 @@ export class NativeBackgroundTasks {
   const status=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===run.id)?.status??run.status
   return {kind:'partner-background-v1',taskId:run.id,childSessionId:run.sessionId,status,alreadyAccepted:true,updated:claimed}
  }
- private async activate(run:ExecutionRun,parent:Agent,events:ReturnType<Agent['session']['snapshotEvents']>,signal:AbortSignal,input:string,resume:boolean):Promise<Activation>{
-  const native=this.native(),childId=run.sessionId,id=run.id,attempt=run.background!.attempt??0,route=backgroundRunRoute(runtimeSnapshot(this.store).sessions,run)!
-  const child:ActiveChild={run,parent};this.children.set(childId,child)
+ private async activate(run:ExecutionRun,parent:Agent,events:ReturnType<Agent['session']['snapshotEvents']>,signal:AbortSignal,input:string,resume:boolean):Promise<BackgroundActivation>{
+  const childId=run.sessionId,id=run.id,attempt=run.background!.attempt??0,route=backgroundRunRoute(runtimeSnapshot(this.store).sessions,run)!
+  const startup=new AbortController(),startSignal=AbortSignal.any([signal,startup.signal])
+  const child:ActiveChild={run,parent,startup};this.children.set(childId,child)
   const release=()=>{if(this.children.get(childId)===child)this.releaseChild(childId)}
+  const authorize=()=>{
+   this.authorize(run,parent)
+   const current=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)
+   if(!current||!active(current)||(current.background?.attempt??0)!==attempt)throw Error('后台任务状态已变化')
+  }
   try{
    const model=this.configuredModel()
    if(resume&&model)child.resumeModel=model
-   else if(!resume)await mkdir(run.background!.cwd,{recursive:true,mode:0o700})
+   if(!resume)await mkdir(run.background!.cwd,{recursive:true,mode:0o700})
    child.disposeScope=bindBackgroundScope(this.store,childId,{owner:run.ownerCompanionId,audience:run.background!.audience,browserScope:browserAudience(run.ownerCompanionId,parent.session.id,events,runtimeSnapshot(this.store))??JSON.stringify([route.channelId,route.userId]),authorize:()=>this.authorize(run,parent)})
    const companion=runtimeSnapshot(this.store).companions.find(c=>c.id===run.ownerCompanionId)
    const preferences=companion?.characterCard?.enabled&&companion.automation?.memory?.enabled?await this.preferences?.(run,input):undefined
-   this.authorize(run,parent)
+   authorize()
    const images=run.background!.imageReferences
    const referenceContext=images?renderBackgroundImageReferences(images):''
-   const prompt=[{type:'text',text:input},...(referenceContext?[{type:'text',text:referenceContext}]:[]),...(preferences?[{type:'text',text:preferences}]:[])]
-   const spec={provider:PARTNER_BACKGROUND_PROVIDER.name,childId,parent,signal,delivery:'caller',label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,maxDepth:Math.min(1,native.resolveMaxDepth?.()??1),...(!resume&&model?{agentOptions:model}:{})}
-   child.activation=resume?await native.resumeActivation!(spec):await native.startActivation(spec)
-   this.authorize(run,parent)
+   const prompt=[{type:'text' as const,text:input},...(referenceContext?[{type:'text' as const,text:referenceContext}]:[]),...(preferences?[{type:'text' as const,text:preferences}]:[])]
+   const spec={childId,parent,signal:startSignal,label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,authorize,...(!resume&&model?{agentOptions:model}:{})}
+   child.activation=resume?await this.agents.resumeActivation!(spec):await this.agents.startActivation(spec)
+   authorize()
    if(runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)?.status==='canceled')throw Error('任务已被取消')
    await this.save(id,r=>{if(r.status!=='canceled'&&(r.background!.attempt??0)===attempt){r.status='running';r.background!.childName=child.activation!.name}})
    void child.activation.result.then(result=>this.finished(id,result,attempt).catch(error=>this.failed(id,error,attempt,false,result.structured)),error=>this.failed(id,error,attempt)).finally(release).catch(error=>this.ctx.logger.warn('后台任务收尾失败：'+String(error)))
@@ -358,7 +349,7 @@ export class NativeBackgroundTasks {
   const events=await this.readChildEvents(run).catch(()=>[])
   const review=await reviewEvidence(run,events,reason,structured).catch(e=>({reason:reason+'；整理回执失败：'+diagnostic(e),tools:[],files:[],canResume:!!events.length&&!run.background?.reviewResumed}))
   const retry=!restart&&(run.background.retries??0)<MAX_BACKGROUND_RETRIES&&review.canResume?retryMode(review.reason):undefined
-  review.canResume=review.canResume&&typeof (this.ctx.get('subagents') as NativeRuntime|undefined)?.resumeActivation==='function'
+  review.canResume=review.canResume&&typeof this.agents.resumeActivation==='function'
   await this.save(id,r=>{
    if(r.status==='canceled'||r.background!.result||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return
    r.status=restart?'canceled':'failed';r.completedAt=Date.now();r.error=review.reason;r.background!.review=review
@@ -377,7 +368,7 @@ export class NativeBackgroundTasks {
  }
  private async retryInBackground(run:ExecutionRun):Promise<boolean>{
   const b=run.background!,mode=b.retryMode
-  if(!mode||!b.review?.canResume||(b.retries??0)>=MAX_BACKGROUND_RETRIES||!this.native().resumeActivation)return false
+  if(!mode||!b.review?.canResume||(b.retries??0)>=MAX_BACKGROUND_RETRIES||!this.agents.resumeActivation)return false
   const parent=(this.ctx.get('agents') as {get?:(id:string)=>Agent|undefined}|undefined)?.get?.(b.sourceSessionId)
   if(!parent)return false
   this.authorize(run,parent)
@@ -419,7 +410,7 @@ export class NativeBackgroundTasks {
    const registry=this.ctx.get('agents') as {get?:(id:string)=>Agent|undefined}|undefined
    if(!registry?.get?.(b.sourceSessionId))await this.review(run)
    const parent=registry?.get?.(b.sourceSessionId)
-   if(!parent||!this.native().resumeActivation)throw Error('原会话或原生续做入口暂不可用')
+   if(!parent||!this.agents.resumeActivation)throw Error('原会话或后台续做入口暂不可用')
    let claimed=false
    await this.save(id,r=>{
     const source=r.background!
@@ -454,6 +445,7 @@ export class NativeBackgroundTasks {
    return
   }
   if(result.stopReason!=='completed')return this.failed(id,'原生后台任务结束状态：'+result.stopReason,attempt,false,result.structured)
+  if(result.structured===undefined)return this.failed(id,'后台任务未提交已确认的交付清单',attempt)
   const value=record(result.structured)
   if(typeof value.text!=='string'||!value.text.trim())throw Error('后台结果正文不能为空')
   const text=value.text,files=[] as {path:string;name:string;mediaType:string}[]
@@ -492,17 +484,9 @@ export class NativeBackgroundTasks {
   try{await this.deliver(run,reply);await this.save(id,r=>{r.background!.deliveredAt=Date.now();delete r.background!.deliveryError})}catch(error){await this.save(id,r=>{r.background!.deliveryError=String(error).slice(0,1000)})}
  }
  private async recoverSavedOutput(run:ExecutionRun):Promise<boolean>{
-  const events=[...await this.readChildEvents(run)].reverse()
-  const endIndex=events.findIndex(e=>e.type==='turn/end'||e.type==='turn/start')
-  const end=events[endIndex]
-  if(end?.type!=='turn/end'||end.data.reason.kind!=='completed')return false
-  const startIndex=events.findIndex((event,index)=>index>endIndex&&event.type==='turn/start')
-  const turn=events.slice(endIndex+1,startIndex<0?undefined:startIndex)
-  const callIndex=turn.findIndex(e=>e.type==='tool/call'&&e.data.name==='structured_output')
-  const call=turn[callIndex]
-  if(call?.type!=='tool/call'||!turn.slice(0,callIndex).some(e=>e.type==='tool/result'&&e.data.message.toolCallId===call.data.callId&&!e.data.message.isError))return false
-  const structured=typeof call.data.arguments==='string'?JSON.parse(call.data.arguments):call.data.arguments
-  await this.finished(run.id,{stopReason:'completed',structured},run.background!.attempt??0)
+  const result=backgroundResult(await this.readChildEvents(run))
+  if(result.structured===undefined)return false
+  await this.finished(run.id,result,run.background!.attempt??0)
   return runtimeSnapshot(this.store).executionRuns.find(r=>r.id===run.id)?.status==='completed'
  }
  async recoverDeliveries():Promise<void>{
@@ -528,5 +512,5 @@ export class NativeBackgroundTasks {
    }
   }finally{this.recovering=false}
  }
- async close():Promise<void>{this.closing=true;this.detachStore();await Promise.allSettled([...this.children.values()].map(c=>c.activation?.dispose()));for(const id of this.children.keys())this.releaseChild(id);this.detachCreated();this.detachProvider?.();this.detachGuard()}
+ async close():Promise<void>{this.closing=true;this.detachStore();for(const child of this.children.values())child.startup.abort();await Promise.allSettled([...this.children.values()].map(c=>c.activation?.dispose()));for(const id of this.children.keys())this.releaseChild(id);this.detachCreated();this.detachGuard()}
 }

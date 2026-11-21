@@ -3,7 +3,7 @@ export type AttentionScene = 'address'|'question'|'banter'|'share'|'topic'|'clos
 export interface ScenePrediction {label:AttentionScene;confidence:number;margin:number}
 export function isClearScene(scene:ScenePrediction|undefined):boolean {return !!scene&&(scene.confidence>=.6&&scene.margin>=.2||scene.confidence>=.5&&scene.margin>=.25)}
 export interface AttentionTurn {speaker:number;text:string;recipient?:number;replyTo?:number}
-export interface AttentionFrame {groupScope?:string;boundRelationship?:string;profile?:readonly string[];partnerText?:string;dialogue?:readonly AttentionTurn[]}
+export interface AttentionFrame {groupScope?:string;defaultScope?:string;boundRelationship?:string;roleRevision?:string;relationshipRevision?:string;profile?:readonly string[];partnerText?:string;dialogue?:readonly AttentionTurn[]}
 export interface AttentionLink {index:number|null;confidence:number;margin:number}
 export function recognizedLink(link:AttentionLink|undefined):boolean {
  return !!link&&link.index!==null&&link.confidence>=.65&&link.margin>=.2
@@ -12,10 +12,11 @@ export interface RecipientPrediction {label:'partner'|'member'|'open';confidence
 export function recognizedRecipient(prediction:RecipientPrediction|undefined):'partner'|'member'|undefined {
  if(prediction&&prediction.label!=='open'&&prediction.confidence>=.65&&prediction.margin>=.2)return prediction.label
 }
-export interface AttentionPrediction { label:AttentionLabel; confidence:number; margin:number; contextSimilarity?:number;replySimilarity?:number;profileSimilarity?:number;scene?:ScenePrediction;link?:AttentionLink;recipient?:RecipientPrediction }
+export interface AttentionPrediction { label:AttentionLabel; confidence:number; margin:number; learnedCall?:'role'|'relationship';contextSimilarity?:number;replySimilarity?:number;profileSimilarity?:number;scene?:ScenePrediction;link?:AttentionLink;recipient?:RecipientPrediction }
 /** Use the same call evidence for admission, busy queues and interjection limits. */
 export function isAttentionCall(prediction:AttentionPrediction|undefined):boolean {
  if(!prediction)return false
+ if(prediction.learnedCall)return true
  // These heads are uncalibrated rankings, not probabilities of a correct answer.
  // Correlated heads agreeing is insufficient alone: require support from the
  // current persona or delivered conversation when relaxing the score cutoff.

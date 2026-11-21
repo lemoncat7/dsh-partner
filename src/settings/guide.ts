@@ -1,9 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { roleTextForCard } from '../character/domain.js'
 import { qqSettings } from '../channels/qq/settings.js'
 import type { Companion, ChannelView, PartnerState } from '../domain.js'
+import { partnerSessionModel } from '../companions/session-model.js'
 import { settingsCatalog, type SettingsGuideResult } from './catalog.js'
 
 const guideRunning = new Set<string>()
@@ -52,7 +52,7 @@ export function settingsGuideFacts(
 
 export function parseSettingsGuideReply(text: string): SettingsGuideResult {
   const value = JSON.parse(text.trim().replace(/^\x60{3}(?:json)?\s*/i, '').replace(/\s*\x60{3}$/, '')) as Partial<SettingsGuideResult> | null
-  if (typeof value?.answer !== 'string' || !value.answer.trim() || value.answer.length > 1800 || !Array.isArray(value.settingIds)) {
+  if (typeof value?.answer !== 'string' || !value.answer.trim() || !Array.isArray(value.settingIds)) {
     throw new Error('设置引导返回格式无效')
   }
   return {
@@ -63,10 +63,8 @@ export function parseSettingsGuideReply(text: string): SettingsGuideResult {
 
 export async function explainSettings(
   ctx: Context, companion: Companion, question: string,
-  facts: ReturnType<typeof settingsGuideFacts>, signal: AbortSignal,
+  facts: ReturnType<typeof settingsGuideFacts>, signal: AbortSignal, sessionId?: string,
 ): Promise<SettingsGuideResult> {
-  const defaults = ctx.get('agentDefaultModel') as AgentDefaultModelConfig | undefined
-  if (!defaults) throw new Error('默认模型服务不可用')
   if (guideRunning.has(companion.id) || guideRunning.size >= 3) throw new Error('设置引导正在生成，请稍后再试')
 
   guideRunning.add(companion.id)
@@ -78,15 +76,14 @@ export async function explainSettings(
       '滚动对话窗口启用时会暂停每日上下文焕新。能力组合的模型仅作为伙伴新建会话的默认值，后台子智能体模型由 DSH 的子智能体插件管理。',
       '对未知状态明确说还需检查的项目。只引用目录中的页面，避免编造开关、路径和链接。输出 JSON 对象，answer 是简短纯文本，settingIds 是 0 到 5 个来自目录的设置 ID，按建议打开的顺序排列。',
     ].join('\n')
-    const selection = { ...defaults.currentSelection(), ...(companion.provider ? { provider: companion.provider } : {}), ...(companion.model ? { model: companion.model } : {}) }
+    const selection = await partnerSessionModel(ctx, companion, sessionId, signal)
     let output = '', finished = false
     for await (const chunk of ctx.llm.stream({
-      ...selection, system, maxTokens: 650, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+      ...selection, system, signal,
       messages: [createUserMessage({ content: [{ type: 'text', text: JSON.stringify({ question, facts, settings: menu }) }], source: { kind: 'user' } })],
     })) {
       if (chunk.type === 'text-delta') {
         output += chunk.text
-        if (output.length > 4096) throw new Error('设置引导返回过长')
       }
       if (chunk.type === 'finish') finished = chunk.reason.kind === 'stop'
     }

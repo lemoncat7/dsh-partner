@@ -84,6 +84,7 @@ export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):R
   return {reply,route:'opportunity',score,probability,reasons:[reason+(reply?'':'，本次旁听')]}
  }
  const recipient=recognizedRecipient(semantic?.recipient)
+ if(semantic?.learnedCall)return decide(true,'semantic',semantic.learnedCall==='relationship'?'关系设定中的已训练称呼，确认呼唤伙伴':'角色设定中的已训练称呼，确认呼唤伙伴')
  if(recipient==='member')return decide(false,'other','结合群聊前文识别为对其他成员说话',Math.round(semantic!.recipient!.confidence*100))
  if(recipient==='partner')return {
   ...decide(true,'continuation','结合发言人、回复对象和前文识别为对伙伴说话',Math.round(semantic!.recipient!.confidence*100)),

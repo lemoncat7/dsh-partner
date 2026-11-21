@@ -3,6 +3,12 @@ import { isPluginSource } from './message-source.js'
 import type { PartnerConcern } from './concern-domain.js'
 
 export const CONCERN_CREATED_NOTICE = '伙伴自动新增关注'
+export const CONCERN_EXECUTION_NOTICE = '关注变化 · 直接执行'
+
+export function isConcernExecutionNotice(event: SessionEvent): boolean {
+  return event.type === 'user/message' && isPluginSource(event.data.source, '@lemoncat7/dsh-partner')
+    && event.data.source.form === 'notice' && event.data.source.summary === CONCERN_EXECUTION_NOTICE
+}
 
 export function renderConcernCreatedNotice(concerns: readonly PartnerConcern[]): string {
   const lines = concerns.flatMap((concern, index) => [

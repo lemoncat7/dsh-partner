@@ -5,6 +5,7 @@ import type { PartnerStore } from '../store.js'
 import { completedTurnEvents } from '../agent-runtime.js'
 import { channelReplyPartsAfter, isAutonomousDeliveryTurn, isRequirementDeliveryReceipt } from '../channels/delivery-policy.js'
 import { continuationFinalReply } from '../scheduler/final-reply.js'
+import { isConcernExecutionNotice } from '../concern-notification.js'
 import type { PushEvent } from './push-domain.js'
 import type { PushService } from './push-service.js'
 
@@ -64,6 +65,7 @@ export class PushObserver {
     if (!companion || !state.pushChannels?.some(c => c.companionId === companion.id && c.enabled)) return
     const history = session.snapshotEvents().filter(e => e.seq < event.seq)
     const turn = completedTurnEvents(history, event)
+    if (turn.some(isConcernExecutionNotice)) return
     const continuation = continuationFinalReply(state.schedules, session.id, history, turn, event)
     if (continuation) {
       const wake = state.schedules.find(s => s.id === continuation.id)!.continuation!

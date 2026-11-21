@@ -1370,5 +1370,369 @@
   {
     "text": "小刘，帮我评价一下 @其他成员 这次表现",
     "label": "other"
+  },
+  {
+    "text": "呼叫值班的在不在",
+    "label": "address"
+  },
+  {
+    "text": "轮到你出声了，小导游",
+    "label": "address"
+  },
+  {
+    "text": "喂喂，能听到我吗",
+    "label": "address"
+  },
+  {
+    "text": "过来冒个泡嘛搭档",
+    "label": "address"
+  },
+  {
+    "text": "小助理你人嘞",
+    "label": "address"
+  },
+  {
+    "text": "借我一下你的耳朵，先打个招呼",
+    "label": "address"
+  },
+  {
+    "text": "主持人举个手让我认一下",
+    "label": "address"
+  },
+  {
+    "text": "在线的话敲一下桌子呀",
+    "label": "address"
+  },
+  {
+    "text": "嘿，终于找到你了",
+    "label": "address"
+  },
+  {
+    "text": "这段录音只有左耳有声，哪里能调回来",
+    "label": "question"
+  },
+  {
+    "text": "刚才你推荐的第二条路线会经过收费站么",
+    "label": "question"
+  },
+  {
+    "text": "既然数据已经导出来了，下一步先对哪个字段",
+    "label": "question"
+  },
+  {
+    "text": "你方便帮我把这三版变化捋一遍吗",
+    "label": "question"
+  },
+  {
+    "text": "想送个能修的旧钟，有没有什么挑选诀窍",
+    "label": "question"
+  },
+  {
+    "text": "所以去掉封面之后还能保留页码吗",
+    "label": "question"
+  },
+  {
+    "text": "这题我卡在最后一格，能给个提示不",
+    "label": "question"
+  },
+  {
+    "text": "刚才说的那条规则遇到周末还算吗",
+    "label": "question"
+  },
+  {
+    "text": "你帮我把这个清单按优先级排一下",
+    "label": "question"
+  },
+  {
+    "text": "这份进度唯一准时到达的是延期通知",
+    "label": "banter"
+  },
+  {
+    "text": "这么会画饼，烤箱都得找你进修",
+    "label": "banter"
+  },
+  {
+    "text": "我还以为它在思考，原来是在装睡",
+    "label": "banter"
+  },
+  {
+    "text": "恭喜这份表格获得最佳迷宫奖",
+    "label": "banter"
+  },
+  {
+    "text": "你这一顿操作把快捷键用成了长途旅行",
+    "label": "banter"
+  },
+  {
+    "text": "你这剪辑牛，主角全靠观众脑补",
+    "label": "banter"
+  },
+  {
+    "text": "我愿称这次开机为一场考古",
+    "label": "banter"
+  },
+  {
+    "text": "看来我的钱包先替我冷静下来了",
+    "label": "banter"
+  },
+  {
+    "text": "这排队速度，前面是挨个做人物专访吗",
+    "label": "banter"
+  },
+  {
+    "text": "终于等到这首歌的现场版了，录了两段给你们听",
+    "label": "share"
+  },
+  {
+    "text": "我把绕路的岔口拍下来了，经过的时候认蓝牌",
+    "label": "share"
+  },
+  {
+    "text": "把今天的观测表传上来了，后半夜那列最明显",
+    "label": "share"
+  },
+  {
+    "text": "刚看到楼下那只橘猫学会自己按门了",
+    "label": "share"
+  },
+  {
+    "text": "我把没聊完的那篇文章链接补在这儿",
+    "label": "share"
+  },
+  {
+    "text": "给你们看一下重做的开头，转场换过了",
+    "label": "share"
+  },
+  {
+    "text": "上次那个坏相机修好了，试拍是这张",
+    "label": "share"
+  },
+  {
+    "text": "刚从市集回来，换到了两颗奇怪的种子",
+    "label": "share"
+  },
+  {
+    "text": "整理了一份图文教程放在群文件里，有空可以翻翻",
+    "label": "share"
+  },
+  {
+    "text": "说起迟到，你们遇到过什么离谱的理由",
+    "label": "topic"
+  },
+  {
+    "text": "要是不用看导航，你们最想在哪座城乱逛",
+    "label": "topic"
+  },
+  {
+    "text": "今晚聊点旧物吧，每人说一个舍不得扔的",
+    "label": "topic"
+  },
+  {
+    "text": "突然好奇，大家第一次攒钱买的是啥",
+    "label": "topic"
+  },
+  {
+    "text": "如果给你一间闲置店面，你会拿来干什么",
+    "label": "topic"
+  },
+  {
+    "text": "来聊聊那些被低估的小众爱好",
+    "label": "topic"
+  },
+  {
+    "text": "假如一周多一天你会怎么安排",
+    "label": "topic"
+  },
+  {
+    "text": "想了个脑洞，如果街道按气味命名你们那条叫什么",
+    "label": "topic"
+  },
+  {
+    "text": "不聊工作了，最近谁有值得推荐的亲子游戏",
+    "label": "topic"
+  },
+  {
+    "text": "先到这儿，我得去接电话",
+    "label": "close"
+  },
+  {
+    "text": "收到了，这个版本就定下了",
+    "label": "close"
+  },
+  {
+    "text": "不用赶了，刚才我已经处理好了",
+    "label": "close"
+  },
+  {
+    "text": "行，这事儿咱们明天接着说",
+    "label": "close"
+  },
+  {
+    "text": "多谢带路，剩下的我自己试试",
+    "label": "close"
+  },
+  {
+    "text": "先别发了，我等确认再通知",
+    "label": "close"
+  },
+  {
+    "text": "这话题打住吧，大家去吃饭",
+    "label": "close"
+  },
+  {
+    "text": "记下啦，今天辛苦大家",
+    "label": "close"
+  },
+  {
+    "text": "前面那句撤回，当我没问",
+    "label": "close"
+  },
+  {
+    "text": "@小满，刚才那张票你直接发给阿泉",
+    "label": "other"
+  },
+  {
+    "text": "老周和阿临你们俩核一下收件地址",
+    "label": "other"
+  },
+  {
+    "text": "山风，你刚发的标注图我已经收藏了",
+    "label": "other"
+  },
+  {
+    "text": "阿楠上一句是在问小禾，我替他们补个时间",
+    "label": "other"
+  },
+  {
+    "text": "@阿青 你接着回楼上那位就行",
+    "label": "other"
+  },
+  {
+    "text": "小夏，你和阿葵讨论的那份合同我晚点看",
+    "label": "other"
+  },
+  {
+    "text": "阿白，刚才跟你说的钥匙我交给小岑了",
+    "label": "other"
+  },
+  {
+    "text": "我这句是接左边那位朋友的话",
+    "label": "other"
+  },
+  {
+    "text": "雨伞是给楼上阿澄的，麻烦你们俩别拿错",
+    "label": "other"
+  },
+  {
+    "text": "又忘了把充电线拔下来",
+    "label": "background"
+  },
+  {
+    "text": "当我路过，蹲一下后续",
+    "label": "background"
+  },
+  {
+    "text": "刷到凌晨才发现闹钟没开",
+    "label": "background"
+  },
+  {
+    "text": "我在这边挂会儿机，晚点再看",
+    "label": "background"
+  },
+  {
+    "text": "没注意外头已经下雨了",
+    "label": "background"
+  },
+  {
+    "text": "今天的地铁怎么还没到",
+    "label": "background"
+  },
+  {
+    "text": "工位底下还是一堆旧纸箱",
+    "label": "background"
+  },
+  {
+    "text": "在群里浅潜一下",
+    "label": "background"
+  },
+  {
+    "text": "感叹一下，一转眼就到周五了",
+    "label": "background"
+  },
+  {
+    "text": "台灯忘关了",
+    "label": "background"
+  },
+  {
+    "text": "我就蹲在这里看看你们聊什么",
+    "label": "background"
+  },
+  {
+    "text": "刚瞄了一眼时钟",
+    "label": "background"
+  },
+  {
+    "text": "底下空调一直在响",
+    "label": "background"
+  },
+  {
+    "text": "继续潜水，有事再喊我",
+    "label": "background"
+  },
+  {
+    "text": "我就随便感慨一句",
+    "label": "background"
+  },
+  {
+    "text": "居然没发现这个抽屉还在",
+    "label": "background"
+  },
+  {
+    "text": "哎，随便翻到一沓纸",
+    "label": "background"
+  },
+  {
+    "text": "等图加载完我孙子都能上小学了",
+    "label": "banter"
+  },
+  {
+    "text": "规定真简洁，两页目录下面只有四个附件",
+    "label": "banter"
+  },
+  {
+    "text": "这报错消息是猜字谜附赠的吗",
+    "label": "banter"
+  },
+  {
+    "text": "关窗关得挺礼貌，风已经绕道从门进来了",
+    "label": "banter"
+  },
+  {
+    "text": "后面先都不用回复了，我记下来了",
+    "label": "close"
+  },
+  {
+    "text": "弄清楚了，翻篇吧咱们",
+    "label": "close"
+  },
+  {
+    "text": "先暂停，我下回来了再讲",
+    "label": "close"
+  },
+  {
+    "text": "方案先拍板，今天就不继续讨论了",
+    "label": "close"
+  },
+  {
+    "text": "我哥刚拿到他的第一张登山证，拍了张合照给我",
+    "label": "share"
+  },
+  {
+    "text": "刚办完签收手续，比我想的快好多",
+    "label": "share"
+  },
+  {
+    "text": "发现旧版本还留着原片，我把对照片也传到群了",
+    "label": "share"
   }
 ]

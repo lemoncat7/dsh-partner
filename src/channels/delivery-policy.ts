@@ -2,10 +2,11 @@ import { deliveredAttachment } from '../attachments/delivery-receipt.js'
 import { chatReplyFromEvent, type ChatPart } from '../chat/protocol.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { isPluginSource } from '../message-source.js'
+import { CONCERN_EXECUTION_NOTICE } from '../concern-notification.js'
 
 const INTERNAL_TASK_NOTICES = new Set([
   '看板任务待验收', '看板任务已完成', '看板任务受阻', '伙伴执行看板任务', '伙伴核验看板任务', '伙伴汇总需求',
-  '伙伴长任务续接',
+  '伙伴长任务续接', CONCERN_EXECUTION_NOTICE,
   '需求成果交付', '伙伴后台任务完成', '伙伴后台任务待处置',
 ])
 

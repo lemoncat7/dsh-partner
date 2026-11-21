@@ -436,7 +436,6 @@ test('does not invoke the agent when no concern is due', async () => {
     const scheduler = new HeartbeatScheduler(
       { logger: { warn() {}, error() {} } }, store,
       { heartbeat: async () => { agentCalls += 1; throw new Error('must not run') } },
-      { sendProactive: async () => {} },
       { pendingNotifications: async () => [], due: async (_companionId, _scopeId, options) => { dueOptions = options; return [] } },
     )
     const result = await scheduler.trigger(companion.id, { manual: true })
@@ -469,7 +468,6 @@ test('checks only the selected concern when manually triggered from its row', as
         },
         persistKnowledgeObservations: async () => {}, recordHeartbeatActivity: async () => {},
       },
-      { sendProactive: async () => {} },
       {
         pendingNotifications: async () => { throw new Error('targeted checks must not flush unrelated notifications') },
         due: async (_companionId, _scopeId, options) => { dueOptions = options; return [target] },

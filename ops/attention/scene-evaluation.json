@@ -4,7 +4,7 @@
     "label": "address"
   },
   {
-    "text": "弟弟～",
+    "text": "喂，小领队你在群里吗",
     "label": "address"
   },
   {
@@ -157,6 +157,134 @@
   },
   {
     "text": "签到第七天",
+    "label": "background"
+  },
+  {
+    "text": "嘿，那位戴帽子的伙伴来签到",
+    "label": "address"
+  },
+  {
+    "text": "有没有听见我叫你，报个到呀",
+    "label": "address"
+  },
+  {
+    "text": "喂，屏幕那头在吗",
+    "label": "address"
+  },
+  {
+    "text": "值班员，出来喘口气",
+    "label": "address"
+  },
+  {
+    "text": "那段字幕做成两行会不会挡住画面",
+    "label": "question"
+  },
+  {
+    "text": "关于上一条你说的临时方案，什么时候能撤",
+    "label": "question"
+  },
+  {
+    "text": "谁知道这副眼镜鼻托松了怎么装",
+    "label": "question"
+  },
+  {
+    "text": "能帮我核一下总计和这几笔小数吗",
+    "label": "question"
+  },
+  {
+    "text": "说好是轻量版，打开像接了一单搬家",
+    "label": "banter"
+  },
+  {
+    "text": "你把三分钟热度活活煮成了隔夜饭",
+    "label": "banter"
+  },
+  {
+    "text": "它找文件的样子像我月底找零花钱",
+    "label": "banter"
+  },
+  {
+    "text": "修得真快，我刚数完第三季的片尾",
+    "label": "banter"
+  },
+  {
+    "text": "昨晚记到一段蛙声，我把原声留在群相册了",
+    "label": "share"
+  },
+  {
+    "text": "给你们瞧瞧修好后的门牌，油漆刚干",
+    "label": "share"
+  },
+  {
+    "text": "刚到馆里，展览时间表贴在入口右侧",
+    "label": "share"
+  },
+  {
+    "text": "把上个月读完的书单和笔记一起放这儿",
+    "label": "share"
+  },
+  {
+    "text": "换个题，要是你们能看见一种声音，会挑哪种",
+    "label": "topic"
+  },
+  {
+    "text": "大家聊聊学生时代最有用的一门课呗",
+    "label": "topic"
+  },
+  {
+    "text": "周末只留一件有趣的事做，你会选什么",
+    "label": "topic"
+  },
+  {
+    "text": "你们心里最有生活感的街道长什么样",
+    "label": "topic"
+  },
+  {
+    "text": "好了我先撤，经理叫我开会了",
+    "label": "close"
+  },
+  {
+    "text": "这个误会说开就好，咱不翻了",
+    "label": "close"
+  },
+  {
+    "text": "先不用考虑我，我决定明早再办",
+    "label": "close"
+  },
+  {
+    "text": "行，收摊了，改天我请各位喝茶",
+    "label": "close"
+  },
+  {
+    "text": "禾子，你那句话明显是回阿桥的，他还在等你补截图",
+    "label": "other"
+  },
+  {
+    "text": "@阿骆 你替小唯把交接表发到你们那边",
+    "label": "other"
+  },
+  {
+    "text": "那是阿书跟我的暗号，在等他回呢",
+    "label": "other"
+  },
+  {
+    "text": "阿洛，如果小云找你就把剩下那页转给她",
+    "label": "other"
+  },
+  {
+    "text": "屋里的风扇还吱吱响",
+    "label": "background"
+  },
+  {
+    "text": "我先占个位慢慢爬楼",
+    "label": "background"
+  },
+  {
+    "text": "啧，开灯才知道屋里这么暗",
+    "label": "background"
+  },
+  {
+    "text": "刚好翻到这本旧册子了",
     "label": "background"
   }
 ]

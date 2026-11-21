@@ -6,7 +6,7 @@ const settle=()=>new Promise(r=>setTimeout(r,20))
 function fixture(){
  const concern={id:'c',subject:'draft',scopeId:'@local:u',state:'watching',executionInstructions:'只保存待审草稿，不发布',resources:[]}
  const event={concernId:'c',fingerprint:'execution:v1',decision:'keep',event:'draft needed'}
- const state={concernExecutions:[],sessions:[{companionId:'p',sessionId:'s',channelId:'@local',userId:'u'}],delegations:[],planReceipts:[]}
+ const state={concernExecutions:[],sessions:[{kind:'local',companionId:'p',sessionId:'s',channelId:'@local',userId:'u'}],delegations:[],planReceipts:[]}
  const store={snapshot:()=>structuredClone(state),update:async fn=>fn(state)}
  const concerns={activity:async()=>({concerns:[concern],observations:[event]})}
  let calls=0,canResume=true,fail=true;const prompts=[]

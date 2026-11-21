@@ -2,22 +2,33 @@ import {channelReplyAllowed} from './reply-access.js'
 import { qqGroupRoute } from './qq/settings.js'
 import type { PartnerState } from '../domain.js'
 
+export function companionNotificationRoutes(state: PartnerState, companionId: string): {channelId:string;userId:string}[] {
+  const config = state.companions.find(c => c.id === companionId)?.notificationDelivery
+  if (config?.mode === 'selected') {
+    if (!config.targets.length) throw new Error('通知未配置接收人')
+    return config.targets.map(target => ({...target}))
+  }
+  const clean = {...state, pairings: state.pairings.map(({deliveryTarget: _legacy, ...p}) => p)}
+  const latest = clean.pairings
+    .filter(p => !qqGroupRoute(p,state.channels) && p.lastInboundAt !== undefined &&
+      clean.channels.some(c => c.id === p.channelId && c.companionId === companionId))
+    .sort((a,b) => (b.lastInboundAt ?? 0) - (a.lastInboundAt ?? 0))[0]
+  return latest ? [notificationRoute(clean,latest.channelId,latest.userId)] : []
+}
+
 export function notificationRoutes(state: PartnerState, channelId: string, userId: string, companionId?:string): {channelId:string;userId:string}[] {
   if(qqGroupRoute({channelId,userId},state.channels))return [notificationRoute(state,channelId,userId)]
   const source = state.channels.find(c => c.id === channelId)
   const owner = source?.companionId ?? companionId
   const config = state.companions?.find(c => c.id === owner)?.notificationDelivery
-  if (config?.mode === 'selected') {
-    if (!config.targets.length) throw new Error('通知未配置接收人')
-    return config.targets.map(target => ({...target}))
-  }
+  if (config?.mode === 'selected' && owner !== undefined) return companionNotificationRoutes(state, owner)
   if (config?.mode === 'recent') {
-    const clean = {...state, pairings: state.pairings.map(({deliveryTarget: _legacy, ...p}) => p)}
     if (!source) {
-      const latest = clean.pairings.filter(p=>!qqGroupRoute(p,state.channels)&&p.lastInboundAt!==undefined&&clean.channels.some(c=>c.id===p.channelId&&c.companionId===owner)).sort((a,b)=>(b.lastInboundAt??0)-(a.lastInboundAt??0))[0]
-      if (!latest) throw new Error('暂无最近联系的渠道与用户')
-      return [notificationRoute(clean,latest.channelId,latest.userId)]
+      const targets = owner === undefined ? [] : companionNotificationRoutes(state, owner)
+      if (!targets.length) throw new Error('暂无最近联系的渠道与用户')
+      return targets
     }
+    const clean = {...state, pairings: state.pairings.map(({deliveryTarget: _legacy, ...p}) => p)}
     return [notificationRoute(clean, channelId, userId)]
   }
   return [notificationRoute(state, channelId, userId)]

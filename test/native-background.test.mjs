@@ -4,7 +4,7 @@ import {mkdtemp,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {assertObjectJsonSchema} from '@deepseek-ai/dsh-tools'
-import {NativeBackgroundTasks,PARTNER_BACKGROUND_PROVIDER} from '../lib/execution/native-background.js'
+import {NativeBackgroundTasks} from '../lib/execution/native-background.js'
 import {qqSettings} from '../lib/channels/qq/settings.js'
 import {markObservationAgent} from '../lib/observation-contract.js'
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve:v=>resolve(v)}}
@@ -18,10 +18,10 @@ async function fixture(t,preferences,images){
  const state={channels:[channel],companions:[{id:'c',capabilities:['work'],characterCard:{enabled:true}}],sessions:[route],pairings:[],executionRuns:[]}
  const subscribers=new Set(),guards=[],calls=[],sent=[],updates=[],resumes=[],resumeResult=deferred(),result=deferred();let disposed=0
  const store={snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn)},update:async fn=>{fn(state);for(const listener of subscribers)listener();return structuredClone(state)}}
- const native={getProvider:()=>PARTNER_BACKGROUND_PROVIDER,registerProvider:()=>()=>{},startActivation:async spec=>{calls.push(spec);return {childId:spec.childId,name:'agent-1',result:result.promise,dispose:async()=>{disposed++}}},resumeActivation:async spec=>{resumes.push(spec);return {childId:spec.childId,name:'agent-1',result:resumeResult.promise,dispose:async()=>{disposed++}}},sendMessage:async(...args)=>updates.push(args)}
+ const native={startActivation:async spec=>{calls.push(spec);return {childId:spec.childId,name:'agent-1',result:result.promise,dispose:async()=>{disposed++}}},resumeActivation:async spec=>{resumes.push(spec);return {childId:spec.childId,name:'agent-1',result:resumeResult.promise,dispose:async()=>{disposed++}}},sendMessage:async(...args)=>updates.push(args)}
  const handlers=new Map()
  const ctx={get:()=>native,on:(name,fn)=>{handlers.set(name,fn);return()=>handlers.delete(name)},tools:{guard:fn=>{guards.push(fn);return()=>guards.splice(guards.indexOf(fn),1)}},logger:{warn(){}}},deliver=async(run,reply)=>sent.push({run:structuredClone(run),reply})
- const service=new NativeBackgroundTasks(ctx,store,deliver,preferences,undefined,images)
+ const service=new NativeBackgroundTasks(ctx,store,deliver,preferences,undefined,images,native)
  t.after(()=>service.close())
  const tool=service.tool('c'),exec={agent:parent,signal:new AbortController().signal}
  const start=()=>tool.execute({action:'start',label:'整理',input:'目标：整理 /tmp/reference.md 并生成配图'},exec)
@@ -30,7 +30,7 @@ async function fixture(t,preferences,images){
 const waitFor=async predicate=>{for(let n=0;n<100;n++){if(predicate())return;await new Promise(r=>setTimeout(r,10))}assert.fail('completion did not settle')}
 test('native acceptance returns immediately; ordinary chat does not cancel and result keeps original group',async t=>{
  const f=await fixture(t),accepted=await f.start();assert.equal(accepted.status,'running');assert.equal(f.sent.length,0)
- assertObjectJsonSchema(f.calls[0].outputSchema);assert.equal(f.calls[0].delivery,'caller');assert.equal(f.calls[0].provider,'partner-task');assert.match(f.calls[0].prompt[0].text,/reference.md/)
+ assertObjectJsonSchema(f.calls[0].outputSchema);assert.match(f.calls[0].prompt[0].text,/reference.md/)
  assert.equal((await f.start()).alreadyAccepted,true);assert.equal(f.calls.length,1)
  f.route.inboundMessageIds=Array.from({length:128},(_,i)=>'later-'+i)
  f.setEvents([f.event('other')]);f.state.sessions.push({...f.route,id:'other',userId:'group:12345678:99887766',inboundMessageIds:['other']});await f.store.update(()=>{})
@@ -206,8 +206,6 @@ test('conversational tool guard avoids history snapshots and state copies',async
  assert.equal(f.guards[0]({agent,name:'partner_tools',arguments:{action:'describe',name:'partner_browser'}}),undefined)
 })
 
-test('fresh partner backend never reads or seeds parent history',async()=>{assert.equal(PARTNER_BACKGROUND_PROVIDER.inheritsParentContext,false);assert.deepEqual(await PARTNER_BACKGROUND_PROVIDER.prepareContinuable({parent:{session:{snapshotEvents(){assert.fail('must not read parent history')}}}}),{})})
-
 test('accepted work ends the foreground after confirmed preamble, without another model reply',async t=>{
  const f=await fixture(t);let ended=0;f.exec.concludeTurn=()=>{ended++}
  f.setEvents([f.event('input'),{type:'tool/result',data:{message:{toolCallId:'say',content:[]},meta:{kind:'partner-chat-v1',parts:[{type:'text',text:'我去找'}],delivered:true,taskPreamble:true,inputMessageId:'input'}}}])
@@ -239,7 +237,7 @@ test('cancel preserves a resumable task; explicit resume keeps ids, cwd, result 
  assert.equal(canceled.canResume,true);assert.equal(f.state.executionRuns[0].status,'canceled')
  const resumed=await f.tool.execute({action:'resume',taskId:id,input:'继续尚未完成的配图'},f.exec)
  assert.equal(resumed.resumed,true);assert.equal(resumed.childSessionId,accepted.childSessionId);assert.equal(f.calls.length,1);assert.equal(f.resumes.length,1)
- assert.equal(f.resumes[0].cwd,f.calls[0].cwd);assert.deepEqual(f.resumes[0].outputSchema,f.calls[0].outputSchema);assert.equal(f.resumes[0].delivery,'caller')
+ assert.equal(f.resumes[0].cwd,f.calls[0].cwd);assert.deepEqual(f.resumes[0].outputSchema,f.calls[0].outputSchema)
  assert.match(f.resumes[0].prompt[0].text,/不重复执行/)
  assert.equal((await f.tool.execute({action:'resume',taskId:id},f.exec)).alreadyAccepted,true);assert.equal(f.resumes.length,1)
  // The first activation can settle late: it must neither deliver nor release the new guard.
@@ -251,7 +249,7 @@ test('cancel preserves a resumable task; explicit resume keeps ids, cwd, result 
 })
 test('canceled work can cold-resume after adapter restart without a new child',async t=>{
  const f=await fixture(t),a=await f.start();await f.tool.execute({action:'cancel',taskId:a.taskId},f.exec);await f.service.close()
- const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close());f.setEvents([f.event('update')])
+ const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver,undefined,undefined,undefined,f.native);t.after(()=>service.close());f.setEvents([f.event('update')])
  const result=await service.tool('c').execute({action:'resume',taskId:a.taskId},f.exec)
  assert.equal(result.childSessionId,a.childSessionId);assert.equal(f.resumes.length,1);assert.equal(f.calls.length,1)
  f.resumeResult.resolve({stopReason:'completed',structured:{text:'重启后继续完成',files:[]}});await waitFor(()=>f.state.executionRuns[0].background.deliveredAt)
@@ -265,7 +263,7 @@ test('the generic startup recovery leaves interrupted native background tasks fo
  const execution=new EphemeralExecutionService({},f.store,f.parent.session.header.cwd)
  assert.equal(await execution.reconcileInterruptedRuns(),0)
  assert.equal(f.state.executionRuns[0].status,'running')
- const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close())
+ const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver,undefined,undefined,undefined,f.native);t.after(()=>service.close())
  await service.recoverDeliveries()
  const run=f.state.executionRuns[0]
  assert.equal(run.sessionId,accepted.childSessionId)
@@ -290,7 +288,7 @@ test('restart delivers a committed result once and leaves an unconfirmed result 
   const f=await fixture(t),accepted=await f.start()
   await f.service.close()
   childLog(f,savedOutput(confirmed))
-  const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close())
+  const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver,undefined,undefined,undefined,f.native);t.after(()=>service.close())
   await service.recoverDeliveries();await service.recoverDeliveries()
   const run=f.state.executionRuns[0]
   assert.equal(run.sessionId,accepted.childSessionId)
@@ -327,7 +325,7 @@ test('failed resume remains canceled with its progress preserved; restart never 
  f.native.resumeActivation=async()=>{throw Error('capacity unavailable')}
  await assert.rejects(f.tool.execute({action:'resume',taskId:a.taskId},f.exec),/capacity unavailable/);assert.equal(f.state.executionRuns[0].status,'canceled')
  await f.service.close();f.state.executionRuns[0].status='running'
- const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver);t.after(()=>service.close());await service.recoverDeliveries()
+ const service=new NativeBackgroundTasks(f.ctx,f.store,f.deliver,undefined,undefined,undefined,f.native);t.after(()=>service.close());await service.recoverDeliveries()
  assert.equal(f.state.executionRuns[0].status,'canceled');assert.match(f.state.executionRuns[0].error,/重启/);assert.equal(f.calls.length,1);assert.equal(f.resumes.length,0)
 })
 

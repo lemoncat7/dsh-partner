@@ -1,5 +1,4 @@
 import {runtimePolicy} from '../companions/runtime-policy.js'
-import {cleanupWorkCatalog} from './catalog-cleanup.js'
 import {lstat,realpath,rm} from 'node:fs/promises'
 import {basename,dirname,resolve} from 'node:path'
 import type {Context} from '@deepseek-ai/cordis'
@@ -77,7 +76,7 @@ export class PartnerWorkSessionCleanup {
    for(const run of runs){
     const explicitlyClosed=run.background?.stoppedAt||run.background?.discardedAt
     if(!terminal(run)||!explicitlyClosed&&!runtimePolicy(this.store,run.ownerCompanionId)?.rules.autoChildCleanup||!run.background&&!run.sessionCleanup?.parentSessionId&&!run.sessionId.startsWith('partner-run-'))continue
-    try{if(!run.sessionCleanup?.deletedAt)await cleanupWorkSession(this.ctx,this.store,run);await cleanupWorkCatalog(this.ctx,this.store,run)}catch(error){this.ctx.logger.warn('伙伴工作会话清理暂未完成：'+String(error))}
+    try{if(!run.sessionCleanup?.deletedAt)await cleanupWorkSession(this.ctx,this.store,run)}catch(error){this.ctx.logger.warn('伙伴工作会话清理暂未完成：'+String(error))}
    }
   }finally{this.running=false}
  }

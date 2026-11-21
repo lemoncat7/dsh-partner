@@ -35,8 +35,8 @@ test('recovery UI exposes status, async lock, explicit version and no blind retr
  assert.match(source,/核对产物并恢复/);assert.match(source,/expectedUpdatedAt/);assert.match(source,/lock\.current/)
  assert.match(source,/role="alert"/);assert.match(source,/disabled=\{disabled\|\|busy\}/)
  const heartbeat=await readFile(new URL('../src/heartbeat.ts',import.meta.url),'utf8')
- assert.match(heartbeat,/await this\.recordActivity\(companion, route, execution, partialError[^\n]*\n\s*await this\.executionDispatcher\?\.\(companion\.id\)/)
- assert.match(heartbeat,/await this\.recordActivity\(companion, route, execution, 'notified'[^\n]*\n\s*await this\.executionDispatcher\?\.\(companion\.id\)/)
+ assert.match(heartbeat,/await this\.recordActivity\(companion, execution, partialError[^\n]*\n\s*await this\.executionDispatcher\?\.\(companion\.id\)/)
+ assert.match(heartbeat,/await this\.recordActivity\(companion, execution, 'notified'[^\n]*\n\s*await this\.executionDispatcher\?\.\(companion\.id\)/)
 })
 
 test('recovery API requires mutation header and exact receipt version, propagates conflicts',async t=>{

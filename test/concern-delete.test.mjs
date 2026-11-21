@@ -39,7 +39,7 @@ test('archived cleanup is paginated and heartbeat deletion cannot race an active
  const store=new PartnerConcernStore(root);const item=await store.createExplicit('c','*','old')
  await store.act('c',item.id,'ignore');assert.equal((await store.archived('c')).items[0].id,item.id)
  let release
- const scheduler=new HeartbeatScheduler({}, {snapshot:()=>({companions:[{id:'c'}]}),isCompanionRemoving:()=>false},{},{},store)
+ const scheduler=new HeartbeatScheduler({}, {snapshot:()=>({companions:[{id:'c'}]}),isCompanionRemoving:()=>false},{},store)
  scheduler.run=()=>new Promise(resolve=>{release=resolve})
  const running=scheduler.trigger('c',{manual:true})
  await assert.rejects(scheduler.removeConcern('c',item.id,item.updatedAt),/正在执行/)
