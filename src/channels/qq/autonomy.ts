@@ -13,7 +13,7 @@ import { isAttentionCall, recognizedLink, recognizedRecipient, type AttentionTur
 type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;redirect:boolean;at:number;receivedAt:number;sequence:number}
 type Conversation={at:number;text:string;input:string;recipient:string;observedSequence:number}
 type Group={messages:Observation[];replies:Map<string,Conversation>;roomReplies:Array<Conversation&{messageId:string}>;sequence:number}
-export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;linkedMessageId?:string;followupRequest?:boolean;decisionMs?:number;contextSize?:number;discussionParticipants?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
+export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;linkedMessageId?:string;followupRequest?:boolean;attachmentFollowup?:true;decisionMs?:number;contextSize?:number;discussionParticipants?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
 const CONTEXT_TTL_MS=10*60_000
 export const QUIET_CONVERSATION_WINDOW_MS=2*60*60_000
 /** Per-speaker threads plus optional local semantic routing. No remote LLM gate or tools. */
@@ -78,8 +78,9 @@ export class QqGroupAutonomy {
    .map(({qqId,sender,text,at,receivedAt})=>({qqId,sender,text,at,receivedAt,kind:'member'}))
   for(const [qqId,reply] of group?.replies??[])if(reply.at<=receivedAt&&now-reply.at<=CONTEXT_TTL_MS)
    rows.push({qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,kind:'partner'})
-  const quiet=this.quietRecent(channelId,event)
-  if(quiet&&!rows.some(r=>r.kind==='partner'&&r.at===quiet.at))rows.push({qqId:'',sender:'伙伴（已确认送达）',text:quiet.text,at:quiet.at,receivedAt:quiet.at,kind:'partner'})
+  const preceding=this.precedingAttachmentReply(group,event)??this.quietRecent(channelId,event)
+  if(preceding&&!rows.some(r=>r.kind==='partner'&&r.at===preceding.at&&r.qqId===preceding.recipient))
+   rows.push({qqId:preceding.recipient,sender:'伙伴（已确认送达）',text:preceding.text||'（已发送回复，正文未记录）',at:preceding.at,receivedAt:preceding.at,kind:'partner'})
   // Group events carry second-level source times; local arrival orders them against send receipts.
   return JSON.stringify(rows.sort((a,b)=>a.receivedAt-b.receivedAt).slice(-16)
    .map(({receivedAt,...row})=>({...row,at:new Date(receivedAt).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
@@ -104,6 +105,14 @@ export class QqGroupAutonomy {
   const now=this.now(),inputAt=event.receivedAt??event.timestamp??now
   const reply=[...group.replies.values()].sort((a,b)=>b.at-a.at)[0]
   if(reply&&reply.at<=inputAt&&now>=reply.at&&now-reply.at<QUIET_CONVERSATION_WINDOW_MS&&input.sequence===reply.observedSequence+1)return reply
+ }
+ private precedingAttachmentReply(group:Group|undefined,event:DirectMessage):Conversation|undefined {
+  const sender=event.qqGroup
+  if(!group||!sender||sender.mentioned||sender.otherMention||sender.hasReply||sender.replyTo||event.qqReplyId||event.text.trim()||!event.media?.length)return
+  const reply=group.roomReplies.at(-1)
+  if(!reply||reply!==group.replies.get(sender.userId))return
+  const current=group.messages.find(message=>message.id===event.id)
+  if(current&&current.sequence===reply.observedSequence+1&&current.receivedAt>=reply.at)return reply
  }
  /** Only confirmed delivery establishes a shared conversation, never admission or silence. */
  private groupRecent(channelId:string,event:DirectMessage):Conversation|undefined {
@@ -160,7 +169,8 @@ export class QqGroupAutonomy {
   const recent=lastSpeakerReply&&lastSpeakerReply.at<=inputAt?lastSpeakerReply:undefined
   const groupRecent=this.groupRecent(channelId,event)
   const quietRecent=this.quietRecent(channelId,event)
-  const context:ReplyScoreContext={name:companion.name??'',now,seed:channelId+':'+event.id,...(recent?{recent}:{}),...(groupRecent?{groupRecent}:{}),...(quietRecent?{quietRecent}:{})}
+  const attachmentFollowup=!!this.precedingAttachmentReply(group,event)
+  const context:ReplyScoreContext={name:companion.name??'',now,seed:channelId+':'+event.id,attachmentFollowup,...(recent?{recent}:{}),...(groupRecent?{groupRecent}:{}),...(quietRecent?{quietRecent}:{})}
 
   const index=group?.messages.findIndex(m=>m.id===event.id)??-1
   const before=(group?.messages??[]).slice(0,index<0?undefined:index)
@@ -237,6 +247,7 @@ export class QqGroupAutonomy {
   }
   this.record(channelId,event,`${result.reply?'进入回复流程':'决定旁听'} · ${result.reasons.join('；')}`)
   Object.assign(this.decisions.get(channelId)!,{method:'local',score:result.score,probability:result.probability,reasons:result.reasons,route:result.route,addressed:result.reply&&(result.route==='direct'||recognizedCall),...(result.reply&&result.followupRequest?{followupRequest:true}:{}),...(linkedMessageId?{linkedMessageId}:{}),decisionMs:Math.round(performance.now()-started),contextSize:attentionContext.length,...(participants!==undefined&&(result.route==='continuation'||topicContinues(event.text,{...context,...(semantic?{semantic}:{})}))?{discussionParticipants:participants}:{}),...(classification?{classification}:{}),...(semantic?{semantic}:{})})
+  if(result.reply&&attachmentFollowup)this.decisions.get(channelId)!.attachmentFollowup=true
   return result.reply
  }
 }

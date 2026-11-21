@@ -39,6 +39,26 @@ test('group intake releases the next room message when the first enters the repl
  finish({text:'你好',attachments:[]})
  await pending
 })
+test('the group model receives a delayed attachment and can end the turn silently',async()=>{
+ const f=fixture()
+ let now=Date.now()-83_000
+ f.manager.groupAutonomy=new QqGroupAutonomy({},()=>now)
+ f.setReply({text:'上次已经发到群里的答复',attachments:[]})
+ await f.handle({...f.event,receivedAt:now})
+ assert.equal(f.sent.length,1)
+ now+=83_000
+ const file={kind:'file',source:'fixture',name:'补充资料.txt'}
+ f.api.receiveAttachments=async()=>[{kind:'file',name:file.name,data:Buffer.from('补充资料')}]
+ f.setReply({text:'',attachments:[],chatParts:[]})
+ await f.handle({...f.event,id:'file',text:'',receivedAt:now,media:[file],qqGroup:{...f.event.qqGroup,mentioned:false}})
+ const turn=f.inputs.at(-1)[3]
+ assert.equal(f.inputs.length,2)
+ assert.equal(turn.attachments[0].name,file.name)
+ assert.match(turn.text,/群聊附件补充/)
+ assert.match(turn.text,/上次已经发到群里的答复/)
+ assert.equal(turn.groupReply.kind,'ambient')
+ assert.equal(f.sent.length,1)
+})
 test('whitelisted QQ groups grant chat without granting private access, identity relationships or another room',()=>{
  const f=fixture()
  assert.equal(channelReplyAllowed(f.state,'qq',f.peer,f.target),true)

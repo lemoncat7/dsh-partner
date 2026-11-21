@@ -3,7 +3,7 @@ import { isAttentionCall, isClearScene, recognizedRecipient, type AttentionPredi
 
 export interface ReplyScore { reply:boolean; score:number; probability:number; reasons:string[]; followupRequest?:boolean; route:'direct'|'continuation'|'semantic'|'fallback'|'other'|'closing'|'opportunity' }
 interface ReplyEvidence {at:number;text:string;input?:string}
-export interface ReplyScoreContext { name:string; recent?:ReplyEvidence; now:number; seed:string; semantic?:AttentionPrediction; quickContinuation?:boolean; latestReplyToSpeaker?:boolean; latestReplyInRoom?:boolean; singleParticipant?:boolean; otherConversation?:boolean; quietRecent?:ReplyEvidence; groupRecent?:ReplyEvidence }
+export interface ReplyScoreContext { name:string; recent?:ReplyEvidence; now:number; seed:string; semantic?:AttentionPrediction; quickContinuation?:boolean; attachmentFollowup?:boolean; latestReplyToSpeaker?:boolean; latestReplyInRoom?:boolean; singleParticipant?:boolean; otherConversation?:boolean; quietRecent?:ReplyEvidence; groupRecent?:ReplyEvidence }
 const normalized=(text:string)=>text.slice(0,1200).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'').slice(0,160)
 export function topicSimilarity(left:string,right:string):number {
  const grams=(text:string)=>{const chars=Array.from(normalized(text)),out=new Set<string>();for(let i=1;i<chars.length;i++)out.add(chars[i-1]!+chars[i]!);return out}
@@ -71,7 +71,10 @@ export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  if(!event.media?.length&&/^(?:哈{2,}[\s，,]*)?(?:嗯{1,3}|好|好的|收到|ok|知道了|了解|谢谢|谢了|晚安|拜拜|下次聊|先走了|对[啊呀的]?|是[啊呀的]?|确实|我也觉得|哈{2,})[\s。.!！~～]*$/iu.test(text))return decide(false,'closing','确认或收尾语，无需逐条回应')
  if(!event.media?.length&&/^[\s\p{P}\p{S}]+$/u.test(text)&&!activeConversation(context))return decide(false,'fallback','孤立标点或符号，没有明确对话对象')
  if(/(?:大家|各位|你们).{0,16}(?:觉得|怎么看|谁会|能不能|来看看|帮忙)|(?:有没有人|有人(?:知道|会|能|懂))/u.test(text))return decide(true,'opportunity','面向全群的询问或交流邀请，进入接话判断')
- if(!text&&event.media?.length&&context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员紧接着补发了附件')
+ if(!text&&event.media?.length){
+  if(context.attachmentFollowup)return decide(true,'continuation','附件紧邻发给同一群友的已送达回复，由模型决定是否接话')
+  if(context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员紧接着补发了附件')
+ }
  return undefined
 }
 export function scoreGroupReply(event:DirectMessage,context:ReplyScoreContext):ReplyScore {

@@ -386,6 +386,42 @@ test('quiet continuity expires, cannot cross rooms, and intervening traffic surv
   assert.equal(await gate.shouldReply('c',next,companion,signal()),false,mode)
  }
 })
+test('attachment-only input can follow the last confirmed reply regardless of media type or elapsed time',async()=>{
+ for(const kind of ['image','file','record','video']){
+  let now=context.now
+  const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>assert.fail('the attachment continuation has no text to classify'))
+  const first=input('看看这个话题')
+  gate.observe('c',first);gate.replied('c',first,'这是伙伴上一条回复')
+  now+=kind==='image'?83_000:QUIET_CONVERSATION_WINDOW_MS+1
+  const next={...input('',{},'followup'),receivedAt:now,media:[{kind,source:'fixture'}]}
+  gate.observe('c',next)
+  assert.equal(await gate.shouldReply('c',next,companion,signal()),true)
+  assert.equal(gate.status('c').attachmentFollowup,true)
+  assert.equal(gate.status('c').addressed,false)
+  assert.ok(JSON.parse(gate.context('c',next)).some(row=>row.text==='这是伙伴上一条回复'))
+ }
+})
+test('an attachment cannot extend a different, interrupted or unconfirmed conversation',async()=>{
+ for(const condition of ['another-member','intervening','another-reply','other-room','quoted-other','unconfirmed','arrived-before-reply','working']){
+  let now=context.now
+  const gate=new QqGroupAutonomy(forbidden,()=>now,unavailable)
+  const first=input('看看这个话题',{},'first')
+  gate.observe('c',first)
+  if(condition!=='unconfirmed')gate.replied('c',first,'这是伙伴上一条回复')
+  const other=input('插一句',{userId:'33445678'},'other')
+  if(condition==='intervening'||condition==='another-reply'){
+   now+=500;gate.observe('c',other)
+   if(condition==='another-reply')gate.replied('c',other,'已经给另一位群友答复')
+  }
+  const group=condition==='another-member'?{userId:'33445678'}:condition==='quoted-other'?{replyTo:'other',hasReply:true}:
+   condition==='other-room'?{groupId:'99887766'}:{}
+  now+=83_000
+  const next={...input('',group,'followup'),receivedAt:condition==='arrived-before-reply'?context.now-1:now,media:[{kind:'file',source:'fixture'}]}
+  gate.observe('c',next)
+  assert.equal(await gate.shouldReply('c',next,companion,signal(),undefined,condition==='working'),false,condition)
+  assert.equal(gate.status('c').attachmentFollowup,undefined,condition)
+ }
+})
 test('unavailable classifications carry diagnostics without turning failure into a semantic rejection',async()=>{
  const gate=new QqGroupAutonomy(forbidden,()=>context.now,async(t,s,c,report)=>{report({status:'timeout',attempts:2,retryAfterMs:1000})})
  const e=input('路过的话');gate.observe('c',e);await gate.shouldReply('c',e,companion,signal())
