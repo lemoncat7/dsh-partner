@@ -90,6 +90,23 @@ test('bounded observations exclude the current and later events from the context
  assert.equal(rows.length,16);assert.equal(rows.at(-1).text,'message-97')
 })
 
+test('group context keeps a confirmed reply before messages received later in the same QQ second',()=>{
+ const second=1000000
+ let now=second+100
+ const gate=new QqGroupAutonomy(forbidden,()=>now,unavailable)
+ const record=(id,text,user)=>{const e={...input(text,{userId:user},id),timestamp:second,receivedAt:now};gate.observe('c',e);return e}
+ const first=record('first','先问一句','22345678')
+ now=second+300
+ gate.replied('c',first,'伙伴已经答了')
+ now=second+450
+ record('other','群友接话','33445678')
+ now=second+600
+ const current=record('current','再问一句','22345678')
+ const rows=JSON.parse(gate.context('c',current))
+ assert.deepEqual(rows.map(row=>row.text),['先问一句','伙伴已经答了','群友接话'])
+ assert.deepEqual(rows.map(row=>Date.parse(row.at)),[second+100,second+300,second+450])
+})
+
 test('shared sleep stops an ongoing hot group thread before semantic classification',async()=>{
  let now=context.now,calls=0;const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>{calls++;return {label:'engage',confidence:.65,margin:.25,replySimilarity:.6}})
  const first=input('小明？');gate.observe('c',first);gate.replied('c',first,'聊着呢')

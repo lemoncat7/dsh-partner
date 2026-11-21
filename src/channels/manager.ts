@@ -1322,6 +1322,7 @@ export class ChannelManager {
         if(progress)this.directReplyProgress.set(progressKey,progress)
         const agentStarted=Date.now()
         const updates:ReplyProgress=Object.assign((stage:Parameters<ReplyProgress>[0])=>{
+          if(event.qqGroup&&stage==='queued'){prepared()}
           (progress?.update??authored?.update)?.(stage)
         },{
           groupCurrent:()=>!this.groupReplyFreshness.obsolete(opportunity),
@@ -1342,7 +1343,7 @@ export class ChannelManager {
           this.groupMedia.submitted(mediaScope,[...events,...loadedMedia])
           return pending
         })
-        prepared()
+        if(!event.qqGroup)prepared()
         const reply=await pendingReply.finally(()=>authored?.finish())
         await replyTurn.ready()
         const captured=replyTurn.capture()

@@ -21,6 +21,24 @@ function fixture() {
  const event={id:'m',sender:peer,targetId:target,text:'你好',qqGroup:{groupId:'99887766',userId:'22345678',senderName:'访客',mentioned:true,autonomous:true}}
  return {peer,target,channel,state,store,sent,inputs,agents,manager,api,event,setReply:r=>{reply=r},handle:e=>manager.handleDirect(channel,api,e??event,new AbortController().signal)}
 }
+test('group intake releases the next room message when the first enters the reply queue',async()=>{
+ const f=fixture()
+ let progress,entered,finish
+ const whenEntered=new Promise(resolve=>{entered=resolve})
+ const result=new Promise(resolve=>{finish=resolve})
+ f.agents.reply=async(_companion,_channel,_sender,_event,notify)=>{
+  progress=notify;entered()
+  return result
+ }
+ let prepared=false
+ const pending=f.manager.handleDirect(f.channel,f.api,f.event,new AbortController().signal,[f.event],()=>{prepared=true},'steer')
+ await whenEntered
+ assert.equal(prepared,false)
+ progress('queued')
+ assert.equal(prepared,true)
+ finish({text:'你好',attachments:[]})
+ await pending
+})
 test('whitelisted QQ groups grant chat without granting private access, identity relationships or another room',()=>{
  const f=fixture()
  assert.equal(channelReplyAllowed(f.state,'qq',f.peer,f.target),true)
@@ -205,6 +223,7 @@ test('QQ polling merges a speaker burst and steers subsequent additions even wit
  t.after(()=>{controller.abort();release()})
  f.agents.reply=async(_c,_channel,_sender,input,updates)=>{
   seen.push({text:input.text,attachments:input.attachments})
+  updates('queued')
   if(seen.length===1)await end
   else release()
   return {text:'',attachments:[]}

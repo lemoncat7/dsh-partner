@@ -10,7 +10,7 @@ import type { QqSettings } from './settings.js'
 import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, routeGroupReply, scoreGroupReply, topicContinues, topicSimilarity, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
 import { isAttentionCall, recognizedLink, recognizedRecipient, type AttentionTurn, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
-type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;redirect:boolean;at:number;sequence:number}
+type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;redirect:boolean;at:number;receivedAt:number;sequence:number}
 type Conversation={at:number;text:string;input:string;recipient:string;observedSequence:number}
 type Group={messages:Observation[];replies:Map<string,Conversation>;roomReplies:Array<Conversation&{messageId:string}>;sequence:number}
 export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;linkedMessageId?:string;followupRequest?:boolean;decisionMs?:number;contextSize?:number;discussionParticipants?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
@@ -40,6 +40,8 @@ export class QqGroupAutonomy {
   if(redirect)group.replies.delete(event.qqGroup.userId)
   const now=this.now(),sourceAt=event.timestamp??event.receivedAt
   const at=typeof sourceAt==='number'&&Number.isFinite(sourceAt)&&sourceAt>0&&sourceAt<=now?sourceAt:now
+  const arrival=event.receivedAt
+  const receivedAt=typeof arrival==='number'&&Number.isFinite(arrival)&&arrival>0&&arrival<=now?arrival:at
   const existing=group.messages.find(m=>m.id===event.id)
   const sequence=existing?.sequence??++group.sequence
   const quoted=event.qqGroup.replyTo==='other'&&event.qqReplyId&&event.qqQuote?.senderId
@@ -48,7 +50,7 @@ export class QqGroupAutonomy {
   const parentId=quoted?.id??existing?.parentId
   group.messages=group.messages.filter(m=>m.id!==event.id&&now-m.at<=CONTEXT_TTL_MS)
   const recipient=event.qqGroup.mentioned||event.qqGroup.replyTo==='self'?'partner':event.qqGroup.replyTo==='other'?event.qqQuote?.senderId:undefined
-  group.messages.push({id:event.id,qqId:event.qqGroup.userId,sender:event.qqGroup.senderName||event.qqGroup.userId,text:(event.text||'（附件消息）').slice(0,1200),...(recipient?{recipient}:{}),...(parentId?{parentId}:{}),redirect,at,sequence})
+  group.messages.push({id:event.id,qqId:event.qqGroup.userId,sender:event.qqGroup.senderName||event.qqGroup.userId,text:(event.text||'（附件消息）').slice(0,1200),...(recipient?{recipient}:{}),...(parentId?{parentId}:{}),redirect,at,receivedAt,sequence})
   group.messages=group.messages.slice(-32)
   if(this.groups.size>100)this.groups.delete(this.groups.keys().next().value!)
  }
@@ -71,12 +73,16 @@ export class QqGroupAutonomy {
   if(!event.qqGroup?.autonomous)return ''
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId),messages=group?.messages??[]
   const index=messages.findIndex(m=>m.id===event.id)
-  const now=this.now(),at=index<0?now:messages[index]!.at
-  const rows=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=CONTEXT_TTL_MS).slice(-16).map(({qqId,sender,text,at})=>({qqId,sender,text,at,kind:'member'}))
-  for(const [qqId,reply] of group?.replies??[])if(reply.at<=at&&now-reply.at<=CONTEXT_TTL_MS)rows.push({qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,kind:'partner'})
+  const now=this.now(),receivedAt=index<0?now:messages[index]!.receivedAt
+  const rows=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=CONTEXT_TTL_MS).slice(-16)
+   .map(({qqId,sender,text,at,receivedAt})=>({qqId,sender,text,at,receivedAt,kind:'member'}))
+  for(const [qqId,reply] of group?.replies??[])if(reply.at<=receivedAt&&now-reply.at<=CONTEXT_TTL_MS)
+   rows.push({qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,kind:'partner'})
   const quiet=this.quietRecent(channelId,event)
-  if(quiet&&!rows.some(r=>r.kind==='partner'&&r.at===quiet.at))rows.push({qqId:'',sender:'伙伴（已确认送达）',text:quiet.text,at:quiet.at,kind:'partner'})
-  return JSON.stringify(rows.sort((a,b)=>a.at-b.at).slice(-16).map(row=>({...row,at:new Date(row.at).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
+  if(quiet&&!rows.some(r=>r.kind==='partner'&&r.at===quiet.at))rows.push({qqId:'',sender:'伙伴（已确认送达）',text:quiet.text,at:quiet.at,receivedAt:quiet.at,kind:'partner'})
+  // Group events carry second-level source times; local arrival orders them against send receipts.
+  return JSON.stringify(rows.sort((a,b)=>a.receivedAt-b.receivedAt).slice(-16)
+   .map(({receivedAt,...row})=>({...row,at:new Date(receivedAt).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
  }
  /** Bound short-lived group snippets; the scene policy also receives confirmed delivery evidence. */
  attentionContext(channelId:string,event:DirectMessage):string[] {

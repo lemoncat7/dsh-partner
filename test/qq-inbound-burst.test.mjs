@@ -23,6 +23,19 @@ test('different speakers, rooms and referenced messages never merge',async()=>{
  for(const m of [event('a'),event('b','b','33445678'),event('c','c','22345678','88776655'),{...event('d'),qqGroup:{...event('d').qqGroup,replyToId:'other-message'}}])f.bursts.enqueue([m],run)
  await f.dispatcher.drain();assert.equal(seen.length,4);assert.ok(seen.every(m=>m.length===1))
 })
+test('an intervening group member seals the earlier speaker burst',async()=>{
+ const f=fixture(),seen=[],run=async(m,ready)=>{seen.push(m.map(x=>x.id));ready()}
+ for(const m of [event('a1'),event('b','b','33445678'),event('a2'),event('a3')])f.bursts.enqueue([m],run)
+ await f.dispatcher.drain()
+ assert.deepEqual(seen,[['a1'],['b'],['a2','a3']])
+})
+test('a poll backlog cannot merge messages sent seconds apart',async()=>{
+ const f=fixture(),seen=[],run=async(m,ready)=>{seen.push(m.map(x=>x.id));ready()}
+ f.bursts.enqueue([{...event('first'),timestamp:10000,receivedAt:20000}],run)
+ f.bursts.enqueue([{...event('second'),timestamp:15000,receivedAt:20010}],run)
+ await f.dispatcher.drain()
+ assert.deepEqual(seen,[['first'],['second']])
+})
 test('active reply permits next merged input to prepare before the old reply ends',async()=>{
  const f=fixture(),seen=[];let finish,started
  const active=new Promise(r=>started=r),end=new Promise(r=>finish=r)

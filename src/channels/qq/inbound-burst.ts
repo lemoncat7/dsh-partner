@@ -2,8 +2,21 @@ import {setTimeout as delay} from 'node:timers/promises'
 import type {DirectMessage} from '../direct/transport.js'
 import type {DirectDispatcher} from '../direct/dispatcher.js'
 
-interface Burst { messages:DirectMessage[]; first:number; last:number }
-/** Debounce one group speaker in its existing dispatch lane; never delay polling or private chats. */
+interface Burst { key:string; messages:DirectMessage[]; first:number; last:number; sealed?:true }
+
+function withinSourceWindow(events:readonly DirectMessage[],previous:readonly DirectMessage[],maxMs:number):boolean {
+  const before=previous[0]!,tail=previous.at(-1)!,first=events[0]!,last=events.at(-1)!
+  for(const field of ['timestamp','receivedAt'] as const){
+    const from=before[field],end=tail[field],next=first[field],to=last[field]
+    if(from===undefined||end===undefined||next===undefined||to===undefined)continue
+    if(Number.isFinite(from)&&Number.isFinite(end)&&Number.isFinite(next)&&Number.isFinite(to)){
+      if(next<end||to-from>maxMs)return false
+    }
+  }
+  return true
+}
+
+/** Debounce only adjacent messages from the same speaker within a group. */
 export class QqGroupBursts {
   private readonly pending=new Map<string,Burst>()
   private readonly ids=new Set<string>()
@@ -18,27 +31,29 @@ export class QqGroupBursts {
     if(!fresh.length)return
     const first=fresh[0]!
     if(!first.qqGroup||fresh.some(m=>!m.qqGroup||m.sender!==first.sender||m.targetId!==first.targetId))throw Error('群聊合并只能包含同一群的同一发言人')
-    // Keep references to another person separate from a direct exchange.
-    const key=JSON.stringify([first.targetId,first.sender,first.qqGroup.otherMention===true,first.qqGroup.replyToId??''])
-    const previous=this.pending.get(key),now=Date.now()
-    if(previous&&previous.messages.length+fresh.length<=16&&now-previous.first<this.maxMs){
+    const room=first.qqGroup.groupId
+    const key=JSON.stringify([first.sender,first.qqGroup.otherMention===true,first.qqGroup.replyToId??''])
+    const previous=this.pending.get(room),now=Date.now()
+    if(previous?.key===key&&previous.messages.length+fresh.length<=16&&now-previous.first<this.maxMs&&
+      withinSourceWindow(fresh,previous.messages,this.maxMs)){
       previous.messages.push(...fresh);previous.last=now;fresh.forEach(m=>this.ids.add(m.id));return
     }
-    const burst:Burst={messages:[...fresh],first:now,last:now}
-    this.pending.set(key,burst);fresh.forEach(m=>this.ids.add(m.id))
+    if(previous)previous.sealed=true
+    const burst:Burst={key,messages:[...fresh],first:now,last:now}
+    this.pending.set(room,burst);fresh.forEach(m=>this.ids.add(m.id))
     try {
       this.dispatcher.enqueue(fresh.map(m=>m.id),'steer',async prepared=>{
         try {
-          for(;;){const remaining=Math.min(burst.last+this.quietMs,burst.first+this.maxMs)-Date.now();if(remaining<=0)break;await delay(remaining,undefined,{signal:this.signal})}
-          if(this.pending.get(key)===burst)this.pending.delete(key)
+          while(!burst.sealed){const remaining=Math.min(burst.last+this.quietMs,burst.first+this.maxMs)-Date.now();if(remaining<=0)break;await delay(remaining,undefined,{signal:this.signal})}
+          if(this.pending.get(room)===burst)this.pending.delete(room)
           await run(burst.messages,prepared)
         } finally {
-          if(this.pending.get(key)===burst)this.pending.delete(key)
+          if(this.pending.get(room)===burst)this.pending.delete(room)
           burst.messages.forEach(m=>this.ids.delete(m.id))
         }
-      },first.targetId||first.sender)
+      },first.targetId||'group:'+room)
     } catch(error) {
-      if(this.pending.get(key)===burst)this.pending.delete(key)
+      if(this.pending.get(room)===burst)this.pending.delete(room)
       fresh.forEach(m=>this.ids.delete(m.id));throw error
     }
   }

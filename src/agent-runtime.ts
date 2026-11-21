@@ -597,13 +597,13 @@ export class PartnerAgentRuntime {
     const key = route.sessionId
     await this.cancelPostReply(companion.id, undefined, route.sessionId)
     const queuedAt=Date.now()
-    reportProgress(progress,'queued')
     const group=message.groupReply&&runtimeSnapshot(this.store).channels.some(c=>c.id===channelId&&c.platform==='qq')&&userId.startsWith('group:')?message.groupReply:undefined
     const silent=():PartnerReply=>({text:'',attachments:[],chatParts:[]})
     const current=this.replyQueue.enqueue(key,group?.kind??'ordered',group?JSON.stringify([channelId,qqSessionTarget(userId)]):undefined,()=>this.replySlots.use(()=>{
       if(group?.kind==='ambient'&&progress?.groupCurrent?.()===false)return Promise.resolve(silent())
       return this.drive(companion,channelId,userId,message,progress,queuedAt,route,inputReady)
     }),silent)
+    reportProgress(progress,'queued')
     const drained=this.replyQueue.idle(key);this.queues.set(key,drained)
     try{return await current}finally{if(!this.replyQueue.busy(key)&&this.queues.get(key)===drained)this.queues.delete(key)}
   }
