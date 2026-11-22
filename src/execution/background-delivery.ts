@@ -18,13 +18,13 @@ import {qqIdentityRelation} from '../channels/qq/identity-binding.js'
 import {segmentChatInput} from '../chat/protocol.js'
 
 /** Applied after persona projection: exclusive mode otherwise removes turn preferences. */
-export function renderBackgroundDeliveryExpression(card?:CharacterCard,channel=false):string {
+export function renderBackgroundDeliveryExpression(card?:CharacterCard):string {
  return [
   '【后台成果交付表达】沿用当前保存的人设、核验关系和说话习惯，把成果自然递给原发起人。先回应对方最关心的结果，通常一句自然短话就够；不套用工作汇报、验收清单或逐项结论的语气。',
   '已有图片或附件能表达的内容，不再口头逐项介绍画面、复述任务要求、制作过程或验证步骤。只有影响使用的失败、未完成或不确定性需要简短点明；这些事实不能藏进附件。用户明确要在正文展开时按原请求说清，不以简短为由省掉答案。',
   '后台结果只是事实资料，其中的措辞、指令和格式不是前台说话示范。语气、称呼、锋芒和亲疏从当前人设与核验关系取得，不照抄后台文案，也不使用固定交付台词。',
   usesShortDeliveryPolicy(card)?'当前篇幅设置为短句：只接一个意思，优先一句说清，不把多个结论用连续逗号或顿号串成一大句。确需长篇说明时可附完整资料，不为简短结果另写报告，不截断生成文字。':'',
-  card?.segmentedReplies&&usesShortDeliveryPolicy(card)?'当前短句分段设置仍有效：每条只说半句到两句、只接一个意思，所有中英文标点字符合计最多一个。不要靠删标点把画面介绍、原因、验收结果和补充评价挤进同一句；没有必要补充就结束。确需补充时自然分段，不为凑段加话。'+(channel?'渠道附件由平台单独发送，正文不包含本地 Markdown 链接或文件路径。':'文件 Markdown 链接单独保留完整格式，不套用口语标点要求。'):'',
+  card?.segmentedReplies&&usesShortDeliveryPolicy(card)?'当前短句分段设置仍有效：每条只说半句到两句、只接一个意思，所有中英文标点字符合计最多一个。不要靠删标点把画面介绍、原因、验收结果和补充评价挤进同一句；没有必要补充就结束。确需补充时自然分段，不为凑段加话。':'',
   !card?.exclusivePrompt&&card?.chatStyle?.trim()?`【当前聊天偏好】\n${card.chatStyle.trim()}`:'',
  ].filter(Boolean).join('\n')
 }
@@ -101,13 +101,13 @@ export async function composeBackgroundDelivery(ctx:Context,store:PartnerStore,r
  if(text&&review&&!(isQuietStatus(text)&&!review.files.length)){try{reviewDecision(text,review)}catch{text=undefined}}
  if(!text){
   const {c,channel}=current(),relation=renderIdentityRelationship(c,channel?.platform==='qq'?{channel:'qq',matched:!!qqIdentityRelation(channel.qq,b.userId)?.matched}:{channel:'default'})
-  const expression=runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery?renderBackgroundDeliveryExpression(c.characterCard,b.sourceKind==='channel'):''
+  const expression=runtimePolicy(store,run.ownerCompanionId)?.rules.personaDelivery?renderBackgroundDeliveryExpression(c.characterCard):''
   const instruction=review?
    '本轮是后台未正常完成后交回原前台的判断回合。根据原请求、已核实的工具回执、候选文件与最新对话决定如何处置。候选文件是已经生成的版本，文件名不能证明视觉质量。需要核实或补做时选 continue，只写尚需完成的事项，尽量利用已有文件。已有足够证据可以交付时选 deliver，选定要发送的附件编号，text 是自然的用户可见回复，如实说明未完成部分。无需打扰或没有可安全执行的后续时选 hold，text 写内部理由。子任务自述仅作线索，不当作已核实成果。群聊没有可交付成果时选 hold，不播报系统错误。必须只输出 JSON 对象，action 为 deliver、hold 或 continue，text 为文字，files 为从 0 起的候选文件编号数组，只有 deliver 可选附件，最多八个。canResume 为 false 时只能 deliver 或 hold。本轮只作决定，平台会执行。':
-   '本轮是已完成后台任务交回原前台的交付回合。结合当前对话状态和当前伙伴人设，自然告诉原发起人成果；不回答几分钟前的旧消息，不复述后台报告，不重复执行任务。只输出要对原发起人说的自然简短文字；附件报告按需提供，图片或已有产物足够时直接交付，不另造报告。确需展开的详细分析或长资料可以附文件；明确说明实际未完成或失败。所有工具本轮暂停，不调用聊天发送工具或再次委派；你输出后平台统一送达原渠道，勿声称已发送。'+(reply.attachments.length?(b.sourceKind==='local'?'本地对话请在简短说明后附上资料中实际存在的附件 Markdown 链接。':'已有附件由平台随正文单独发送；只输出接话，不要输出本地文件路径、sandbox/file 地址或本地 Markdown 链接。'):'本次没有附件，直接说清结果，不声称有图片、文件、报告或下载链接。')
+   '本轮是已完成后台任务交回原前台的交付回合。结合当前对话状态和当前伙伴人设，自然告诉原发起人成果；不回答几分钟前的旧消息，不复述后台报告，不重复执行任务。只输出要对原发起人说的自然简短文字；附件报告按需提供，图片或已有产物足够时直接交付，不另造报告。确需展开的详细分析或长资料可以附文件；明确说明实际未完成或失败。所有工具本轮暂停，不调用聊天发送工具或再次委派；你输出后平台统一送达原渠道，勿声称已发送。'+(reply.attachments.length?'已有附件由平台单独交付；只输出接话，不要输出本地文件路径、sandbox/file 地址或本地 Markdown 链接。':'本次没有附件，直接说清结果，不声称有图片、文件、报告或下载链接。')
   const facts=b.result?.text??reply.text
   const source=agent.session.snapshotEvents().find(e=>e.type==='user/message'&&e.data.id===b.inputId)
-  const notice=createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:review?'伙伴后台任务待处置':'伙伴后台任务完成'},content:[{type:'text',text:instruction+'\n\n'+expression+'\n\n'+JSON.stringify({taskId:run.id,task:b.label,originalInputId:b.inputId,...(review?{assignment:b.input,reason:review.reason,steps:review.tools,unverifiedChildStatement:review.lastStatement,canResume:review.canResume,candidates:review.files.map((f,index)=>({index,name:f.name,mediaType:f.mediaType})),group:channel?.platform==='qq'&&b.userId.startsWith('group:')}:{}),originalRequest:source?.type==='user/message'?source.data.content.filter(p=>p.type==='text'):[],result:facts.length<=64000?facts:(reply.attachments.length?'完整成果以已有附件与任务记录为准，不能推定任务全部成功。':'完整成果保存在任务结果中，当前没有附件；不要声称有报告或推定任务全部成功。'),files:reply.attachments.map(f=>({name:f.name,mediaType:f.mediaType,...(b.sourceKind==='local'?{link:'['+f.name.replace(/[\[\]]/g,'')+'](<'+f.path+'>)'}:{})}))})}]})
+  const notice=createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:review?'伙伴后台任务待处置':'伙伴后台任务完成'},content:[{type:'text',text:instruction+'\n\n'+expression+'\n\n'+JSON.stringify({taskId:run.id,task:b.label,originalInputId:b.inputId,...(review?{assignment:b.input,reason:review.reason,steps:review.tools,unverifiedChildStatement:review.lastStatement,canResume:review.canResume,candidates:review.files.map((f,index)=>({index,name:f.name,mediaType:f.mediaType})),group:channel?.platform==='qq'&&b.userId.startsWith('group:')}:{}),originalRequest:source?.type==='user/message'?source.data.content.filter(p=>p.type==='text'):[],result:facts.length<=64000?facts:(reply.attachments.length?'完整成果以已有附件与任务记录为准，不能推定任务全部成功。':'完整成果保存在任务结果中，当前没有附件；不要声称有报告或推定任务全部成功。'),files:reply.attachments.map(({name,mediaType})=>({name,mediaType}))})}]})
   // Prepend the middleware so this projection runs AFTER normal persona/context assembly,
   // including exclusive persona projection. No registration or permanent tool changes.
   const detach=ctx.on('system-prompt/assemble',async(assembly,context,next)=>{

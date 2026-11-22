@@ -4,6 +4,7 @@ import {composeBackgroundDelivery,foregroundCompletionText} from '../lib/executi
 import {PartnerAgentRuntime} from '../lib/agent-runtime.js'
 import {ReplyQueue} from '../lib/core/reply-queue.js'
 import {isInternalTaskNotice,channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
+import {backgroundArtifactReceipt} from '../lib/execution/background-artifact-receipt.js'
 const fixture=(speech='差异整理好了，实时价格还得下单前确认\n\n[对比报告.md](</task/report.md>)')=>{
  const c={id:'c',capabilities:['work'],characterCard:{enabled:true}},route={id:'r',kind:'local',companionId:'c',sessionId:'source'},state={companions:[c],sessions:[route],channels:[],executionRuns:[]}
  const run={id:'task',ownerCompanionId:'c',background:{sourceKind:'local',routeId:'r',sourceSessionId:'source',inputId:'u',label:'型号对比',result:{text:'两款核实完毕，实时价格未确认',files:[]}}};state.executionRuns.push(run)
@@ -240,7 +241,9 @@ test('web results in a channel-linked session still render inside the original D
  runtime.prepareBackgroundDelivery=(run,reply)=>PartnerAgentRuntime.prototype.prepareBackgroundDelivery.call(runtime,run,reply)
  await PartnerAgentRuntime.prototype.deliverLocalBackgroundResult.call(runtime,f.run,f.reply)
  assert.equal(f.turns(),1)
- assert.match(f.events.find(isInternalTaskNotice).data.content[0].text,/本地对话/)
+ const prompt=f.events.find(isInternalTaskNotice).data.content[0].text
+ assert.match(prompt,/已有附件由平台单独交付/)
+ assert.doesNotMatch(prompt,/\/task\/report\.md/)
 })
 
 test('a quiet status-only sentence never becomes channel text or removes actual attachments',async()=>{
@@ -251,4 +254,57 @@ test('a quiet status-only sentence never becomes channel text or removes actual 
  assert.equal(answer.chatParts[0].attachment,f.reply.attachments[0])
  const events=[{seq:1,type:'user/message',data:{source:{kind:'user'}}},{seq:2,type:'assistant/message',data:{message:{content:[{type:'text',text:'这轮不打扰，安静收工。'}]}}},{seq:3,type:'turn/end',data:{reason:{kind:'completed'}}}]
  assert.equal(channelReplyPartsAfter(events,0).text,'')
+})
+
+test('normal web delivery records a visible downloadable artifact, with no model turn or duplicate receipt', async t => {
+ const {Session}=await import('@deepseek-ai/dsh-session')
+ const {mkdtemp,mkdir,writeFile,symlink,rm}=await import('node:fs/promises')
+ const {tmpdir}=await import('node:os')
+ const {join}=await import('node:path')
+ const {AttachmentDeliveryService}=await import('../lib/attachments/service.js')
+ const {dispatchAttachmentsApi}=await import('../lib/api/features/attachments-api.js')
+ const {backgroundArtifactDefinition,BackgroundArtifactCard}=await import('../lib/execution/background-artifact-card.js')
+ const {createElement}=await import('react'),{renderToStaticMarkup}=await import('react-dom/server')
+ const root=await mkdtemp(join(tmpdir(),'partner-background-delivery-'))
+ const service=await AttachmentDeliveryService.open(join(root,'deliveries'))
+ t.after(async()=>{service.close();await rm(root,{recursive:true,force:true})})
+ const cwd=join(root,'task'),report=join(cwd,'report 100%.html'),outside=join(root,'other.md'),linked=join(cwd,'linked.md')
+ await mkdir(cwd)
+ await writeFile(report,'<h1>任务报告</h1>')
+ await writeFile(outside,'外部文件')
+ await symlink(outside,linked)
+ const f=fixture(),session=Session.create('source'),agent={status:'idle',session}
+ f.c.characterCard.enabled=false
+ Object.assign(f.route,{channelId:'@local',userId:'owner:c'})
+ Object.assign(f.run.background,{cwd,capabilities:[],channelId:'@local',userId:'owner:c'})
+ f.run.background.result.files=[{path:report,name:'任务报告.html',mediaType:'text/html'},{path:linked,name:'不属于任务.md',mediaType:'text/markdown'}]
+ f.reply.attachments=f.run.background.result.files
+ const runtime={ctx:f.ctx,store:f.store,isArchived:()=>false,ensureAgent:async()=>agent,replyQueue:new ReplyQueue(),queues:new Map(),backgroundArtifacts:{service,prefix:'/partner'}}
+ runtime.prepareBackgroundDelivery=(run,reply)=>PartnerAgentRuntime.prototype.prepareBackgroundDelivery.call(runtime,run,reply)
+ for(let i=0;i<2;i++)await PartnerAgentRuntime.prototype.deliverLocalBackgroundResult.call(runtime,f.run,f.reply)
+ assert.equal(session.deriveMessages().length,0)
+ const replay=Session.create('replay',session.snapshotEvents()),events=replay.snapshotEvents().filter(event=>backgroundArtifactReceipt(event))
+ assert.equal(events.length,1)
+ const [event]=events,data=backgroundArtifactReceipt(event),match={event,location:{kind:'session'}}
+ assert.deepEqual(backgroundArtifactDefinition.match(event),{id:f.run.id,role:'start'})
+ assert.equal(backgroundArtifactDefinition.buildViewNode({start:match,state:data}).visibility,'visible')
+ const markup=renderToStaticMarkup(createElement(BackgroundArtifactCard,{data}))
+ assert.match(markup,/<a href="\/partner\/attachments\/[a-f0-9]{64}" download="任务报告.html">任务报告.html<\/a>/)
+ assert.match(markup,/不属于任务.md · 暂不可下载/)
+ assert.match(markup,/两款核实完毕/)
+ assert.equal((await service.storedEntries()).length,1)
+ f.run.background.deliveredAt=Date.now()
+ const restored=Session.create('source')
+ await PartnerAgentRuntime.prototype.restoreBackgroundArtifacts.call(runtime,{session:restored})
+ assert.equal(backgroundArtifactReceipt(restored.snapshotEvents().at(-1)).files[0].url,data.files[0].url)
+ assert.equal(restored.deriveMessages().length,0)
+ const unrelated=Session.create('other')
+ await PartnerAgentRuntime.prototype.restoreBackgroundArtifacts.call(runtime,{session:unrelated})
+ assert.equal(unrelated.snapshotEvents().some(backgroundArtifactReceipt),false)
+ await rm(report)
+ const headers=new Map();let body
+ await dispatchAttachmentsApi({method:'GET'},{setHeader:(name,value)=>headers.set(name,value),end:value=>{body=value}},['attachments',data.files[0].url.split('/').at(-1)],service,f.store)
+ assert.equal(body.toString(),'<h1>任务报告</h1>')
+ assert.equal(headers.get('content-type'),'application/octet-stream')
+ assert.match(headers.get('content-disposition'),/^attachment;/)
 })

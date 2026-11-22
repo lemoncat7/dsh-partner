@@ -1,4 +1,6 @@
 import {backgroundRunRoute} from './execution/background-routing.js'
+import {assertBackgroundArtifactOrigin, recordBackgroundArtifacts, type BackgroundArtifactDelivery} from './execution/background-artifacts.js'
+import {backgroundArtifactReceipt} from './execution/background-artifact-receipt.js'
 import {archiveInboundImage,inboundDay} from './attachments/inbound-archive.js'
 import {imageReferenceId,imageRouteScope} from './attachments/image-references.js'
 import {conversationReplyText} from './channels/delivery-policy.js'
@@ -303,6 +305,7 @@ export class PartnerAgentRuntime {
     private readonly composer?: PartnerAgentComposer,
     private readonly channelActivities:ChannelActivityRegistry=createChannelActivities(),
     private readonly timeZone:string='Asia/Shanghai',
+    private readonly backgroundArtifacts?: BackgroundArtifactDelivery,
   ) {
     this.configurations = new SessionConfigurationIndex(store)
     const preparations:Array<()=>void>=[]
@@ -313,7 +316,10 @@ export class PartnerAgentRuntime {
       try {void agent.runMaintenance(signal=>this.prepareAgentAssembly(agent,signal)).catch(error=>this.ctx.logger.warn('伙伴配置准备失败：'+String(error)))}catch { /* Another maintenance owner will release the next idle boundary. */ }
     }
     if(typeof this.ctx.on==='function'&&typeof this.ctx.tools?.resolve==='function'){
-      preparations.push(this.ctx.on('agent/created',async ({agent})=>{await this.prepareAgentAssembly(agent,AbortSignal.timeout(60000))}))
+      preparations.push(this.ctx.on('agent/created',async ({agent})=>{
+        const configured=await this.prepareAgentAssembly(agent,AbortSignal.timeout(60000))
+        if (configured && this.backgroundArtifacts) void this.restoreBackgroundArtifacts(agent)
+      }))
       preparations.push(this.ctx.on('agent/status',({agent,status})=>{if(status==='idle')refreshIdle(agent)}))
       const claimedTurns=new WeakMap<Agent,number>()
       preparations.push(this.ctx.on('agent/inbox/claimed',({agent,message,turn})=>{
@@ -709,7 +715,21 @@ export class PartnerAgentRuntime {
     const state=runtimeSnapshot(this.store),c=state.companions.find(c=>c.id===run.ownerCompanionId),route=backgroundRunRoute(state.sessions,run)
     if(!c||!route||this.isArchived(route))throw Error('后台交付原会话已失效')
     const key=route.sessionId
-    const pending=this.replyQueue.enqueue(key,'delivery',undefined,async()=>composeBackgroundDelivery(this.ctx,this.store,run,await this.ensureAgent(c,route),reply),()=>({text:'',attachments:[]}))
+    const pending=this.replyQueue.enqueue(key,'delivery',undefined,async()=>{
+      const agent=await this.ensureAgent(c,route)
+      const artifacts=this.backgroundArtifacts
+      if (!artifacts || !run.background?.result) return composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
+      const current=()=>assertBackgroundArtifactOrigin(this.store,run,origin=>this.closed||this.isArchived(origin))
+      const localText=route.kind==='local'&&!c.characterCard?.enabled ? reply.text : undefined
+      try { return await composeBackgroundDelivery(this.ctx,this.store,run,agent,reply) }
+      finally {
+        try { await recordBackgroundArtifacts(agent.session,run,artifacts,current,localText ? {text:localText} : {}) }
+        catch (error) {
+          if (route.kind==='local') throw error
+          this.ctx.logger.warn('后台任务网页交付暂未完成：'+String(error))
+        }
+      }
+    },()=>({text:'',attachments:[]}))
     const drained=this.replyQueue.idle(key);this.queues.set(key,drained)
     try{return await pending}finally{if(!this.replyQueue.busy(key)&&this.queues.get(key)===drained)this.queues.delete(key)}
   }
@@ -717,8 +737,28 @@ export class PartnerAgentRuntime {
   async deliverLocalBackgroundResult(run:import('./execution/domain.js').ExecutionRun,reply:PartnerReply):Promise<void>{
     const state=runtimeSnapshot(this.store),route=backgroundRunRoute(state.sessions,run),c=state.companions.find(c=>c.id===run.ownerCompanionId)
     if(route?.kind!=='local'||!c||this.isArchived(route))throw Error('后台交付本地会话已失效')
-    // The real foreground turn already persists its own assistant answer and links.
     await this.prepareBackgroundDelivery(run,reply)
+  }
+
+  private async restoreBackgroundArtifacts(agent: Agent): Promise<void> {
+    const artifacts=this.backgroundArtifacts
+    if (!artifacts || this.closed) return
+    try {
+      const {executionRuns}=this.store.snapshot(['executionRuns'])
+      const events=agent.session.snapshotEvents(), receipts=new Set(events.flatMap(event=>backgroundArtifactReceipt(event)?.taskId ?? []))
+      const positions=new Map(events.flatMap(event=>event.type==='user/message'?[[event.data.id,event.seq] as const]:[]))
+      for (const run of executionRuns) {
+        if (run.background?.sourceSessionId!==agent.session.id || !run.background.deliveredAt || run.background.discardedAt ||
+          !run.background.result?.files.length || receipts.has(run.id)) continue
+        const current=()=>assertBackgroundArtifactOrigin(this.store,run,origin=>this.closed||this.isArchived(origin))
+        const handoff=run.background.foregroundMessageId ?? run.background.inputId
+        const input=positions.get(handoff as SessionEvent<'user/message'>['data']['id'])
+        const anchorSeq=input===undefined ? undefined : events.find(event=>event.seq>input&&event.type==='turn/end')?.seq
+        await recordBackgroundArtifacts(agent.session,run,artifacts,current,anchorSeq===undefined?{}:{anchorSeq}).catch(error=>{
+          this.ctx.logger.warn('历史任务网页附件暂未恢复：'+String(error))
+        })
+      }
+    } catch (error) { this.ctx.logger.warn('读取历史任务附件失败：'+String(error)) }
   }
 
   async notifyTaskProgress(task: BoardTask, previousStatus: BoardTask['status']): Promise<void> {

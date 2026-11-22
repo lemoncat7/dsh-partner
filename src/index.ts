@@ -199,7 +199,9 @@ export function apply(context: Context, config: PartnerConfig): void {
       const referenceText=agent&&images.context(agent)
       return referenceText?{...result,sections:[...result.sections,{name:'partner-image-references',text:referenceText}]}:result
     },{prepend:true}))
-    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone)
+    const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
+    ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
+    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone,{service:deliveries,prefix:resolved.apiPrefix})
     const continuous:ContinuousService=new ContinuousService(store,browser,{
       review:(c,t,signal,conversation)=>reviewContinuous(ctx,continuous,c,t,signal,conversation),
       conversation:t=>agents.continuousConversation(t),
@@ -250,8 +252,6 @@ export function apply(context: Context, config: PartnerConfig): void {
       },
       warn: message => ctx.logger.warn(`dsh-partner: ${message}`),
     })
-    const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
-    ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
     const stickers = new StickerLibrary(layout.privateRoot)
     const stickerAdapters=new StickerAdapters(stickers)
     const qqCatalogs=new QqStickerCache(async(id,kind)=>(await channels.qqDirectory(id,kind==='image'?'stickers':'faces') as {faces:QqFace[]}).faces)
