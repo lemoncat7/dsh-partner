@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { PartnerMemory, UserProfileSnapshot } from './memory-domain.js'
+import { preferenceEvidenceCount } from './memory-evidence.js'
+export { preferenceEvidenceCount } from './memory-evidence.js'
 
 export const PROFILE_SUBJECTS = ['基本身份', '工作背景', '长期职责', '常用环境', '长期目标'] as const
 export type ProfileSubject = typeof PROFILE_SUBJECTS[number]
@@ -25,10 +27,6 @@ export function isProfileBaselineEntry(memory: PartnerMemory): boolean {
     && (memory.locked === true || (memory.confidence >= PROFILE_CONFIDENCE_MIN && memory.importance >= PROFILE_IMPORTANCE_MIN))
 }
 
-/** Distinct user evidence only; reprocessing a turn cannot reinforce it twice. */
-export function preferenceEvidenceCount(memory: PartnerMemory): number {
-  return memory.kind === 'preference' ? new Set(memory.evidence.filter(e => e.supportsCurrent !== false && e.excerpt.trim().length >= 2).map(e => e.turnId)).size : 0
-}
 export function preferenceEmphasis(memory: PartnerMemory): string {
   const count = preferenceEvidenceCount(memory)
   return count >= 3 ? '（反复强调，相关任务优先遵循）' : count >= 2 ? '（多次确认）' : ''

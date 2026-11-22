@@ -17,7 +17,8 @@ import { initializeMemoryJournal, enqueueMemoryJob, claimMemoryJob, checkpointMe
 import {redactObservationError} from './observation-errors.js'
 import type { ReflectionResult } from './memory-domain.js'
 import { rankMemories, memoryRelevance, memoryTerms } from './memory-retrieval.js'
-import { confirmedSuccess, initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown } from './memory-artifacts.js'
+import { shiftCalendarDay } from './memory-calendar.js'
+import { confirmedSuccess, initializeMemoryArtifacts, applyMemoryArtifacts, readScenes, readExperienceDrafts, readExperienceDraft, reviewExperienceDraft, experienceMarkdown, type SceneProposal, type ExperienceProposal } from './memory-artifacts.js'
 
 interface MemoryDocument { schemaVersion: 1; memories: PartnerMemory[] }
 type ReflectionResultLike = { daily: Omit<DailyReflection, 'date' | 'companionId' | 'scopeId' | 'updatedAt' | 'turnCount'>; memories: MemoryCandidate[]; characterState?: CharacterState }
@@ -30,7 +31,7 @@ export class PartnerMemoryStore {
   private readonly writes = new Map<string, Promise<void>>()
 
   private frozen = false
-  constructor(private readonly root: string, private readonly timeZone = 'Asia/Shanghai', private readonly privateRoot?: (id: string) => string) {}
+  constructor(private readonly root: string, readonly timeZone = 'Asia/Shanghai', private readonly privateRoot?: (id: string) => string) {}
   async freeze(): Promise<void> { this.frozen = true; await Promise.allSettled(this.writes.values()) }
 
   day(at: number): string { return localDay(at, this.timeZone) }
@@ -158,9 +159,70 @@ export class PartnerMemoryStore {
     })
   }
 
-  async history(companionId: string, scopeId: string, before = Date.now() + 1, limit = 30, beforeId = '\uffff'): Promise<ConversationTurn[]> {
-    return this.journal(companionId, db => db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND (at<? OR (at=? AND id<?)) ORDER BY at DESC, id DESC LIMIT ?')
-      .all(scopeId, before, before, beforeId, Math.max(1, Math.min(100, limit))).map(row => JSON.parse(String(row.turn_json)) as ConversationTurn))
+  async history(companionId: string, scopeId: string, before = Date.now() + 1, limit = 30, beforeId = '\uffff', day?: string): Promise<ConversationTurn[]> {
+    return this.journal(companionId, db => {
+      const params: (string | number)[] = [scopeId, before, before, beforeId]
+      if (day) {
+        const format=dayFormatter(this.timeZone)
+        db.function('partner_day', at => format(Number(at)))
+        params.push(Date.parse(day)-86_400_000, Date.parse(day)+2*86_400_000, day)
+      }
+      return db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND (at<? OR (at=? AND id<?))' +
+        (day ? ' AND at>=? AND at<? AND partner_day(at)=?' : '') + ' ORDER BY at DESC, id DESC LIMIT ?')
+        .all(...params, Math.max(1, Math.min(100, limit))).map(row => JSON.parse(String(row.turn_json)) as ConversationTurn)
+    })
+  }
+
+  async historyTimeline(companionId: string, scopeId: string, now = Date.now(), through?: string) {
+    const today = this.day(now)
+    const last=through && through<today ? through : today
+    const first=shiftCalendarDay(last,-27)
+    return this.journal(companionId, db => {
+      const format=dayFormatter(this.timeZone)
+      db.function('partner_day', at => format(Number(at)))
+      const rows = db.prepare('SELECT partner_day(at) AS day, COUNT(*) AS turns, SUM(done=0) AS pending FROM memory_jobs WHERE scope_id=? AND at>=? AND at<? GROUP BY day')
+        .all(scopeId,Date.parse(first)-86_400_000,Date.parse(last)+2*86_400_000)
+      const reviews = db.prepare('SELECT * FROM daily_reflections WHERE scope_id=? AND date BETWEEN ? AND ?').all(scopeId,first,last)
+      const activity = new Map(rows.map(row=>[String(row.day),row]))
+      const daily = new Map(reviews.map(row=>[String(row.date),row]))
+      const days = Array.from({length:28},(_,index)=>{
+        const day = shiftCalendarDay(first,index)
+        const count = activity.get(day), review = daily.get(day)
+        return {day, turns:Number(count?.turns ?? 0), pending:Number(count?.pending ?? 0),
+          ...(review ? {reflection:reflectionFromRow(review), reviewed:Boolean(review.reviewed_at), reviewError:review.review_error ? redactObservationError(String(review.review_error)) : ''} : {})}
+      })
+      return {timeZone:this.timeZone,today,days}
+    })
+  }
+
+  async artifactSources(companionId: string, scopeId: string) {
+    return this.journal(companionId, db => {
+      const now = Date.now(), all=this.memoriesForScope(db,companionId,scopeId)
+      const active=all.filter(m=>m.status==='active'&&(m.expiresAt===undefined||m.expiresAt>now)).sort((a,b)=>b.updatedAt-a.updatedAt)
+      const recent = db.prepare('SELECT turn_json FROM memory_jobs WHERE scope_id=? AND done=1 AND at>=? ORDER BY at DESC LIMIT 400')
+        .all(scopeId,now-30*86_400_000).map(row=>JSON.parse(String(row.turn_json)) as ConversationTurn)
+      const confirmations = recent.flatMap((turn,index)=>{
+        if (!confirmedSuccess(turn.user)) return []
+        // Adjacent context stays in the same original conversation.
+        const prior = recent.slice(index+1,index+4).filter(item=>item.sessionId===turn.sessionId).slice(0,2).reverse()
+        return [{turn,prior}]
+      }).slice(0,20)
+      return {memories:active.slice(0,48),confirmations,scenes:readScenes(db,scopeId,active).map(scene=>({title:scene.title,memoryIds:scene.memoryIds}))}
+    })
+  }
+
+  async saveArtifacts(companionId: string, scopeId: string, scenes: SceneProposal[], experiences: ExperienceProposal[], guard: () => boolean) {
+    return this.journal(companionId, db => {
+      if (!guard()) throw new Error('记忆范围或学习设置已变化')
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const memories=this.memoriesForScope(db,companionId,scopeId)
+        applyMemoryArtifacts(db,scopeId,memories,scenes,experiences,Date.now())
+        const result={scenes:readScenes(db,scopeId,memories).length, experiences:readExperienceDrafts(db,scopeId).length}
+        db.exec('COMMIT')
+        return result
+      } catch (error) { rollback(db); throw error }
+    })
   }
 
   async retryJob(companionId: string, scopeId: string, id: string): Promise<void> {
@@ -326,9 +388,12 @@ export class PartnerMemoryStore {
     return this.serialValue(this.databasePath(companionId), async () => {
       const database = await this.open(companionId)
       try {
-        const result = database.prepare(`UPDATE memories SET subject = ?, content = ?, updated_at = ?, confidence = 1, locked = 1
-          WHERE companion_id = ? AND id = ?`).run(compact(subject, 120), compact(content, 800), Date.now(), companionId, memoryId)
-        if (result.changes === 0) throw new Error('memory was not found')
+        const previous = database.prepare('SELECT * FROM memories WHERE companion_id=? AND id=?').get(companionId,memoryId)
+        if (!previous) throw new Error('memory was not found')
+        const memory=memoryFromRow(previous), next=compact(content,800)
+        const evidence=memory.kind==='preference'&&memory.content!==next ? memory.evidence.map(item=>({...item,supportsCurrent:false})) : memory.evidence
+        database.prepare(`UPDATE memories SET subject = ?, content = ?, updated_at = ?, confidence = 1, locked = 1, evidence_json = ?
+          WHERE companion_id = ? AND id = ?`).run(compact(subject,120),next,Date.now(),json(evidence),companionId,memoryId)
         return memoryFromRow(database.prepare('SELECT * FROM memories WHERE id = ?').get(memoryId) as SqlRow)
       } finally { database.close() }
     })
@@ -806,9 +871,15 @@ function json(value: unknown): string { return JSON.stringify(value) }
 function parseJson<T>(value: unknown, fallback: T): T { try { return JSON.parse(string(value)) as T } catch { return fallback } }
 export function localMemoryDay(value: number, timeZone = 'Asia/Shanghai'): string { return localDay(value, timeZone) }
 function localDay(value: number, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value)
-  const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find(item => item.type === type)?.value ?? ''
-  return `${part('year')}-${part('month')}-${part('day')}`
+  return dayFormatter(timeZone)(value)
+}
+function dayFormatter(timeZone:string): (value:number)=>string {
+  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'})
+  return value=>{
+    const parts=formatter.formatToParts(value)
+    const part=(type:Intl.DateTimeFormatPartTypes)=>parts.find(item=>item.type===type)?.value??''
+    return `${part('year')}-${part('month')}-${part('day')}`
+  }
 }
 function missing(error: unknown): boolean { return (error as NodeJS.ErrnoException).code === 'ENOENT' }
 async function readJson<T>(path: string): Promise<T | undefined> { try { return JSON.parse(await readFile(path, 'utf8')) as T } catch (error) { if (missing(error)) return undefined; throw error } }

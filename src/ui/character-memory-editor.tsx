@@ -1,77 +1,91 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../client-api.js'
 import type { CharacterState } from '../character/domain.js'
-import { FormField as Field } from './partner-components.js'
-import { errorMessage } from './workspace-components.js'
+import { FormField as Field, relativeTime } from './partner-components.js'
+import { errorMessage, WorkspaceDialog, WorkspaceNotice } from './workspace-components.js'
+import { useMemoryResource } from './memory/use-memory-resource.js'
 
-/** Shares the memory page's scope and learning switch; existing state stays in place. */
-export function CharacterMemoryEditor({ companionId, scopeId, enabled, roleEnabled, onEditingChange }: {
-  companionId: string; scopeId: string; enabled: boolean; roleEnabled: boolean; onEditingChange(value: boolean): void
-}): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [state, setState] = useState<CharacterState>()
-  const [saved, setSaved] = useState<CharacterState>()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-  const [notice, setNotice] = useState('')
-  const [revision, setRevision] = useState(0)
-  const dirty = JSON.stringify(state) !== JSON.stringify(saved)
-  const url = `/companions/${encodeURIComponent(companionId)}/character/state?${new URLSearchParams({scopeId})}`
-  useEffect(() => { onEditingChange(dirty || busy); return () => onEditingChange(false) }, [dirty, busy, onEditingChange])
-  useEffect(() => {
-    if (!open || !scopeId || saved) { setBusy(false); return }
-    let alive = true; setBusy(true); setError(undefined)
-    void api<{state:CharacterState}>(url).then(data => { if (alive) { setState(data.state); setSaved(data.state) } })
-      .catch(e => { if (alive) setError(errorMessage(e)) }).finally(() => { if (alive) setBusy(false) })
-    return () => { alive = false }
-  }, [url, open, revision, scopeId])
-  // Follow automatic updates while viewing, but never replace an unsaved edit.
-  useEffect(() => {
-    if (!open || !scopeId || !saved || dirty || busy) return
-    const controller = new AbortController()
-    let running = false
-    const refresh = async () => {
-      if (running || document.hidden) return
-      running = true
-      try {
-        const data = await api<{state:CharacterState}>(url,{signal:controller.signal})
-        if (!controller.signal.aborted && data.state.updatedAt > saved.updatedAt) {setState(data.state);setSaved(data.state)}
-      } catch (e) {if (!controller.signal.aborted) setError(errorMessage(e))}
-      finally {running=false}
-    }
-    void refresh()
-    const timer=setInterval(()=>{void refresh()},15_000)
-    return ()=>{controller.abort();clearInterval(timer)}
-  },[url,open,scopeId,saved?.updatedAt,dirty,busy])
-  const save = async () => {
-    if (!state || busy) return
-    setBusy(true); setError(undefined); setNotice('')
-    try {
-      const data = await api<{state:CharacterState}>(url, {method:'PUT', body:JSON.stringify({state,expectedAt:state.updatedAt})})
-      setState(data.state); setSaved(data.state); setNotice('当前相处状态已保存')
-    } catch(e) { setError(errorMessage(e)) } finally { setBusy(false) }
+const groups = [
+  {key:'facts', label:'相处背景'},
+  {key:'events', label:'近期互动'},
+] as const
+
+export function CharacterMemoryEditor({companionId,scopeId,enabled,roleEnabled,onEditingChange}: {
+  companionId:string; scopeId:string; enabled:boolean; roleEnabled:boolean; onEditingChange(value:boolean):void
+}):JSX.Element {
+  const url='/companions/'+encodeURIComponent(companionId)+'/character/state?'+new URLSearchParams({scopeId})
+  const resource=useMemoryResource<{state:CharacterState}>(scopeId?url:undefined,15_000)
+  const [draft,setDraft]=useState<CharacterState>()
+  const [busy,setBusy]=useState(false)
+  const [error,setError]=useState<string>()
+  const [notice,setNotice]=useState<string>()
+  const initialField=useRef<'scene'|'pins'>('scene')
+  const editing=!!draft
+  const state=resource.data?.state
+  useEffect(()=>{onEditingChange(editing);return()=>onEditingChange(false)},[editing,onEditingChange])
+  const openEditor=(field:'scene'|'pins')=>{
+    if(!state)return
+    initialField.current=field
+    setError(undefined);setNotice(undefined);setDraft(state)
   }
-  return <details className="dsh-partner-memory-record dsh-partner-current-state" onToggle={e => setOpen(e.currentTarget.open)}>
-    <summary>当前相处状态 <small>{dirty ? '有未保存的修改' : !roleEnabled ? '角色聊天未开启' : enabled ? '随记忆自动整理' : '自动整理已暂停'}</small></summary>
-    <div className="dsh-partner-character">
-      <p className="dsh-partner-character-hint">记住刚聊到哪、当前怎么相处。与记忆页共用上方范围和学习开关，无需再配置定时任务；上下文焕新后仍保留。真实喜好与约定在长期记忆中，梦境在“身份 → 睡眠与做梦”中查看。</p>
-      {!roleEnabled && <p className="dsh-partner-character-hint">开启角色聊天后才会自动整理和使用相处状态；已有内容保留，可以继续查看和修改。</p>}
-      {!enabled && <p className="dsh-partner-character-hint">记忆学习已暂停，相处状态不会自动更新。已有状态仍可用于接话，也可以在此手动修正。</p>}
-      {!scopeId && <p>开始一次伙伴对话后，即可查看当前相处状态。</p>}
-      {error && <p role="alert" className="dsh-partner-inline-error">{error}</p>}
-      {busy && <p role="status">正在处理…</p>}
-      {state && <fieldset disabled={busy} className="dsh-partner-character-fields">
-        <Field label="当前话题与场景" hint="只保留当前在聊什么、还有什么没说完。"><textarea rows={3} maxLength={1500} value={state.scene} onChange={e => setState({...state,scene:e.target.value})}/></Field>
-        <Field label="当前关系" hint="明确形成的相处方式；不猜测好感值，也不覆盖人格设定。"><textarea rows={2} maxLength={1000} value={state.relationship} onChange={e => setState({...state,relationship:e.target.value})}/></Field>
-        <details className="dsh-partner-settings-advanced"><summary>背景、近期互动与固定内容</summary><p className="dsh-partner-character-hint">旧的角色事实、剧情与固定记忆完整保留在这里。自动整理会合并过时状态；固定内容只由你修改。</p>
-          {(['facts','events','pins'] as const).map(key => <Field key={key} label={key==='facts'?'相关角色背景':key==='events'?'近期互动':'固定内容'} hint={key==='pins'?'每行一条，最多 12 条，每条 500 字；自动整理不会改写。':'每行一条，最多 20 条，每条 300 字；不要重复长期记忆或写入梦里的经历。'}><textarea rows={3} value={state[key].join('\n')} onChange={e => setState({...state,[key]:e.target.value.split('\n')})}/></Field>)}
-        </details>
-        <div className="dsh-partner-character-row"><span role="status">{dirty ? '保存或撤销后可切换记忆范围。' : notice || (state.updatedAt ? `最近整理或修改：${new Date(state.updatedAt).toLocaleString()}` : '暂无相处状态，开启角色聊天与记忆学习后会自动整理。')}</span>
-          {dirty && <button type="button" onClick={() => {setState(saved); setNotice('已撤销未保存修改');setError(undefined)}}>撤销修改</button>}
-          <button type="button" disabled={!dirty} onClick={() => void save()}>保存相处状态</button>
+  const save=async()=>{
+    if(!draft||busy)return
+    setBusy(true);setError(undefined)
+    try{
+      await api(url,{method:'PUT',body:JSON.stringify({state:draft,expectedAt:draft.updatedAt})})
+      setDraft(undefined);setNotice('已保存');await resource.reload()
+    }catch(reason){setError(errorMessage(reason))}
+    finally{setBusy(false)}
+  }
+  return <section className="dsh-partner-companion-state" aria-label="当前相处状态">
+    <header>
+      <div><h3>当前相处状态</h3><small>{notice??(state?.updatedAt?relativeTime(state.updatedAt)+'更新':!scopeId?'开始对话后可查看':resource.loading?'正在读取':!roleEnabled?'角色聊天已关闭':!enabled?'学习已暂停':'等待对话整理')}</small></div>
+      <button type="button" disabled={!state} onClick={()=>openEditor('scene')}>编辑相处状态</button>
+    </header>
+    {resource.error&&<WorkspaceNotice>{resource.error} <button type="button" onClick={()=>{void resource.reload()}}>重试</button></WorkspaceNotice>}
+    {state&&<>
+      <div className="dsh-partner-state-overview">
+        <div><h4>聊到哪儿了</h4><p>{state.scene||'暂无接续话题'}</p></div>
+        <div><h4>目前怎么相处</h4><p>{state.relationship||'暂无相处记录'}</p></div>
+      </div>
+      <section className="dsh-partner-state-pins" aria-label="手动保留">
+        <div>
+          <h4>手动保留</h4>
+          {state.pins.length>0
+            ? <ul>{state.pins.map((item,index)=><li key={index}>{item}</li>)}</ul>
+            : <p>还没有添加。可以保留希望伙伴记住的约定或偏好。</p>}
         </div>
-      </fieldset>}
-      {scopeId && <button type="button" disabled={busy || dirty} onClick={() => {setState(undefined);setSaved(undefined);setNotice('');setRevision(n=>n+1)}}>重新读取</button>}
-    </div>
-  </details>
+        <button type="button" onClick={()=>openEditor('pins')}>{state.pins.length?'编辑保留内容':'添加保留内容'}</button>
+      </section>
+      {groups.some(({key})=>state[key].length>0)&&<details className="dsh-partner-state-extra"><summary>查看背景和近期互动</summary><div>
+        {groups.filter(({key})=>state[key].length>0).map(({key,label})=><section key={key}><h4>{label}</h4><ul>{state[key].map((item,index)=><li key={index}>{item}</li>)}</ul></section>)}
+      </div></details>}
+    </>}
+    {draft&&<WorkspaceDialog eyebrow="" title="编辑相处状态" detail="角色聊天开启时，伙伴会在当前记忆范围的私下对话中参考这些内容。" className="dsh-partner-state-dialog" close={()=>{if(!busy)setDraft(undefined)}}>
+      <form className="dsh-partner-state-form" onSubmit={event=>{event.preventDefault();void save()}}>
+        {error&&<WorkspaceNotice>{error}</WorkspaceNotice>}
+        <div className="dsh-partner-state-fields">
+          <Field label="聊到哪儿了"><textarea rows={4} maxLength={1500} value={draft.scene} data-dialog-initial-focus={initialField.current==='scene'?true:undefined} onChange={event=>setDraft({...draft,scene:event.target.value})}/></Field>
+          <Field label="目前怎么相处"><textarea rows={4} maxLength={1000} value={draft.relationship} onChange={event=>setDraft({...draft,relationship:event.target.value})}/></Field>
+        </div>
+        <div className="dsh-partner-state-pin-editor">
+          <Field label="手动保留" hint="每行一条，最多 12 条，每条 500 字">
+            <textarea rows={3} value={draft.pins.join('\n')} data-dialog-initial-focus={initialField.current==='pins'?true:undefined} placeholder="例如：工作日上午有空再回消息，不用主动提醒我。" onChange={event=>setDraft({...draft,pins:event.target.value.split('\n')})}/>
+          </Field>
+          <p>由你手动添加，伙伴整理对话时会保留这些条目。</p>
+        </div>
+        <details className="dsh-partner-state-extra-editor">
+          <summary>相处背景与近期互动</summary>
+          <div className="dsh-partner-state-fields">{groups.map(({key,label})=><Field key={key} label={label} hint="每行一条，最多 20 条，每条 300 字">
+            <textarea rows={3} value={draft[key].join('\n')} onChange={event=>setDraft({...draft,[key]:event.target.value.split('\n')})}/>
+          </Field>)}</div>
+        </details>
+        <footer className="dsh-partner-memory-actions">
+          <button type="button" disabled={busy} onClick={()=>setDraft(undefined)}>取消</button>
+          {error&&<button type="button" disabled={busy} onClick={()=>{void resource.reload();setDraft(undefined)}}>读取最新状态</button>}
+          <button type="submit" className="is-primary" disabled={busy}>{busy?'保存中…':'保存'}</button>
+        </footer>
+      </form>
+    </WorkspaceDialog>}
+  </section>
 }

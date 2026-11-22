@@ -9,6 +9,7 @@ import {GroupReplyWindows,GroupReplyFreshness} from './qq/reply-window.js'
 import {groupTaskInput} from './qq/task-focus.js'
 import type { ReplyProgress } from '../execution/reply-progress.js'
 import {resolveQqQuote,quotedMessageText} from './qq/quote.js'
+import {precedingQqGroupMessage} from './qq/message.js'
 import { AuthoredProgress } from './authored-progress.js'
 import { activityPolicyCurrent } from '../character/post-reply.js'
 import {channelReplyAllowed,directReplyTarget} from './reply-access.js'
@@ -1151,6 +1152,12 @@ export class ChannelManager {
     const mediaCount=events.reduce((sum,item)=>sum+(item.media?.length??0),0)
     const mediaScope=JSON.stringify([channel.id,channel.accountId,channel.companionId])
     if(channel.platform==='qq'&&(groupAccess||pairing?.status==='approved'))for(const item of events)this.groupMedia.observe(mediaScope,item)
+    if(event.qqGroup&&groupAccess&&api.onebot&&this.groupAutonomy.needsHistory(channel.id,event)){
+      const history=await api.onebot.connection.call('get_group_msg_history',{group_id:Number(event.qqGroup.groupId),count:8},AbortSignal.any([signal,AbortSignal.timeout(1500)])).catch(()=>undefined)
+      signal.throwIfAborted()
+      const predecessor=precedingQqGroupMessage(history,event,channel.accountId,policy)
+      if(predecessor&&this.groupAutonomy.needsHistory(channel.id,event))this.groupAutonomy.observe(channel.id,predecessor)
+    }
     for(const item of events)this.groupAutonomy.observe(channel.id,item)
     if(event.qqGroup && isSleeping(requiredCompanion(this.store,channel.companionId)) && !event.qqGroup.mentioned && event.qqGroup.replyTo!=='self'){this.groupAutonomy.record(channel.id,event,'伙伴正在睡眠，暂停群聊自主接话');await this.rememberReceipts(receipts);return}
     const focusDecision=(verifiedFollowup=false)=>{

@@ -40,6 +40,8 @@ import type { CompanionService } from './companions/service.js'
 import { dispatchPartnerWorkspaceApi } from './api/features/workspace-api.js'
 import { dispatchPendantApi } from './api/features/pendant-api.js'
 import { dispatchMemoryLayersApi } from './api/features/memory-layers-api.js'
+import {loadOwnerGroupTurns,ownerGroupSources,ownerGroupTimeline} from './api/owner-group-history.js'
+import {validCalendarDay} from './memory-calendar.js'
 import type { AttachmentDeliveryService } from './attachments/service.js'
 import { dispatchAttachmentsApi } from './api/features/attachments-api.js'
 import type { PartnerInboxStore } from './notifications/store.js'
@@ -381,10 +383,45 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, prefix: strin
     }
     if (id !== undefined && segments[2] === 'memory') {
       requiredCompanion(runtime.store, id)
+      if(segments.length===4&&segments[3]==='group-history'&&method==='GET'){
+        const sources=ownerGroupSources(runtime.store.snapshot(),id)
+        const view=url.searchParams.get('view')
+        if(!view)return sendJson(res,200,sources.map(({id,title})=>({id,title})))
+        const source=sources.find(item=>item.id===url.searchParams.get('group'))
+        if(!source)throw httpError(404,'群聊或归属账号已变化')
+        const rows=await loadOwnerGroupTurns(runtime.ctx,source)
+        const live=ownerGroupSources(runtime.store.snapshot(),id).find(item=>item.id===source.id)
+        const routeKey=(routes:typeof source.routes)=>JSON.stringify(routes.map(r=>[r.id,r.sessionId,r.userId]))
+        if(!live||routeKey(live.routes)!==routeKey(source.routes))throw httpError(409,'群聊或归属账号已变化')
+        if(view==='timeline'){
+          const through=url.searchParams.get('through')??undefined
+          if(through!==undefined&&!validCalendarDay(through))throw httpError(400,'日期无效')
+          return sendJson(res,200,ownerGroupTimeline(rows,runtime.memory.timeZone,Date.now(),through))
+        }
+        if(view!=='records')throw httpError(400,'未知群聊记录视图')
+        const before=Number(url.searchParams.get('before')??Date.now()+1), beforeId=url.searchParams.get('beforeId')??'\uffff'
+        if(!Number.isFinite(before))throw httpError(400,'记录游标无效')
+        const day=url.searchParams.get('day'), query=url.searchParams.get('q')?.trim().slice(0,300).toLocaleLowerCase()
+        const time=new Intl.DateTimeFormat('en-CA',{timeZone:runtime.memory.timeZone,year:'numeric',month:'2-digit',day:'2-digit'})
+        return sendJson(res,200,rows.filter(row=>(!day||time.format(row.at)===day)&&
+          (row.at<before||row.at===before&&row.id<beforeId)&&(!query||(row.user+'\n'+row.assistant).toLocaleLowerCase().includes(query))).slice(0,query?12:30))
+      }
       const memoryRoutes = runtime.store.snapshot().sessions.filter(item => item.companionId === id)
       const requestedMemoryScope = url.searchParams.get('scopeId')
       const memoryRoute = memoryRoutes.find(item => memoryScope(item.channelId, item.userId) === requestedMemoryScope)
       if (memoryRoute) url.searchParams.set('scopeId', conversationMemoryScope(memoryRoute, memoryRoutes))
+      if(segments.length===4&&segments[3]==='artifacts'){
+        const scopeId=text(url.searchParams.get('scopeId'),'scopeId',500)
+        if(!memoryRoutes.some(route=>conversationMemoryScope(route,memoryRoutes)===scopeId))throw httpError(400,'请选择本伙伴的记忆范围')
+        if(method==='GET')return sendJson(res,200,runtime.dailyReview.artifactStatus(id,scopeId)??{status:'idle'})
+        if(method==='POST'){
+          mutation(req)
+          const problem=runtime.dailyReview.startArtifacts(id,scopeId)
+          if(problem)throw httpError(409,problem)
+          return sendJson(res,202,{status:'running'})
+        }
+        throw httpError(405,'请求方法无效')
+      }
       if (await dispatchMemoryLayersApi(req, res, url, segments, runtime.memory, id)) return
       if (method === 'GET' && segments.length === 3) {
         const state = runtime.store.snapshot()

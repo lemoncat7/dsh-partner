@@ -1,6 +1,7 @@
 import {useState} from 'react'
 import type {MemoryView, DailyReflectionView} from '../../client-api.js'
 import {relativeTime} from '../partner-components.js'
+import {preferenceEmphasisLabel,preferenceEvidenceCount} from '../../memory-evidence.js'
 export function DailyReflectionDetail({ entry }: { entry: DailyReflectionView }): JSX.Element {
   return <article className="dsh-partner-diary-detail"><header><time>{entry.date}</time><strong>{entry.turnCount} 轮交流后的理解</strong><small>更新于 {new Date(entry.updatedAt).toLocaleString()}</small></header><p>{entry.summary}</p><ReflectionGroup title="待跟进" items={entry.openTasks} /><ReflectionGroup title="当天事件" items={entry.events} /><ReflectionGroup title="新理解" items={entry.learnings} /><ReflectionGroup title="已完成" items={entry.completedTasks} /></article>
 }
@@ -19,8 +20,9 @@ export function MemoryCard({ item, editing, busy, setEditing, save, remove }: { 
   </div> : <>
     <header><span>{memoryKind(item.kind)}</span><div>{confirmingRemove ? <><button type="button" onClick={() => setConfirmingRemove(false)}>取消</button><button type="button" className="is-danger" disabled={busy} onClick={remove}>确认删除</button></> : <><button type="button" onClick={() => setEditing({ ...item })}>编辑</button><button type="button" onClick={() => setConfirmingRemove(true)}>删除</button></>}</div></header>
     <strong>{item.subject}</strong><p>{item.content}</p>
+    {preferenceEmphasisLabel(item) && <span className="dsh-partner-memory-emphasis">{preferenceEmphasisLabel(item)} · {preferenceEvidenceCount(item)} 次有效确认</span>}
     <footer><progress max={1} value={item.confidence} aria-label={`置信度 ${Math.round(item.confidence * 100)}%`} /><small>{item.locked ? '手动确认' : `${Math.round(item.confidence * 100)}% 可信`} · {relativeTime(item.updatedAt)}</small></footer>
-    {item.evidence.length > 0 && <details className="dsh-partner-memory-evidence"><summary>查看对话依据 <b>{item.evidence.length}</b></summary><div>{[...item.evidence].reverse().map(evidence => <blockquote key={`${evidence.turnId}:${evidence.at}`}><p>{evidence.excerpt}</p><time>{new Date(evidence.at).toLocaleString()}</time></blockquote>)}</div></details>}
+    {item.evidence.length > 0 && <details className="dsh-partner-memory-evidence"><summary>查看对话依据 <b>{item.evidence.length}</b></summary><div>{[...item.evidence].reverse().map(evidence => <blockquote key={`${evidence.turnId}:${evidence.at}`}><p>{evidence.excerpt}</p><time>{new Date(evidence.at).toLocaleString()}</time>{evidence.supportsCurrent===false&&<small> · 已被新的说法替代</small>}</blockquote>)}</div></details>}
   </>}</article>
 }
 

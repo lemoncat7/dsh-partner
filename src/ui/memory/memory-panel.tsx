@@ -56,7 +56,7 @@ export function MemoryPanel({companion, snapshot, openSession, startSession, ren
   const [showAllJobs,setShowAllJobs] = useState(false)
   const scopes = collection.data?.profiles ?? []
   return <div className="dsh-partner-memory-page">
-    <WorkspaceHero eyebrow="MEMORY & CONTEXT" title="记忆库" detail="长期记忆保存事实与约定，当前相处状态接续话题；做梦是独立的联想，不会改写真实经历。" actions={<button type="button" onClick={() => { setSettingsSection('learning'); setSettings(true) }}>记忆设置</button>} />
+    <WorkspaceHero eyebrow="MEMORY & CONTEXT" title="记忆库" detail="按日期查看交流记录，核对伙伴记下的事实、偏好与经验。" actions={<button type="button" onClick={() => { setSettingsSection('learning'); setSettings(true) }}>记忆设置</button>} />
     <div className="dsh-partner-memory-context"><label><span>记忆范围</span><select aria-label="记忆范围" disabled={stateEditing} value={scopeId} onChange={event => {setScope(event.target.value); setError(undefined); setNotice(undefined)}}>
       {!scopes.length && <option value={scopeId}>{scopeId ? '统一会话记忆' : '暂无记忆'}</option>}
       {scopes.map(profile => <option value={profile.scopeId} key={profile.scopeId}>{profile.label}</option>)}

@@ -61,3 +61,15 @@ export function oneBotMessage(raw: any, accountId: string, targetId = '', settin
   }
   return { ...(replyToId?{qqReplyId:replyToId}:{}),...(Number.isFinite(raw._partnerReceivedAt)?{receivedAt:raw._partnerReceivedAt}:{}), senderName:String(raw.sender?.nickname||realSender).slice(0,80),...(groupId?{qqGroup:{groupId,userId:realSender,senderName:String(raw.sender?.card||raw.sender?.nickname||realSender).slice(0,80),mentioned,autonomous,...(otherMention?{otherMention:true,otherMentionOffsets:otherMentionOffsets.filter(offset=>offset<=100000).map(offset=>offset+(mentioned?'[对方 @ 了你]\n'.length:0))}:{}),...(hasReply?{hasReply:true}:{}),...(replyToId?{replyToId}:{})}}:{}),id: `qq:${accountId}:${sender}:${id}`, sender, targetId: groupId?`group:${groupId}`:sender, text: (mentioned?'[对方 @ 了你]\n':'')+text.join('').slice(0, 100000), ...(media.length ? { media } : {}), ...(Number.isFinite(raw.time) ? { timestamp: raw.time * 1000 } : {}) }
 }
+
+/** Read the adjacent historical message only; skip future or ambiguous same-second rows. */
+export function precedingQqGroupMessage(raw: unknown, current: DirectMessage, accountId: string, settings: QqSettings): DirectMessage | undefined {
+  const room=current.qqGroup?.groupId, at=current.timestamp
+  if(!room||!at)return
+  const data=raw as {messages?:unknown}|null
+  const items=Array.isArray(raw)?raw:Array.isArray(data?.messages)?data.messages:[]
+  const previous=items.filter(row=>row&&Number.isFinite(row.time)&&row.time*1000<at&&(!row.group_id||String(row.group_id)===room))
+    .sort((a,b)=>b.time-a.time)[0]
+  if(!previous||String(previous.user_id)===accountId||at-previous.time*1000>2*60*60_000)return
+  return oneBotMessage({...previous,group_id:room,self_id:accountId,post_type:'message',message_type:'group'},accountId,'group:'+room,settings)
+}

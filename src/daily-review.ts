@@ -4,6 +4,8 @@ import { PartnerStore } from './store.js'
 import { PartnerMemoryStore } from './memory-store.js'
 import { MemoryReflectionService } from './memory-reflection.js'
 import { PartnerAgentRuntime } from './agent-runtime.js'
+import { conversationMemoryScope } from './memory-scope.js'
+import { redactObservationError } from './observation-errors.js'
 
 const TICK_MS = 60_000
 
@@ -16,6 +18,8 @@ export class DailyReviewScheduler {
   private renewalState(id: string, state: string, detail: string): void { this.renewalStates.set(id, {state, detail, at: Date.now()}) }
   private readonly running = new Set<string>()
   private readonly jobs = new Set<Promise<{ reviewed: number; failed: number; reason?: string }>>()
+  private readonly artifactJobs = new Set<Promise<void>>()
+  private readonly artifacts = new Map<string, {status:'running'|'ready'|'error';at:number;scenes?:number;experiences?:number;confirmations?:number;error?:string}>()
 
   constructor(private readonly ctx: Context, private readonly store: PartnerStore, private readonly memory: PartnerMemoryStore,
     private readonly reflection: MemoryReflectionService, private readonly agents: PartnerAgentRuntime, private readonly timeZone = 'Asia/Shanghai') {}
@@ -23,9 +27,31 @@ export class DailyReviewScheduler {
   start(): void { if (!this.closed && this.timer === undefined) this.schedule(5_000) }
   async close(): Promise<void> {
     this.closed = true; if (this.timer) clearTimeout(this.timer); this.timer = undefined
-    await Promise.allSettled([...this.jobs])
+    await Promise.allSettled([...this.jobs,...this.artifactJobs])
   }
   isRunning(id: string): boolean { return this.running.has(id) }
+
+  artifactStatus(companionId: string, scopeId: string) { return this.artifacts.get(JSON.stringify([companionId,scopeId])) }
+
+  startArtifacts(companionId: string, scopeId: string): string | undefined {
+    const current=()=>{
+      if(this.closed||this.store.isCompanionRemoving(companionId))return
+      const state=this.store.snapshot(), companion=state.companions.find(item=>item.id===companionId)
+      const routes=state.sessions.filter(route=>route.companionId===companionId)
+      if(companion?.automation.memory.enabled&&routes.some(route=>conversationMemoryScope(route,routes)===scopeId))return companion
+    }
+    const companion=current()
+    if(!companion)return '请开启记忆学习并选择可用的记忆范围'
+    if(this.running.has(companionId))return '记忆终审或提炼正在执行'
+    const key=JSON.stringify([companionId,scopeId])
+    this.running.add(companionId)
+    this.artifacts.set(key,{status:'running',at:Date.now()})
+    const job=this.reflection.refreshArtifacts(companion,scopeId,()=>!!current()).then(
+      counts=>{this.artifacts.set(key,{status:'ready',at:Date.now(),...counts})},
+      error=>{this.artifacts.set(key,{status:'error',at:Date.now(),error:redactObservationError(message(error))})},
+    ).finally(()=>{this.running.delete(companionId);this.artifactJobs.delete(job)})
+    this.artifactJobs.add(job)
+  }
 
   async trigger(companionId: string, force = false, renewal = false): Promise<{ reviewed: number; failed: number; reason?: string }> {
     if (this.closed) return { reviewed: 0, failed: 0, reason: '记忆服务正在停止' }

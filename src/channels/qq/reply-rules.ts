@@ -48,6 +48,14 @@ export function attentionMessageText(event:DirectMessage):string {
  for(const offset of [...(event.qqGroup?.otherMentionOffsets??[])].reverse())text=text.slice(0,offset)+' @其他成员 '+text.slice(offset)
  return text
 }
+/** A short repeated subject plus a question marker can refer to an adjacent utterance. */
+export function clarificationSubject(text:string):string|undefined {
+ const value=text.normalize('NFKC').toLocaleLowerCase().trim()
+ if(Array.from(value).length>18)return
+ const question=/^([\p{L}\p{N}]+?)(?:啥|什么(?:意思)?|是啥|怎么说|是什么意思|呢|吗|么|嘛)[\s?？!！。]*$/u.exec(value)?.[1]
+ if(question)return question
+ return /^([\p{L}\p{N}]{1,12})[?？]+$/u.exec(value)?.[1]
+}
 /** Short requests often omit the action's object when the preceding turn supplied it. */
 function asksForFollowup(text:string):boolean {
  const request=/^(?:(?:那(?:么|就)?|所以|这样的话)[\s，,]*)?你(?!们)\s*(.+)$/u.exec(text.trim())?.[1]

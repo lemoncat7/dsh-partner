@@ -9,7 +9,7 @@ export interface ExperienceDraft extends ExperienceProposal {
   id: string; scopeId: string; status: 'draft' | 'approved' | 'rejected'; updatedAt: number; version: string
 }
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex').slice(0, 24)
-export const confirmedSuccess = (value:string):boolean => /(?:已(?:经)?解决|问题解决了|测试通过|验收通过|验证通过|运行正常|恢复正常|确实可用|可以用了|已经能用|成功了|搞定了|works correctly|tests passed)/iu.test(value)
+export const confirmedSuccess = (value:string):boolean => /(?:已(?:经)?解决|问题解决了|测试通过|验收通过|验证通过|运行正常|恢复正常|确实可用|可以用了|已经能用|(?:已经|现在)\s*(?:可以|正常|能用)了|确实生效|已经生效|验证成功|部署成功|成功了|搞定了|works correctly|tests passed)/iu.test(value)
 const canonical = (value: string): string => value.normalize('NFKC').replace(/\s+/g, ' ').trim()
 const text = (value: unknown, limit: number): string => typeof value === 'string' ? canonical(value).slice(0, limit) : ''
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}

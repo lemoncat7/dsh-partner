@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Companion } from '../../domain.js'
 import type { DirectMessage } from '../direct/transport.js'
 import type { QqSettings } from './settings.js'
-import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, routeGroupReply, scoreGroupReply, topicContinues, topicSimilarity, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
+import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, clarificationSubject, routeGroupReply, scoreGroupReply, topicContinues, topicSimilarity, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
 import { isAttentionCall, recognizedLink, recognizedRecipient, type AttentionTurn, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
 type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;redirect:boolean;at:number;receivedAt:number;sequence:number}
@@ -48,11 +48,26 @@ export class QqGroupAutonomy {
    ?group.messages.find(m=>m.sequence<sequence&&m.qqId===event.qqQuote?.senderId&&m.id.endsWith(':'+event.qqReplyId))
    :undefined
   const parentId=quoted?.id??existing?.parentId
-  group.messages=group.messages.filter(m=>m.id!==event.id&&now-m.at<=CONTEXT_TTL_MS)
+  group.messages=group.messages.filter(m=>m.id!==event.id&&now-m.at<=QUIET_CONVERSATION_WINDOW_MS)
   const recipient=event.qqGroup.mentioned||event.qqGroup.replyTo==='self'?'partner':event.qqGroup.replyTo==='other'?event.qqQuote?.senderId:undefined
   group.messages.push({id:event.id,qqId:event.qqGroup.userId,sender:event.qqGroup.senderName||event.qqGroup.userId,text:(event.text||'（附件消息）').slice(0,1200),...(recipient?{recipient}:{}),...(parentId?{parentId}:{}),redirect,at,receivedAt,sequence})
   group.messages=group.messages.slice(-32)
   if(this.groups.size>100)this.groups.delete(this.groups.keys().next().value!)
+ }
+ /** Peek only for cold, unaddressed clarifications; routine chatter needs no history RPC. */
+ needsHistory(channelId:string,event:DirectMessage):boolean {
+  const sender=event.qqGroup
+  if(!sender?.autonomous||sender.mentioned||sender.otherMention||sender.hasReply||sender.replyTo||!clarificationSubject(event.text))return false
+  const prior=this.groups.get(channelId+':'+sender.groupId)?.messages.filter(m=>m.id!==event.id).at(-1)
+  const at=event.timestamp??event.receivedAt??this.now()
+  return !prior||at>prior.at&&at-prior.at>QUIET_CONVERSATION_WINDOW_MS
+ }
+ private memberClarification(group:Group|undefined, prior:readonly Observation[], current:Observation|undefined, event:DirectMessage):Observation|undefined {
+  const subject=clarificationSubject(event.text), parent=prior.at(-1)
+  if(!subject||!current||!parent||parent.qqId===current.qqId||this.now()-parent.at>QUIET_CONVERSATION_WINDOW_MS||parent.receivedAt>current.receivedAt)return
+  if(group?.roomReplies.some(reply=>reply.at>=parent.receivedAt&&reply.at<=current.receivedAt&&reply.observedSequence>=parent.sequence&&reply.observedSequence<current.sequence))return
+  const echoed=parent.text.normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'')
+  if(echoed===subject||subject.length>=2&&echoed.length<=18&&echoed.endsWith(subject))return parent
  }
  /** Delivery, not admission or silence, starts/extends the conversation. */
  replied(channelId:string,event:DirectMessage,text=''):void {
@@ -175,6 +190,7 @@ export class QqGroupAutonomy {
   const index=group?.messages.findIndex(m=>m.id===event.id)??-1
   const before=(group?.messages??[]).slice(0,index<0?undefined:index)
   const current=group?.messages[index]
+  const memberClarification=this.memberClarification(group,before,current,event)
   const latestRoomReply=groupRecent&&groupRecent.text.trim()&&current&&current.sequence>groupRecent.observedSequence
    &&!before.some(m=>m.sequence>groupRecent.observedSequence)?groupRecent:undefined
   context.latestReplyInRoom=!!latestRoomReply
@@ -228,7 +244,16 @@ export class QqGroupAutonomy {
      semantic={...semantic,recipient:{label:turn.speaker===0?'partner':'member',confidence:link.confidence,margin:link.margin}}
     }
    }
-   result=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
+   if(memberClarification&&!linkedMessageId&&!isAttentionCall(semantic)){
+    linkedMessageId=memberClarification.id
+    if(current&&!current.parentId)current.parentId=linkedMessageId
+    result={reply:false,route:'other',score:0,probability:0,reasons:['短追问复述了上一位群友的发言，先旁听']}
+   }
+   result??=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})
+   if(!memberClarification&&!before.some(row=>now-row.at<=CONTEXT_TTL_MS)&&!groupRecent&&!quietRecent&&!event.qqGroup.otherMention&&clarificationSubject(event.text)
+     &&result.route==='semantic'&&!isAttentionCall(semantic)&&!recognizedRecipient(semantic?.recipient)){
+    result={...result,reply:false,probability:0,reasons:['短追问缺少可核实的前文，等待明确的接话依据']}
+   }
   }
   // Resolve ambiguous embedded mentions after semantics; confirmed redirects retire the
   // speaker thread, while references to somebody else preserve delivered continuity.

@@ -588,3 +588,36 @@ test('unrelated chatter leaves a one-member discussion intact; a second particip
  assert.equal(shared.route,'opportunity')
  assert.equal(shared.probability,.28)
 })
+
+test('delayed short clarification follows the adjacent group member instead of an unaddressed engagement score',async()=>{
+ let now=5_000_000
+ const engagement={label:'engage',confidence:.576590342436074,margin:.2968160414738788,scene:{label:'close',confidence:.263537,margin:.03228}}
+ const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>engagement)
+ const original=input('爽',{userId:'33445678'},'original')
+ gate.observe('c',original)
+ now+=33*60_000
+ const next=input('爽啥',{},'clarification')
+ gate.observe('c',next)
+ assert.equal(await gate.shouldReply('c',next,companion,signal()),false)
+ assert.equal(gate.status('c').linkedMessageId,'original')
+ assert.equal(gate.status('c').route,'other')
+ const cold=new QqGroupAutonomy(forbidden,()=>now,async()=>engagement)
+ assert.equal(cold.needsHistory('c',next),true)
+ cold.observe('c',next)
+ assert.equal(await cold.shouldReply('c',next,companion,signal()),false)
+ const addressed=input('爽啥',{mentioned:true},'direct')
+ assert.equal(cold.needsHistory('c',addressed),false)
+ assert.equal(await cold.shouldReply('c',addressed,companion,signal()),true)
+})
+
+test('cold group lookup admits only the adjacent, earlier, human message in the configured room',async()=>{
+ const {precedingQqGroupMessage}=await import('../lib/channels/qq/message.js')
+ const bot='99999999',g='12345678'
+ const settings={groupReplies:true,groupIds:[g],groupTrigger:'mention',autonomousGroupIds:[g]}
+ const current={...input('颜色呢'),timestamp:3_000_000}
+ const row=(time,group_id,user_id,message,id)=>({time,group_id,user_id,message:[{type:'text',data:{text:message}}],message_id:id})
+ const present=row(2990,g,'22222222','颜色',11)
+ const rows=[row(3001,g,'22222222','未来',13),row(2995,'99887766','33445678','其他群',12),present]
+ assert.equal(precedingQqGroupMessage({messages:rows},current,bot,settings).text,'颜色')
+ assert.equal(precedingQqGroupMessage({messages:[...rows,row(2997,g,bot,'伙伴已有回复',14)]},current,bot,settings),undefined)
+})
