@@ -39,6 +39,7 @@ import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { Config as ConfigSchema, resolveConfig, type Config as PartnerConfig } from './config.js'
 import { PartnerStore } from './store.js'
+import { recoverStartupConversationMemory } from './startup-memory-recovery.js'
 import { PartnerCredentialVault } from './credentials.js'
 import { McpCredentials } from './mcp/credentials.js'
 import { McpService } from './mcp/service.js'
@@ -341,9 +342,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     continuous.start()
     heartbeat.start()
     dailyReview.start()
-    // Catch up archival gaps after a restart independently of context renewal.
-    // The worker consumes the durable queue; this never replays user tools.
-    void (async () => {for (const c of store.snapshot().companions) await agents.recoverConversationMemory(c.id)})()
+    // Whole-history catch-up is opt-in; normal event capture and queued work continue.
+    void recoverStartupConversationMemory(resolved.recoverConversationMemoryOnStart === true, store, agents)
       .catch(error => ctx.logger.warn('伙伴对话记忆补录失败：'+String(error)))
     memoryWorker.start()
     scheduler.start()

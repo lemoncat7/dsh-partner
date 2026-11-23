@@ -8,6 +8,7 @@ export interface Config {
   apiPrefix: string
   defaultCwd: string
   autoStartChannels: boolean
+  recoverConversationMemoryOnStart?: boolean
   timeZone: string
 }
 
@@ -18,6 +19,7 @@ export const Config: Schema<Config> = Schema.object({
   apiPrefix: Schema.string().default('/partner-local/v1'),
   defaultCwd: Schema.string().default(''),
   autoStartChannels: Schema.boolean().default(true),
+  recoverConversationMemoryOnStart: Schema.boolean().default(false).description('启动时补录旧会话记忆；大历史会完整载入内存，默认关闭，可在记忆页面手动补录。'),
   timeZone: Schema.string().default('Asia/Shanghai'),
 })
 
@@ -33,6 +35,7 @@ export function resolveConfig(config: Config): Config {
     apiPrefix,
     defaultCwd: config.defaultCwd?.trim() || process.cwd(),
     autoStartChannels: config.autoStartChannels ?? true,
+    recoverConversationMemoryOnStart: config.recoverConversationMemoryOnStart ?? false,
     timeZone: validTimeZone(config.timeZone?.trim() || 'Asia/Shanghai'),
   }
 }
