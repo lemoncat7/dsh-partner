@@ -91,6 +91,7 @@ function RoleFields({ card, onChange }: { card: CharacterCard; onChange(card: Ch
     {card.roleText === undefined && roleTextForCard(card) && <p className="dsh-partner-character-hint">旧角色与示例完整保留；独立的旧关系字段会显示在“关系设定”。混写在正文里的专属关系请手动移过去，或让 AI 帮你拆分。</p>}
     <ExclusivePromptToggle enabled={card.exclusivePrompt===true} onChange={enabled=>onChange({...card,exclusivePrompt:enabled})}/>
     <Field label="角色设定" hint="只写角色自身的身份、性格、语气与通用示例。与用户的关系、专属称呼请写在身份的“关系设定”，不要混入这里、聊天偏好或背景资料。"><textarea rows={14} maxLength={48000} value={roleTextForCard(card)} onChange={e => onChange({ ...card, roleText: e.target.value })} /></Field>
+    <Field label="角色绘图参考" hint="每行一张，最多 8 张。填工作区内已选好的角色设定图路径，供私聊和发往归属账号私聊的自主绘图使用。"><textarea rows={3} value={card.drawingReferences?.join('\n')??''} onChange={e=>onChange({...card,drawingReferences:e.target.value.split('\n')})}/></Field>
   </div>
 }
 

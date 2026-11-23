@@ -4,6 +4,7 @@ import {mkdtemp,mkdir,writeFile,access,rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {cleanupWorkSession,PartnerWorkSessionCleanup} from '../lib/execution/session-cleanup.js'
+import {Session,appendPluginRecord} from '@deepseek-ai/dsh-session'
 async function fixture(t){
  const root=await mkdtemp(join(tmpdir(),'partner-log-cleanup-'));t.after(()=>rm(root,{recursive:true,force:true}))
  const id='partner-run-owned',directory=join(root,id),file=join(directory,'session.v4.jsonl.zstd'),artifact=join(root,'result.md')
@@ -57,4 +58,36 @@ test('ordinary native child sessions are not adopted or reclaimed by the role wo
  await hooks.get('subagent/start')({id:'native-normal',local:true,parentSessionId:'parent'})
  assert.deepEqual(state.executionRuns,[])
  cleaner.close()
+})
+
+test('a child finishing sweeps eligible siblings and filters only retired catalog entries',async()=>{
+ const session=Session.create('parent'),hooks=new Map()
+ const terminal={id:'sibling',sessionId:'finished-sibling',status:'completed',ownerCompanionId:'c',sessionCleanup:{parentSessionId:'parent'}}
+ const paused={id:'paused',sessionId:'paused',status:'canceled',ownerCompanionId:'c',background:{sourceSessionId:'parent'}}
+ const other={...terminal,id:'unrelated',sessionId:'unrelated',sessionCleanup:{parentSessionId:'other-parent'}}
+ const prior={...terminal,id:'old-ghost',sessionId:'old-ghost',sessionCleanup:{parentSessionId:'parent',deletedAt:1}}
+ const state={companions:[{id:'c',characterCard:{enabled:true}}],executionRuns:[terminal,paused,other,prior],sessions:[{sessionId:'parent',companionId:'c'}]}
+ const store={snapshot:()=>structuredClone(state),update:async fn=>fn(state)}
+ const def={key:'subagentCatalog',stateVersion:6,stateSchema:{parse:({items})=>({items})},apply:state=>state,wire:{view:state=>state.items}}
+ const context={on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name)},logger:{warn(msg){assert.fail(msg)}},get:key=>key==='agents'?{get:id=>id==='parent'?{session}:undefined}:key==='sessionPersistence'?{stat:async()=>undefined,open:async()=>{throw Error('missing child')}}:key==='sessionProjections'?{registrations:new Map([['subagentCatalog',{def}]])}:undefined}
+ const cleaner=new PartnerWorkSessionCleanup(context,store)
+ const catalog={items:[{id:'finished-sibling'},{id:'paused'},{id:'old-ghost'}]}
+ assert.deepEqual(def.wire.view(catalog).map(row=>row.id),['finished-sibling','paused'])
+ await hooks.get('subagent/start')({id:'child',local:true,parentSessionId:'parent'})
+ await hooks.get('subagent/end')({id:'child',stopReason:'completed'})
+ await cleaner.sweep('parent')
+ assert.ok(terminal.sessionCleanup.deletedAt)
+ assert.ok(state.executionRuns.at(-1).sessionCleanup.deletedAt)
+ assert.equal(other.sessionCleanup.deletedAt,undefined)
+ assert.equal(paused.sessionCleanup,undefined)
+ assert.deepEqual(def.wire.view(catalog).map(row=>row.id),['paused'])
+ const refresh=session.snapshotEvents().find(e=>e.type==='plugin:dsh-partner/subagent-cleaned')
+ const durable=def.stateSchema.parse(def.apply(catalog,refresh))
+ assert.deepEqual(durable.partnerRetired,['finished-sibling'])
+ state.executionRuns=state.executionRuns.filter(run=>run.id!==terminal.id)
+ assert.deepEqual(def.wire.view(durable).map(row=>row.id),['paused'])
+ appendPluginRecord(session,'plugin:dsh-partner/subagent-cleaned',{version:1,childId:'paused',runId:'fake',ownerCompanionId:'c'})
+ assert.equal(def.apply(catalog,session.snapshotEvents().at(-1)),catalog)
+ cleaner.close()
+ assert.equal(def.wire.view(catalog),catalog.items)
 })

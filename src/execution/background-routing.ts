@@ -7,7 +7,7 @@ import {qqIdentityRelation} from '../channels/qq/identity-binding.js'
 import {questionOrigin,webMessageRoute,attachedWebRoute} from '../channels/question-origin.js'
 import {isInternalTaskNotice} from '../channels/delivery-policy.js'
 import {isIdleContactNotice} from '../character/idle-contact.js'
-import {needsTaskPreamble} from './task-preamble.js'
+import {isLightweightLookup,needsTaskPreamble} from './task-preamble.js'
 import {backgroundHandoff} from './background-receipt.js'
 
 /** Match the current work to a real input, including a scheduler-issued activity notice. */
@@ -55,7 +55,7 @@ function substantial(name:string,args:Record<string,any>):boolean {
   ||['run','execute'].includes(args.action)
 }
 export function backgroundWork(name:string,args:unknown):boolean {const action=actualAction(name,args);return work(action.name,action.args)}
-/** A lightweight lookup is allowed; declared multi-tool work and continued workflows must hand off. */
+/** Keep lookups in the chat and hand executable or continuing work to the background. */
 export function backgroundRequired(name:string,args:unknown,events:readonly SessionEvent[],callId?:string):string|undefined {
  const action=actualAction(name,args)
  if(!work(action.name,action.args))return
@@ -67,12 +67,17 @@ export function backgroundRequired(name:string,args:unknown,events:readonly Sess
  // Publishing prepared content is a single foreground delivery, even after lookups.
  // Keep the handoff guard above: an accepted background task still owns its work.
  if(action.name==='partner_qq'&&action.args.action==='call'&&action.args.operation==='send_qzone_msg')return
- let calls=0,multistep=false
+ if(isLightweightLookup(action.name,action.args))return
+ if(substantial(action.name,action.args))return '这是执行型任务，必须先交原生后台'
+ // Discovery, denied attempts and bounded lookups do not count as completed work.
+ const failedDispatches=new Set(tail.flatMap(e=>e.type==='tool/ptc-dispatch'&&e.data.isError?[e.data.parentCallId]:[]))
+ const completed=new Set(tail.flatMap(e=>e.type==='tool/result'&&!e.data.message.isError?[e.data.message.toolCallId]:[]))
+ let calls=0
  for(const e of tail){
-  if(e.type!=='tool/call'||e.data.callId===callId)continue
+  if(e.type!=='tool/call'||e.data.callId===callId||!completed.has(e.data.callId)||failedDispatches.has(e.data.callId))continue
   const c=actualAction(e.data.name,e.data.arguments)
-  if(['partner_chat_say','partner_chat_progress'].includes(c.name)&&c.args.beforeTools!==false&&Array.isArray(c.args.expectedTools)&&new Set(c.args.expectedTools).size>1)multistep=true
-  if(work(c.name,c.args))calls++
+  if(!work(c.name,c.args)||isLightweightLookup(c.name,c.args))continue
+  calls++
+  if(calls>=2)return '本轮已有多步实际执行，后续工作必须先交原生后台'
  }
- if(substantial(action.name,action.args)||multistep||calls>=2)return '这是执行型或连续多步工作，必须先交原生后台'
 }

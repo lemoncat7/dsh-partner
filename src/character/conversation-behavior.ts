@@ -76,7 +76,7 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
 
 /** The user-requested before/after workflow, independent of response style. */
 export function renderTaskConversationGuidance(): string {
-  return '【任务回应流程】私聊执行工具任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）用 text 按当前人物说准备做的动作；直接写要对用户说的正文。确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。前台处理聊天、轻量查询和准备好内容后的一次渠道发布（例如直接发说说）；需要先创作、调查或制作图片的部分仍交后台。连续调查、报告、编程、浏览器操作和生图先交 partner_background_task，带完整目标和必要背景，接收后简短确认并结束前台，不等待、轮询或重复执行。后台独立做完，交付时按原伙伴人设写简短接话，图片、现有产物或简短结果足够时直接交付，不额外写报告；用户需要详细分析、长资料或可保留的文档时再按需附文件。后台不套用聊天人设、分段与滚动窗口。流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
+  return '【任务回应流程】私聊开始执行型任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）用 text 按当前人物说准备做的动作；直接写要对用户说的正文。确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。前台处理聊天、可直接查完的只读查询和准备好内容后的一次渠道发布（例如直接发说说）；需要先长时间创作、持续调查或制作图片的部分交后台。连续调查、报告、编程、浏览器操作和生图先交 partner_background_task，带完整目标和必要背景，接收后简短确认并结束前台，不等待、轮询或重复执行。后台独立做完，交付时按原伙伴人设写简短接话，图片、现有产物或简短结果足够时直接交付，不额外写报告；用户需要详细分析、长资料或可保留的文档时再按需附文件。后台不套用聊天人设、分段与滚动窗口。流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
 }
 
 /** Delivery policy, not a replacement persona. Explicit requests override defaults. */

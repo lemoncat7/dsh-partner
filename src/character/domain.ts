@@ -8,6 +8,8 @@ export interface CharacterCard {
   exclusivePrompt?: boolean
   /** Authoritative free-form role. Absent means adapt the legacy fields losslessly. */
   roleText?: string
+  /** Workspace illustrations explicitly selected for private role-image tasks. */
+  drawingReferences?: string[]
   chatStyle?: string
   shortVoiceReplies?: boolean
   segmentedReplies?: boolean
@@ -73,6 +75,7 @@ export function normalizeCharacterCard(value: unknown): CharacterCard {
     ...(v.segmentedReplies !== undefined ? { segmentedReplies: v.segmentedReplies === true } : {}),
     ...(v.stickersEnabled !== undefined ? { stickersEnabled: v.stickersEnabled === true } : {}),
     ...(v.roleText !== undefined ? { roleText: str(v.roleText, '角色设定', 48000) } : {}),
+    ...(v.drawingReferences !== undefined ? { drawingReferences: [...new Set(list(v.drawingReferences, '角色绘图参考', 8).map(path => str(path, '参考图路径', 1024)).filter(Boolean))] } : {}),
     ...(v.chatStyle !== undefined ? { chatStyle: str(v.chatStyle, '聊天偏好', 2000) } : {}),
     identity: str(v.identity, '角色核心', 2000), motivation: str(v.motivation, '行为动机', 3000), voice: str(v.voice, '语言风格', 1500),
     relationship: str(v.relationship, '关系起点', 1000), greeting: str(v.greeting, '开场白', 1000),

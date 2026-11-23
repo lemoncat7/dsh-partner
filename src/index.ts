@@ -201,7 +201,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     },{prepend:true}))
     const deliveries = migrated ? await openSharedAttachmentStorage(layout.publicRoot,layout.privateRoot) : await AttachmentDeliveryService.openGrouped(join(dirname(resolved.statePath), 'attachment-deliveries'))
     ctx.effect(() => () => deliveries.close(), 'dsh-partner.attachments')
-    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone,{service:deliveries,prefix:resolved.apiPrefix})
+    const agents = new PartnerAgentRuntime(ctx, store, resolved.defaultCwd, memory, reflection, concerns, composer,channelActivities,resolved.timeZone,true)
     const continuous:ContinuousService=new ContinuousService(store,browser,{
       review:(c,t,signal,conversation)=>reviewContinuous(ctx,continuous,c,t,signal,conversation),
       conversation:t=>agents.continuousConversation(t),
@@ -229,7 +229,7 @@ export function apply(context: Context, config: PartnerConfig): void {
       if(!route||groupConversation(route,state.sessions))return ''
       const recalled=await memory.recallContext(run.ownerCompanionId,conversationMemoryScope(route,state.sessions.filter(r=>r.companionId===run.ownerCompanionId)),input,12,{includeHistory:false})
       return renderTaskPreferences(recalled.profile,recalled.relevant)
-    },run=>agents.prepareBackgroundDelivery(run,{text:'',attachments:[]}),images)
+    },run=>agents.prepareBackgroundDelivery(run,{text:'',attachments:[]}),images,undefined,parent=>workCleanup.schedule(parent))
     scheduler.continuations.configure({
       execute: (entry, _companion, signal) => agents.wakeSchedule(entry, signal),
       notify: entry => channels.notifyContinuation(entry),

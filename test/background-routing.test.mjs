@@ -4,14 +4,32 @@ import {backgroundOrigin,backgroundRequired} from '../lib/execution/background-r
 import {bindBackgroundScope,backgroundToolScope} from '../lib/execution/background-scope.js'
 const user={seq:1,type:'user/message',data:{id:'u',source:{kind:'user'},content:[]}}
 const call=(name,args={},id=name)=>({seq:2,type:'tool/call',data:{callId:id,name,arguments:args}})
-test('one or two lightweight lookups stay foreground; executable work and continuing research must hand off',()=>{
- assert.equal(backgroundRequired('web_search',{},[user]),undefined)
- assert.equal(backgroundRequired('web_fetch',{},[user,call('web_search')]),undefined)
- assert.match(backgroundRequired('web_search',{},[user,call('web_search',{},'one'),call('web_fetch',{},'two')]),/后台/)
+const result=(id,isError=false)=>({type:'tool/result',data:{message:{toolCallId:id,isError,content:[]}}})
+const bili=(operation)=>({action:'call',operation})
+
+test('bounded lookups and their announced tool list stay foreground even after retries',()=>{
+ const lookupHistory=[user,
+  call('partner_chat_say',{beforeTools:true,expectedTools:['web_fetch','partner_bilibili','web_search']}),
+  call('partner_bilibili',{operation:'hot'},'invalid'),result('invalid',true),
+  call('partner_tools',{action:'describe',name:'partner_bilibili',operation:'hot'}),
+  call('partner_bilibili',bili('search'),'bili'),result('bili'),
+  call('web_search',{},'search'),result('search'),
+  call('web_fetch',{},'fetch'),result('fetch')]
+ const hot=bili('hot')
+ assert.equal(backgroundRequired('partner_bilibili',hot,lookupHistory),undefined)
+ assert.equal(backgroundRequired('partner_tools',{action:'call',name:'partner_bilibili',argumentsJson:JSON.stringify(hot)},lookupHistory),undefined)
+ assert.equal(backgroundRequired('web_search',{},lookupHistory),undefined)
+ assert.equal(backgroundRequired('partner_qq',{action:'call',operation:'get_friend_list'},lookupHistory),undefined)
+})
+
+test('executable or continuing work must hand off; discovery and failed attempts do not count',()=>{
  for(const name of ['generate_image','edit_image','bash','write','partner_browser'])assert.match(backgroundRequired(name,{action:'open'},[user]),/后台/)
  assert.equal(backgroundRequired('partner_browser',{action:'recent'},[user]),undefined)
  assert.match(backgroundRequired('partner_tools',{action:'call',name:'partner_browser',argumentsJson:'{"action":"open"}'},[user]),/后台/)
- assert.match(backgroundRequired('web_search',{},[user,call('partner_chat_say',{beforeTools:true,expectedTools:['web_search','web_fetch']})]),/后台/)
+ const wrappedFailure=call('partner_tools',{action:'call',name:'custom_work',argumentsJson:'{}'},'wrapped')
+ const attempts=[user,call('custom_work',{},'failed'),result('failed',true),wrappedFailure,{type:'tool/ptc-dispatch',data:{parentCallId:'wrapped',isError:true}},result('wrapped'),call('custom_work',{},'ok'),result('ok')]
+ assert.equal(backgroundRequired('custom_work',{},attempts),undefined)
+ assert.match(backgroundRequired('custom_work',{},[...attempts,call('custom_work',{},'second'),result('second')]),/后台/)
  assert.equal(backgroundRequired('partner_background_task',{action:'start'},[user]),undefined)
 })
 test('current dispatch excluded from work count; new input resets workflow',()=>{

@@ -60,7 +60,7 @@ export class NativeBackgroundTasks {
  private closing=false
  private recovering=false
  private readonly delivering=new Map<string,Promise<void>>()
- constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>,private readonly review?:(run:ExecutionRun)=>Promise<unknown>,private readonly images?:PartnerImageReferences,private readonly agents:BackgroundAgentRuntime=new PartnerBackgroundAgents(ctx)){
+ constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>,private readonly review?:(run:ExecutionRun)=>Promise<unknown>,private readonly images?:PartnerImageReferences,private readonly agents:BackgroundAgentRuntime=new PartnerBackgroundAgents(ctx),private readonly onSettled?:(parentSessionId:string)=>void){
   this.detachGuard=(ctx.tools as ToolRuntime).guard(exec=>{
    const child=exec.agent&&this.children.get(exec.agent.session.id)
    if(!child){
@@ -130,7 +130,7 @@ export class NativeBackgroundTasks {
   return model
  }
  tool(owner:string):ToolDefinition {
-  return {name:'partner_background_task',description:'任何发言人交办或伙伴自主活动决定执行的调查、整理文档、生图、编程等工作（包括一次生图），一旦识别必须先用 start 交给 DSH 原生后台子任务，立刻返回前台；普通闲聊、轻量直接提问、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
+  return {name:'partner_background_task',description:'用 start 将需要持续执行的任务交给 DSH 原生后台子任务，例如连续调查、整理报告、编程、生图或多步浏览器操作；接收后立刻返回前台。普通闲聊、可直接查完的只读查询、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
    parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','pause','cancel','resume','stop','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120},referenceImages:{type:'array',maxItems:8,items:{type:'string',minLength:1,maxLength:4096},description:'start、update、resume 时，按顺序交接任务需要的同会话图片编号或归档文件路径。没有参考图变更时省略；明确改为文生图时传空数组。'}}},
    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'原生后台任务'}),
    execute:async(raw,exec)=>{
@@ -233,6 +233,7 @@ export class NativeBackgroundTasks {
       await child?.activation?.dispose()
       if(child&&this.children.get(run.sessionId)===child)this.releaseChild(run.sessionId)
       const current=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)
+      this.onSettled?.(parent.session.id)
       return {taskId:id,canceled:current?.status==='canceled',canResume:!!current&&canResume(current),completedActionsPreserved:true,...(args.action==='stop'&&current?.background?.stoppedAt?{stopped:true}:{}),...(args.action==='discard'&&current?.background?.discardedAt?{discarded:true}:{})}
      }
      throw Error('未知后台任务操作')
@@ -326,9 +327,9 @@ export class NativeBackgroundTasks {
    authorize()
    if(runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)?.status==='canceled')throw Error('任务已被取消')
    await this.save(id,r=>{if(r.status!=='canceled'&&(r.background!.attempt??0)===attempt){r.status='running';r.background!.childName=child.activation!.name}})
-   void child.activation.result.then(result=>this.finished(id,result,attempt).catch(error=>this.failed(id,error,attempt,false,result.structured)),error=>this.failed(id,error,attempt)).finally(release).catch(error=>this.ctx.logger.warn('后台任务收尾失败：'+String(error)))
+   void child.activation.result.then(result=>this.finished(id,result,attempt).catch(error=>this.failed(id,error,attempt,false,result.structured)),error=>this.failed(id,error,attempt)).finally(()=>{release();this.onSettled?.(parent.session.id)}).catch(error=>this.ctx.logger.warn('后台任务收尾失败：'+String(error)))
    return child.activation
-  }catch(error){await child.activation?.dispose().catch(()=>{});release();if(!resume)await this.failed(id,error,attempt);throw error}
+  }catch(error){await child.activation?.dispose().catch(()=>{});release();if(!resume)await this.failed(id,error,attempt);this.onSettled?.(parent.session.id);throw error}
  }
  private releaseChild(id:string):void {const child=this.children.get(id);child?.disposeScope?.();for(const dispose of child?.disposers?.reverse()??[])dispose();this.children.delete(id)}
  private async save(id:string,mutate:(run:ExecutionRun)=>void):Promise<void>{await this.store.update(s=>{const run=s.executionRuns.find(r=>r.id===id);if(run)mutate(run)})}
@@ -433,6 +434,7 @@ export class NativeBackgroundTasks {
    if(!current()?.background?.deliveredAt)return
   }
   await this.save(id,r=>{if(r.background?.review&&!r.background.review.doneAt&&(r.background.attempt??0)===(b.attempt??0)){r.outputSummary=decision.text;r.background.review.doneAt=Date.now();delete r.background.deliveryError}})
+  this.onSettled?.(b.sourceSessionId)
  }
  private async finished(id:string,result:{stopReason:string;structured?:unknown},attempt?:number):Promise<void>{
   const run=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id);if(!run||run.status==='canceled'||this.closing||attempt!==undefined&&(run.background!.attempt??0)!==attempt)return
@@ -481,7 +483,7 @@ export class NativeBackgroundTasks {
  private async deliverResultOnce(id:string):Promise<void>{
   const run=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id);if(!run?.background?.result||run.background.deliveredAt)return
   const b=run.background,reply:PartnerReply={text:b.result!.text,attachments:b.result!.files.map(f=>({...f,kind:'file'}))}
-  try{await this.deliver(run,reply);await this.save(id,r=>{r.background!.deliveredAt=Date.now();delete r.background!.deliveryError})}catch(error){await this.save(id,r=>{r.background!.deliveryError=String(error).slice(0,1000)})}
+  try{await this.deliver(run,reply);await this.save(id,r=>{r.background!.deliveredAt=Date.now();delete r.background!.deliveryError});this.onSettled?.(b.sourceSessionId)}catch(error){await this.save(id,r=>{r.background!.deliveryError=String(error).slice(0,1000)})}
  }
  private async recoverSavedOutput(run:ExecutionRun):Promise<boolean>{
   const result=backgroundResult(await this.readChildEvents(run))

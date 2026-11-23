@@ -2,7 +2,7 @@ import { SETTINGS_SEARCH_LABEL, SettingsSearch } from './ui/settings-search.js'
 import type { SettingRequest } from './settings/catalog.js'
 import settingsSearchCssText from './ui/settings-search.css'
 import { registerWorkProgressCards } from './execution/work-progress-card.js'
-import { registerBackgroundArtifactCards } from './execution/background-artifact-card.js'
+import { registerBackgroundResultText } from './execution/background-result-text.js'
 import {ContinuousPanel} from './ui/continuous-panel.js'
 import { CompanionVitals } from './ui/companion-vitals.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -78,7 +78,7 @@ export const inject = ['slots', 'layout', 'sessions', 'uiWorkspace']
 
 export function apply(ctx: ClientContext): void {
   registerWorkProgressCards(ctx)
-  registerBackgroundArtifactCards(ctx)
+  registerBackgroundResultText(ctx)
   registerDecisionCards(ctx)
   registerChatReplies(ctx)
   ctx.effect(installStyles, 'dsh-partner: styles')

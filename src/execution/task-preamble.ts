@@ -1,6 +1,8 @@
 import { chatReplyFromEvent } from '../chat/protocol.js'
 import { isInternalTaskNotice, isRequirementDeliveryReceipt } from '../channels/delivery-policy.js'
 import { isIdleContactNotice } from '../character/idle-contact.js'
+import {BILI_ACTION_MAP} from '../channels/bilibili/catalog.js'
+import {QQ_ACTION_MAP} from '../channels/qq/action-catalog.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -12,6 +14,15 @@ export function needsTaskPreamble(name:string,args:unknown):boolean {
   const action = input?.action
   if(name === 'partner_qq' && action === 'call' && ['fetch_custom_face_detail','set_msg_emoji_like','get_msg_emoji_likes','get_emoji_likes'].includes(String(input?.operation)))return false
   return !['list','describe','load','unload','reference','inspect'].includes(String(action))
+}
+/** Read-only calls that return a bounded result without starting a workflow. */
+export function isLightweightLookup(name:string,args:unknown):boolean {
+  if(name==='web_search'||name==='web_fetch')return true
+  const input=args as {action?:string;operation?:string}|undefined
+  if(!input?.operation||input.action!==undefined&&input.action!=='call')return false
+  if(name==='partner_bilibili')return BILI_ACTION_MAP.get(input.operation)?.write===false
+  if(name==='partner_qq')return QQ_ACTION_MAP.get(input.operation)?.effect==='read'
+  return false
 }
 /** Only the active user turn can request a private-channel acknowledgement. */
 function inputId(events:readonly SessionEvent[]):string|undefined {
@@ -71,7 +82,7 @@ export class TaskPreambleGate {
     if(!this.active() || inputId(this.events())!==id)throw Error('用户消息已变化，请先处理新的输入')
   }
   async before(name:string,args:unknown):Promise<string|undefined>{
-    if(!this.active() || !needsTaskPreamble(name,args))return
+    if(!this.active() || !needsTaskPreamble(name,args) || isLightweightLookup(name,args))return
     const id=inputId(this.events())
     if(!id)return
     if(this.unified)return hasTaskPreamble(this.events())?undefined:'本次工作尚未执行：先用 partner_chat_say，text 按当前人格简短说明准备做什么，beforeTools:true，expectedTools 填实际工具名；确认送达后再执行。普通接话不能冒充动作告知，不要另发重复的前置回应。'

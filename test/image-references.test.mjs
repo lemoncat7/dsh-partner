@@ -10,6 +10,7 @@ import {imageReferenceId,PartnerImageReferences,planImageReferences} from '../li
 import {recordInputOrigin} from '../lib/conversation-history-recall.js'
 import {PartnerAgentRuntime} from '../lib/agent-runtime.js'
 import {bindBackgroundScope} from '../lib/execution/background-scope.js'
+import {IDLE_CONTACT_NOTICE} from '../lib/character/idle-contact.js'
 
 const pic=(id,name)=>({attachmentId:'sha256:'+id,mediaType:'image/png',bytes:3,width:1,height:1,name})
 const one=pic('1','猫图.png'),two=pic('2','狗图.png')
@@ -91,6 +92,36 @@ test('image-reference private files require exact current authorization and neve
  await assert.rejects(()=>service.resolve(agent,['copy.png'],signal()),/同一会话里的引用记录/)
  add(session,'本次允许使用私照：../outside.png')
  await assert.rejects(()=>service.resolve(agent,[],signal()),/工作区内/)
+})
+
+test('autonomous drawing can use selected local character art without an attachment or opening other local photos',async t=>{
+ const cwd=await mkdtemp(join(tmpdir(),'partner-drawing-reference-'));t.after(()=>rm(cwd,{recursive:true,force:true}))
+ const drawing='角色定稿.png',privatePhoto='私照.png'
+ await writeFile(join(cwd,drawing),'character reference')
+ await writeFile(join(cwd,privatePhoto),'private image')
+ const {session,state,service,store,agent}=fixture(t,cwd)
+ state.companions[0].characterCard.drawingReferences=[drawing]
+ state.companions[0].idleContact={enabled:true}
+ const notice=createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:IDLE_CONTACT_NOTICE},content:[{type:'text',text:'选择本轮活动'}]})
+ session.append('user/message',notice,{surfaceOp:'append'})
+ state.sessions[0].idleContactState={messageId:notice.id}
+ const plan=references=>service.plan(agent,route,notice.id,{references,input:'用角色参考图绘图',signal:signal()})
+ assert.match(service.context(agent),/角色定稿\.png/)
+ await assert.rejects(()=>plan([privatePhoto]),/交接的参考图/)
+ const handoff=await plan([join(cwd,drawing)])
+ assert.equal(handoff.handedOff,true)
+ assert.equal(handoff.selected[0].drawingPath,drawing)
+ const run={id:'work',ownerCompanionId:'c',sessionId:'drawing-child',status:'running',background:{audience:'activity',sourceKind:'local',sourceSessionId:'source',sourceCwd:cwd,routeId:route.id,userId:route.userId,channelId:route.channelId,inputId:notice.id,capabilities:[],imageReferences:handoff}}
+ state.executionRuns.push(run)
+ const child={session:{id:run.sessionId,header:{cwd:'/tmp/task'},snapshotEvents:()=>[]}}
+ t.after(bindBackgroundScope(store,run.sessionId,{owner:'c',audience:'activity',browserScope:'local',authorize(){}}))
+ assert.equal((await service.resolve(child,[],signal())).uploads[0].data.toString(),'character reference')
+ run.background.imageReferences=await plan(undefined)
+ assert.deepEqual(run.background.imageReferences.drawingChoices,[drawing])
+ assert.equal((await service.resolve(child,[drawing],signal())).uploads[0].data.toString(),'character reference')
+ await assert.rejects(()=>service.resolve(child,[],signal()),/找不到指定的参考图/)
+ state.companions[0].characterCard.drawingReferences=[]
+ await assert.rejects(()=>service.resolve(child,[drawing],signal()),/配置已变化/)
 })
 test('image-reference background task uses frozen references with no task-directory copy',async t=>{
  const {session,state,service,store,ctx,agent}=fixture(t)

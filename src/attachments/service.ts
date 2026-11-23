@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { constants, mkdirSync, chmodSync, existsSync } from 'node:fs'
 import { chmod, mkdir, open, realpath, readFile, writeFile, stat, unlink } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { extractOutboundAttachments } from '../channels/outbound-media.js'
 import { PARTNER_MEDIA_MAX_BYTES, type PartnerOutboundAttachment } from '../channel-message.js'
@@ -145,16 +145,6 @@ export class AttachmentDeliveryService {
       const [file] = await extractOutboundAttachments(`[交付](<${input.path}>)`, input.cwd)
       if (!file) throw new Error('附件不可用：文件必须存在于当前会话目录内、格式受支持且不超过 64 MB。远端 URL 或沙箱文件请先下载到当前目录。')
       return this.prepareSnapshot(input, file, signal)
-    })
-  }
-  /** A committed background artifact is downloadable even if its format has no channel renderer. */
-  async prepareTaskArtifact(input: {companionId: string; sessionId: string; taskId: string; cwd: string; path: string; name: string}, signal: AbortSignal): Promise<AttachmentDelivery> {
-    return this.serial('storage', async () => {
-      signal.throwIfAborted()
-      const root = await realpath(input.cwd), path = await realpath(input.path)
-      const within = relative(root, path)
-      if (path !== resolve(input.path) || !within || within === '..' || within.startsWith('..' + sep) || isAbsolute(within)) throw Error('后台产物位置已变化')
-      return this.prepareSnapshot({...input, turn: input.taskId, channel: false}, {path, name: input.name, mediaType: 'application/octet-stream', kind: 'file'}, signal)
     })
   }
   private async prepareSnapshot(input: AttachmentSnapshotOwner, file: PartnerOutboundAttachment, signal: AbortSignal): Promise<AttachmentDelivery> {

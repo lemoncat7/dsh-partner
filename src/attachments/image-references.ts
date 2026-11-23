@@ -1,7 +1,7 @@
 import {localConversationRoute,webMessageRoute} from '../channels/question-origin.js'
 import { createHash } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
-import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
@@ -24,7 +24,7 @@ const MAX_REFERENCE_BYTES = 20 * 1024 * 1024
 const missingReference = '当前会话找不到指定的参考图。请引用原消息、提供图片编号，或发一次原图。'
 const referenceIntent = /(?:参考图|图生图|照片作参考|(?:参考|沿用|基于|照着|用|根据)(?:一下)?(?:上(?:次|面|一张)|之前|前面|刚才|我发|原图|[这那](?:张|些|几张))|[这那](?:张|几张)(?:图|图片|照|改|换|做)|上一(?:张|组)|刚(?:刚|才)(?:发|传)的|(?:继续|重新|接着)(?:改|编辑).{0,8}(?:图片|原图))/iu
 const continuation = /(?:重来|再(?:画|做|改|来|生成)|接着|继续|重做|重新(?:画|生|改|做)|换(?:个|成|一下|背景|姿势|配色|风格)|改(?:成|一下|个|背景|配色|风格)|之前|上次|刚才|刚刚|沿用|同款|原图|this image|previous image)/iu
-const withoutReferences = /(?:不(?:要|用|必)(?:再)?(?:用)?(?:任何)?(?:参考(?:图|照)?|原图)|文生图|纯文字生图)/iu
+const withoutReferences = /(?:不(?:要|用|必|需要)(?:再)?(?:用)?(?:任何)?(?:参考(?:图|照)?|原图)|文生图|纯文字生图)/iu
 
 export function imageRouteScope(state:PartnerState,route:ChannelSession):string|undefined{
   const channel=state.channels.find(c=>c.id===route.channelId&&c.companionId===route.companionId)
@@ -36,7 +36,7 @@ export function imageReferenceId(ref: ImageAttachmentRef): string {
 }
 
 interface GeneratedImage { path:string; digest:string; bytes:number; mediaType:string }
-type ImageReference = { id:string; name:string; caption?:string } & ({ref:ImageAttachmentRef} | {generated:GeneratedImage})
+type ImageReference = { id:string; name:string; caption?:string; drawingPath?:string } & ({ref:ImageAttachmentRef} | {generated:GeneratedImage})
 export interface ImageReferencePlan {
   selected: ImageReference[]
   inputId?: string
@@ -46,6 +46,7 @@ export interface ImageReferencePlan {
   issue?: string
   choices?: ImageReference[]
   available?: ImageReference[]
+  drawingChoices?: string[]
   requested?: boolean
 }
 
@@ -71,17 +72,17 @@ function receivedGroupReferences(events:readonly SessionEvent[],route:ChannelSes
 
 /** The owning input and exact channel route are the authority. Quote bodies and task prompts never grant access. */
 export function planImageReferences(events: readonly SessionEvent[], route: ChannelSession, inputId: string, options: {
-  privateFiles: boolean; root?: string|undefined; shared: boolean; scope?: string|undefined
+  privateFiles: boolean; root?: string|undefined; shared: boolean; scope?: string|undefined; autonomous?: boolean
 }): { plan: ImageReferencePlan; recent: ImageReference[] } {
   const origins = new Map(inputOrigins(events).map(origin => [origin.messageId, origin]))
   const current = events.find(e => e.type === 'user/message' && e.data.id === inputId)
-  if (current?.type !== 'user/message' || current.data.source.kind !== 'user') return { plan: { selected: [] }, recent: [] }
+  if (current?.type !== 'user/message' || !(options.autonomous ? isIdleContactNotice(current) : current.data.source.kind === 'user')) return { plan: { selected: [] }, recent: [] }
   const owns = (id: string) => {
     const origin = origins.get(id)
     if (origin) return origin.routeId === route.id && origin.channelId === route.channelId && origin.userId === route.userId && (!origin.imageScope || origin.imageScope===options.scope)
     return route.kind === 'channel' ? route.inboundMessageIds?.includes(id) === true : !options.shared
   }
-  if (!owns(inputId)) return { plan: { selected: [], issue: missingReference }, recent: [] }
+  if (!options.autonomous&&!owns(inputId)) return { plan: { selected: [], issue: missingReference }, recent: [] }
   const batches = events.flatMap(e => {
     if(e.type!=='user/message'||e.seq>current.seq||!owns(e.data.id))return []
     const images=attachments(e)
@@ -89,7 +90,7 @@ export function planImageReferences(events: readonly SessionEvent[], route: Chan
   })
   const currentImages = unique(attachments(current))
   const origin = origins.get(inputId)
-  const text = route.kind === 'local' ? textOf(current) : origin?.imageRequest ?? ''
+  const text = options.autonomous?'':route.kind === 'local' ? textOf(current) : origin?.imageRequest ?? ''
   const history=events.flatMap(e=>{
     if(e.seq>current.seq)return []
     const record=pluginRecordOf(e)
@@ -103,6 +104,7 @@ export function planImageReferences(events: readonly SessionEvent[], route: Chan
   const terms=memoryTerms(text.replace(/(?:参考图?|用过|上次|之前|继续|刚才|重新|图片|生图|照片)/gu,''))
   const choices=()=>recent.map(image=>({image,hits:terms.filter(term=>(image.name+' '+(image.caption??'')).toLowerCase().includes(term)).length}))
     .sort((a,b)=>b.hits-a.hits).slice(0,8).map(item=>item.image)
+  if(options.autonomous)return {plan:{selected:[],...(recent.length?{available:choices()}:{})},recent}
   // Only the exact user-authored path in this request can approve a workspace file.
   const fileLines = text.split('\n').map(line => line.match(/^\s*本次允许使用(?:私照|私有照片)[：:]\s*(.+?)\s*$/u)?.[1]).filter((path): path is string => Boolean(path))
   if (fileLines.length) {
@@ -163,7 +165,20 @@ type ImageUse={routeId:string;scope?:string|undefined;images:ImageReference[];ge
 declare module '@deepseek-ai/dsh-session/types' {
   interface PluginRecordMap {'plugin:dsh-partner/image-use':ImageUse}
 }
-export const renderBackgroundImageReferences = selectionDescription
+export function renderBackgroundImageReferences(plan:ImageReferencePlan):string {
+  return [selectionDescription(plan),!plan.handedOff&&plan.drawingChoices?.length?drawingPrompt(plan.drawingChoices,'generate_image'):''].filter(Boolean).join('\n')
+}
+
+function drawingPrompt(paths:readonly string[],tool:string):string {
+  return '本伙伴已配置角色绘图参考：'+JSON.stringify(paths)+'。画这些角色并需要保持外观时，将对应路径传给 '+tool+' 的 referenceImages；其他题材省略。'
+}
+
+function approvedDrawingPaths(state:PartnerState,route:ChannelSession):string[] {
+  const companion=state.companions.find(c=>c.id===route.companionId)
+  const channel=state.channels.find(c=>c.id===route.channelId&&c.companionId===route.companionId)
+  const privateOwner=route.kind==='local'||channel?.platform==='qq'&&!route.userId.startsWith('group:')&&!!qqIdentityRelation(channel.qq,route.userId)?.matched
+  return privateOwner&&companion?.characterCard?.enabled?companion.characterCard.drawingReferences??[]:[]
+}
 
 type ReferenceUpload = { data: Uint8Array; mediaType: string; name: string; source: string }
 
@@ -181,6 +196,22 @@ async function matchHandoffFile(argument:string,recent:ImageReference[],root:str
   if(!sameSize.length)return
   const digest=createHash('sha256').update(await readFile(path,{signal})).digest('hex')
   return sameSize.find(image=>'ref' in image?image.ref.attachmentId==='sha256:'+digest:image.generated.digest===digest)
+}
+
+const drawingTypes:Readonly<Record<string,string>>={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif'}
+async function matchDrawingFile(argument:string,allowed:readonly string[],root:string|undefined,signal:AbortSignal):Promise<ImageReference|undefined> {
+  if(!root)return
+  const drawingPath=allowed.find(path=>resolve(root,path)===resolve(root,argument))
+  if(!drawingPath)return
+  const base=await realpath(root)
+  const path=await realpath(resolve(base,drawingPath)).catch(()=>undefined)
+  const within=path&&relative(base,path)
+  const mediaType=path&&drawingTypes[extname(path).toLowerCase()]
+  if(!path||!within||within==='..'||within.startsWith('..'+sep)||isAbsolute(within)||!mediaType)throw Error('配置的角色参考图不在工作区内，或文件不可用：'+basename(drawingPath))
+  const info=await stat(path)
+  if(!info.isFile()||!info.size||info.size>MAX_REFERENCE_BYTES)throw Error('配置的角色参考图文件大小无效：'+basename(drawingPath))
+  const digest=createHash('sha256').update(await readFile(path,{signal})).digest('hex')
+  return {id:'IMG-'+digest.slice(0,20).toUpperCase(),name:basename(path),drawingPath,generated:{path,digest,bytes:info.size,mediaType}}
 }
 
 async function readApprovedFiles(plan: NonNullable<ImageReferencePlan['files']>, signal: AbortSignal): Promise<ReferenceUpload[]> {
@@ -220,10 +251,12 @@ export class PartnerImageReferences {
       if(event.type!=='user/message')continue
       if(inputId?event.data.id===inputId:event.data.source.kind==='user'||isInternalTaskNotice(event)||isIdleContactNotice(event)){current=event;break}
     }
-    if (current?.type !== 'user/message' || current.data.source.kind !== 'user') return
+    if (current?.type !== 'user/message') return
+    const autonomous=isIdleContactNotice(current)
+    if(!autonomous&&current.data.source.kind!=='user')return
     const id = current.data.id
     const origin = inputOrigins(events).find(o => o.messageId === id)
-    const route = (origin ? routes.find(r => r.id === origin.routeId && r.channelId === origin.channelId && r.userId === origin.userId) :
+    const route = autonomous?routes.find(r=>r.idleContactState?.messageId===id&&!r.idleContactState.cancelled):(origin ? routes.find(r => r.id === origin.routeId && r.channelId === origin.channelId && r.userId === origin.userId) :
       routes.find(r => r.kind === 'channel' && r.inboundMessageIds?.includes(id))) ?? webMessageRoute(agent.session.id,events,routes,id)
     if (!route) return
     const channel = state.channels.find(c => c.id === route.channelId)
@@ -231,7 +264,8 @@ export class PartnerImageReferences {
     const scope=imageRouteScope(state,route)
     if(origin?.imageScope&&origin.imageScope!==scope)return
     const privateFiles = route.kind === 'local' || !!(channel?.platform === 'qq' && !route.userId.startsWith('group:') && qqIdentityRelation(channel.qq,route.userId)?.matched)
-    return { events, current, route, options:{ privateFiles, root:agent.session.header.cwd, shared:routes.some(r => r.kind === 'channel'), scope } }
+    if(autonomous&&!privateFiles)return
+    return { events, current, route, drawingPaths:approvedDrawingPaths(state,route), options:{ privateFiles:privateFiles&&!autonomous, autonomous, root:agent.session.header.cwd, shared:routes.some(r => r.kind === 'channel'), scope } }
   }
 
   async plan(agent: Agent, route: ChannelSession, inputId: string, handoff?:{ references:readonly string[]|undefined; input:string; signal:AbortSignal }): Promise<ImageReferencePlan|undefined> {
@@ -241,6 +275,11 @@ export class PartnerImageReferences {
       return
     }
     const {plan,recent}=planImageReferences(source.events,route,inputId,source.options)
+    if(source.options.autonomous&&handoff&&!withoutReferences.test(handoff.input)&&referenceIntent.test(handoff.input))plan.requested=true
+    if(source.drawingPaths.length&&!plan.files&&!plan.explicit&&(plan.requested||handoff&&/(?:图|照|肖像|形象|image|portrait)/iu.test(handoff.input))){
+      if(plan.issue===missingReference)delete plan.issue
+      if(!plan.issue)plan.drawingChoices=source.drawingPaths
+    }
     if(handoff&&(plan.issue===missingReference||!plan.explicit&&!plan.files)){
       const userIds=plan.explicit?imageIdsInText(inputOrigins(source.events).find(origin=>origin.messageId===inputId)?.imageRequest??''):[]
       const fromInput=userIds.length?userIds:imageIdsInText(handoff.input)
@@ -254,7 +293,7 @@ export class PartnerImageReferences {
         const selected:ImageReference[]=[]
         for(const argument of references){
           const id=imageIdFromArgument(argument)
-          const image=(id&&byId.get(id))||await matchHandoffFile(argument,[...byId.values()],source.options.root,handoff.signal)
+          const image=(id&&byId.get(id))||await matchDrawingFile(argument,source.drawingPaths,source.options.root,handoff.signal)||await matchHandoffFile(argument,[...byId.values()],source.options.root,handoff.signal)
           if(!image)throw Error('前台交接的参考图在原会话中找不到。请用已收到或用过的图片编号。')
           selected.push(image)
         }
@@ -265,18 +304,23 @@ export class PartnerImageReferences {
     }
     if(handoff?.references&&plan.explicit&&plan.issue)throw Error(plan.issue)
     if(plan.selected.length>8)throw Error('本次参考图最多 8 张。')
+    if(source.options.autonomous&&plan.requested){
+      if(plan.available?.length)plan.choices=plan.available
+      else if(!plan.drawingChoices?.length)plan.issue='这次自主绘图没有可用参考图。可以使用已配置的角色图或同一私聊中可复用的图片。'
+    }
     if(plan.files||plan.explicit&&!plan.issue)return {...plan,inputId,handedOff:true}
-    return plan.requested||plan.issue||plan.choices?.length||plan.available?.length?{...plan,inputId}:undefined
+    return plan.requested||plan.issue||plan.choices?.length||plan.available?.length||plan.drawingChoices?.length?{...plan,inputId}:undefined
   }
 
   context(agent: Agent): string {
     const source = this.source(agent)
-    if (!source || !source.current.data.content.some(p => p.type==='image'||p.type==='text'&&(/图|照|IMG-|image|photo/iu.test(p.text)||continuation.test(p.text)))) return ''
+    if (!source || !(source.options.autonomous&&source.drawingPaths.length) && !source.current.data.content.some(p => p.type==='image'||p.type==='text'&&(/图|照|IMG-|image|photo/iu.test(p.text)||continuation.test(p.text)))) return ''
     const { events,current,route,options } = source
     const { plan,recent } = planImageReferences(events,route,current.data.id,options)
     return [
       '同会话已接收或使用过的图片可按编号或当天归档路径直接引用。找不到指定图时，从当前会话查找相应编号，仍找不到就确认来源；工作区的私照不能拿来补位。用户问图编号时可直接告知。',
-      selectionDescription(plan),
+      source.drawingPaths.length&&!plan.files&&!plan.explicit?drawingPrompt(source.drawingPaths,'partner_background_task'):'',
+      plan.issue===missingReference&&source.drawingPaths.length&&!plan.explicit?'':selectionDescription(plan),
       recent.length ? '本发言人在当前会话的近期图片（新到旧）：'+JSON.stringify(recent.slice(0,6).map(({id,name,caption})=>({id,name,...(caption?{caption}:{})}))) : '',
     ].filter(Boolean).join('\n')
   }
@@ -291,28 +335,37 @@ export class PartnerImageReferences {
     if (task && (!scoped || !backgroundSourceAllowed(state,task))) throw Error('后台参考图的原会话授权已失效。')
     const source = partner ? this.source(agent) : undefined
     const plan = task?.background?.imageReferences ?? (source ? planImageReferences(source.events,source.route,source.current.data.id,source.options).plan : { selected: [] })
+    if(source?.drawingPaths.length&&!plan.explicit&&!plan.files){
+      plan.drawingChoices=source.drawingPaths
+      if(plan.issue===missingReference)delete plan.issue
+    }
     if (plan.issue) throw Error(plan.issue)
     const requestedIds=plan.handedOff?[]:requested.map(value=>imageIdFromArgument(value)??value)
     let selected=plan.selected
     const defaultIds=new Set(selected.map(image=>image.id))
     const background=task?.background
     const canSelectHistory=!plan.files&&!plan.explicit&&(selected.length?!!background:!plan.requested||!!plan.choices?.length)
-    if(canSelectHistory&&requestedIds.some(id=>!defaultIds.has(id))){
+    if(!plan.handedOff&&(canSelectHistory||plan.drawingChoices?.length)&&requestedIds.some(id=>!defaultIds.has(id))){
       const candidates=new Map([...selected,...(plan.choices??plan.available??[])].map(image=>[image.id,image]))
-      if(requestedIds.some(id=>/^IMG-[0-9A-F]{20}$/.test(id)&&!candidates.has(id))){
+      const unmatched=requestedIds.some(id=>!candidates.has(id))
+      if(unmatched){
         const parent=background&&this.ctx.agents.get(background.sourceSessionId as Agent['session']['id'])
         const inputId=plan.inputId??background?.supplementInputIds?.at(-1)??background?.resumeInputId??background?.inputId
         const request=background?(parent&&inputId?this.source(parent,inputId):undefined):source
         if(request&&(!background||request.route.id===background.routeId)){
           const {plan:atInput,recent}=planImageReferences(request.events,request.route,request.current.data.id,request.options)
-          if(!atInput.explicit&&!atInput.issue)for(const image of recent)if(requestedIds.includes(image.id))candidates.set(image.id,image)
+          if(!atInput.explicit&&!atInput.issue)for(const image of recent)candidates.set(image.id,image)
         }
       }
-      selected=[...new Set(requestedIds)].flatMap(id=>candidates.get(id)??[])
+      const root=background?.sourceCwd??source?.options.root
+      const chosen=await Promise.all(requested.map((value,index)=>candidates.get(requestedIds[index]!)??matchDrawingFile(value,plan.drawingChoices??[],root,signal)))
+      if(chosen.every(image=>!!image))selected=unique(chosen)
     }
     const expected = selected.map(image => image.id)
-    if(plan.requested&&plan.choices?.length&&!selected.length)throw Error(missingReference)
-    if (!plan.handedOff&&requested.some((value,index) => !expected.includes(requestedIds[index]!) && !plan.files?.paths.includes(value)))
+    if(plan.requested&&(plan.choices?.length||plan.drawingChoices?.length)&&!selected.length)throw Error(missingReference)
+    const drawingRoot=background?.sourceCwd??source?.options.root
+    if (!plan.handedOff&&requested.some((value,index) => !expected.includes(requestedIds[index]!) && !plan.files?.paths.includes(value) &&
+      !(drawingRoot&&selected.some(image=>image.drawingPath&&resolve(drawingRoot,image.drawingPath)===resolve(drawingRoot,value)))))
       throw Error(plan.explicit?'请使用用户本次指定的参考图编号。':'找不到这张图在同一会话里的引用记录，请用同一会话已收到或用过的图片编号。私照请单独指定。')
     const count=plan.files?.paths.length??selected.length
     if(count>8)throw Error('本次参考图最多 8 张，请明确选出要用的图片编号。')
@@ -330,6 +383,7 @@ export class PartnerImageReferences {
         const channel=live.channels.find(c=>c.id===current.channelId)
         if(!qqIdentityRelation(channel?.qq,current.userId)?.matched)throw Error('本次私照授权已失效。')
       }
+      if(selected.some(image=>image.drawingPath&&!approvedDrawingPaths(live,current).includes(image.drawingPath)))throw Error('角色参考图配置已变化，请重新选图。')
     }
     if (plan.files){const uploads=await readApprovedFiles(plan.files,signal);assertCurrent();return {uploads}}
     let total=0
@@ -361,7 +415,8 @@ export class PartnerImageReferences {
         assertCurrent()
         const caption=(task?.background?.label??(source&&textOf(source.current))??'').trim().slice(0,120)
         const generated=outputs.map(file=>({id:'IMG-'+file.digest.slice(0,20).toUpperCase(),name:basename(file.path),generated:file,...(caption?{caption}:{})}))
-        if(selected.length||generated.length)appendPluginRecord(peer.session,'plugin:dsh-partner/image-use',{routeId:route.id,scope,images:selected,generated})
+        const reusable=selected.filter(image=>!image.drawingPath)
+        if(reusable.length||generated.length)appendPluginRecord(peer.session,'plugin:dsh-partner/image-use',{routeId:route.id,scope,images:reusable,generated})
       }catch(error){this.ctx.logger.warn('记录已使用图片失败：'+String(error))}
     }}:{})}
   }

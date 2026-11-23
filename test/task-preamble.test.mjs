@@ -23,12 +23,12 @@ test('silent tool-only task is blocked until persona-authored acknowledgement is
  events.push(user('u2'));assert.match(await g.before('generate_image',{}),/尚未执行/)
 })
 test('visible tool preamble is sent and awaited; failed or revoked delivery never releases work',async()=>{
- const events=[{type:'turn/start'},user('u'),{type:'assistant/message',data:{message:{content:[{type:'text',text:'我去核实一下。'},{type:'tool-call',name:'web_search'}]}}}]
+ const events=[{type:'turn/start'},user('u'),{type:'assistant/message',data:{message:{content:[{type:'text',text:'我去核实一下。'},{type:'tool-call',name:'write'}]}}}]
  const sent=[],g=new TaskPreambleGate(()=>events,async text=>{sent.push(text)})
- assert.equal(await g.before('web_search',{}),undefined);assert.deepEqual(sent,['我去核实一下。'])
+ assert.equal(await g.before('write',{}),undefined);assert.deepEqual(sent,['我去核实一下。'])
  let attempts=0;const failed=new TaskPreambleGate(()=>events,async()=>{attempts++;throw Error('unknown send')})
- assert.match(await failed.before('web_search',{}),/未确认送达/)
- assert.match(await failed.before('web_search',{}),/发送失败/);assert.equal(attempts,1)
+ assert.match(await failed.before('write',{}),/未确认送达/)
+ assert.match(await failed.before('write',{}),/发送失败/);assert.equal(attempts,1)
 })
 test('discovery and ordinary chat stay immediate; autonomous/internal turns never require an acknowledgement',async()=>{
  for(const name of ['partner_chat_reply','partner_stickers','partner_tools','partner_chat_progress'])assert.equal(needsTaskPreamble(name,{}),false)
@@ -99,4 +99,14 @@ test('lightweight message reaction does not demand a separate task announcement'
  assert.equal(needsTaskPreamble('partner_qq',{action:'call',operation:'set_msg_emoji_like'}),false)
  assert.equal(needsTaskPreamble('partner_qq',{action:'call',operation:'get_msg_emoji_likes'}),false)
  assert.equal(needsTaskPreamble('partner_qq',{action:'call',operation:'add_custom_face'}),true)
+})
+
+
+test('a quick channel or web lookup needs no separate progress message',async()=>{
+ const events=[{type:'turn/start'},user('query')]
+ const g=new TaskPreambleGate(()=>events,async()=>assert.fail('lookup should not announce progress'))
+ for(const operation of ['hot','search','video'])assert.equal(await g.before('partner_bilibili',{action:'call',operation}),undefined)
+ assert.equal(await g.before('partner_qq',{action:'call',operation:'get_friend_list'}),undefined)
+ assert.equal(await g.before('web_search',{}),undefined)
+ assert.match(await g.before('partner_bilibili',{action:'call',operation:'comment'}),/尚未执行/)
 })

@@ -4,14 +4,14 @@ import {backgroundArtifactReceipt, type BackgroundArtifactReceipt} from './backg
 
 const KIND = 'partner-background-artifacts'
 
-export const backgroundArtifactDefinition: ConversationNodeDefinition<BackgroundArtifactReceipt> = {
+export const backgroundResultTextDefinition: ConversationNodeDefinition<BackgroundArtifactReceipt> = {
   kind: KIND, target: 'chat',
   match: event => {
     const receipt = backgroundArtifactReceipt(event)
-    return receipt ? {id: receipt.taskId, role: 'start'} : null
+    return receipt?.text ? {id: receipt.taskId, role: 'start'} : null
   },
   start: (_context, match) => backgroundArtifactReceipt(match.event)!,
-  update: context => context.state,
+  update: (context,match) => backgroundArtifactReceipt(match.event)??context.state,
   buildViewNode: context => {
     if (!context.start || !context.state) return null
     const {event, location} = context.start
@@ -20,17 +20,7 @@ export const backgroundArtifactDefinition: ConversationNodeDefinition<Background
   },
 }
 
-export function BackgroundArtifactCard({data}: {data: BackgroundArtifactReceipt}) {
-  return <section className="dsh-partner-work-progress dsh-partner-background-artifacts" aria-label="任务产出">
-    <strong>任务产出</strong>
-    {data.text && <p>{data.text}</p>}
-    {data.files.length > 0 && <ul>{data.files.map((file, index) => <li key={index}>
-      {file.url ? <a href={file.url} download={file.name}>{file.name}</a> : <span>{file.name} · 暂不可下载</span>}
-    </li>)}</ul>}
-  </section>
-}
-
-export function registerBackgroundArtifactCards(ctx: Context): void {
+export function registerBackgroundResultText(ctx: Context): void {
   type Registry = {register(definition: ConversationNodeDefinition<BackgroundArtifactReceipt>): () => void}
   const runtime = ctx as unknown as {
     inject(names: string[], callback: (scope: Context) => void): unknown
@@ -41,11 +31,11 @@ export function registerBackgroundArtifactCards(ctx: Context): void {
     if (registered.has(registry)) return
     registered.add(registry)
     scope.effect(() => {
-      const dispose = registry.register(backgroundArtifactDefinition)
+      const dispose = registry.register(backgroundResultTextDefinition)
       return () => { registered.delete(registry); dispose() }
-    }, 'partner: background artifacts')
+    }, 'partner: background result text')
   }
   runtime.inject(['uiConversation'], scope => register(scope, (scope.get('uiConversation') as {events: Registry}).events))
   runtime.inject(['conversationEvents'], scope => register(scope, scope.get('conversationEvents') as Registry))
-  runtime.slots.inject('conversation.chat.node', () => runtime.slots.register({name: 'conversation.chat.node', key: KIND}, ({node}) => <BackgroundArtifactCard data={node.data} />))
+  runtime.slots.inject('conversation.chat.node', () => runtime.slots.register({name: 'conversation.chat.node', key: KIND}, ({node}) => <div className="dsh-partner-background-result-text">{node.data.text}</div>))
 }

@@ -1,5 +1,5 @@
 import {backgroundRunRoute} from './execution/background-routing.js'
-import {assertBackgroundArtifactOrigin, recordBackgroundArtifacts, type BackgroundArtifactDelivery} from './execution/background-artifacts.js'
+import {assertBackgroundArtifactOrigin, backgroundPresentationCallId, recordBackgroundArtifacts} from './execution/background-artifacts.js'
 import {backgroundArtifactReceipt} from './execution/background-artifact-receipt.js'
 import {archiveInboundImage,inboundDay} from './attachments/inbound-archive.js'
 import {imageReferenceId,imageRouteScope} from './attachments/image-references.js'
@@ -305,7 +305,7 @@ export class PartnerAgentRuntime {
     private readonly composer?: PartnerAgentComposer,
     private readonly channelActivities:ChannelActivityRegistry=createChannelActivities(),
     private readonly timeZone:string='Asia/Shanghai',
-    private readonly backgroundArtifacts?: BackgroundArtifactDelivery,
+    private readonly backgroundArtifacts=false,
   ) {
     this.configurations = new SessionConfigurationIndex(store)
     const preparations:Array<()=>void>=[]
@@ -663,6 +663,7 @@ export class PartnerAgentRuntime {
     const companion = runtimeSnapshot(this.store).companions.find(item => item.id === route.companionId)
     if (companion === undefined) throw new Error('伙伴身份不存在')
     const agent=await this.ensureAgent(companion, route)
+    await this.restoreBackgroundArtifacts(agent)
     const journal=collectActivityJournal(agent.session.id,agent.session.snapshotEvents?.()??[])
     if(journal.length)await this.store.update(state=>{const c=state.companions.find(c=>c.id===companion.id);if(c)mergeActivityJournal(c,journal)})
     return route
@@ -717,18 +718,18 @@ export class PartnerAgentRuntime {
     const key=route.sessionId
     const pending=this.replyQueue.enqueue(key,'delivery',undefined,async()=>{
       const agent=await this.ensureAgent(c,route)
-      const artifacts=this.backgroundArtifacts
-      if (!artifacts || !run.background?.result) return composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
+      if (!this.backgroundArtifacts || !run.background?.result) return composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
       const current=()=>assertBackgroundArtifactOrigin(this.store,run,origin=>this.closed||this.isArchived(origin))
       const localText=route.kind==='local'&&!c.characterCard?.enabled ? reply.text : undefined
-      try { return await composeBackgroundDelivery(this.ctx,this.store,run,agent,reply) }
-      finally {
-        try { await recordBackgroundArtifacts(agent.session,run,artifacts,current,localText ? {text:localText} : {}) }
-        catch (error) {
-          if (route.kind==='local') throw error
-          this.ctx.logger.warn('后台任务网页交付暂未完成：'+String(error))
-        }
+      const result=await composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
+      const saved=this.store.snapshot(['executionRuns']).executionRuns.find(item=>item.id===run.id)?.background
+      try {
+        await recordBackgroundArtifacts(agent.session,run,current,{text:localText,foregroundMessageId:saved?.foregroundMessageId})
+      } catch (error) {
+        if (route.kind==='local') throw error
+        this.ctx.logger.warn('后台任务网页交付暂未完成：'+String(error))
       }
+      return result
     },()=>({text:'',attachments:[]}))
     const drained=this.replyQueue.idle(key);this.queues.set(key,drained)
     try{return await pending}finally{if(!this.replyQueue.busy(key)&&this.queues.get(key)===drained)this.queues.delete(key)}
@@ -741,20 +742,17 @@ export class PartnerAgentRuntime {
   }
 
   private async restoreBackgroundArtifacts(agent: Agent): Promise<void> {
-    const artifacts=this.backgroundArtifacts
-    if (!artifacts || this.closed) return
+    if (!this.backgroundArtifacts || this.closed) return
     try {
       const {executionRuns}=this.store.snapshot(['executionRuns'])
-      const events=agent.session.snapshotEvents(), receipts=new Set(events.flatMap(event=>backgroundArtifactReceipt(event)?.taskId ?? []))
-      const positions=new Map(events.flatMap(event=>event.type==='user/message'?[[event.data.id,event.seq] as const]:[]))
+      const events=agent.session.snapshotEvents()
+      const receipts=new Set(events.flatMap(event=>backgroundArtifactReceipt(event)?.taskId??[]))
+      const presented=new Set(events.flatMap(event=>event.type==='deliverables/presented'?event.data.callId:[]))
       for (const run of executionRuns) {
-        if (run.background?.sourceSessionId!==agent.session.id || !run.background.deliveredAt || run.background.discardedAt ||
-          !run.background.result?.files.length || receipts.has(run.id)) continue
+        if (run.background?.sourceSessionId!==agent.session.id || !run.background.deliveredAt&&!receipts.has(run.id) ||
+          run.background.discardedAt || !run.background.result?.files.length || presented.has(backgroundPresentationCallId(run.id))) continue
         const current=()=>assertBackgroundArtifactOrigin(this.store,run,origin=>this.closed||this.isArchived(origin))
-        const handoff=run.background.foregroundMessageId ?? run.background.inputId
-        const input=positions.get(handoff as SessionEvent<'user/message'>['data']['id'])
-        const anchorSeq=input===undefined ? undefined : events.find(event=>event.seq>input&&event.type==='turn/end')?.seq
-        await recordBackgroundArtifacts(agent.session,run,artifacts,current,anchorSeq===undefined?{}:{anchorSeq}).catch(error=>{
+        await recordBackgroundArtifacts(agent.session,run,current).catch(error=>{
           this.ctx.logger.warn('历史任务网页附件暂未恢复：'+String(error))
         })
       }

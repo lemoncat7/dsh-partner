@@ -2,7 +2,7 @@ import type {} from '@deepseek-ai/dsh-session/types'
 
 export interface BackgroundArtifactReceipt {
   taskId: string
-  files: Array<{name: string; url?: string}>
+  files: Array<{name: string; resource?: string | null; url?: string}>
   text?: string
   anchorSeq?: number
 }
@@ -18,6 +18,5 @@ export function backgroundArtifactReceipt(event: {type: string; ignorable?: bool
   const data = event.data as Partial<BackgroundArtifactReceipt> | null
   if (data && typeof data.taskId === 'string' && (data.text === undefined || typeof data.text === 'string') &&
     (data.anchorSeq === undefined || Number.isSafeInteger(data.anchorSeq) && data.anchorSeq > 0) &&
-    Array.isArray(data.files) && data.files.length <= 8 && data.files.every(file => file && typeof file.name === 'string' &&
-      (file.url === undefined || typeof file.url === 'string' && /^\/(?!\/)[\w/-]+\/attachments\/[0-9a-f]{64}$/.test(file.url)))) return data as BackgroundArtifactReceipt
+    Array.isArray(data.files)) return data as BackgroundArtifactReceipt
 }
