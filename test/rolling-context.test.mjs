@@ -56,9 +56,20 @@ test('raw recall uses durable origins after bounded route ids expire and isolate
  const restored=Session.create('replay',s.snapshotEvents());assert.equal(restored.snapshotEvents().filter(e=>e.type==='plugin:dsh-partner/input-origin').length,2)
 })
 test('rolling pauses renewal without disabling long-term learning or daily review',async()=>{
- const companion={id:'c',automation:{...DEFAULT_AUTOMATION,memory:{...DEFAULT_AUTOMATION.memory,...settings,enabled:true}}}
+ const companion={id:'c',characterCard:{enabled:true},automation:{...DEFAULT_AUTOMATION,memory:{...DEFAULT_AUTOMATION.memory,...settings,enabled:true}}}
  const scheduler=new DailyReviewScheduler({}, {snapshot:()=>({companions:[companion]}),isCompanionRemoving:()=>false},{},{},{})
  assert.match((await scheduler.trigger('c',false,true)).reason,/滚动/)
+})
+test('unchanged assembly and pre-step calls reuse the rolling result; new events and settings invalidate it',()=>{
+ const s=fixture();for(let i=1;i<=6;i++)round(s,i)
+ const original=s.snapshotEvents.bind(s);let reads=0
+ s.snapshotEvents=()=>{reads++;return original()}
+ rollConversationContext(s,settings);const firstReads=reads
+ assert.ok(firstReads>0);assert.equal(rollConversationContext(s,settings),0);assert.equal(reads,firstReads)
+ round(s,7);rollConversationContext(s,settings);assert.ok(reads>firstReads)
+ const nextReads=reads
+ rollConversationContext(s,{...settings,rollingContextTurns:1});assert.ok(reads>nextReads)
+ assert.ok(original().some(e=>e.type==='user/message'&&e.data.content.some(b=>b.type==='text'&&b.text==='question-1')),'immutable history survives')
 })
 
 test('local history in a shared session remains recallable with explicit local provenance',async()=>{

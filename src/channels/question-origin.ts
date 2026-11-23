@@ -10,9 +10,25 @@ export function questionOrigin(sessionId: string, events: readonly SessionEvent[
     if (isRequirementDeliveryReceipt(event)) continue
     if (isInternalTaskNotice(event)) return undefined
     if (event.type !== 'user/message' || event.data.source.kind !== 'user') continue
-    return routes.find(route => route.sessionId === sessionId && route.kind === 'channel' && route.inboundMessageIds?.includes(event.data.id))
+    const origin = inputOrigin(events, event.data.id)
+    return routes.find(route => route.sessionId === sessionId && route.kind === 'channel' &&
+      (route.inboundMessageIds?.includes(event.data.id) || origin !== undefined && origin.routeId === route.id && origin.channelId === route.channelId && origin.userId === route.userId))
   }
   return undefined
+}
+
+/** Resolve shared-session writes from the message author, never route ordering. */
+export function conversationOrigin(sessionId: string, events: readonly SessionEvent[], routes: readonly ChannelSession[]): ChannelSession | undefined {
+  const channel = questionOrigin(sessionId, events, routes)
+  if (channel) return channel
+  const user = [...events].reverse().find(e => e.type === 'user/message' && e.data.source.kind === 'user')
+  if (user?.type !== 'user/message') return
+  const web = webMessageRoute(sessionId, events, routes, user.data.id)
+  if (web) return web
+  // Old single-route records predate local/channel typing. Shared records must
+  // have an explicit origin instead of silently adopting the first binding.
+  const linked = routes.filter(r => r.sessionId === sessionId)
+  return linked.length === 1 && !linked[0]!.kind ? linked[0] : undefined
 }
 
 

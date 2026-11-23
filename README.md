@@ -46,6 +46,7 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 - [知识库与 SSH 统一工具入口兼容](docs/tool-entry-compatibility.md)
 - [存储迁移](docs/storage-migration.md)
 - [任务生命周期与交付](docs/lifecycle-recovery.md)
+- [后台读写与任务生命周期](docs/runtime-maintenance.md)
 - [架构与隐私边界](docs/architecture.md)
 - [版本与发布说明](https://github.com/lemoncat7/dsh-partner/releases)
 - [发布维护约定](docs/releases/README.md)

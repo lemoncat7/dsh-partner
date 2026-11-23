@@ -31,6 +31,7 @@
     }
   },
   "files": [
+    "docs/runtime-maintenance.md",
     "docs/releases/2.26.8.md",
     "docs/releases/2.26.7.md",
     "docs/releases/2.26.6.md",

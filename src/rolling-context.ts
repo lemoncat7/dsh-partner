@@ -11,8 +11,7 @@ const protectedNode=(e:SessionEvent)=>e.type==='system/message'||e.type==='devel
  * Unknown/plugin snapshots and partial snapshots retain their original meaning.
  */
 function removeSupersededSnapshots(session:Session):number {
- const bySeq=new Map(session.snapshotEvents().map(e=>[e.seq,e]))
- const nodes=session.surface.nodes.map(seq=>bySeq.get(seq)!).filter(Boolean)
+ const nodes=session.surface.nodes.map(seq=>session.eventAt(seq)!).filter(Boolean)
  const newer=new Map<string,Set<string>[]>(),stale=new Set<number>()
  for(const e of [...nodes].reverse()){
   if(e.type!=='user/message'||!('form' in e.data.source)||e.data.source.form!=='snapshot'||!['runtime-context','time-context'].includes(e.data.source.kind))continue
@@ -45,13 +44,21 @@ export function removePrivateMemorySnapshots(session:Session):void {
 }
 
 /** Logged surface replacements only: no provider interception, summary model or transcript deletion. */
+const rolled = new WeakMap<Session,{seq:number;turns:number|undefined;chars:number|undefined}>()
 export function rollConversationContext(session:Session,settings:CompanionAutomation['memory']):number {
  if(!settings.rollingContextEnabled)return 0
+ const previous=rolled.get(session)
+ if(previous?.seq===session.seq&&previous.turns===settings.rollingContextTurns&&previous.chars===settings.rollingContextMaxChars)return 0
+ const removed=rollContext(session,settings)
+ rolled.set(session,{seq:session.seq,turns:settings.rollingContextTurns,chars:settings.rollingContextMaxChars})
+ return removed
+}
+function rollContext(session:Session,settings:CompanionAutomation['memory']):number {
  const snapshotsRemoved=removeSupersededSnapshots(session)
- const events=session.snapshotEvents(),bySeq=new Map(events.map(e=>[e.seq,e])),nodes=session.surface.nodes.map(seq=>bySeq.get(seq)!).filter(Boolean)
+ const events=session.snapshotEvents(),nodes=session.surface.nodes.map(seq=>session.eventAt(seq)!).filter(Boolean),bySeq=new Map(nodes.map(e=>[e.seq,e]))
  if(!nodes.length)return snapshotsRemoved
  const turnBySeq=new Map<number,number>();let turn=-1,open=-1
- for(const e of events){if(e.type==='turn/start'){turn=e.seq;open=turn}if(e.type==='turn/end')open=-1;turnBySeq.set(e.seq,turn)}
+ for(const e of events){if(e.type==='turn/start'){turn=e.seq;open=turn}if(e.type==='turn/end')open=-1;if(bySeq.has(e.seq))turnBySeq.set(e.seq,turn)}
  // Count complete conversation turns, including authorized autonomous activity.
  // Activity can continue without any real user node remaining after host compaction.
  const groups:Array<{turn:number;index:number}>=[]

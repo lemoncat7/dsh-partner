@@ -10,6 +10,7 @@ import { explicitConcernDirective } from './memory-reflection.js'
 import type { PartnerStore } from './store.js'
 import { concernManagementTool } from './concern-management-tool.js'
 import { isInternalTaskNotice, isRequirementDeliveryReceipt } from './channels/delivery-policy.js'
+import { conversationOrigin } from './channels/question-origin.js'
 
 const TOOL_NAME = 'partner_concern_suggest'
 
@@ -61,7 +62,9 @@ function concernSuggestionTool(store: PartnerStore, concerns: PartnerConcernStor
     presentCall: () => ({ card: 'generic', title: '保存伙伴关注事项' }),
     async execute(raw, exec) {
       const agent = requireAgent(exec)
-      const route = store.snapshot().sessions.find(item => item.sessionId === agent.session.id)
+      const sessions = store.snapshot(['sessions']).sessions
+      const route = sessions.some(r => r.sessionId === agent.session.id)
+        ? conversationOrigin(agent.session.id, agent.session.snapshotEvents(), sessions) : undefined
       if (route === undefined) throw new Error('partner_concern_suggest is only available in a partner-owned conversation')
       const companion = store.snapshot().companions.find(item => item.id === route.companionId)
       if (companion === undefined) throw new Error('当前会话所属伙伴不存在，不能保存关注')

@@ -172,7 +172,8 @@ export function apply(context: Context, config: PartnerConfig): void {
     const interruptedRuns = await executor.reconcileInterruptedRuns()
     if (interruptedRuns > 0) ctx.logger.info(`dsh-partner: reconciled ${interruptedRuns} interrupted execution run(s)`)
     const collaboration = new PartnerCollaborationService(store, skills, tasks, executor)
-    const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone)
+    const scheduler = new PartnerSchedulerService(store, executor, resolved.timeZone,
+      error => ctx.logger.warn(`伙伴定时任务失败：${String(error)}`))
     const companions = new CompanionService(store)
     const management: CompanionManagementService = new CompanionManagementService(store, {
       catalog: async () => ({
@@ -238,7 +239,7 @@ export function apply(context: Context, config: PartnerConfig): void {
     const avatars = new ChannelAvatarService(store, credentials)
     composer.setAvatarToolFactory(id => avatars.tool(id))
     const memoryWorker = new MemoryWorker({
-      companions: () => store.snapshot().companions,
+      companions: () => store.snapshot(['companions']).companions,
       removing: id => store.isCompanionRemoving(id),
       process: async companion => {
         try {
@@ -246,7 +247,7 @@ export function apply(context: Context, config: PartnerConfig): void {
             if (!await agents.recordConcernCreatedNotice(companion, scopeId, created)) throw new Error('关注通知未送达，稍后重试')
           })
         } finally {
-          const routes = store.snapshot().sessions.filter(route => route.companionId === companion.id)
+          const routes = store.snapshot(['sessions']).sessions.filter(route => route.companionId === companion.id)
           const primary = routes.find(route => route.kind === 'local')
           if (primary && !store.isCompanionRemoving(companion.id)) await persona.process(companion, conversationMemoryScope(primary, routes))
         }
@@ -311,7 +312,9 @@ export function apply(context: Context, config: PartnerConfig): void {
     const disposeSessionObserver = ctx.on('session/event', (session, event) => {
       notices.observeSession(session, event)
       try { pushObserver.observeSession(session, event) } catch { ctx.logger.warn('dsh-partner: 推送事件处理失败') }
-      void agents.observeSessionEvent(session, event).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
+      void agents.observeSessionEvent(session, event).then(() => {
+        if (event.type === 'turn/end' && event.data.reason.kind === 'completed') memoryWorker.wake()
+      }).catch(error => ctx.logger.warn(`dsh-partner memory reflection failed: ${error instanceof Error ? error.message : String(error)}`))
       void channels.observeAutonomousResult(session, event).catch(error => ctx.logger.warn(`dsh-partner autonomous delivery failed: ${error instanceof Error ? error.message : String(error)}`))
     })
     const heartbeat = new HeartbeatScheduler(ctx, store, agents, concerns, resolved.timeZone,

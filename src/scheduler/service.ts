@@ -10,28 +10,33 @@ const OVERLAP_POLICIES = ['skip', 'queue'] as const
 
 export class PartnerSchedulerService {
   private timer: NodeJS.Timeout | undefined
-  private readonly running = new Set<string>()
   private readonly controllers = new Map<string, AbortController>()
   private readonly queued = new Set<string>()
+  private readonly jobs = new Set<Promise<void>>()
+  private polling: Promise<void> | undefined
   private closed = false
 
   readonly continuations: ScheduleContinuations
-  constructor(private readonly store: PartnerStore, private readonly executor: EphemeralExecutionService, private readonly timeZone: string) { this.continuations = new ScheduleContinuations(store) }
+  constructor(private readonly store: PartnerStore, private readonly executor: EphemeralExecutionService, private readonly timeZone: string,
+    private readonly report: (error: unknown) => void = () => {}) { this.continuations = new ScheduleContinuations(store) }
 
   start(): void {
     if (this.timer || this.closed) return
     this.continuations.start()
-    this.timer = setInterval(() => { void this.tick() }, 15_000)
+    this.timer = setInterval(() => { void this.tick().catch(this.report) }, 15_000)
     this.timer.unref?.()
-    void this.tick()
+    void this.tick().catch(this.report)
   }
 
   async close(): Promise<void> {
     this.closed = true
-    this.continuations.close()
+    this.queued.clear()
+    const continuationsClosed = this.continuations.close()
     for (const controller of this.controllers.values()) controller.abort()
     if (this.timer) clearInterval(this.timer)
     this.timer = undefined
+    await Promise.all([this.polling?.catch(() => {}), continuationsClosed])
+    await Promise.allSettled(this.jobs)
   }
 
   list(): ScheduledPartnerTask[] { return this.store.snapshot().schedules }
@@ -92,6 +97,7 @@ export class PartnerSchedulerService {
   }
 
   async trigger(id: string): Promise<void> {
+    if (this.closed) throw new Error('定时任务服务正在停止')
     const entry = this.store.snapshot().schedules.find(item => item.id === id)
     if (!entry) throw new Error('Schedule does not exist')
     this.requireCompanion(entry.companionId)
@@ -99,23 +105,54 @@ export class PartnerSchedulerService {
     await this.run(entry)
   }
 
-  private async tick(): Promise<void> {
-    if (this.closed) return
+  private tick(): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    if (this.polling) return this.polling
+    const job = this.poll().finally(() => { if (this.polling === job) this.polling = undefined })
+    this.polling = job
+    return job
+  }
+
+  private async poll(): Promise<void> {
     const snapshot = this.store.snapshot(), before = snapshot.schedules.length
     cleanupObsoleteSchedules(snapshot)
     if (snapshot.schedules.length !== before) await this.store.update(state => cleanupObsoleteSchedules(state))
     await this.continuations.tick()
-    const due = this.store.snapshot().schedules.filter(item => !item.continuation && item.enabled && item.nextRunAt <= Date.now() && this.store.hasCapability(item.companionId, 'schedules'))
-    for (const entry of due) void this.run(entry).catch(() => {})
+    const due = this.store.snapshot(['schedules']).schedules.filter(item => !item.continuation && item.enabled && item.nextRunAt <= Date.now() && this.store.hasCapability(item.companionId, 'schedules'))
+    for (const entry of due) {
+      if (this.closed) break
+      let claimed: ScheduledPartnerTask | undefined
+      await this.store.update(state => {
+        const current = state.schedules.find(item => item.id === entry.id)
+        if (this.closed || !current?.enabled || current.continuation || current.nextRunAt !== entry.nextRunAt
+          || !state.companions.find(c => c.id === current.companionId)?.capabilities.includes('schedules')) return
+        // Consume this occurrence before execution. Polling the same occurrence
+        // must never count as a second overlapping invocation.
+        current.nextRunAt = nextOccurrence(current.schedule, Date.now(), this.timeZone)
+        current.updatedAt = Date.now()
+        claimed = structuredClone(current)
+      })
+      if (claimed) void this.run(claimed).catch(this.report)
+    }
   }
 
-  private async run(entry: ScheduledPartnerTask): Promise<void> {
-    if (this.running.has(entry.id)) {
+  private run(entry: ScheduledPartnerTask): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    if (this.controllers.has(entry.id)) {
       if (entry.overlapPolicy === 'queue') this.queued.add(entry.id)
-      else await this.advance(entry.id, 'skipped')
-      return
+      else return this.track(this.recordResult(entry.id, 'skipped'))
+      return Promise.resolve()
     }
-    this.running.add(entry.id)
+    return this.track(this.execute(entry))
+  }
+
+  private track(job: Promise<void>): Promise<void> {
+    this.jobs.add(job)
+    void job.then(() => this.jobs.delete(job), () => this.jobs.delete(job))
+    return job
+  }
+
+  private async execute(entry: ScheduledPartnerTask): Promise<void> {
     const controller = new AbortController()
     this.controllers.set(entry.id, controller)
     const unsubscribe = this.store.subscribe(state => {
@@ -129,28 +166,26 @@ export class PartnerSchedulerService {
         timeoutMinutes: entry.timeoutMinutes, destroyAfterRun: entry.destroySessionAfterRun,
         systemInstruction: `这是定时任务「${entry.title}」。只执行本次计划内容；不要自行修改调度规则。`,
       })
-      await this.advance(entry.id, 'completed')
+      await this.recordResult(entry.id, 'completed')
     } catch {
-      await this.advance(entry.id, 'failed')
+      await this.recordResult(entry.id, 'failed')
       throw new Error(`Scheduled task failed: ${entry.title}`)
     } finally {
       unsubscribe(); this.controllers.delete(entry.id)
-      this.running.delete(entry.id)
-      if (this.queued.delete(entry.id)) {
+      if (this.queued.delete(entry.id) && !this.closed) {
         const current = this.store.snapshot().schedules.find(item => item.id === entry.id && item.enabled)
-        if (current) void this.run(current).catch(() => {})
+        if (current) void this.run(current).catch(this.report)
       }
     }
   }
 
-  private async advance(id: string, status: NonNullable<ScheduledPartnerTask['lastRunStatus']>): Promise<void> {
+  private async recordResult(id: string, status: NonNullable<ScheduledPartnerTask['lastRunStatus']>): Promise<void> {
     const now = Date.now()
     await this.store.update(state => {
       const entry = state.schedules.find(item => item.id === id)
       if (!entry) return
       entry.lastRunAt = now
       entry.lastRunStatus = status
-      entry.nextRunAt = nextOccurrence(entry.schedule, Math.max(now, entry.nextRunAt), this.timeZone)
       entry.updatedAt = now
     })
   }

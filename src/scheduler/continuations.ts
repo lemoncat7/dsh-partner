@@ -19,6 +19,7 @@ export class ScheduleContinuations {
   private readonly notifying = new Set<string>()
   private unsubscribe: (() => void) | undefined
   private closed = false
+  private readonly jobs = new Set<Promise<void>>()
   constructor(private readonly store: PartnerStore) {}
 
   configure(runner: ContinuationRunner): void { this.runner = runner }
@@ -31,7 +32,17 @@ export class ScheduleContinuations {
       }
     }, () => {})
   }
-  close(): void { this.closed = true; this.unsubscribe?.(); this.unsubscribe = undefined; for (const c of this.active.values()) c.abort() }
+  async close(): Promise<void> {
+    this.closed = true; this.unsubscribe?.(); this.unsubscribe = undefined
+    for (const c of this.active.values()) c.abort()
+    await Promise.allSettled(this.jobs)
+  }
+
+  private track(job: Promise<void>): Promise<void> {
+    this.jobs.add(job)
+    void job.then(() => this.jobs.delete(job), () => this.jobs.delete(job))
+    return job
+  }
 
   async defer(owner: string, sessionId: string, value: unknown, origin?: ChannelSession): Promise<ScheduledPartnerTask> {
     const input = record(value, 'continuation')
@@ -128,7 +139,12 @@ export class ScheduleContinuations {
     }
   }
 
-  async run(id: string): Promise<void> {
+  run(id: string): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    return this.track(this.execute(id))
+  }
+
+  private async execute(id: string): Promise<void> {
     if (this.closed || !this.runner || this.active.has(id)) return
     const initial = this.store.snapshot().schedules.find(s => s.id === id)
     if (!initial?.enabled || !initial.continuation || !this.store.hasCapability(initial.companionId, 'schedules')) return
@@ -138,7 +154,7 @@ export class ScheduleContinuations {
     try {
       await this.store.update(state => {
         const entry = state.schedules.find(s => s.id === id), wake = entry?.continuation
-        if (!entry?.enabled || !wake || !['waiting', 'running'].includes(wake.state) || !state.companions.find(c => c.id === entry.companionId)?.capabilities.includes('schedules')) return
+        if (this.closed || !entry?.enabled || !wake || !['waiting', 'running'].includes(wake.state) || !state.companions.find(c => c.id === entry.companionId)?.capabilities.includes('schedules')) return
         // A persisted running state after restart must re-check external facts, not replay submission.
         if (wake.attempts >= wake.maxAttempts || Date.now() >= wake.deadlineAt) {
           wake.state = 'blocked'; wake.summary = '等待已达到检查次数或截止时间上限，请人工核实外部任务'; entry.enabled = false; return
@@ -153,7 +169,7 @@ export class ScheduleContinuations {
       const companion = this.store.snapshot().companions.find(c => c.id === claimed!.companionId)!
       await this.runner.execute(claimed, companion, controller.signal)
       // A natural-language promise is not a durable outcome. Never silently mark it completed.
-      await this.blockUnresolved(id, claimed.continuation!.runToken!, '本轮未提交续接结果；请核实执行记录', true)
+      if (!this.closed) await this.blockUnresolved(id, claimed.continuation!.runToken!, '本轮未提交续接结果；请核实执行记录', true)
     } catch (error) {
       const message = error instanceof WakeToolsUnavailable || (error instanceof Error && error.message.startsWith('本次定时检查超过')) ? error.message : '本轮续接执行失败，已暂停以避免重复执行后续动作'
       if (claimed && !this.closed) await this.blockUnresolved(id, claimed.continuation!.runToken!, controller.signal.aborted ? '执行被取消或能力已关闭；请核实执行记录后处理' : message,
@@ -193,7 +209,12 @@ export class ScheduleContinuations {
     })
   }
 
-  private async notify(id: string): Promise<void> {
+  private notify(id: string): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    return this.track(this.deliver(id))
+  }
+
+  private async deliver(id: string): Promise<void> {
     const entry = this.store.snapshot().schedules.find(s => s.id === id), wake = entry?.continuation
     // Linked task delivery belongs to the requirement, never to each timer.
     if (wake?.board) return

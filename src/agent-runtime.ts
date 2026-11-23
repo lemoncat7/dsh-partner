@@ -58,7 +58,7 @@ import { qqSettings, qqSessionTarget } from './channels/qq/settings.js'
 import { fatigueValue } from './character/fatigue.js'
 import type { SleepService } from './character/sleep-service.js'
 import { renderSleepContext, isSleeping } from './character/sleep.js'
-import { questionOrigin,webMessageRoute } from './channels/question-origin.js'
+import { questionOrigin,webMessageRoute,conversationOrigin } from './channels/question-origin.js'
 import { renderCharacterContext } from './character/domain.js'
 import { renderConversationTurn } from './character/conversation-behavior.js'
 import { projectConversationPrompt } from './character/prompt-projection.js'
@@ -1065,9 +1065,11 @@ export class PartnerAgentRuntime {
     if (route === undefined) return
     const companion = runtimeSnapshot(this.store).companions.find(item => item.id === route.companionId)
     if (companion === undefined) return
-    const journal=memoryOnly?[]:collectActivityJournal(session.id,session.snapshotEvents())
+    const snapshot = session.snapshotEvents()
+    const history = (snapshot.at(-1)?.seq ?? 0) > event.seq ? snapshot.filter(e => e.seq <= event.seq) : snapshot
+    const journal=memoryOnly?[]:collectActivityJournal(session.id,history)
     if(!memoryOnly&&journal.length)await this.store.update(state=>{const c=state.companions.find(c=>c.id===companion.id);if(c)mergeActivityJournal(c,journal)})
-    const events = completedTurnEvents(session.snapshotEvents(), event)
+    const events = completedTurnEvents(history, event)
     const activityNotice=events.find(isIdleContactNotice)
     if(!memoryOnly&&activityNotice?.type==='user/message')await this.store.update(state=>{
       const source=state.sessions.find(r=>r.companionId===companion.id&&r.idleContactState?.messageId===activityNotice.data.id)
@@ -1077,17 +1079,20 @@ export class PartnerAgentRuntime {
       thought.lastOutcome=events.some(isActivitySilenceRequested)?'silent':'considered'
       thought.result=thought.lastOutcome==='silent'?'本轮选择安静结束':'已考虑此念头；发送结果以渠道回执为准'
     })
-    const identityRelation = currentQqIdentityRelation(session.id, events, runtimeSnapshot(this.store).sessions, runtimeSnapshot(this.store).channels ?? [])
+    const currentState = runtimeSnapshot(this.store)
+    const identityRelation = currentQqIdentityRelation(session.id, events, currentState.sessions, currentState.channels ?? [])
     const prompt = events.find(item => item.type === 'user/message' && item.data.source.kind === 'user')
     const userText = events.filter(e => e.type === 'user/message' && e.data.source.kind === 'user').map(e => e.type === 'user/message' ? textContent(e.data.content) : '').filter(Boolean).join('\n\n')
     const assistantText = conversationReplyText(events)
     if (!userText || !assistantText) return
-    const scopeId = memoryScope(route.channelId, route.userId)
+    const sourceRoute = conversationOrigin(session.id, history, currentState.sessions)
+    if (!sourceRoute) return
+    const scopeId = memoryScope(sourceRoute.channelId, sourceRoute.userId)
     const concernDirective = memoryOnly || identityRelation && !identityRelation.matched ? undefined : await this.concerns?.applyUserDirective(companion.id, scopeId, userText, event.time)
-    const created = companion.automation.memory.enabled && automaticMemoryAllowed(session.id, events, runtimeSnapshot(this.store).sessions) && this.reflection !== undefined ? await this.reflection.reflect(companion, {
-      id: `turn-${createHash('sha256').update(JSON.stringify([session.id, event.time, userText])).digest('hex').slice(0, 32)}`, companionId: companion.id, scopeId: conversationMemoryScope(route, runtimeSnapshot(this.store).sessions),
-      sourceRouteIds: [...new Set(events.flatMap(e => { if(e.type!=='user/message'||e.data.source.kind!=='user')return []; const routes=runtimeSnapshot(this.store).sessions.filter(r=>r.companionId===companion.id&&r.sessionId===session.id); const origin=routes.find(r=>r.kind==='channel'&&r.inboundMessageIds?.includes(e.data.id))??routes.find(r=>r.kind==='local'); return origin?[origin.id]:[] }))],
-      interactionEligible: affectionTurnEligible(runtimeSnapshot(this.store), companion.id, session.id, events),
+    const created = companion.automation.memory.enabled && automaticMemoryAllowed(session.id, events, currentState.sessions) && this.reflection !== undefined ? await this.reflection.reflect(companion, {
+      id: `turn-${createHash('sha256').update(JSON.stringify([session.id, event.time, userText])).digest('hex').slice(0, 32)}`, companionId: companion.id, scopeId: conversationMemoryScope(route, currentState.sessions),
+      sourceRouteIds: [...new Set(events.flatMap(e => { if(e.type!=='user/message'||e.data.source.kind!=='user')return []; const routes=currentState.sessions.filter(r=>r.companionId===companion.id&&r.sessionId===session.id); const origin=routes.find(r=>r.kind==='channel'&&r.inboundMessageIds?.includes(e.data.id))??routes.find(r=>r.kind==='local'); return origin?[origin.id]:[] }))],
+      interactionEligible: affectionTurnEligible(currentState, companion.id, session.id, events),
       characterEnabled: companion.characterCard?.enabled === true,
       ...(identityRelation ? {identityRelation} : {}),
       userMessageIds: events.flatMap(e => e.type === 'user/message' && e.data.source.kind === 'user' ? [e.data.id] : []),

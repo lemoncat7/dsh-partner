@@ -6,6 +6,7 @@ import { MemoryReflectionService } from './memory-reflection.js'
 import { PartnerAgentRuntime } from './agent-runtime.js'
 import { conversationMemoryScope } from './memory-scope.js'
 import { redactObservationError } from './observation-errors.js'
+import { runtimeSnapshot } from './companions/runtime-policy.js'
 
 const TICK_MS = 60_000
 
@@ -57,7 +58,7 @@ export class DailyReviewScheduler {
     if (this.closed) return { reviewed: 0, failed: 0, reason: '记忆服务正在停止' }
     if (this.store.isCompanionRemoving(companionId)) return { reviewed: 0, failed: 0, reason: '伙伴正在删除' }
     if (this.running.has(companionId)) return { reviewed: 0, failed: 0, reason: '每日终审正在执行' }
-    const companion = this.store.snapshot().companions.find(item => item.id === companionId)
+    const companion = runtimeSnapshot(this.store).companions.find(item => item.id === companionId)
     if (!companion) throw new Error('伙伴不存在')
     if(renewal && companion.automation.memory.rollingContextEnabled)return {reviewed:0,failed:0,reason:'滚动对话窗口已开启，暂停每日整段焕新'}
     if (!renewal && !force && (!companion.automation.memory.enabled || !companion.automation.memory.dailyReviewEnabled)) return { reviewed: 0, failed: 0, reason: '每日整理与焕新未启用' }
@@ -78,7 +79,7 @@ export class DailyReviewScheduler {
 
   private async tick(): Promise<void> {
     const now = Date.now()
-    for (const companion of this.store.snapshot().companions) {
+    for (const companion of runtimeSnapshot(this.store).companions) {
       const settings = companion.automation.memory
       if (settings.enabled && settings.dailyReviewEnabled && zonedHour(now, this.timeZone) >= settings.dailyReviewHour) {
         await this.trigger(companion.id).catch(error => this.ctx.logger.warn(`dsh-partner daily review failed: ${message(error)}`))
