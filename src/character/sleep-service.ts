@@ -151,9 +151,11 @@ export class SleepService {
       if (this.closed) return
       if (this.store.isCompanionRemoving(initial.id)) continue
       const now = this.now(), enabled = sleepPolicy(initial).enabled
-      if (enabled || initial.sleepState?.fatigue) await this.store.update(s => {
-        const c = s.companions.find(c => c.id === initial.id)
-        if (c) settleFatigue(c, now)
+      // fatigueValue integrates elapsed time. A timer-only checkpoint rewrites
+      // the entire split-state manifest even when a sleeping value stays zero.
+      if (enabled && !initial.sleepState?.fatigue) await this.store.update(state => {
+        const c = state.companions.find(c => c.id === initial.id)
+        if (c && !c.sleepState?.fatigue) settleFatigue(c, now)
       })
       let c = this.current(initial.id), e = c.sleepState?.episode
       if (e && !e.wokeAt && (!enabled || e.wakeAt <= now)) { await this.wake(c.id, enabled ? '自然醒来' : '睡眠功能已关闭'); c = this.current(c.id); e = c.sleepState?.episode }
@@ -170,7 +172,9 @@ export class SleepService {
       if (!activity || now - activity < IDLE_MS || now - (e?.wokeAt ?? 0) < 10 * 60_000 || now - (c.sleepState?.decision?.at ?? 0) < 60_000) continue
       const route = state.sessions.filter(r => r.companionId === c.id && !this.ports.archived(r.sessionId)).sort((a,b) => b.lastMessageAt - a.lastMessageAt)[0]
       if (!route) continue
-      const probability = fatigueSleepProbability(value), selected = this.random() < probability
+      const probability = fatigueSleepProbability(value)
+      if (probability === 0) continue
+      const selected = this.random() < probability
       await this.store.update(s => { const target = s.companions.find(x => x.id === c.id); if (target) (target.sleepState ??= {}).decision = { activityAt: activity, at: now, outcome: selected ? 'sleep' : 'awake' } })
       if (selected) {
         try { await this.sleep(c.id, route.id, fatigueSleepMinutes(value), '有些困了，想休息一会儿', this.random() < 0.65, activity) }

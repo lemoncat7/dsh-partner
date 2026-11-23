@@ -16,6 +16,8 @@ import type { SplitStatePersistence } from './storage/split-state.js'
 import { validateMcpState } from './mcp/state.js'
 import { validatePushState } from './notifications/push-state.js'
 import { reconcileBoardContinuations } from './tasks/continuation.js'
+import { fatigueValue } from './character/fatigue.js'
+import { sleepPolicy } from './character/sleep.js'
 
 export class PartnerStore {
   private sessionPolicies = new Map<string,CompanionRuntimePolicy>()
@@ -104,7 +106,21 @@ export class PartnerStore {
     this.writes = this.writes.then(async () => {
       const next = structuredClone(this.state)
       change(next)
-      for (const c of next.companions) enforceThoughtBudget(next, c)
+      for (const c of next.companions) {
+        const previous = this.state.companions.find(old => old.id === c.id)
+        if (previous && isDeepStrictEqual(previous.sleepState, c.sleepState)) {
+          const before = this.policies.get(c.id)!.companion
+          const after = resolveCompanionRuntimePolicy(c).companion
+          if (sleepPolicy(before).enabled !== sleepPolicy(after).enabled) {
+            // Freeze at disable; resume from the same value at enable. All
+            // config entry points share this commit boundary, so idle timers
+            // need not persist elapsed time to make toggling/restart correct.
+            const now = Date.now(), sleepState = c.sleepState ??= {}
+            sleepState.fatigue = { value: fatigueValue(before, now), at: now }
+          }
+        }
+        enforceThoughtBudget(next, c)
+      }
       reconcileBoardContinuations(next)
       validateState(next)
       // Polling and repeated receipts often produce no change. Do not fsync or

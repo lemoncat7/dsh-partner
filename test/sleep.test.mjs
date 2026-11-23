@@ -1,7 +1,7 @@
 import {normalizeCharacterCard} from '../lib/character/domain.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,rm,stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
@@ -47,6 +47,46 @@ test('fatigue caps, elapsed minutes do not lose time, disabled freezes and clock
  c.sleepState={fatigue:{value:5,at:HOUR},episode:{startedAt:HOUR,wakeAt:2*HOUR}}
  assert.equal(fatigueValue(c,2*HOUR),0);assert.equal(fatigueValue(c,3*HOUR),5)
  c.sleepPolicy.enabled=false;assert.equal(fatigueValue(c,100*HOUR),5)
+})
+test('idle fatigue and zero-probability checks do not write state; elapsed fatigue survives restart',async t=>{
+ const f=await fixture(t);await f.seed(10)
+ const before=await stat(f.path,{bigint:true}),sample=f.c().sleepState.fatigue
+ for(let i=0;i<6;i++){f.advance(MIN);await f.service.tick()}
+ assert.deepEqual(f.c().sleepState.fatigue,sample)
+ near(fatigueValue(f.c(),f.now()),10.5)
+ const after=await stat(f.path,{bigint:true});assert.equal(after.ino,before.ino);assert.equal(after.mtimeNs,before.mtimeNs)
+ near(fatigueValue((await PartnerStore.open(f.path)).snapshot().companions[0],f.now()),10.5)
+})
+test('an enabled legacy role without a fatigue sample initializes once, then integrates without writes',async t=>{
+ const f=await fixture(t)
+ await f.store.update(s=>{s.companions[0].sleepState={activityAt:f.now()}})
+ await f.service.tick();near(f.c().sleepState.fatigue.value,30)
+ const before=await stat(f.path,{bigint:true})
+ f.advance(MIN);await f.service.tick();near(fatigueValue(f.c(),f.now()),30+5/60)
+ assert.equal((await stat(f.path,{bigint:true})).mtimeNs,before.mtimeNs)
+})
+test('sleeping at zero and disabled old fatigue do not rewrite the manifest every minute',async t=>{
+ const f=await fixture(t);await f.service.sleep(f.id,'r',240,'休息',false);await f.seed(0)
+ const before=await stat(f.path,{bigint:true}),state=f.c().sleepState
+ for(let i=0;i<4;i++){f.advance(MIN);await f.service.tick()}
+ assert.deepEqual(f.c().sleepState,state);assert.equal((await stat(f.path,{bigint:true})).mtimeNs,before.mtimeNs)
+ await f.service.wake(f.id)
+ await f.store.update(s=>{s.companions[0].sleepPolicy.enabled=false})
+ const disabled=f.c().sleepState,off=await stat(f.path,{bigint:true})
+ for(let i=0;i<4;i++){f.advance(MIN);await f.service.tick()}
+ assert.deepEqual(f.c().sleepState,disabled);assert.equal((await stat(f.path,{bigint:true})).mtimeNs,off.mtimeNs)
+})
+for(const toggle of ['sleep','role'])test(`${toggle} policy changes checkpoint fatigue once and exclude disabled time`,async t=>{
+ const f=await fixture(t),real=Date.now;let now=f.now()
+ Date.now=()=>now
+ try{
+  await f.seed(30);now+=2*HOUR
+  await f.store.update(s=>{if(toggle==='sleep')s.companions[0].sleepPolicy.enabled=false;else s.companions[0].characterCard.enabled=false})
+  near(f.c().sleepState.fatigue.value,40)
+  now+=2*HOUR;near(fatigueValue(f.store.runtimePolicy(f.id).companion,now),40)
+  await f.store.update(s=>{if(toggle==='sleep')s.companions[0].sleepPolicy.enabled=true;else s.companions[0].characterCard.enabled=true})
+  near(fatigueValue(f.c(),now+HOUR),45)
+ }finally{Date.now=real}
 })
 test('local fatigue rolls retry unchanged inactivity each minute; no model sleep gate or duplicate concurrent rolls',async t=>{
  assert.equal(sleepPolicy({}).enabled,false);assert.equal(sleepPolicy({characterCard:{enabled:true}}).enabled,true)
