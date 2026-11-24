@@ -88,17 +88,17 @@
 .dsh-partner-workspace #dsh-partner-identity-editor :disabled,
 .dsh-partner-workspace #dsh-partner-channels :disabled { opacity: .55; cursor: not-allowed; }
 .dsh-partner-workspace #dsh-partner-channels .dsh-partner-workspace-dialog {
-  background: var(--partner-solid-panel) !important;
+  background: var(--partner-dialog-surface) !important;
   color: var(--partner-text) !important;
   border: 1px solid var(--partner-border) !important;
   border-radius: var(--partner-radius-dialog, 24px) !important;
   font-family: var(--partner-font-family) !important;
-  box-shadow: 0 22px 58px color-mix(in srgb, #000 18%, transparent), 0 4px 14px color-mix(in srgb, #000 8%, transparent), inset 0 1px 0 var(--partner-card-highlight) !important;
+  box-shadow: var(--partner-glass-shadow) !important;
 }
 /* The native top-layer wrapper is not the visible panel. Host dialog resets
    must not paint it as a full-screen form surface. */
 .dsh-partner-workspace #dsh-partner-channels dialog.dsh-partner-workspace-dialog-layer {
-  background: var(--partner-interaction-veil, var(--partner-dialog-veil)) !important;
+  background: var(--partner-dialog-veil) !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;

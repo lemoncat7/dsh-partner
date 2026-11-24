@@ -408,4 +408,11 @@ function WeixinChannelPanel({ companion, snapshot, onChanged, channel }: { compa
   </div>
 }
 
-function installStyles(): () => void { let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null; if (!style) { style = document.createElement('style'); style.id = STYLE_ID; style.textContent = cssText; document.head.append(style) } return () => style?.remove() }
+function installStyles(): () => void {
+  document.getElementById(STYLE_ID)?.remove()
+  const style = document.createElement('style')
+  style.id = STYLE_ID
+  style.textContent = cssText
+  document.head.append(style)
+  return () => { if (document.getElementById(STYLE_ID) === style) style.remove() }
+}

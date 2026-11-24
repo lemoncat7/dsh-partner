@@ -6,9 +6,8 @@
   --partner-radius-menu: 15px;
   --partner-dialog-inset: 20px;
   --partner-interaction-well: color-mix(in srgb, var(--partner-text) 3%, transparent);
-  --partner-dialog-surface: color-mix(in srgb, var(--partner-text) 3%, var(--partner-solid-panel));
+  --partner-dialog-surface: var(--partner-glass-regular);
   --partner-interaction-rim: inset 0 1px 0 var(--partner-card-highlight);
-  --partner-interaction-veil: rgb(12 18 24 / 14%);
 }
 .dsh-partner-workspace :where(button:not(.dsh-partner-feature-switch)) {
   border-radius: var(--partner-radius-control);
@@ -27,12 +26,12 @@
 .dsh-partner-workspace .dsh-partner-tabs button.is-active { color: var(--partner-text); background: var(--partner-raised); box-shadow: var(--partner-interaction-rim), 0 2px 5px color-mix(in srgb, var(--partner-text) 8%, transparent); }
 .dsh-partner-workspace .dsh-partner-capability-card-copy { border-radius: 13px; transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease; }
 .dsh-partner-workspace .dsh-partner-capability-card:has([aria-pressed=true]) .dsh-partner-capability-card-copy { border-color: var(--partner-focus-ring); box-shadow: var(--partner-interaction-rim); }
-.dsh-partner-workspace .dsh-partner-workspace-dialog-layer { align-items: center; padding: 20px; background: var(--partner-interaction-veil); }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-layer { align-items: center; padding: 20px; background: var(--partner-dialog-veil); }
 .dsh-partner-workspace .dsh-partner-workspace-dialog {
   font: var(--partner-font-body)/1.5 var(--partner-font-family);
   width: min(640px, 100%); height: auto; max-height: min(800px, 100%); box-sizing: border-box;
-  padding: 7px; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-dialog);
-  box-shadow: var(--partner-interaction-rim), 0 20px 64px rgb(0 0 0 / 20%);
+  padding: 0; border: 1px solid var(--partner-border); border-radius: var(--partner-radius-dialog);
+  box-shadow: var(--partner-glass-shadow);
   animation-duration: 220ms;
 }
 .dsh-partner-workspace .dsh-partner-workspace-dialog.is-wide { width: min(880px, 100%); height: auto; max-height: min(840px, 100%); }
@@ -41,11 +40,10 @@
 .dsh-partner-workspace .dsh-partner-workspace-dialog > header strong { font-size: 18px; line-height: 1.4; letter-spacing: normal; }
 .dsh-partner-workspace .dsh-partner-workspace-dialog > header p { max-width: 52ch; line-height: 1.65; }
 .dsh-partner-workspace .dsh-partner-workspace-dialog > header button { width: 34px; min-width: 34px; min-height: 34px; border-radius: 50%; background: var(--partner-interaction-well); }
-.dsh-partner-workspace .dsh-partner-workspace-dialog-body { padding: var(--partner-dialog-inset); border: 1px solid var(--partner-separator); border-radius: 17px; background: var(--partner-dialog-surface); scroll-padding-block: 12px 90px; scrollbar-gutter: auto; }
+.dsh-partner-workspace .dsh-partner-workspace-dialog-body { padding: 12px var(--partner-dialog-inset) var(--partner-dialog-inset); border: 0; border-radius: 0; background: transparent; scroll-padding-block: 12px; scrollbar-gutter: auto; }
 .dsh-partner-workspace .dsh-partner-workspace-dialog-body > :is(form, .dsh-partner-task-detail) > footer:last-child {
-  bottom: calc(-1 * var(--partner-dialog-inset)); margin: 4px calc(-1 * var(--partner-dialog-inset)) calc(-1 * var(--partner-dialog-inset));
-  padding: 14px var(--partner-dialog-inset); gap: 10px; border-top: 1px solid var(--partner-separator); box-shadow: none;
-  background: var(--partner-dialog-surface);
+  margin: 16px 0 0; padding: 14px 0 0; gap: 10px; border-top: 1px solid var(--partner-separator); box-shadow: none;
+  background: transparent;
 }
 .dsh-partner-workspace .dsh-partner-workspace-dialog footer > button { min-height: 38px; border-radius: var(--partner-radius-control); }
 .dsh-partner-workspace .dsh-partner-workspace-dialog.is-confirmation { width: min(440px, 100%); }
@@ -57,7 +55,7 @@
   .dsh-partner-workspace { --partner-radius-dialog: 22px; --partner-dialog-inset: 16px; }
   .dsh-partner-workspace .dsh-partner-workspace-dialog-layer { align-items: center; padding: 8px; }
   .dsh-partner-workspace .dsh-partner-workspace-dialog,
-  .dsh-partner-workspace .dsh-partner-workspace-dialog.is-wide { width: 100%; height: auto; max-height: 100%; padding: 6px; border-width: 1px; border-radius: var(--partner-radius-dialog); }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog.is-wide { width: 100%; height: auto; max-height: 100%; padding: 0; border-width: 1px; border-radius: var(--partner-radius-dialog); }
   .dsh-partner-workspace .dsh-partner-workspace-dialog > header { padding: 12px; }
   .dsh-partner-workspace .dsh-partner-workspace-dialog footer { flex-wrap: wrap; gap: 8px; }
   .dsh-partner-workspace .dsh-partner-workspace-dialog :is(footer, .dsh-partner-form-actions) > button { min-height: 44px; }
@@ -67,4 +65,14 @@
   .dsh-partner-workspace :is(button, input, textarea, select, .dsh-partner-capability-card-copy) { transition: none; }
   .dsh-partner-workspace .dsh-partner-workspace-dialog { animation: none; }
   .dsh-partner-workspace :is(.dsh-partner-form-actions, .dsh-partner-workspace-dialog footer) > button:active:not(:disabled) { transform: none; }
+}
+
+/* The dialog owns one glass surface. Keep its header outside the scroll area;
+   content and actions remain on that surface without an inner plate. */
+@media (prefers-reduced-transparency: reduce) {
+  .dsh-partner-workspace { --partner-dialog-surface: var(--partner-solid-panel); }
+  .dsh-partner-workspace .dsh-partner-workspace-dialog { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .dsh-partner-workspace { --partner-dialog-surface: var(--partner-solid-panel); }
 }
