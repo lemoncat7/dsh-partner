@@ -13,6 +13,7 @@ import { isAttentionCall, recognizedLink, recognizedRecipient, type AttentionTur
 type ReplyState='observed'|'admitted'|'replied'|'silent'|'superseded'
 type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;replyState?:ReplyState;redirect:boolean;at:number;receivedAt:number;sequence:number}
 type Conversation={messageId:string;at:number;text:string;input:string;recipient:string;observedSequence:number}
+type ContextTurn={messageId:string;qqId:string;sender:string;text:string;at:number;receivedAt:number;sequence:number;replyState:ReplyState;kind:'member'|'partner';recipient?:string;replyTo?:string;replyToEvidence?:'quote'|'delivery'}
 type Group={messages:Observation[];replies:Map<string,Conversation>;roomReplies:Array<Conversation&{messageId:string}>;sequence:number}
 export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;linkedMessageId?:string;followupRequest?:boolean;attachmentFollowup?:true;decisionMs?:number;contextSize?:number;discussionParticipants?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
 const CONTEXT_TTL_MS=10*60_000
@@ -95,29 +96,34 @@ export class QqGroupAutonomy {
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId),messages=group?.messages??[]
   const index=messages.findIndex(m=>m.id===event.id)
   const now=this.now(),receivedAt=index<0?now:messages[index]!.receivedAt
+  const sequence=index<0?(group?.sequence??0)+1:messages[index]!.sequence
   const imageShare=!event.text.trim()&&event.media?.some(media=>media.kind==='image')
   const contextTtl=imageShare?90_000:CONTEXT_TTL_MS
-  const rows=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=contextTtl).slice(-16)
-   .map(({id,qqId,sender,text,at,receivedAt,replyState,recipient,parentId})=>({messageId:id,qqId,sender,text,at,receivedAt,replyState:replyState??'observed',...(recipient?{recipient}:{}),...(parentId?{replyTo:parentId}:{}),kind:'member'}))
-  for(const [qqId,reply] of group?.replies??[])if(reply.at<=receivedAt&&now-reply.at<=contextTtl)
-   rows.push({messageId:reply.messageId,qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,replyState:'replied',kind:'partner'})
+  const rows:ContextTurn[]=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=contextTtl).slice(-16)
+   .map(({id,qqId,sender,text,at,receivedAt,sequence,replyState,recipient,parentId})=>({messageId:id,qqId,sender,text,at,receivedAt,sequence,replyState:replyState??'observed',...(recipient?{recipient}:{}),...(parentId?{replyTo:parentId,replyToEvidence:'quote' as const}:{}),kind:'member'}))
+  const partnerTurn=(reply:Conversation):ContextTurn=>({messageId:'reply:'+reply.messageId,qqId:'partner',sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,sequence:reply.observedSequence+.5,replyState:'replied',kind:'partner',recipient:reply.recipient,replyTo:reply.messageId,replyToEvidence:'delivery'})
+  // Preserve the room's actual delivery order, including successive replies to
+  // the same member. The per-speaker map is a routing cache, not a transcript.
+  for(const reply of group?.roomReplies??[])if(reply.observedSequence<sequence&&reply.at<=receivedAt&&now-reply.at<=contextTtl)
+   rows.push(partnerTurn(reply))
   const preceding=this.precedingAttachmentReply(group,event)??this.quietRecent(channelId,event)
-  if(preceding&&!rows.some(r=>r.kind==='partner'&&r.at===preceding.at&&r.qqId===preceding.recipient))
-   rows.push({messageId:preceding.messageId,qqId:preceding.recipient,sender:'伙伴（已确认送达）',text:preceding.text||'（已发送回复，正文未记录）',at:preceding.at,receivedAt:preceding.at,replyState:'replied',kind:'partner'})
+  if(preceding&&!rows.some(r=>r.messageId==='reply:'+preceding.messageId))rows.push(partnerTurn(preceding))
   // Group events carry second-level source times; local arrival orders them against send receipts.
-  return JSON.stringify(rows.sort((a,b)=>a.receivedAt-b.receivedAt).slice(-16)
-   .map(({receivedAt,...row})=>({...row,at:new Date(receivedAt).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
+  return JSON.stringify(rows.sort((a,b)=>a.sequence-b.sequence||a.receivedAt-b.receivedAt).slice(-16)
+   .map(({receivedAt,sequence,...row})=>({...row,at:new Date(receivedAt).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
  }
  /** Bound short-lived group snippets; the scene policy also receives confirmed delivery evidence. */
  attentionContext(channelId:string,event:DirectMessage):string[] {
-  const rows=JSON.parse(this.context(channelId,event)||'[]') as {text:string;kind:string;ageSeconds:number}[]
+  const rows=JSON.parse(this.context(channelId,event)||'[]') as {messageId:string;text:string;kind:string;ageSeconds:number}[]
   const fresh=rows.filter(r=>r.ageSeconds<=90&&r.text.trim()&&!r.text.startsWith('（已发送回复'))
-  const partner=[...fresh].reverse().find(r=>r.kind==='partner')
   const quiet=this.quietRecent(channelId,event)
-  const speech=partner?.text??quiet?.text
-  const snippets=speech?[speech.slice(0,48),...(speech.length>48?[speech.slice(-48)]:[])]:[]
-  return [...fresh.filter(r=>r.kind==='member').slice(-(4-snippets.length)).map(r=>r.text.slice(0,48)),...snippets]
-
+  const history=quiet?.text&&!fresh.some(r=>r.messageId==='reply:'+quiet.messageId)?[{text:quiet.text,kind:'partner'},...fresh]:fresh
+  // Keep the newest human explanation after our older reply, rather than
+  // appending our reply again as if it were the last thing said in the room.
+  const partner=[...history].reverse().find(row=>row.kind==='partner')
+  const snippets=partner?[partner.text.slice(0,48),...(partner.text.length>48?[partner.text.slice(-48)]:[])]:[]
+  const members=new Set(history.filter(row=>row.kind==='member').slice(-(4-snippets.length)))
+  return history.flatMap(row=>row===partner?snippets:members.has(row)?[row.text.slice(0,48)]:[])
  }
  /** A quiet gap may preserve the last shared topic, but intervening traffic retires it.
   * Sequence evidence survives the ten-minute observation TTL and rejects queued old inputs. */
@@ -170,8 +176,8 @@ export class QqGroupAutonomy {
   const current=decision?.messageId===event.id?decision:undefined
   const matched=!!event.qqGroup&&qqIdentityRelation(settings,event.qqGroup.userId)?.matched===true
   const imageShare=!event.text.trim()&&event.media?.some(media=>media.kind==='image')
-  const target='本轮回应对象（渠道记录）：'+JSON.stringify({messageId:event.id,speaker:event.qqGroup?.senderName,qqId:event.qqGroup?.userId})+'。先回应「当前群内发言」中的新内容。群聊背景中的 observed 是当时仅旁听，silent 是已经选择不发言，superseded 是已被新消息替代；都不是等待补答的请求。admitted 只表示曾进入处理，replied 才表示已送达。除非当前发言明确引用或追问，不在新消息触发时补答旧问题，也不将其他群友的旧发言当作当前发言人的话。'
-  const guidance=target+'\n'+renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined,current?.semantic?.scene,current?.followupRequest,current?.discussionParticipants,matched,(current?.semantic?.profileSimilarity??0)>=.45)
+  const target='本轮当前发言（渠道记录）：'+JSON.stringify({messageId:event.id,speaker:event.qqGroup?.senderName,qqId:event.qqGroup?.userId})+'。这标识谁刚发言，不代表对方正在对你说话。先理解「当前群内发言」中的新内容。群聊背景中的 observed 是当时仅旁听，silent 是已经选择不发言，superseded 是已被新消息替代；都不是等待补答的请求，但其中的发言仍是理解当前话题的背景。admitted 只表示曾进入处理，replied 才表示已送达。除非当前发言明确引用或追问，不在新消息触发时补答旧问题，也不将其他群友的旧发言当作当前发言人的话。'
+  const guidance=target+'\n'+renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined,current?.semantic?.scene,current?.followupRequest,current?.discussionParticipants,matched,(current?.semantic?.profileSimilarity??0)>=.45,event.qqGroup?.replyTo==='self')
    +(imageShare?'\n当前发言是图片分享。先看实际图片，再结合前文判断表情、玩笑、作品或其他分享的意思；没有配字不等于没有交流内容。按当前人物自然接话，不必要求对方先补文字或说明想做什么。没有合适的新话仍可安静结束，不能凭空描述未能读取的图片。':'')
   if(!current?.linkedMessageId||!event.qqGroup)return guidance
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId)
@@ -183,7 +189,7 @@ export class QqGroupAutonomy {
    lineage.unshift({speaker:turn.speaker===0?'伙伴':turn.speaker===1?'当前发言人':'其他群友',text:turn.text})
    i=turn.replyTo??-1
   }
-  return lineage.length?guidance+'\n当前发言关联的前文（按时间排列，仅供理解）：'+JSON.stringify(lineage):guidance
+  return lineage.length?guidance+'\n本地推测的关联候选（不是 QQ 引用或已确认的回应对象，可能有误；仍须结合最近群友发言判断）：'+JSON.stringify(lineage):guidance
  }
  async shouldReply(channelId:string,event:DirectMessage,companion:Companion,signal:AbortSignal,settings?:Partial<QqSettings>,addressOnly=false,accountId=''):Promise<boolean> {
   signal.throwIfAborted()
@@ -236,14 +242,14 @@ export class QqGroupAutonomy {
    const relationship=boundRelationship?relationshipSettings:''
    const profile=[companion.name?.slice(0,160),...qqPersonaClauses(qqRoleText(companion),7),...qqPersonaClauses(relationship,3)]
     .filter((v):v is string=>!!v?.trim())
-   const speakerText=activeConversation(context)?recent?.text:undefined
+   const speakerText=activeConversation(context)&&!roomTrafficAfterReply?recent?.text:undefined
    const dialogue=this.attentionDialogue(group,event,before,current,quietRecent)
    const frame:AttentionFrame={groupScope:JSON.stringify([channelId,accountId,event.qqGroup.groupId]),
     defaultScope:defaultAttentionScope(channelId,accountId,companion.id),
     ...(companion.characterCard?.enabled?{roleRevision:settingsRevision(roleSettingsForAttention(companion))}:{}),
     ...(relationshipSettings?{relationshipRevision:settingsRevision(relationshipSettings)}:{}),
     ...(relationship?{boundRelationship:relationship.slice(0,4096)}:{}),
-    profile,partnerText:(latestRoomReply?.text||speakerText||groupRecent?.text||quietRecent?.text||'').slice(0,160),dialogue:dialogue.turns}
+    profile,partnerText:(latestRoomReply?.text||speakerText||quietRecent?.text||'').slice(0,160),dialogue:dialogue.turns}
    try{semantic=await this.classify(attentionMessageText(event),signal,attentionContext,value=>{classification=value},frame)}catch{signal.throwIfAborted()}
    signal.throwIfAborted()
    const link=semantic?.link,index=link?.index
@@ -251,13 +257,13 @@ export class QqGroupAutonomy {
     const turn=dialogue.turns[index]
     if(turn&&turn.speaker!==1){
      linkedMessageId=dialogue.ids[index]
-     if(current&&linkedMessageId&&!current.parentId)current.parentId=linkedMessageId
+     // Semantic links are candidates for this decision only. Persisting one as
+     // a quote feeds an earlier guess back to the classifier as a new fact.
      semantic={...semantic,recipient:{label:turn.speaker===0?'partner':'member',confidence:link.confidence,margin:link.margin}}
     }
    }
    if(memberClarification&&!linkedMessageId&&!isAttentionCall(semantic)){
     linkedMessageId=memberClarification.id
-    if(current&&!current.parentId)current.parentId=linkedMessageId
     result={reply:false,route:'other',score:0,probability:0,reasons:['短追问复述了上一位群友的发言，先旁听']}
    }
    result??=scoreGroupReply(event,{...context,...(semantic?{semantic}:{})})

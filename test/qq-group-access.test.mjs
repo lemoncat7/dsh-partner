@@ -28,7 +28,7 @@ test('a silent group turn is background rather than a pending question on the ne
  f.setReply({text:'新的回复',attachments:[]})
  await f.handle({...f.event,id:'new-input',text:'现在的新问题'})
  assert.match(f.inputs[1][3].text,/"messageId":"quiet"[^\n]*"replyState":"silent"/)
- assert.match(f.inputs[1][3].text,/本轮回应对象（渠道记录）：\{"messageId":"new-input"/)
+ assert.match(f.inputs[1][3].text,/本轮当前发言（渠道记录）：\{"messageId":"new-input"/)
  assert.equal(f.sent.length,1)
 })
 test('a failed historical attachment is retired and cannot contaminate subsequent unrelated text',async()=>{

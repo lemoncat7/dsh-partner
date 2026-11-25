@@ -329,7 +329,7 @@ test('a new speaker can ask for a followup to the last delivered room reply',asy
  assert.equal(f.gate.status('c').followupRequest,true)
  assert.equal(f.gate.status('c').addressed,true)
  assert.equal(f.gate.status('c').linkedMessageId,'reply:有对应链接么')
- assert.match(f.gate.guidance('c',request),/当前发言关联的前文/)
+ assert.match(f.gate.guidance('c',request),/本地推测的关联候选/)
  assert.match(f.gate.guidance('c',request),/有对应链接么/)
  f=fixture()
  f.gate.observe('c',input('另外那条我先问小赵',{userId:'44556677'}))
@@ -344,7 +344,7 @@ test('a new speaker can ask for a followup to the last delivered room reply',asy
  f.gate.observe('c',agreement)
  assert.equal(await f.gate.shouldReply('c',agreement,companion,signal()),false,'similarity alone does not identify a request')
 })
-test('interleaved conversation preserves two reply chains and uses the selected parent’s speaker',async()=>{
+test('interleaved conversation uses the selected speaker without turning semantic links into quoted reply chains',async()=>{
  let now=context.now
  let frame
  const member={userId:'33445678'},third={userId:'44556677'}
@@ -367,9 +367,9 @@ test('interleaved conversation preserves two reply chains and uses the selected 
  const last=add('那把第二版也附上',third)
  assert.equal(await decide(last),false)
  const traced=frame.dialogue.find(turn=>turn.text===a.text)
- assert.equal(frame.dialogue[traced.replyTo].text,'旧版也能导出')
+ assert.equal(traced.replyTo,undefined,'a guessed target must not become a quote in the next classification')
  const human=frame.dialogue.find(turn=>turn.text==='我来取过去')
- assert.equal(frame.dialogue[human.replyTo].text,'下班前这箱我会放前台')
+ assert.equal(human.replyTo,undefined,'human-to-human guesses must not become quotes either')
  assert.doesNotMatch(JSON.stringify(frame.dialogue),/33445678|44556677/)
 })
 test('shared conversation stays selective and cannot inherit silence, another room or a future send',async()=>{
