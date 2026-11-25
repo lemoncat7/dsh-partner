@@ -10,6 +10,38 @@ const forbidden={get(){throw Error('must not resolve a remote model')}}
 const unavailable=async()=>undefined
 const input=(text,group={},id=text)=>({...event,id,text,qqGroup:{...event.qqGroup,...group}})
 
+test('group background distinguishes observed, silent and delivered messages from the current reply target',async()=>{
+ let now=context.now
+ const gate=new QqGroupAutonomy(forbidden,()=>now,unavailable)
+ const skipped=input('你们玩过战锤吗',{},'skipped');gate.observe('c',skipped)
+ assert.equal(await gate.shouldReply('c',skipped,companion,signal()),false)
+ now+=1000
+ const quiet=input('旧话题的补充',{userId:'33445678'},'quiet');gate.observe('c',quiet);gate.settled('c',quiet,'silent')
+ const replaced=input('已被新话替代',{userId:'33445678'},'replaced');gate.observe('c',replaced);gate.settled('c',replaced,'superseded')
+ const delivered=input('已回答的问题',{},'delivered');gate.observe('c',delivered);gate.replied('c',delivered,'已送达的答案')
+ gate.settled('c',delivered,'silent')
+ now+=1000
+ const current={...input('',{userId:'44556677',senderName:'新的发言人'},'new-picture'),media:[{kind:'image',source:'fixture'}]};gate.observe('c',current)
+ const rows=JSON.parse(gate.context('c',current))
+ assert.equal(rows.find(r=>r.messageId==='skipped').replyState,'observed')
+ assert.equal(rows.find(r=>r.messageId==='quiet').replyState,'silent')
+ assert.equal(rows.find(r=>r.messageId==='replaced').replyState,'superseded')
+ assert.equal(rows.find(r=>r.messageId==='delivered'&&r.kind==='member').replyState,'replied')
+ assert.ok(!rows.some(r=>r.messageId==='new-picture'),'background never contains the new input itself')
+ assert.match(gate.guidance('c',current),/"messageId":"new-picture","speaker":"新的发言人","qqId":"44556677"/)
+ assert.match(gate.guidance('c',current),/不是等待补答的请求/)
+})
+test('an unrelated image does not resurrect five-minute-old chatter, while a text followup can still consult it',()=>{
+ let now=context.now
+ const gate=new QqGroupAutonomy(forbidden,()=>now,unavailable)
+ gate.observe('c',input('旧的低功耗模式话题',{userId:'33445678'},'old'))
+ now+=5*60_000
+ const picture={...input('',{},'picture'),media:[{kind:'image',source:'fixture'}]};gate.observe('c',picture)
+ assert.ok(!JSON.parse(gate.context('c',picture)).some(r=>r.messageId==='old'))
+ const followup=input('刚才低功耗模式的那段是什么意思',{},'followup');gate.observe('c',followup)
+ assert.ok(JSON.parse(gate.context('c',followup)).some(r=>r.messageId==='old'))
+})
+
 test('explicit calling and validated reply relationships take precedence over semantics',()=>{
  for(const text of ['小明？','小明你怎么看','小明。出来聊聊']){
   const result=scoreGroupReply(input(text),context);assert.equal(result.reply,true,text);assert.equal(result.route,'direct')
@@ -399,6 +431,34 @@ test('attachment-only input can follow the last confirmed reply regardless of me
   assert.equal(gate.status('c').attachmentFollowup,true)
   assert.equal(gate.status('c').addressed,false)
   assert.ok(JSON.parse(gate.context('c',next)).some(row=>row.text==='这是伙伴上一条回复'))
+ }
+})
+test('image-only sharing reaches visual conversation after interleaved members or without a recent reply',async()=>{
+ for(const mode of ['cold','interleaved','other-speaker']){
+  let now=context.now
+  const gate=new QqGroupAutonomy(forbidden,()=>now,async()=>assert.fail('text-only attention must not reject images'))
+  if(mode!=='cold'){
+   const first=input('小明你怎么看',{},'first');gate.observe('c',first);gate.replied('c',first,'我觉得挺有意思')
+   now+=40_000;gate.observe('c',input('插一句',{userId:'33445678'},'other'))
+   if(mode==='other-speaker')gate.replied('c',input('插一句',{userId:'33445678'},'other'),'接了另一位群友的话')
+  }
+  now+=1000
+  const picture={...input('',{},'picture'),receivedAt:now,media:[{kind:'image',source:'fixture'}]}
+  gate.observe('c',picture)
+  assert.equal(await gate.shouldReply('c',picture,companion,signal()),true,mode)
+  assert.equal(gate.status('c').route,'opportunity')
+  assert.equal(gate.status('c').addressed,false,'sharing is not an explicit call or private permission')
+  assert.match(gate.guidance('c',picture),/没有配字不等于没有交流内容/)
+ }
+})
+test('image sharing retains recipient, sleep and busy-work boundaries',async()=>{
+ for(const mode of ['other-mention','quoted-other','unknown-quote','sleep','busy']){
+  const gate=new QqGroupAutonomy(forbidden,()=>context.now,unavailable)
+  const group=mode==='other-mention'?{otherMention:true}:mode==='quoted-other'?{replyTo:'other',hasReply:true}:mode==='unknown-quote'?{hasReply:true}:{}
+  const picture={...input('',group,'picture'),media:[{kind:'image',source:'fixture'}]}
+  gate.observe('c',picture)
+  const c=mode==='sleep'?{...companion,sleepPolicy:{enabled:true},sleepState:{episode:{wakeAt:context.now+60_000}}}:companion
+  assert.equal(await gate.shouldReply('c',picture,c,signal(),undefined,mode==='busy'),false,mode)
  }
 })
 test('an attachment cannot extend a different, interrupted or unconfirmed conversation',async()=>{

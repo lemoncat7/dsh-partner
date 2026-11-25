@@ -27,6 +27,23 @@ async function fixture(t,preferences,images){
  const start=()=>tool.execute({action:'start',label:'整理',input:'目标：整理 /tmp/reference.md 并生成配图'},exec)
  return {state,parent,route,store,service,tool,exec,start,calls,sent,updates,result,guards,ctx,deliver,native,resumes,resumeResult,handlers,disposed:()=>disposed,setEvents:v=>{events=v},event}
 }
+test('a reworded download of the same Bilibili video updates the running task instead of starting another child',async t=>{
+ const f=await fixture(t)
+ const first=await f.tool.execute({action:'start',label:'提取B站福建舰视频',input:'下载视频 https://www.bilibili.com/video/BV1W9o9BNET1 保存原始画质文件'},f.exec)
+ const message=f.event('update');message.data.content=[{type:'text',text:'我以为你没在干活，视频到底能不能下载'}];f.setEvents([message])
+ const next=await f.tool.execute({action:'start',label:'下载福建舰B站视频',input:'把 BV1W9o9BNET1 下载到 media/ 并交付到原会话'},f.exec)
+ assert.equal(next.taskId,first.taskId);assert.equal(next.updated,true)
+ assert.equal(f.calls.length,1);assert.equal(f.updates.length,1)
+})
+test('sharing a BV identity does not merge a different objective or an explicitly independent task',async t=>{
+ for(const mode of ['analysis','different-video','explicit-new']){
+  const f=await fixture(t)
+  const first=await f.tool.execute({action:'start',label:'提取B站视频',input:'下载 BV1W9o9BNET1 原始视频'},f.exec)
+  const message=f.event('update');message.data.content=[{type:'text',text:mode==='explicit-new'?'另开一个独立任务':'处理这个要求'}];f.setEvents([message])
+  const next=await f.tool.execute({action:'start',label:mode==='analysis'?'分析视频内容':'下载B站视频',input:mode==='different-video'?'下载 BV1ZDgrzRE8H 原始视频':mode==='analysis'?'分析 BV1W9o9BNET1 的视频内容':'下载 BV1W9o9BNET1 原始视频另存一份'},f.exec)
+  assert.notEqual(next.taskId,first.taskId,mode);assert.equal(f.calls.length,2,mode)
+ }
+})
 const waitFor=async predicate=>{for(let n=0;n<100;n++){if(predicate())return;await new Promise(r=>setTimeout(r,10))}assert.fail('completion did not settle')}
 test('native acceptance returns immediately; ordinary chat does not cancel and result keeps original group',async t=>{
  const f=await fixture(t),accepted=await f.start();assert.equal(accepted.status,'running');assert.equal(f.sent.length,0)
@@ -639,4 +656,38 @@ test('oversized body recovery selects native offload occurrences only from the f
  const session={surface:{nodes:[1,2,3]},eventAt:seq=>events.get(seq),deriveEventMessage:e=>({content:e.blocks}),append:(...args)=>operations.push(args)}
  assert.equal(offloadBackgroundImages(session),true)
  assert.deepEqual(operations,[['image/offload',{targets:[{seq:1,imageIndexes:[1]},{seq:3,imageIndexes:[0]}]}]])
+})
+
+test('legacy recovery keeps business identity and workspace while binding the native seeded child before startup',async t=>{
+ const f=await fixture(t),accepted=await f.start(),original=f.state.executionRuns[0]
+ await f.tool.execute({action:'pause',taskId:accepted.taskId},f.exec)
+ f.result.resolve({stopReason:'aborted'});await new Promise(r=>setTimeout(r,0))
+ const seed=[{type:'turn/start',seq:0,data:{turn:1}}]
+ f.native.prepareResume=async(childId,parent)=>{assert.equal(childId,accepted.childSessionId);assert.equal(parent,f.parent);return {childId:'native-recovery-child',seed}}
+ const prior=f.native.startActivation
+ f.native.startActivation=async spec=>{
+  assert.equal(f.state.executionRuns[0].sessionId,spec.childId,'task and tool authority bind before native agent creation')
+  assert.equal(spec.cwd,original.background.cwd);assert.deepEqual(spec.seed,seed)
+  return {...await prior(spec),result:f.resumeResult.promise}
+ }
+ f.setEvents([f.event('update')])
+ const receipt=await f.tool.execute({action:'resume',taskId:accepted.taskId},f.exec)
+ assert.equal(receipt.taskId,accepted.taskId);assert.equal(receipt.childSessionId,'native-recovery-child')
+ assert.deepEqual(f.state.executionRuns[0].background.previousSessionIds,[accepted.childSessionId])
+ f.resumeResult.resolve({stopReason:'completed',structured:{text:'接续已有产物完成',files:[]}})
+ await waitFor(()=>f.state.executionRuns[0].background.deliveredAt)
+ assert.equal(f.sent.length,1);assert.equal(f.sent[0].run.background.userId,original.background.userId)
+})
+
+test('failed native seeded recovery retains the original legacy session for a later attempt',async t=>{
+ const f=await fixture(t),accepted=await f.start()
+ await f.tool.execute({action:'pause',taskId:accepted.taskId},f.exec)
+ f.result.resolve({stopReason:'aborted'});await new Promise(r=>setTimeout(r,0))
+ f.native.prepareResume=async()=>({childId:'rejected-native-child',seed:[]})
+ f.native.startActivation=async()=>{throw Error('native factory rejected corrupt seed')}
+ f.setEvents([f.event('update')])
+ await assert.rejects(f.tool.execute({action:'resume',taskId:accepted.taskId},f.exec),/corrupt seed/)
+ assert.equal(f.state.executionRuns[0].sessionId,accepted.childSessionId)
+ assert.deepEqual(f.state.executionRuns[0].background.previousSessionIds,[])
+ assert.equal(f.state.executionRuns[0].status,'canceled')
 })

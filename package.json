@@ -1,6 +1,6 @@
 {
   "name": "@lemoncat7/dsh-partner",
-  "version": "2.29.0",
+  "version": "2.29.1",
   "description": "Long-lived AI companions with QQ, WeChat, Matrix and Mattermost channels for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",
@@ -31,6 +31,8 @@
     }
   },
   "files": [
+    "docs/releases/2.29.1.md",
+    "docs/releases/2.29.0.md",
     "docs/runtime-maintenance.md",
     "docs/releases/2.26.8.md",
     "docs/releases/2.26.7.md",
@@ -306,7 +308,8 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "pack:check": "npm pack --dry-run",
     "pack:verify": "node scripts/check-package.mjs",
-    "test:sidebar-browser": "node test/sidebar-anchor.browser.mjs"
+    "test:sidebar-browser": "node test/sidebar-anchor.browser.mjs",
+    "test:channels-browser": "node test/channels-common.browser.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.19.0",

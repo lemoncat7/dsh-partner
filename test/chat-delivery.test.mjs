@@ -118,7 +118,7 @@ test('terminal replies stay outside native process folding and leave tool result
     assert.deepEqual(node.data.blocks,nativeChatBlocks(meta))
   }
 })
-test('a reply receipt reuses identical visible text from its own native assistant step',()=>{
+test('a terminal reply receipt shares expression ownership with its own native assistant step',()=>{
   const make=(reply,assistant,kind='tool/result')=>{
     const event={...result,type:kind,data:{...result.data,meta:reply,message:{...result.data.message,toolCallId:'reply-call'},rootCallId:'reply-call'}}
     const location={kind:'step',step:{data:{get:key=>key==='assistant-step'?assistant:undefined}}}
@@ -134,7 +134,13 @@ test('a reply receipt reuses identical visible text from its own native assistan
   assert.deepEqual(make(meta,{...assistant,blocks:[assistant.blocks[0],{kind:'tool-call',callId:'a different call'}]})?.data.blocks,nativeChatBlocks(meta))
   assert.deepEqual(make(meta,{...assistant,status:'interrupted'})?.data.blocks,nativeChatBlocks(meta))
   const different={...meta,parts:[{type:'text',text:'你终于回来了'}]}
-  assert.deepEqual(make(different,assistant)?.data.blocks,nativeChatBlocks(different))
+  assert.equal(make(different,assistant),null,'terminal companion prose is not another message, even when paraphrased')
+  const duplicate={...meta,parts:[{type:'text',text:'回得快不好吗 又不是我偷懒'}]}
+  const paraphrase={...assistant,blocks:[{kind:'text',text:'回得快不好吗 又不是我在偷懒'},{kind:'tool-call',callId:'reply-call'}]}
+  for(const kind of ['tool/result','tool/ptc-dispatch'])assert.equal(make(duplicate,paraphrase,kind),null)
+  assert.deepEqual(make({...duplicate,intermediate:true},paraphrase)?.data.blocks,nativeChatBlocks(duplicate))
+  assert.deepEqual(make(duplicate,{...paraphrase,blocks:[...paraphrase.blocks,{kind:'tool-call',callId:'other-call'}]})?.data.blocks,nativeChatBlocks(duplicate),'multiple calls may have independent prose')
+  assert.deepEqual(make(duplicate,{...paraphrase,finalNode:{seq:99}})?.data.blocks,nativeChatBlocks(duplicate),'later assistant steps cannot absorb earlier receipts')
   const voice={...meta,parts:[],delivered:true,deliveryKind:'voice',originRouteId:'r',spokenText:assistant.blocks[0].text}
   assert.deepEqual(make(voice,assistant)?.data.blocks,[{kind:'text',text:'[语音已发送]'}])
 })

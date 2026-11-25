@@ -170,10 +170,27 @@ test('autonomous notice refreshes context even without a new user message, then 
  f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'自主活动'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}),{surfaceOp:'append'})
  assert.equal(await f.runtime.prepareConversationContext(f.agent,signal),true)
  assert.match(f.contexts.values().next().value.text,/partner_activity_finish/)
+ assert.match(f.contexts.values().next().value.text,/没有新进来的用户发言/)
+ assert.match(f.contexts.values().next().value.text,/不是对方说的话/)
+ assert.doesNotMatch(f.contexts.values().next().value.text,/【直接回复的节奏】/)
  f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'继续任务'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴执行看板任务'}}),{surfaceOp:'append'})
  await f.runtime.prepareConversationContext(f.agent,signal);assert.doesNotMatch(f.contexts.values().next().value.text,/partner_activity_finish/)
  f.input('在吗');await f.runtime.prepareConversationContext(f.agent,signal)
  assert.doesNotMatch(f.contexts.values().next().value.text,/partner_activity_finish/)
+})
+
+test('autonomous wake does not select lore using the last answered user question',async()=>{
+ const f=fixture(false),signal=new AbortController().signal
+ f.config.companion.characterCard.lore=[{id:'old-topic',title:'旧问题',enabled:true,keywords:['专属旧话题'],content:'OLD_TOPIC_LORE'}]
+ f.input('专属旧话题怎么处理')
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.values().next().value.text,/OLD_TOPIC_LORE/)
+ f.agent.session.append('user/message',createUserMessage({content:[{type:'text',text:'内部活动提示'}],source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'伙伴闲时主动联系'}}),{surfaceOp:'append'})
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.doesNotMatch(f.contexts.values().next().value.text,/OLD_TOPIC_LORE/)
+ f.input('还想谈谈专属旧话题')
+ await f.runtime.prepareConversationContext(f.agent,signal)
+ assert.match(f.contexts.values().next().value.text,/OLD_TOPIC_LORE/)
 })
 
 test('QQ role relationship requires role chat, then refreshes binding independently of tool discovery and revisions',async()=>{

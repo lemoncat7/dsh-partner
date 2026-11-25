@@ -5,6 +5,7 @@ export interface ExecutionRun {
   sessionCleanup?:{parentSessionId?:string;deletedAt?:number;catalogRemovedAt?:number}
 
   background?: {
+    previousSessionIds?:string[];
     imageReferences?:import('../attachments/image-references.js').ImageReferencePlan;
     retries?:number; retryMode?:import('./background-retry.js').BackgroundRetryMode; stoppedAt?:number; interruptedAt?:number; supplementInputIds?:string[];
     review?:import('./background-review.js').BackgroundReview;reviewResumed?:boolean;

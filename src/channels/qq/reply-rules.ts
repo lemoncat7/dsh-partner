@@ -82,6 +82,9 @@ export function routeGroupReply(event:DirectMessage,context:ReplyScoreContext):R
  if(!text&&event.media?.length){
   if(context.attachmentFollowup)return decide(true,'continuation','附件紧邻发给同一群友的已送达回复，由模型决定是否接话')
   if(context.quickContinuation&&activeConversation(context))return decide(true,'continuation','同一成员紧接着补发了附件')
+  // The local attention model reads text only. An image is itself a share,
+  // so let the conversation model see it before deciding to speak or stay quiet.
+  if(event.media.some(media=>media.kind==='image'))return decide(true,'opportunity','收到图片分享，结合图片与群聊上下文决定是否接话')
  }
  return undefined
 }

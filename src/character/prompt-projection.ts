@@ -6,7 +6,7 @@ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 const TOOL_SECTIONS: Record<string, readonly string[]> = {
   'tool:read': ['read'], 'tool:write': ['write'], 'tool:edit': ['edit'],
   'tool:glob': ['glob'], 'tool:grep': ['grep'], 'tool:bash': ['bash'],
-  'tool:jobs': ['job_output', 'job_kill'],
+  'tool:jobs': ['job_list', 'job_output', 'job_kill'],
   'tool:goal': ['create_goal', 'get_goal', 'update_goal'],
   'tool:workflow': ['workflow'], 'tool:subagent': ['subagent', 'subagent_fork'],
   'tool:subagent_fork': ['subagent', 'subagent_fork'],

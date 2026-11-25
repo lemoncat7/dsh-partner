@@ -10,8 +10,9 @@ import type { QqSettings } from './settings.js'
 import { activeConversation, attentionMessageText, mentionsOtherRecipient, conversationEnded, clarificationSubject, routeGroupReply, scoreGroupReply, topicContinues, topicSimilarity, type ReplyScoreContext, GROUP_CONVERSATION_WINDOW_MS } from './reply-rules.js'
 import { isAttentionCall, recognizedLink, recognizedRecipient, type AttentionTurn, type AttentionClassifier, type AttentionDiagnostic, type AttentionFrame, type AttentionPrediction } from './attention-classifier.js'
 
-type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;redirect:boolean;at:number;receivedAt:number;sequence:number}
-type Conversation={at:number;text:string;input:string;recipient:string;observedSequence:number}
+type ReplyState='observed'|'admitted'|'replied'|'silent'|'superseded'
+type Observation={id:string;sender:string;qqId:string;text:string;recipient?:string;parentId?:string;replyState?:ReplyState;redirect:boolean;at:number;receivedAt:number;sequence:number}
+type Conversation={messageId:string;at:number;text:string;input:string;recipient:string;observedSequence:number}
 type Group={messages:Observation[];replies:Map<string,Conversation>;roomReplies:Array<Conversation&{messageId:string}>;sequence:number}
 export interface GroupDecision {at:number;groupId:string;reason:string;messageId?:string;method?:'local';score?:number;probability?:number;reasons?:string[];route?:string;addressed?:boolean;linkedMessageId?:string;followupRequest?:boolean;attachmentFollowup?:true;decisionMs?:number;contextSize?:number;discussionParticipants?:number;classification?:AttentionDiagnostic;semantic?:AttentionPrediction}
 const CONTEXT_TTL_MS=10*60_000
@@ -24,6 +25,10 @@ export class QqGroupAutonomy {
  constructor(_ctx:Context,private readonly now=()=>Date.now(),private readonly classify:AttentionClassifier=async()=>undefined){}
  status(channelId:string){return this.decisions.get(channelId)}
  history(channelId:string){return structuredClone(this.decisionHistory.get(channelId)??[])}
+ settled(channelId:string,event:DirectMessage,state:ReplyState):void {
+  const row=this.groups.get(channelId+':'+event.qqGroup?.groupId)?.messages.find(m=>m.id===event.id)
+  if(row&&row.replyState!=='replied')row.replyState=state
+ }
  record(channelId:string,event:DirectMessage,reason:string):false {
   if(this.decisions.size>=100&&!this.decisions.has(channelId)){const key=this.decisions.keys().next().value!;this.decisions.delete(key);this.decisionHistory.delete(key)}
   const decision:GroupDecision={at:this.now(),groupId:event.qqGroup?.groupId??'',messageId:event.id,reason}
@@ -50,7 +55,7 @@ export class QqGroupAutonomy {
   const parentId=quoted?.id??existing?.parentId
   group.messages=group.messages.filter(m=>m.id!==event.id&&now-m.at<=QUIET_CONVERSATION_WINDOW_MS)
   const recipient=event.qqGroup.mentioned||event.qqGroup.replyTo==='self'?'partner':event.qqGroup.replyTo==='other'?event.qqQuote?.senderId:undefined
-  group.messages.push({id:event.id,qqId:event.qqGroup.userId,sender:event.qqGroup.senderName||event.qqGroup.userId,text:(event.text||'（附件消息）').slice(0,1200),...(recipient?{recipient}:{}),...(parentId?{parentId}:{}),redirect,at,receivedAt,sequence})
+  group.messages.push({id:event.id,qqId:event.qqGroup.userId,sender:event.qqGroup.senderName||event.qqGroup.userId,text:(event.text||'（附件消息）').slice(0,1200),...(recipient?{recipient}:{}),...(parentId?{parentId}:{}),replyState:existing?.replyState??'observed',redirect,at,receivedAt,sequence})
   group.messages=group.messages.slice(-32)
   if(this.groups.size>100)this.groups.delete(this.groups.keys().next().value!)
  }
@@ -76,6 +81,7 @@ export class QqGroupAutonomy {
   if(!group)return
   const latest=group.messages.filter(m=>m.qqId===event.qqGroup!.userId).at(-1)
   if(latest?.redirect)return
+  this.settled(channelId,event,'replied')
   const reply={at:this.now(),text:text.slice(0,1200),input:event.text.slice(0,1200),recipient:event.qqGroup.userId,observedSequence:group.sequence,messageId:event.id}
   group.replies.delete(event.qqGroup.userId)
   group.replies.set(event.qqGroup.userId,reply)
@@ -89,13 +95,15 @@ export class QqGroupAutonomy {
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId),messages=group?.messages??[]
   const index=messages.findIndex(m=>m.id===event.id)
   const now=this.now(),receivedAt=index<0?now:messages[index]!.receivedAt
-  const rows=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=CONTEXT_TTL_MS).slice(-16)
-   .map(({qqId,sender,text,at,receivedAt})=>({qqId,sender,text,at,receivedAt,kind:'member'}))
-  for(const [qqId,reply] of group?.replies??[])if(reply.at<=receivedAt&&now-reply.at<=CONTEXT_TTL_MS)
-   rows.push({qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,kind:'partner'})
+  const imageShare=!event.text.trim()&&event.media?.some(media=>media.kind==='image')
+  const contextTtl=imageShare?90_000:CONTEXT_TTL_MS
+  const rows=messages.slice(0,index<0?messages.length:index).filter(m=>now-m.at<=contextTtl).slice(-16)
+   .map(({id,qqId,sender,text,at,receivedAt,replyState,recipient,parentId})=>({messageId:id,qqId,sender,text,at,receivedAt,replyState:replyState??'observed',...(recipient?{recipient}:{}),...(parentId?{replyTo:parentId}:{}),kind:'member'}))
+  for(const [qqId,reply] of group?.replies??[])if(reply.at<=receivedAt&&now-reply.at<=contextTtl)
+   rows.push({messageId:reply.messageId,qqId,sender:'伙伴（已确认送达）',text:reply.text||'（已发送回复，正文未记录）',at:reply.at,receivedAt:reply.at,replyState:'replied',kind:'partner'})
   const preceding=this.precedingAttachmentReply(group,event)??this.quietRecent(channelId,event)
   if(preceding&&!rows.some(r=>r.kind==='partner'&&r.at===preceding.at&&r.qqId===preceding.recipient))
-   rows.push({qqId:preceding.recipient,sender:'伙伴（已确认送达）',text:preceding.text||'（已发送回复，正文未记录）',at:preceding.at,receivedAt:preceding.at,kind:'partner'})
+   rows.push({messageId:preceding.messageId,qqId:preceding.recipient,sender:'伙伴（已确认送达）',text:preceding.text||'（已发送回复，正文未记录）',at:preceding.at,receivedAt:preceding.at,replyState:'replied',kind:'partner'})
   // Group events carry second-level source times; local arrival orders them against send receipts.
   return JSON.stringify(rows.sort((a,b)=>a.receivedAt-b.receivedAt).slice(-16)
    .map(({receivedAt,...row})=>({...row,at:new Date(receivedAt).toISOString(),ageSeconds:Math.max(0,Math.floor((now-row.at)/1000))})))
@@ -161,7 +169,10 @@ export class QqGroupAutonomy {
   const decision=this.decisions.get(channelId)
   const current=decision?.messageId===event.id?decision:undefined
   const matched=!!event.qqGroup&&qqIdentityRelation(settings,event.qqGroup.userId)?.matched===true
-  const guidance=renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined,current?.semantic?.scene,current?.followupRequest,current?.discussionParticipants,matched,(current?.semantic?.profileSimilarity??0)>=.45)
+  const imageShare=!event.text.trim()&&event.media?.some(media=>media.kind==='image')
+  const target='本轮回应对象（渠道记录）：'+JSON.stringify({messageId:event.id,speaker:event.qqGroup?.senderName,qqId:event.qqGroup?.userId})+'。先回应「当前群内发言」中的新内容。群聊背景中的 observed 是当时仅旁听，silent 是已经选择不发言，superseded 是已被新消息替代；都不是等待补答的请求。admitted 只表示曾进入处理，replied 才表示已送达。除非当前发言明确引用或追问，不在新消息触发时补答旧问题，也不将其他群友的旧发言当作当前发言人的话。'
+  const guidance=target+'\n'+renderGroupConversationGuidance(recent?Math.floor((this.now()-recent.at)/1000):undefined,current?.semantic?.scene,current?.followupRequest,current?.discussionParticipants,matched,(current?.semantic?.profileSimilarity??0)>=.45)
+   +(imageShare?'\n当前发言是图片分享。先看实际图片，再结合前文判断表情、玩笑、作品或其他分享的意思；没有配字不等于没有交流内容。按当前人物自然接话，不必要求对方先补文字或说明想做什么。没有合适的新话仍可安静结束，不能凭空描述未能读取的图片。':'')
   if(!current?.linkedMessageId||!event.qqGroup)return guidance
   const group=this.groups.get(channelId+':'+event.qqGroup.groupId)
   const index=group?.messages.findIndex(m=>m.id===event.id)??-1
@@ -271,6 +282,7 @@ export class QqGroupAutonomy {
    if(statusText)result={...result,reasons:[...result.reasons,statusText]}
   }
   this.record(channelId,event,`${result.reply?'进入回复流程':'决定旁听'} · ${result.reasons.join('；')}`)
+  this.settled(channelId,event,result.reply?'admitted':'observed')
   Object.assign(this.decisions.get(channelId)!,{method:'local',score:result.score,probability:result.probability,reasons:result.reasons,route:result.route,addressed:result.reply&&(result.route==='direct'||recognizedCall),...(result.reply&&result.followupRequest?{followupRequest:true}:{}),...(linkedMessageId?{linkedMessageId}:{}),decisionMs:Math.round(performance.now()-started),contextSize:attentionContext.length,...(participants!==undefined&&(result.route==='continuation'||topicContinues(event.text,{...context,...(semantic?{semantic}:{})}))?{discussionParticipants:participants}:{}),...(classification?{classification}:{}),...(semantic?{semantic}:{})})
   if(result.reply&&attachmentFollowup)this.decisions.get(channelId)!.attachmentFollowup=true
   return result.reply

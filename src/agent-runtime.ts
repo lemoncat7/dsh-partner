@@ -1,4 +1,6 @@
 import {backgroundRunRoute} from './execution/background-routing.js'
+import {installMalformedToolRetry} from './execution/malformed-tool-retry.js'
+import {installNativeJobTurns,nativeJobActivity} from './execution/native-job-origin.js'
 import {assertBackgroundArtifactOrigin, backgroundPresentationCallId, recordBackgroundArtifacts} from './execution/background-artifacts.js'
 import {backgroundArtifactReceipt} from './execution/background-artifact-receipt.js'
 import {archiveInboundImage,inboundDay} from './attachments/inbound-archive.js'
@@ -309,6 +311,8 @@ export class PartnerAgentRuntime {
   ) {
     this.configurations = new SessionConfigurationIndex(store)
     const preparations:Array<()=>void>=[]
+    if(typeof this.ctx.on==='function')preparations.push(installMalformedToolRetry(this.ctx,agent=>!!this.configurations.forSession(agent.session.id)))
+    if(typeof this.ctx.on==='function')preparations.push(installNativeJobTurns(this.ctx,agent=>!!this.configurations.forSession(agent.session.id)))
     const refreshIdle=(agent:Agent)=>{
       if(this.closed||agent.status!=='idle'||typeof agent.runMaintenance!=='function')return
       const installed=this.restoredCompositions.get(agent.session.id),configuration=this.configurations.forSession(agent.session.id)
@@ -1308,10 +1312,11 @@ export class PartnerAgentRuntime {
     const committedIds = new Set(committedMessages.map(m => m.id))
     const messages = [...committedMessages, ...(this.admittedInputs?.get(agent) ?? []).filter(m => !committedIds.has(m.id))]
     const last = [...messages].reverse().find(m => m.role === 'user' && m.source.kind === 'user')
-    const query = last && last.role === 'user' ? conversationRecallQuery(textContent(last.content), !!relationEvents) : ''
     const events=relationEvents ?? this.inputEvents(agent)
     const origin=[...events].reverse().find(e=>e.type==='user/message'&&(e.data.source.kind==='user'||isIdleContactNotice(e)||isInternalTaskNotice(e)))
     const autonomous=Boolean(origin&&isIdleContactNotice(origin))
+    // An old, answered question is background, not this activity's recall/lore topic.
+    const query = !autonomous && last && last.role === 'user' ? conversationRecallQuery(textContent(last.content), !!relationEvents) : ''
     const stickerRoute=autonomous&&origin?.type==='user/message' ? state.sessions.find(r=>r.sessionId===agent.session.id&&r.idleContactState?.messageId===origin.data.id) : questionOrigin(agent.session.id,events,state.sessions)
     const stickerTags=companion.characterCard?.enabled&&companion.characterCard.stickersEnabled&&stickerRoute ? await this.stickerTagsContext?.(stickerRoute,signal).catch(()=> '')??'' : ''
     const affectionAudience=currentAffectionAudience(state,companion.id,agent.session.id,events)
@@ -1488,6 +1493,7 @@ export class PartnerAgentRuntime {
       if(seen.has(route.sessionId))continue
       seen.add(route.sessionId)
       const agent=this.handles.get(route.sessionId)?.agent??this.ctx.agents.get(route.sessionId as SessionId)
+      activity.push(...nativeJobActivity(this.ctx,route.sessionId,()=>agent?.session.snapshotEvents()??[],channelId))
       if(agent?.status!=='running')continue
       let activeRoute=route
       if(channelId){

@@ -7,6 +7,31 @@ import {biliActivityProvider} from '../lib/channels/bilibili/activity-provider.j
 function fixture(){const state={companions:[{id:'c'}],channels:[{id:'bilibili-test',platform:'bilibili',companionId:'c',name:'B',accountId:'',enabled:true,updatedAt:1,bilibili:biliSettings()}],sessions:[{id:'s',sessionId:'s',companionId:'c',kind:'local'}],pairings:[]};const store={snapshot:()=>structuredClone(state),isCompanionRemoving:()=>false,update:async fn=>fn(state)};const calls=[];const service=new BilibiliService(store,async(...a)=>{calls.push(a);return {ok:true}});return {state,store,calls,service,c:state.channels[0]}}
 const signal=()=>new AbortController().signal
 const bv='BV1xx411c7mD'
+test('the observed video_info request resolves to canonical public video without changing login state',async()=>{
+ const f=fixture();f.c.accountId='123'
+ const tool=bilibiliTool('c',f.store,f.service),exec={signal:signal(),agent:{session:{id:'s',header:{cwd:'/tmp'},snapshotEvents:()=>[]}}}
+ const description=await tool.execute({action:'describe',operation:'video_info'},exec)
+ assert.equal(description.operation,'video');assert.equal(description.login,false)
+ await tool.execute({action:'call',operation:'video_info',params:{bvid:bv}},exec)
+ assert.equal(f.calls[0][1],'video');assert.equal(f.c.accountId,'123')
+})
+test('unknown or disabled Bilibili operations do not falsely report a login failure',async()=>{
+ const f=fixture();f.c.accountId='123'
+ const tool=bilibiliTool('c',f.store,f.service),exec={signal:signal(),agent:{session:{id:'s',header:{cwd:'/tmp'},snapshotEvents:()=>[]}}}
+ await assert.rejects(tool.execute({action:'describe',operation:'not_an_api'},exec),error=>/操作不存在/.test(error.message)&&!/登录/.test(error.message))
+ f.c.bilibili={enabledActions:[],privateActions:true}
+ await assert.rejects(tool.execute({action:'call',operation:'video_info',params:{bvid:bv}},exec),/操作 video 未开启/)
+ await assert.rejects(tool.execute({action:'describe',channelId:'wrong-channel',operation:'video'},exec),error=>/渠道/.test(error.message)&&!/登录/.test(error.message))
+ assert.equal(f.c.accountId,'123');assert.equal(f.calls.length,0)
+})
+test('Bilibili distinguishes missing authentication from a disabled account capability',async()=>{
+ const f=fixture();f.c.bilibili={privateActions:true,enabledActions:['favorite_lists']}
+ const tool=bilibiliTool('c',f.store,f.service),exec={signal:signal(),agent:{session:{id:'s',header:{cwd:'/tmp'},snapshotEvents:()=>[]}}}
+ await assert.rejects(tool.execute({action:'describe',operation:'favorite_lists'},exec),/账号尚未登录/)
+ f.c.accountId='123';f.c.bilibili.privateActions=false
+ await assert.rejects(tool.execute({action:'describe',operation:'favorite_lists'},exec),/账号已登录，但登录能力开关未开启/)
+ assert.equal(f.calls.length,0)
+})
 test('public browsing requires no account, unknown/disabled APIs and invalid IDs are rejected',async()=>{const f=fixture();await f.service.call(f.c.id,'share_link',{bvid:bv},signal(),()=>{});assert.equal(f.calls.length,1);await assert.rejects(f.service.call(f.c.id,'like',{bvid:bv,status:true},signal(),()=>{}));await assert.rejects(f.service.call(f.c.id,'video',{bvid:'bad'},signal(),()=>{}));assert.equal(f.calls.length,1);assert.throws(()=>parseBiliSettings({autonomousActions:true,enabledActions:['arbitrary']}))})
 test('activity discovery respects autonomous toggle, enabled APIs and account state',()=>{const f=fixture();assert.equal(biliActivityProvider.discover({channel:f.c,sessions:[],companionId:'c'}).length,0);f.c.bilibili={autonomousActions:true,enabledActions:['search','comment']};let list=biliActivityProvider.discover({channel:f.c,sessions:[],companionId:'c'}).flatMap(x=>x.operations);assert.deepEqual(list,['search']);f.c.accountId='123';list=biliActivityProvider.discover({channel:f.c,sessions:[],companionId:'c'}).flatMap(x=>x.operations);assert.ok(list.includes('comment'))})
 test('write receipts prevent duplicates and survive uncertain completion',async()=>{const f=fixture();f.c.bilibili={autonomousActions:true,enabledActions:['comment']};f.c.accountId='123';const params={bvid:bv,text:'好有趣'};await f.service.call(f.c.id,'comment',params,signal(),()=>{});assert.equal(f.c.bilibiliActivity[0].status,'confirmed');await assert.rejects(f.service.call(f.c.id,'comment',params,signal(),()=>{}));assert.equal(f.calls.length,1);const broken=new BilibiliService(f.store,async()=>{throw Error('timeout')});await assert.rejects(broken.call(f.c.id,'comment',{bvid:bv,text:'另一次'},signal(),()=>{}));assert.equal(f.c.bilibiliActivity.at(-1).status,'unknown');await assert.rejects(f.service.call(f.c.id,'comment',{bvid:bv,text:'另一次'},signal(),()=>{}));assert.equal(f.calls.length,1)})

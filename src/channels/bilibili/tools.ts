@@ -20,7 +20,18 @@ export function bilibiliTool(owner:string,store:PartnerStore,service:BilibiliSer
  const available=(c:typeof channels[number])=>BILI_ACTIONS.filter(op=>biliSettings(c.bilibili).enabledActions.includes(op.id)&&(!op.login||(c.accountId&&biliSettings(c.bilibili).privateActions&&!chatOnly())))
  if(a.action==='list')return {channels:channels.map(c=>({id:c.id,name:c.name,loggedIn:!!c.accountId,actions:available(c).map(({id,title,category,login,write})=>({id,title,category,login,write}))}))}
  const c=a.channelId?channels.find(c=>c.id===a.channelId):channels.length===1?channels[0]:undefined
- const op=BILI_ACTION_MAP.get(a.operation??'');if(!c||!op||!available(c).some(x=>x.id===op.id))throw Error('B 站能力未开启或需要重新登录，请先 list')
+ if(!c)throw Error(channels.length>1&&!a.channelId?'有多个 B 站渠道，请先 list 并指定 channelId':'当前没有匹配的已启用 B 站渠道，请先 list 核对渠道和自主活动开关')
+ // Some providers use the common metadata name despite the published video schema.
+ const operation=a.operation==='video_info'?'video':a.operation
+ const op=BILI_ACTION_MAP.get(operation??'')
+ if(!op)throw Error('B 站操作不存在：'+String(a.operation??'未指定').slice(0,100)+'；视频详情使用 video。请先 list 选择实际操作名，再 describe 核对参数')
+ const policy=biliSettings(c.bilibili)
+ if(!policy.enabledActions.includes(op.id))throw Error('B 站操作 '+op.id+' 未开启，请在渠道配置中开启该能力')
+ if(op.login){
+  if(!c.accountId)throw Error('B 站账号尚未登录，请在渠道配置中扫码登录')
+  if(!policy.privateActions)throw Error('B 站账号已登录，但登录能力开关未开启，请在渠道配置中开启')
+  if(chatOnly())throw Error('当前会话只能使用 B 站公开能力；账号已登录不会授予群友私有权限')
+ }
  if(a.action==='describe')return {channelId:c.id,operation:op.id,title:op.title,schema:op.schema,login:op.login,write:op.write,guidance:bilibiliOperationGuide(op.id),next:'通过 partner_tools action=call、name=partner_bilibili 执行；argumentsJson 内 action 固定为 call，channelId、operation 使用本返回值，params 按 schema 填写，再将整个对象序列化为 JSON 字符串。'}
  if(a.action!=='call')throw Error('操作无效')
  const liveGuard=()=>{guard();const current=store.snapshot().channels.find(x=>x.id===c.id);if(op.login&&chatOnly())throw Error('当前会话只能使用公开能力');if(!current||(autonomous()&&!biliSettings(current.bilibili).autonomousActions))throw Error('B 站自主活动已关闭')}

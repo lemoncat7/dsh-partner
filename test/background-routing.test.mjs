@@ -77,3 +77,17 @@ test('publishing prepared space content stays foreground after lookups, but cann
  assert.match(backgroundRequired('partner_qq',args,accepted),/不能重复/)
  assert.match(backgroundRequired('generate_image',{},looked),/后台/)
 })
+
+test('single native background commands and job controls stay in the parent without spawning an agent',()=>{
+ const busy=[user,call('custom_work',{},'a'),result('a'),call('custom_work',{},'b'),result('b')]
+ for(const name of ['bash','terminal_send']){
+  assert.equal(backgroundRequired(name,{run_in_background:true},busy),undefined)
+  assert.equal(backgroundRequired('partner_tools',{action:'call',name,argumentsJson:'{"run_in_background":true}'},busy),undefined)
+ }
+ for(const name of ['job_list','job_output','job_kill','terminal_open','terminal_read','terminal_list','terminal_signal','terminal_close'])assert.equal(backgroundRequired(name,{},busy),undefined)
+ assert.match(backgroundRequired('bash',{run_in_background:false},[user]),/后台/)
+ assert.match(backgroundRequired('generate_image',{run_in_background:true},[user]),/后台/,'an arbitrary flag does not turn other operations into native jobs')
+ const accepted=[user,call('partner_background_task',{action:'start'},'start'),{type:'tool/result',data:{message:{toolCallId:'start',content:[{type:'text',text:JSON.stringify({kind:'partner-background-v1',taskId:'t',status:'running'})}]}}}]
+ assert.match(backgroundRequired('bash',{run_in_background:true},accepted),/不能重复/)
+ assert.equal(backgroundRequired('job_output',{job_id:'existing'},accepted),undefined)
+})

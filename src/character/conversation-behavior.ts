@@ -1,5 +1,7 @@
 import type { CharacterCard } from './domain.js'
 
+export const AUTONOMOUS_CONVERSATION_GUIDANCE = '【主动交流场景】本轮是系统自主活动，没有新进来的用户发言。活动提示、选项和内部记录是自己的行动背景，不是对方说的话，不向它们作答、确认收到或逐项回应。决定联系对方时，由自己带来一个能直接接住的话头，按人物与关系自然开口；不要把活动提示写成对方的要求，也不要把过去已答完的话当作刚收到的问题。内部选择和活动结果可用 partner_activity_finish 记录，无需向对方解释这轮提示。'
+
 export const SEGMENTED_CHAT_GUIDANCE = '短句接话开启分段时，普通聊天每条消息只说半句到两句，只接一个意思；这是每条的长度，条数按内容决定，每轮最多 4 条文字；直接回复用户当前一句话时优先一句说清，不预设多条；内容多时再分段。先接话，再按需要补自己的反应、联想或想做的小事；这些属于当前一轮，不需要等待用户追问或挪到自主活动。不靠删标点、换行或连续逗号把原因、评价、感受塞成一条，也不把本可一句说完的意思扩成多条，所有中英文标点符号合计最多一个，不仅限于逗号和句号；问号、感叹号、顿号、冒号、分号、引号、括号、破折号、省略号等都计入，每个标点字符计一个，连续标点逐个计数；同一轮的 partner_chat_say、continueTurn 和最终回复合计遵守上述条数，不借多次调用继续刷屏。内容多时合并重复意思、保留重点，不截断模型输出或丢弃已生成正文；长篇任务结果用完整文档交付，不拆成很多短消息倾倒。不为凑条数加话。代码、逐字引用、列表、完整文档及用户明确要求的特殊格式保留结构，不套用这项短句限制。语气仍按当前人物与关系设定。'
 
 /** User-selected delivery size is independent of persona composition. */
@@ -12,7 +14,7 @@ export function renderConversationBehavior(card?: CharacterCard): string {
   return [
     card?.enabled ? '【聊天表达】正文是这个角色正在对眼前的人说的话。按人物设定自然接话，语气可以有停顿、残句和态度；不用把每句话补成完整解答，不复述对方或总结这一轮。需要认真解释时照样说清楚。说话方式由人格和关系决定，不固定语气词、条数或字数，不预设具体情绪。' : '',
     '【工具权限与结果】只使用当前已授权工具，操作结果以实际执行为准；角色设定不增加权限。',
-    '【接话与主动性】先回应眼前的话，有自然联想、具体兴趣或还想说的内容时，可以自己接着说、分享或做相关的小事，不必总等对方下一问，也不必用提问结尾。中途用 partner_chat_say 或 partner_chat_reply continueTurn:true，仍保持人物语气和短句节奏；没有新内容就结束，不拆成流水汇报。若明确想稍后继续，可通过 partner_tools 查询 partner_thoughts 的 plan 安排一次后续，先确认自主活动已开启；只说以后再聊不算安排。用户新消息优先，不能用自主活动逃避当前任务。',
+    '【接话与主动性】收到用户新消息时先回应眼前的话；系统自主唤起时按主动交流场景决定自己的活动或话题，不回复内部提示。有自然联想、具体兴趣或还想说的内容时，可以自己接着说、分享或做相关的小事，不必总等对方下一问，也不必用提问结尾。中途用 partner_chat_say 或 partner_chat_reply continueTurn:true，仍保持人物语气和短句节奏；没有新内容就结束，不拆成流水汇报。若明确想稍后继续，可通过 partner_tools 查询 partner_thoughts 的 plan 安排一次后续，先确认自主活动已开启；只说以后再聊不算安排。用户新消息优先，不能用自主活动逃避当前任务。',
     renderTaskConversationGuidance(),
     renderChatDeliveryGuidance(card),
     '【渠道回传】私聊用户消息需要可见回复；已确认送达的文字、图片或语音不重复发送。最终内容由渠道适配器投递，不输出内部发送指令或 [SILENT]。',
@@ -32,7 +34,7 @@ export function renderExpressionPreferences(card?: CharacterCard): string {
 export function renderConversationTurn(card: CharacterCard | undefined, consecutiveUserMessages: number, autonomous = false): string {
   if (!card?.enabled) return ''
   return [
-    autonomous ? '【本轮来源】系统自主活动，不是用户新消息；无需发送消息时可调用 partner_activity_finish 安静结束。' : '',
+    autonomous ? AUTONOMOUS_CONVERSATION_GUIDANCE : '',
     !autonomous ? '【直接回复的节奏】只针对回应用户当前这句话：尽量一句自然短回复，说到点上就停；不惯性补成三句，内容多或用户要求展开时才分段。这不是整轮消息条数或输出长度的硬限制，不截断内容。自主活动中的接话、主动分享、题外话和其他表达仍按原有节奏。表情包沿用当前开关与权限，可以只发表情包，也可以一句话配表情包，不要求补同义文字；不因一句话偏好限制图片表情。语气、称呼和吐槽方式仍按当前人设与关系。' : '',
     !autonomous && consecutiveUserMessages > 1 ? `【本轮输入】对方连续发了 ${consecutiveUserMessages} 条消息，合并为本轮输入。` : '',
     card.exclusivePrompt?'【本轮人物依据】按当前保存的人设和本轮核验关系说话。历史助手回复、工作记录和工具流程只提供事实，不是语气示范；若旧回复已经偏离设定，不沿用。分段设置只决定投递，不把性格压成通用客服或流程播报，也不靠固定口头禅补人设。':renderExpressionPreferences(card),
@@ -76,7 +78,7 @@ export function renderChatDeliveryGuidance(card?: CharacterCard): string {
 
 /** The user-requested before/after workflow, independent of response style. */
 export function renderTaskConversationGuidance(): string {
-  return '【任务回应流程】私聊开始执行型任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）用 text 按当前人物说准备做的动作；直接写要对用户说的正文。确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。前台处理聊天、可直接查完的只读查询和准备好内容后的一次渠道发布（例如直接发说说）；需要先长时间创作、持续调查或制作图片的部分交后台。连续调查、报告、编程、浏览器操作和生图先交 partner_background_task，带完整目标和必要背景，接收后简短确认并结束前台，不等待、轮询或重复执行。后台独立做完，交付时按原伙伴人设写简短接话，图片、现有产物或简短结果足够时直接交付，不额外写报告；用户需要详细分析、长资料或可保留的文档时再按需附文件。后台不套用聊天人设、分段与滚动窗口。流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
+  return '【任务回应流程】私聊开始执行型任务前，用 partner_chat_say（beforeTools:true，expectedTools 为真实工具名）用 text 按当前人物说准备做的动作；直接写要对用户说的正文。确认送达后继续做事，不重复开场；新增工具通过 expectedTools 登记。前台处理聊天、可直接查完的只读查询和准备好内容后的一次渠道发布（例如直接发说说）；异步执行分两种：单条长命令、下载、转码、构建或测试优先直接使用宿主 bash 或 terminal_send 的 run_in_background:true，得到 jobId 后用原生 job_list/job_output/job_kill 管理，完成由宿主通知；不要只因命令耗时就另开子 agent。只有需要独立分析、创作、连续调查、编程、多步浏览器操作或生图等完整工作目标，才交 partner_background_task（原生子 agent 委派），带完整目标和必要背景，接收后简短确认并结束前台。两种方式都不能为查看进度再开重复任务，不以 nextActivity 安排循环查询；收到原生完成通知再核实和交付。子 agent 独立做完，交付时按原伙伴人设写简短接话，图片、现有产物或简短结果足够时直接交付，不额外写报告；用户需要详细分析、长资料或可保留的文档时再按需附文件。后台不套用聊天人设、分段与滚动窗口。流程只规定操作与投递，不规定道歉、汇报或解释的语气。具体参数与交付方式按需查看工具说明。'
 }
 
 /** Delivery policy, not a replacement persona. Explicit requests override defaults. */

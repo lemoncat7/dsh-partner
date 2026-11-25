@@ -44,6 +44,18 @@ function titleTerms(label:string,input:string):Set<string>{
  return new Set(memoryTerms(text).filter(t=>!/^v?\d+$/i.test(t)))
 }
 
+/** A rephrased request for the same concrete video download is the same work.
+ * Sharing a video alone does not merge analysis, editing or independent tasks.
+ */
+function sameVideoDownload(label:string,input:string,run:ExecutionRun):boolean {
+ const b=run.background!
+ const download=(text:string)=>/下载|提取.{0,12}视频|抓取.{0,12}视频/u.test(text)
+ if(!download(label)||!download(b.label))return false
+ const ids=(text:string)=>[...new Set(text.match(/\bBV[0-9A-Za-z]{10}\b/g)??[])].sort()
+ const requested=ids(input),existing=ids(b.input??'')
+ return requested.length>0&&requested.length===existing.length&&requested.every((id,index)=>id===existing[index])
+}
+
 /** Adopt a correction from the same route only if it matches a unique live objective. */
 export function backgroundFollowup(runs:readonly ExecutionRun[],label:string,input:string,events:readonly SessionEvent[],inputId:string):ExecutionRun|undefined{
  const event=events.find(e=>e.type==='user/message'&&e.data.id===inputId)
@@ -55,6 +67,7 @@ export function backgroundFollowup(runs:readonly ExecutionRun[],label:string,inp
   if(!['queued','running'].includes(run.status)||!run.background)return false
   const b=run.background
   if(b.input?.trim()===input.trim())return true
+  if(sameVideoDownload(label,input,run))return true
   if(!followup)return false
   const words=titleTerms(b.label,b.input??'')
   const matched=[...requested].filter(term=>words.has(term)).length

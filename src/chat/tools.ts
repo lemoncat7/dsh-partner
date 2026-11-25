@@ -1,4 +1,5 @@
 import {NEXT_ACTIVITY_SCHEMA,INTEREST_SCHEMA,saveNextActivity,saveTurnInterest} from '../character/activity-decision.js'
+import {nativeJobCompletion,nativeJobRoute} from '../execution/native-job-origin.js'
 import {taskFollowup,checkTaskReview,TASK_REVIEW_SCHEMA} from './task-followup.js'
 import {sendPreferredVoice,REPLY_DELIVERY_SCHEMA,type ReplyDeliveryOptions} from './preferred-voice.js'
 import {stickerPage,stickerPageBounds} from './sticker-context.js'
@@ -94,12 +95,15 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
       if(!route)throw new Error('不能跨伙伴提交回复')
       const events=agent.session.snapshotEvents()
       const currentStart=[...events].reverse().find(e=>e.type==='turn/start')?.seq??0
-      const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))
+      const job=nativeJobCompletion(agent.session.id,events)
+      if(job&&(job.origin.owner!==owner||!nativeJobRoute(state,job.origin)))throw Error('原生后台任务的原发起人或渠道授权已变化，未发送')
+      const origin=[...events].reverse().find(e=>e.seq>currentStart&&e.type==='user/message'&&!isRequirementDeliveryReceipt(e)&&(e.data.source.kind==='user'||isInternalTaskNotice(e)||isIdleContactNotice(e)))??job?.input
       if(!origin||isInternalTaskNotice(origin))throw new Error('内部任务或自动执行不能用聊天回复结束；请按原任务协议交付')
       const continuing=(raw as {continueTurn?:boolean}).continueTurn===true
+      if(job&&continuing)throw Error('本轮只交付原生后台任务结果，请用最终回复，不另起中途接话')
       const nextActivity=(raw as {nextActivity?:unknown}).nextActivity
       if(continuing&&nextActivity!==undefined&&(nextActivity as {kind?:unknown})?.kind!=='none')throw Error('nextActivity 只在本轮最终回复选择；仍在本轮继续用 continueTurn')
-      const saveNext=async()=>{await saveNextActivity(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),nextActivity,exec.signal);await saveTurnInterest(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),(raw as {interest?:unknown}).interest,exec.signal)}
+      const saveNext=async()=>{if(job)return;await saveNextActivity(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),nextActivity,exec.signal);await saveTurnInterest(owner,store,agent.session.id,()=>agent.session.snapshotEvents(),(raw as {interest?:unknown}).interest,exec.signal)}
       if(continuing&&(raw as {taskDisposition?:unknown}).taskDisposition!==undefined)throw Error('中途接话不提交任务结束状态')
       if (!continuing && (raw as {inlineDetails?: boolean}).inlineDetails !== true) {
         const reports = workExpressionEvidence(events, currentStart).reports

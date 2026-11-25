@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/%40lemoncat7%2Fdsh-partner)](https://www.npmjs.com/package/@lemoncat7/dsh-partner)
 
-当前版本：[2.27.11 更新说明](docs/releases/2.27.11.md)。
+当前版本：[2.29.1 更新说明](docs/releases/2.29.1.md)。
 
 ## 功能
 
@@ -52,11 +52,6 @@ dsh plugin --profile web add @lemoncat7/dsh-partner@latest
 - [发布维护约定](docs/releases/README.md)
 
 QQ 接入说明见 [QQ 渠道（SnowLuma / OneBot v11）](docs/qq-channel.md)：正向 WebSocket 同时收发消息，填写 WS 地址与对应 Token 即可，无需单独填写 HTTP API。配置按连接、私聊、群聊、表情、权限和发送消息分层展示；群聊默认关闭，开启后选择群组及触发方式。
-
-### 2.23.38（本地验证版）
-
-短句接话在中途发言、工具前告知与最终答复共用篇幅提醒；每阶段每次输入最多提醒一次，明确要求详细/原文可展开，不截断正文。人物口吻继续来自角色配置，不内置年龄、称呼或口头禅。详见 [版本说明](docs/releases/2.23.38.md)。
-
 
 ## 宿主兼容策略
 

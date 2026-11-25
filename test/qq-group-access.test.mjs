@@ -21,6 +21,29 @@ function fixture() {
  const event={id:'m',sender:peer,targetId:target,text:'你好',qqGroup:{groupId:'99887766',userId:'22345678',senderName:'访客',mentioned:true,autonomous:true}}
  return {peer,target,channel,state,store,sent,inputs,agents,manager,api,event,setReply:r=>{reply=r},handle:e=>manager.handleDirect(channel,api,e??event,new AbortController().signal)}
 }
+test('a silent group turn is background rather than a pending question on the next input',async()=>{
+ const f=fixture();f.setReply({text:'',attachments:[],chatParts:[]})
+ f.state.companions[0].characterCard={enabled:true}
+ await f.handle({...f.event,id:'quiet',text:'先前的内容'})
+ f.setReply({text:'新的回复',attachments:[]})
+ await f.handle({...f.event,id:'new-input',text:'现在的新问题'})
+ assert.match(f.inputs[1][3].text,/"messageId":"quiet"[^\n]*"replyState":"silent"/)
+ assert.match(f.inputs[1][3].text,/本轮回应对象（渠道记录）：\{"messageId":"new-input"/)
+ assert.equal(f.sent.length,1)
+})
+test('a failed historical attachment is retired and cannot contaminate subsequent unrelated text',async()=>{
+ const f=fixture(),downloads=[]
+ f.manager.groupAutonomy.shouldReply=async(_c,e)=>!!e.text
+ const picture={...f.event,id:'expired-picture',text:'',timestamp:Date.now()-1000,media:[{kind:'image',source:'fixture'}]}
+ await f.handle(picture)
+ f.api.receiveAttachments=async e=>{downloads.push(e.id);throw Error('expired')}
+ await f.handle({...f.event,id:'caption',text:'刚才那张图'})
+ assert.match(f.inputs[0][3].text,/先前附件未能读取/)
+ await f.handle({...f.event,id:'unrelated',text:'另一个新话题'})
+ assert.deepEqual(downloads,['expired-picture'])
+ assert.doesNotMatch(f.inputs[1][3].text,/先前附件未能读取/)
+ assert.equal(f.inputs[1][3].missingReference,false)
+})
 test('group intake releases the next room message when the first enters the reply queue',async()=>{
  const f=fixture()
  let progress,entered,finish
@@ -375,6 +398,19 @@ test('first segment failure is not a sent reply and leaves no finished suppressi
  assert.equal(f.manager.groupReplyWindows.active.size,0);assert.equal(f.manager.groupReplyWindows.recent.size,0)
 })
 
+test('image-only group sharing downloads the image and lets the conversation decide to reply or stay silent',async()=>{
+ for(const silent of [false,true]){
+  const f=fixture(),downloads=[]
+  f.api.receiveAttachments=async e=>{downloads.push(e.id);return [{kind:'image',name:'share.png',data:Buffer.from('image'),mediaType:'image/png'}]}
+  if(silent)f.setReply({text:'',attachments:[],chatParts:[]})
+  await f.handle({...f.event,id:'image-share',text:'',qqGroup:{...f.event.qqGroup,mentioned:false},media:[{kind:'image',source:'fixture'}]})
+  assert.deepEqual(downloads,['image-share'])
+  assert.equal(f.inputs.length,1)
+  assert.equal(f.inputs[0][3].attachments.length,1)
+  assert.equal(f.inputs[0][3].groupReply.kind,'ambient')
+  assert.equal(f.sent.length,silent?0:1)
+ }
+})
 test('silently observed image is attached to a later caption, without downloading bystander pictures or repeating it',async()=>{
  const f=fixture(),downloads=[]
  f.manager.groupAutonomy.shouldReply=async(_c,e)=>!!e.text

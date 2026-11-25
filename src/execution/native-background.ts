@@ -1,4 +1,5 @@
 import {MAX_BACKGROUND_RETRIES,backgroundFollowup,offloadBackgroundImages,retryMode} from './background-retry.js'
+import {installMalformedToolRetry} from './malformed-tool-retry.js'
 import {renderBackgroundImageReferences,type ImageReferencePlan,type PartnerImageReferences} from '../attachments/image-references.js'
 import {runtimeSnapshot,runtimePolicy,runtimeSessionPolicy} from '../companions/runtime-policy.js'
 import {createUserMessage} from '@deepseek-ai/dsh-llm'
@@ -49,7 +50,7 @@ function sameGroupReferenceImages(current:ImageReferencePlan|undefined,next:Imag
  const previous=current?.selected??[]
  return previous.length===next.selected.length&&previous.every((image,index)=>image.id===next.selected[index]?.id)
 }
-const instruction='只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
+const instruction='长耗时的单条命令可用原生 bash/terminal_send run_in_background:true，在本子会话通过 job_output 核实完成和产物，再提交最终清单；不能把 jobId 或已启动当成任务成功。只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
 /** DSH Agents execute the work. The plugin owns task identity and channel delivery. */
 export class NativeBackgroundTasks {
  private readonly children=new Map<string,ActiveChild>()
@@ -57,10 +58,12 @@ export class NativeBackgroundTasks {
  private readonly detachGuard:()=>void
  private readonly detachStore:()=>void
  private readonly detachCreated:()=>void
+ private readonly detachMalformedRetry:()=>void
  private closing=false
  private recovering=false
  private readonly delivering=new Map<string,Promise<void>>()
  constructor(private readonly ctx:Context,private readonly store:PartnerStore,private readonly deliver:(run:ExecutionRun,reply:PartnerReply)=>Promise<void>,private readonly preferences?:(run:ExecutionRun,input:string)=>Promise<string>,private readonly review?:(run:ExecutionRun)=>Promise<unknown>,private readonly images?:PartnerImageReferences,private readonly agents:BackgroundAgentRuntime=new PartnerBackgroundAgents(ctx),private readonly onSettled?:(parentSessionId:string)=>void){
+  this.detachMalformedRetry=typeof ctx.on==='function'?installMalformedToolRetry(ctx,agent=>this.children.has(agent.session.id)):()=>{}
   this.detachGuard=(ctx.tools as ToolRuntime).guard(exec=>{
    const child=exec.agent&&this.children.get(exec.agent.session.id)
    if(!child){
@@ -70,7 +73,7 @@ export class NativeBackgroundTasks {
      const state=runtimeSnapshot(this.store),input=backgroundInput(events),route=backgroundOrigin(exec.agent.session.id,events,state.sessions,input),channel=state.channels.find(c=>c.id===route?.channelId)
      const eligible=route&&(route.kind==='local'||channel?.enabled&&channelReplyAllowed(state,route.channelId,route.userId))
      if(!eligible&&input&&isIdleContactNotice(input))return '当前自主活动的投递来源已失效，本次工作未执行'
-     if(eligible)return '本次工作尚未执行：这是执行型或连续多步任务，必须先通过 partner_background_task action=start 交给原生后台；同一任务正在执行且本轮是补充或修正时使用 update 和原 taskId。input 带完整要求和已完成进度，referenceImages 按顺序传需要使用的会话图片。接收后前台简短确认并结束，不等待、轮询或重复执行。'
+     if(eligible)return '本次工作尚未执行：单条长命令用原生后台 Jobs：bash/terminal_send run_in_background:true，job_list/job_output/job_kill 管理；需要独立分析或连续多步处理的目标必须先通过 partner_background_task action=start 委派子 agent；同一任务正在执行且本轮是补充或修正时使用 update 和原 taskId。input 带完整要求和已完成进度，referenceImages 按顺序传需要使用的会话图片。接收后前台简短确认并结束，不等待、轮询或重复执行。'
     }
     return
    }
@@ -130,9 +133,9 @@ export class NativeBackgroundTasks {
   return model
  }
  tool(owner:string):ToolDefinition {
-  return {name:'partner_background_task',description:'用 start 将需要持续执行的任务交给 DSH 原生后台子任务，例如连续调查、整理报告、编程、生图或多步浏览器操作；接收后立刻返回前台。普通闲聊、可直接查完的只读查询、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
+  return {name:'partner_background_task',description:'用 start 将需要独立推理与连续多步处理的工作委派给 DSH 原生子 agent，例如连续调查、整理报告、编程、生图或多步浏览器操作；接收后立刻返回前台。单条长命令、下载、转码、构建或测试直接用原生 bash/terminal_send run_in_background:true 及 job_list/job_output/job_kill，不必为耗时命令再开子 agent。普通闲聊、可直接查完的只读查询、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
    parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','pause','cancel','resume','stop','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120},referenceImages:{type:'array',maxItems:8,items:{type:'string',minLength:1,maxLength:4096},description:'start、update、resume 时，按顺序交接任务需要的同会话图片编号或归档文件路径。没有参考图变更时省略；明确改为文生图时传空数组。'}}},
-   output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'原生后台任务'}),
+   output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'子 agent 工作委派'}),
    execute:async(raw,exec)=>{
     const args=record(raw),offered=exec.agent;if(!offered)throw Error('任务缺少原会话')
     const registry=this.ctx.get('agents') as {get?:(id:string)=>Agent|undefined}|undefined,parent=registry?.get?.(offered.session.id)??offered
@@ -212,7 +215,7 @@ export class NativeBackgroundTasks {
       const restored=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)!
       try{
        const activation=await this.activate(restored,parent,events,exec.signal,'原发起人明确要求继续这个已取消的任务。保留此前任务上下文与已有产物，只推进未完成部分；已完成或结果未知的外部操作先核实，不重复执行。'+(supplement?'\n本次补充：'+supplement:''),true)
-       return {kind:'partner-background-v1',taskId:id,childSessionId:run.sessionId,name:activation.name,status:'running',resumed:true,independent:true}
+       return {kind:'partner-background-v1',taskId:id,childSessionId:activation.childId,name:activation.name,status:'running',resumed:true,independent:true}
       }catch(error){await this.save(id,r=>{if(r.background?.attempt===restored.background!.attempt){r.status='canceled';r.error='恢复未接收：'+String(error).slice(0,800)}});throw error}
      }
      const child=this.children.get(run.sessionId)
@@ -302,6 +305,24 @@ export class NativeBackgroundTasks {
   return {kind:'partner-background-v1',taskId:run.id,childSessionId:run.sessionId,status,alreadyAccepted:true,updated:claimed}
  }
  private async activate(run:ExecutionRun,parent:Agent,events:ReturnType<Agent['session']['snapshotEvents']>,signal:AbortSignal,input:string,resume:boolean):Promise<BackgroundActivation>{
+  let seed:readonly SessionEvent[]|undefined
+  let legacyChildId:string|undefined
+  if(resume&&this.agents.prepareResume){
+   this.authorize(run,parent)
+   const prepared=await this.agents.prepareResume(run.sessionId,parent,signal)
+   this.authorize(run,parent)
+   if(prepared.childId!==run.sessionId){
+    const previous=run.sessionId
+    legacyChildId=previous
+    await this.save(run.id,r=>{
+     if(r.sessionId!==previous||!active(r)||(r.background?.attempt??0)!==(run.background?.attempt??0))throw Error('后台任务状态已变化')
+     r.background!.previousSessionIds??=[];r.background!.previousSessionIds.push(previous)
+     r.sessionId=prepared.childId
+    })
+    run=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===run.id)!
+    seed=prepared.seed;resume=false
+   }
+  }
   const childId=run.sessionId,id=run.id,attempt=run.background!.attempt??0,route=backgroundRunRoute(runtimeSnapshot(this.store).sessions,run)!
   const startup=new AbortController(),startSignal=AbortSignal.any([signal,startup.signal])
   const child:ActiveChild={run,parent,startup};this.children.set(childId,child)
@@ -322,14 +343,22 @@ export class NativeBackgroundTasks {
    const images=run.background!.imageReferences
    const referenceContext=images?renderBackgroundImageReferences(images):''
    const prompt=[{type:'text' as const,text:input},...(referenceContext?[{type:'text' as const,text:referenceContext}]:[]),...(preferences?[{type:'text' as const,text:preferences}]:[])]
-   const spec={childId,parent,signal:startSignal,label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,authorize,...(!resume&&model?{agentOptions:model}:{})}
+   const spec={childId,parent,signal:startSignal,label:run.background!.label,cwd:run.background!.cwd,prompt,outputSchema,authorize,...(seed?{seed}:{}),...(!resume&&model?{agentOptions:model}:{})}
    child.activation=resume?await this.agents.resumeActivation!(spec):await this.agents.startActivation(spec)
    authorize()
    if(runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)?.status==='canceled')throw Error('任务已被取消')
    await this.save(id,r=>{if(r.status!=='canceled'&&(r.background!.attempt??0)===attempt){r.status='running';r.background!.childName=child.activation!.name}})
    void child.activation.result.then(result=>this.finished(id,result,attempt).catch(error=>this.failed(id,error,attempt,false,result.structured)),error=>this.failed(id,error,attempt)).finally(()=>{release();this.onSettled?.(parent.session.id)}).catch(error=>this.ctx.logger.warn('后台任务收尾失败：'+String(error)))
    return child.activation
-  }catch(error){await child.activation?.dispose().catch(()=>{});release();if(!resume)await this.failed(id,error,attempt);this.onSettled?.(parent.session.id);throw error}
+  }catch(error){
+   await child.activation?.dispose().catch(()=>{});release()
+   if(legacyChildId&&!child.activation)await this.save(id,r=>{
+    if(r.sessionId!==childId||(r.background!.attempt??0)!==attempt)return
+    r.sessionId=legacyChildId!
+    if(r.background!.previousSessionIds?.at(-1)===legacyChildId)r.background!.previousSessionIds.pop()
+   })
+   if(!resume)await this.failed(id,error,attempt);this.onSettled?.(parent.session.id);throw error
+  }
  }
  private releaseChild(id:string):void {const child=this.children.get(id);child?.disposeScope?.();for(const dispose of child?.disposers?.reverse()??[])dispose();this.children.delete(id)}
  private async save(id:string,mutate:(run:ExecutionRun)=>void):Promise<void>{await this.store.update(s=>{const run=s.executionRuns.find(r=>r.id===id);if(run)mutate(run)})}
@@ -514,5 +543,5 @@ export class NativeBackgroundTasks {
    }
   }finally{this.recovering=false}
  }
- async close():Promise<void>{this.closing=true;this.detachStore();for(const child of this.children.values())child.startup.abort();await Promise.allSettled([...this.children.values()].map(c=>c.activation?.dispose()));for(const id of this.children.keys())this.releaseChild(id);this.detachCreated();this.detachGuard()}
+ async close():Promise<void>{this.closing=true;this.detachStore();for(const child of this.children.values())child.startup.abort();await Promise.allSettled([...this.children.values()].map(c=>c.activation?.dispose()));for(const id of this.children.keys())this.releaseChild(id);this.detachCreated();this.detachGuard();this.detachMalformedRetry();this.agents.close?.()}
 }

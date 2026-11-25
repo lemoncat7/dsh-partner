@@ -20,7 +20,11 @@ interface AssistantStepView {
 }
 const normalizeText = (text:string) => text.replace(/\r\n/g,'\n').trim()
 
-/** Suppress only the copy whose call already has identical prose in the native step. */
+/** A terminal call's companion prose and its receipt are one expression.
+ * Providers sometimes paraphrase the authored arguments beside the call. Match
+ * ownership, not text similarity; unrelated calls and intermediate speech keep
+ * their independent content. The native tool result still exposes the receipt.
+ */
 function assistantAlreadyShows(reply: ChatReply, event: SessionEvent, location: ConversationLocation): boolean {
   if(location.kind!=='step')return false
   const callId=event.type==='tool/result'?event.data.message.toolCallId:event.type==='tool/ptc-dispatch'?event.data.rootCallId:undefined
@@ -30,6 +34,8 @@ function assistantAlreadyShows(reply: ChatReply, event: SessionEvent, location: 
   if(native?.status!=='settled'||native.finalNode===undefined||native.finalNode.seq>=event.seq||
     !native.blocks.some(block=>block.kind==='tool-call'&&block.callId===callId))return false
   const shown=normalizeText(native.blocks.flatMap(block=>block.kind==='text'?[block.text]:[]).join(''))
+  const calls=native.blocks.filter(block=>block.kind==='tool-call')
+  if(shown&&!reply.intermediate&&!reply.taskPreamble&&calls.length===1)return true
   const receipt=reply.delivered&&(reply.deliveryKind==='text'||!reply.parts.length)
     ? [reply.spokenText??'']
     : reply.parts.flatMap(part=>part.type==='text'?[part.text]:[])

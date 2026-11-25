@@ -45,7 +45,7 @@ export function backgroundSourceAllowed(state:PartnerState,run:ExecutionRun):boo
  if(route.kind!=='channel'||!ch?.enabled||ch.accountId!==b.accountId||(ch.direct?.baseUrl??'')!==b.baseUrl||directReplyTarget(state,b.channelId,b.userId)!==b.targetId||!channelReplyAllowed(state,b.channelId,b.userId,b.targetId))return false
  return ch.platform!=='qq'||b.audience==='member'||b.audience==='activity'||!!qqIdentityRelation(ch.qq,b.userId)?.matched
 }
-const control=new Set(['partner_background_task','partner_memory_recall','partner_tools','partner_channel_access','partner_stickers','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_continuous_task','partner_schedule','partner_task','partner_task_board','partner_requirement','partner_collaborate'])
+const control=new Set(['job_list','job_output','job_kill','terminal_open','terminal_read','terminal_list','terminal_signal','terminal_close','partner_background_task','partner_memory_recall','partner_tools','partner_channel_access','partner_stickers','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_continuous_task','partner_schedule','partner_task','partner_task_board','partner_requirement','partner_collaborate'])
 function work(name:string,args:Record<string,any>):boolean {
  if(control.has(name)||name==='partner_browser'&&['status','recent','tabs'].includes(args.action))return false
  return needsTaskPreamble(name,args)
@@ -64,6 +64,9 @@ export function backgroundRequired(name:string,args:unknown,events:readonly Sess
  if(start<0)return
  const tail=events.slice(start+1)
  if(backgroundHandoff(tail))return '当前任务已由后台接收，前台不能重复执行'
+ // Native Jobs already runs this operation outside the conversation driver.
+ // It needs no second model or child Session, and retains native job controls.
+ if(['bash','terminal_send'].includes(action.name)&&action.args.run_in_background===true)return
  // Publishing prepared content is a single foreground delivery, even after lookups.
  // Keep the handoff guard above: an accepted background task still owns its work.
  if(action.name==='partner_qq'&&action.args.action==='call'&&action.args.operation==='send_qzone_msg')return

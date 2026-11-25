@@ -1,10 +1,13 @@
 import {inputOrigin} from './input-origin.js'
+import {nativeJobCompletion} from '../execution/native-job-origin.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ChannelSession } from '../domain.js'
 import { isInternalTaskNotice, isRequirementDeliveryReceipt } from './delivery-policy.js'
 
 /** A binding is not an origin. Unknown/browser messages always stay in DSH. */
 export function questionOrigin(sessionId: string, events: readonly SessionEvent[], routes: readonly ChannelSession[]): ChannelSession | undefined {
+  const job=nativeJobCompletion(sessionId,events)
+  if(job)return routes.find(route=>route.id===job.origin.routeId&&route.kind==='channel'&&route.sessionId===sessionId&&route.channelId===job.origin.channelId&&route.userId===job.origin.userId)
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!
     if (isRequirementDeliveryReceipt(event)) continue
