@@ -2,6 +2,12 @@ import type {TaskReviewReceipt} from './task-followup.js'
 import {validNativeEmoji,type NativeEmoji} from './sticker-adapter.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerOutboundAttachment, PartnerReply } from '../channel-message.js'
+import type { CharacterCard } from '../character/domain.js'
+
+/** These chat modes submit public speech explicitly through the chat tools. */
+export function requiresChatReplyReceipt(card?:CharacterCard):boolean {
+  return card?.enabled===true&&(card.segmentedReplies===true||card.stickersEnabled===true)
+}
 
 export type ChatPart = {type:'emoji';emoji:NativeEmoji} | { type: 'text'; text: string } | { type: 'image'; attachment: PartnerOutboundAttachment; url: string; label: string }
 export interface ChatReply { taskReview?:TaskReviewReceipt; kind: 'partner-chat-v1'; parts: ChatPart[]; silent?:boolean; intermediate?:boolean; taskPreamble?:boolean; expectedTools?:string[]; taskDisposition?:'blocked'; inputMessageId?:string; deliveryKind?:'text'|'voice'; transportCallId?:string; delivered?:boolean; spokenText?:string; originRouteId?: string | null }
@@ -36,33 +42,6 @@ export function parseChatInput(raw: unknown): Array<{text:string} | {stickerId:s
   })
   if (total > 12000 || images > 2) throw new Error('一轮最多 12000 字、2 张表情；不需要每轮发表情')
   return parts
-}
-
-/** Some providers put speech beside a terminal tool call instead of inside its arguments.
- * Preserve only that exact call's public text, never reasoning, earlier steps or other tools.
- */
-export function withChatCompanionText(input: Array<{text:string} | {stickerId:string}>, events: readonly SessionEvent[], callId: string | undefined): Array<{text:string} | {stickerId:string}> {
-  // Authored text inside messages is authoritative; surrounding prose can be a paraphrase or preamble.
-  if (!callId || input.some(part=>'text' in part)) return input
-  for (let i=events.length-1;i>=0;i--) {
-    const event=events[i]!
-    if (event.type==='turn/start'||event.type==='user/message') break
-    if (event.type!=='assistant/message') continue
-    const blocks=event.data.message.content
-    const calls=blocks.filter(b=>b.type==='tool-call')
-    if (!calls.some(c=>c.id===callId)) continue
-    if (event.data.interrupted||calls.length!==1) return input
-    const call=calls[0]!
-    if(call.name!=='partner_chat_reply'){
-      if(call.name!=='partner_tools')return input
-      try {const args=JSON.parse(call.arguments);if(args.action!=='call'||args.name!=='partner_chat_reply')return input}catch{return input}
-    }
-    const speech=blocks.filter(b=>b.type==='text').map(b=>b.text.trim()).filter(Boolean).join('\n')
-    if (!speech) return input
-    // The protocol's size limits remain authoritative; a rejected oversized call can be corrected.
-    return parseChatInput({messages:[{text:speech},...input]})
-  }
-  return input
 }
 
 /** Unstructured short chat paragraphs get a delivery fallback (foreground and idle).

@@ -14,7 +14,7 @@ import {ReplyQueue} from './core/reply-queue.js'
 import {renderStickerOpportunity} from './chat/sticker-opportunity.js'
 import {renderBrowserContext} from './browser/context.js'
 import {isPartnerMcpOperation} from './mcp/tool-entry.js'
-import {chatReplyFromEvent} from './chat/protocol.js'
+import {chatReplyFromEvent,requiresChatReplyReceipt} from './chat/protocol.js'
 import {deliveredAttachment} from './attachments/delivery-receipt.js'
 import {taskTool,type GroupTaskFocus} from './channels/qq/task-focus.js'
 import {trackPartnerTools} from './execution/tool-ownership.js'
@@ -510,7 +510,7 @@ export class PartnerAgentRuntime {
     }
     // Wait for the channel completion handler to create/finish its receipt when text is emitted.
     const silent=turn.some(isActivitySilenceRequested)
-    const outgoing=channelReplyPartsAfter(turn,0,true)
+    const outgoing=channelReplyPartsAfter(turn,0,true,requiresChatReplyReceipt(c.characterCard))
     if(route.kind==='channel'&&!silent&&(outgoing.text||outgoing.chatParts?.length)&&!delivery.length&&!state.recentReceipts?.includes('idle:'+plan.sourceInputId))return
     await this.store.update(draft=>{
       const current=draft.companions.find(x=>x.id===c.id),p=current?.activityPlan
@@ -1596,7 +1596,7 @@ export class PartnerAgentRuntime {
       if(event.type==='turn/start'||event.type==='turn/end'||(isInternalTaskNotice(event)&&!isRequirementDeliveryReceipt(event)))directProgress=false
       if(event.type==='user/message'&&event.data.source.kind==='user')directProgress=questionOrigin(agent.session.id,agent.session.snapshotEvents(),runtimeSnapshot(this.store).sessions)?.id===session.id
       const stage=replyStage(event);if(stage)reportProgress(progress,stage)
-      if(directProgress){const activity=replyActivity(event);if(activity)reportProgress(progress,activity)}
+      if(directProgress){const activity=replyActivity(event);if(activity&&(activity.kind!=='text'||!requiresChatReplyReceipt(this.configurations.runtimePolicy(companion.id)?.companion.characterCard)))reportProgress(progress,activity)}
     })
     const detachIntermediate=progress?.sendChat ? installIntermediateDelivery(agent,async(parts,routeId,receipt)=>{
       if(questionOrigin(agent.session.id,agent.session.snapshotEvents(),runtimeSnapshot(this.store).sessions)?.id!==session.id||routeId!==session.id)throw Error('回复对象已变化，中途消息未发送')
@@ -1612,7 +1612,7 @@ export class PartnerAgentRuntime {
       undefined,
       (text,exec,beforeTools,preserveText,inlineDetails)=>renderPersonaDelivery(this.ctx,companion.id,this.store,exec,[{text}],{authored:true,beforeTools,preserveText,inlineDetails,single:true}),
       (text,exec,options)=>sendPreferredVoice(companion.id,this.store,exec,[{text}],options)) : undefined
-    const completion=new ReplyCompletionGuard(agent,()=>!!rolePolicy()?.rules.completionRecovery&&roleReply())
+    const completion=new ReplyCompletionGuard(agent,()=>!!rolePolicy()?.rules.completionRecovery&&roleReply(),()=>requiresChatReplyReceipt(rolePolicy()?.companion.characterCard))
     const detachCompletion=this.ctx.on('agent/turn-stopping',completion.stop)
     const detachCompletionTools=agent.ctx.on('tools/pre-execute',async(exec,next)=>{
       const decision=await next()
@@ -1635,7 +1635,7 @@ export class PartnerAgentRuntime {
       await agent.whenIdle()
       modelEndedAt=Date.now()
     } finally { this.channelReplyOwners.delete(agent.session.id); this.channelReplyFocus.delete(agent.session.id); detachCompletion(); detachCompletionTools(); detachPreamble?.(); detachSpeech?.(); detachIntermediate?.(); detach() }
-    const response:ReturnType<typeof channelReplyPartsAfter> = completion.failed?{text:INCOMPLETE_REPLY,referenceTexts:[]}:channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq)
+    const response:ReturnType<typeof channelReplyPartsAfter> = completion.failed?{text:INCOMPLETE_REPLY,referenceTexts:[]}:channelReplyPartsAfter(agent.session.snapshotEvents(), startSeq,false,requiresChatReplyReceipt(rolePolicy()?.companion.characterCard))
     const stateStarted=Date.now()
     await this.store.update(state => {
       for(const target of state.sessions)if(target.sessionId===session.sessionId)target.lastMessageAt=Date.now()

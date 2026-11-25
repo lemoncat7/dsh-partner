@@ -25,7 +25,7 @@ import { OneBotError } from './qq/connection.js'
 import { isSleeping } from '../character/sleep.js'
 import { isActivitySilenceRequested } from '../character/activity-tool.js'
 import { isIdleContactNotice, idleContactRouteAllowed, lastIdleContactUser } from '../character/idle-contact.js'
-import { replyDeliveryParts, segmentIdleChatReply,chatReplyFromEvent } from '../chat/protocol.js'
+import { replyDeliveryParts, segmentIdleChatReply,chatReplyFromEvent,requiresChatReplyReceipt } from '../chat/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomBytes } from 'node:crypto'
 import type { ChannelSession, ChannelView, Companion, PairingRequest, WeixinChannel } from '../domain.js'
@@ -501,7 +501,7 @@ export class ChannelManager {
         const current=()=>!this.store.isCompanionRemoving(job.origin.owner)&&!!nativeJobRoute(runtimeSnapshot(this.store),job.origin)
         const route=nativeJobRoute(runtimeSnapshot(this.store),job.origin)
         if(!route||route.kind!=='channel'||!current()||this.agents.isArchived(route))return
-        const turn=completedTurnEvents(history,event),parts=channelReplyPartsAfter(turn,0,true)
+        const turn=completedTurnEvents(history,event),parts=channelReplyPartsAfter(turn,0,true,requiresChatReplyReceipt(runtimePolicy(this.store,route.companionId)?.companion.characterCard))
         const final=[...turn].reverse().map(chatReplyFromEvent).find(reply=>reply&&!reply.intermediate)
         if(final?.delivered||!parts.text&&!parts.chatParts?.length)return
         const reply=await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId))
@@ -540,7 +540,7 @@ export class ChannelManager {
           return Boolean(companion && current && activityPolicyCurrent(state,companion,current) && current?.sessionId===session.id && claim?.messageId===notice.data.id && companion.updatedAt===claim.policyRevision && idleContactRouteAllowed(state,companion,route.id) && !isSleeping(companion) && lastIdleContactUser(session.snapshotEvents())?.id===claim.userMessageId && !this.agents.isArchived(route) && !this.store.isCompanionRemoving(route.companionId))
         }
         if(route.kind==='channel' && valid()) {
-          const parts=channelReplyPartsAfter(events,0,true)
+          const parts=channelReplyPartsAfter(events,0,true,requiresChatReplyReceipt(runtimePolicy(this.store,route.companionId)?.companion.characterCard))
           if(parts.text||parts.chatParts?.length) {
             const card=runtimeSnapshot(this.store).companions.find(c=>c.id===route.companionId)?.characterCard
             const reply=segmentIdleChatReply(await prepareChannelReply(parts,route.cwd??partnerCwd(this.defaultCwd,route.companionId)),Boolean(card?.enabled && card.segmentedReplies))
@@ -576,7 +576,7 @@ export class ChannelManager {
       return
     }
     if (!isAutonomousDeliveryTurn(events, history)) return
-    const parts = channelReplyPartsAfter(events, 0, true)
+    const parts = channelReplyPartsAfter(events, 0, true,requiresChatReplyReceipt(runtimePolicy(this.store,route.companionId)?.companion.characterCard))
     if (!parts.text && !parts.referenceTexts.length) return
     const receipt = `outbound:${session.id}:${event.data.turn}`
     await this.queueProactive(route, receipt, await prepareChannelReply(parts, route.cwd ?? partnerCwd(this.defaultCwd, route.companionId)))

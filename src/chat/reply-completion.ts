@@ -20,9 +20,9 @@ function discovery(name:string,args:Record<string,any>):boolean {
   return name==='partner_tools'&&['list','describe','load','unload'].includes(args.action)||name==='partner_mcp'&&['list','describe'].includes(args.action)
 }
 const replyControl=new Set(['partner_chat_progress','partner_chat_say','partner_chat_reply','partner_agreement','partner_channel_access','partner_stickers'])
-export interface ReplyCompletionState { userId:string; phase:'complete'|'execute'|'settle'; files:string[]; deliveries:string[] }
+export interface ReplyCompletionState { userId:string; phase:'complete'|'execute'|'settle'|'reply'; files:string[]; deliveries:string[] }
 /** Evidence for the latest user input in this turn, never a semantic guess from prose. */
-export function replyCompletionState(events:readonly SessionEvent[], inspectOnly=false):ReplyCompletionState|undefined {
+export function replyCompletionState(events:readonly SessionEvent[], inspectOnly=false, requireChatReceipt=false):ReplyCompletionState|undefined {
   const boundary=[...events].reverse().find(e=>e.type==='turn/start')
   if(!boundary)return
   const turn=events.slice(events.indexOf(boundary)+1)
@@ -32,7 +32,8 @@ export function replyCompletionState(events:readonly SessionEvent[], inspectOnly
   const state:ReplyCompletionState={userId:origin.data.id,phase:'execute',files:[],deliveries:[]}
   const last=[...tail].reverse().find(e=>e.type==='assistant/message')
   const pending=pendingActions(events)
-  if(!pending.length&&!failedTaskPreamble(events)&&(tail.some(e=>(chatReplyFromEvent(e)&&!chatReplyFromEvent(e)!.intermediate)||deliveredAttachment(e)) || last?.type==='assistant/message'&&!last.data.interrupted&&!last.data.message.content.some(b=>b.type==='tool-call')&&last.data.message.content.some(b=>b.type==='text'&&b.text.trim())))return {...state,phase:'complete'}
+  const finalText=last?.type==='assistant/message'&&!last.data.interrupted&&!last.data.message.content.some(b=>b.type==='tool-call')&&last.data.message.content.some(b=>b.type==='text'&&b.text.trim())
+  if(!pending.length&&!failedTaskPreamble(events)&&(tail.some(e=>(chatReplyFromEvent(e)&&!chatReplyFromEvent(e)!.intermediate)||deliveredAttachment(e)) || !requireChatReceipt&&finalText))return {...state,phase:'complete'}
   // Reasoning blocks are not user-visible answers. Interrupted/tool/media content is not an empty text stop.
   if(!inspectOnly&&(last?.type!=='assistant/message'||last.data.interrupted||last.data.message.content.some(b=>b.type!=='text'&&b.type!=='reasoning')))return
   const calls=new Map<string,{name:string;args:Record<string,any>}>()
@@ -50,6 +51,7 @@ export function replyCompletionState(events:readonly SessionEvent[], inspectOnly
       if(c.name==='partner_send_attachment'&&typeof value?.deliveryId==='string')state.deliveries.push(value.deliveryId)
     }
   }
+  if(requireChatReceipt&&finalText&&state.phase==='execute'&&!pending.length&&!failedTaskPreamble(events))state.phase='reply'
   return state
 }
 export const INCOMPLETE_REPLY='哎呀，这次卡住啦，没能答完。先到会话里看看进度，再戳我继续吧～'
@@ -59,23 +61,24 @@ export class ReplyCompletionGuard {
   private attempts=0
   private settling:ReplyCompletionState|undefined
   failed=false
-  constructor(private readonly agent:Agent,private readonly active:()=>boolean){}
+  constructor(private readonly agent:Agent,private readonly active:()=>boolean,private readonly requireChatReceipt:()=>boolean=()=>false){}
   stop=({agent,signal}:{agent:Agent;signal:AbortSignal}):void=>{
     if(agent!==this.agent||signal.aborted||!this.active())return
     const events=agent.session.snapshotEvents()
-    let state=replyCompletionState(events)
+    let state=replyCompletionState(events,false,this.requireChatReceipt())
     if(!state||state.phase==='complete')return
     if(state.userId!==this.userId){this.userId=state.userId;this.attempts=0;this.settling=undefined}
     if(this.attempts>=2){this.failed=true;throw Error(INCOMPLETE_REPLY)}
     this.attempts++
     const pending=pendingActions(agent.session.snapshotEvents())
-    this.settling=state.phase==='settle'?state:undefined
-    const action=failedTaskPreamble(agent.session.snapshotEvents())?FAILED_PREAMBLE_NOTICE:pending.length?'仅继续尚未调用的承诺动作，已调用的操作不得重做；若已有失败或无法继续，按事实结束。':state.phase==='execute'?'还没有实际工作提交。继续处理当前用户请求，工具目录与参数说明不等于执行；需要工作就实际调用，不能执行就按事实答复。':'已提交过实际工作。只根据现有工具回执交付或答复，不重新执行或猜测成功。成功生成的文件可通过附件工具交付；发送失败只能按原 deliveryId 重试。其他失败或状态不明请按事实简短说明。'
-    agent.steer(createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'当前请求答复完整性检查'},content:[{type:'text',text:`${pending.length?pendingActionNotice(pending):''} 当前请求尚无最终答复或已确认交付，不能以空正文结束。${action} 已送达的前置回应不要重复。以上仅是内部执行检查，不是对用户的回复稿；不要向用户复述回执、空答复、恢复或工具目录等内部流程。需要答复时沿用当前人格，只说实际结果或具体阻碍，不用空泛道歉代替尚可执行的工作。此恢复留在当前用户回合，不交给自主活动。`}]}))
+    this.settling=state.phase==='settle'||state.phase==='reply'?state:undefined
+    const speech=this.requireChatReceipt()?'当前聊天要求用 partner_chat_reply 的 messages 明确提交对外回复；普通正文不会发送。只把直接对对方说的话写入 text，不把分析、拟回复、人物扮演说明或本检查写入消息。已有普通中途接话且无需补充时按规则用空 messages 收尾；自主群聊没有合适的话可以按现有规则静默结束。':''
+    const action=failedTaskPreamble(agent.session.snapshotEvents())?FAILED_PREAMBLE_NOTICE:pending.length?'仅继续尚未调用的承诺动作，已调用的操作不得重做；若已有失败或无法继续，按事实结束。':state.phase==='reply'?'本轮只需提交聊天回复，不新增或重做工作操作。':state.phase==='execute'?'还没有实际工作提交。继续处理当前用户请求，工具目录与参数说明不等于执行；需要工作就实际调用，不能执行就按事实答复。':'已提交过实际工作。只根据现有工具回执交付或答复，不重新执行或猜测成功。成功生成的文件可通过附件工具交付；发送失败只能按原 deliveryId 重试。其他失败或状态不明请按事实简短说明。'
+    agent.steer(createUserMessage({source:{kind:'plugin:@lemoncat7/dsh-partner',plugin:'@lemoncat7/dsh-partner',form:'notice',summary:'当前请求答复完整性检查'},content:[{type:'text',text:`${pending.length?pendingActionNotice(pending):''} 当前请求尚无最终答复或已确认交付，不能以未提交的正文结束。${speech}${action} 已送达的前置回应不要重复。以上仅是内部执行检查，不是对用户的回复稿；不要向用户复述回执、空答复、恢复或工具目录等内部流程。需要答复时沿用当前人格，只说实际结果或具体阻碍，不用空泛道歉代替尚可执行的工作。此恢复留在当前用户回合，不交给自主活动。`}]}))
   }
   deny(name:string,args:unknown):string|undefined {
     if(!this.settling||!this.active())return
-    const current=replyCompletionState(this.agent.session.snapshotEvents(),true)
+    const current=replyCompletionState(this.agent.session.snapshotEvents(),true,this.requireChatReceipt())
     // While a tool call is live, use the latest actual user id, not the final-answer projection.
     const user=[...this.agent.session.snapshotEvents()].reverse().find(e=>e.type==='user/message'&&e.data.source.kind==='user')
     if(user?.type!=='user/message'||user.data.id!==this.userId)return

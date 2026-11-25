@@ -1,3 +1,4 @@
+import {requiresChatReplyReceipt} from '../chat/protocol.js'
 import { channelReplyPartsAfter } from '../channels/delivery-policy.js'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerState } from '../domain.js'
@@ -23,8 +24,9 @@ export class PartnerNoticeService {
       // Internal task/review/heartbeat turns are summarized by their terminal
       // domain event, not surfaced as duplicate or unfinished assistant replies.
       if (!events.some(item => item.type === 'user/message' && item.data.source.kind === 'user')) return
-      const structured = channelReplyPartsAfter(events, -1)
-      const summary = structured.chatParts ? structured.text : events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
+      const requireReceipt=requiresChatReplyReceipt(companion.characterCard)
+      const structured = channelReplyPartsAfter(events, -1,false,requireReceipt)
+      const summary = structured.chatParts||requireReceipt ? structured.text : events.filter(item => item.type === 'assistant/message' && !item.data.interrupted)
         .map(item => item.type === 'assistant/message' ? item.data.message.content.filter(block => block.type === 'text').map(block => block.type === 'text' ? block.text : '').join('\n').trim() : '')
         .filter(Boolean).at(-1) ?? ''
       if (!summary) return

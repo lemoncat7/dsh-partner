@@ -64,6 +64,7 @@ test('native completion can use the normal reply tool and is delivered once to i
  let concluded=0
  const reply=await tool.execute({messages:[{text:'文件已经下好了'}],delivery:'text'},{agent,signal:new AbortController().signal,concludeTurn(){concluded++}})
  assert.equal(concluded,1);assert.equal(reply.originRouteId,'a')
+ f.session.append('tool/result',{message:{toolCallId:'reply',isError:false,content:[]},meta:reply},{surfaceOp:'append'})
  f.session.append('assistant/message',{turn:2,step:1,message:createAssistantMessage({source:{provider:'test',model:'test'},content:[{type:'text',text:'文件已经下好了'}]}),stream:[]},{surfaceOp:'append'})
  const end=f.session.append('turn/end',{turn:2,reason:{kind:'completed'}})
  const sent=[],manager=new ChannelManager({},f.store,{}, {isArchived:()=>false},'/tmp')

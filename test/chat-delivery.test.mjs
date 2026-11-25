@@ -9,7 +9,7 @@ import {NotificationDelivery} from '../lib/channels/notification-delivery.js'
 import {ChannelManager} from '../lib/channels/manager.js'
 import {channelReplyPartsAfter} from '../lib/channels/delivery-policy.js'
 import {prepareChannelReply} from '../lib/channels/outbound-media.js'
-import {segmentChatInput,segmentIdleChatReply,parseChatInput,replyDeliveryParts,withChatCompanionText} from '../lib/chat/protocol.js'
+import {segmentChatInput,segmentIdleChatReply,parseChatInput,replyDeliveryParts} from '../lib/chat/protocol.js'
 import {StickerLibrary,stickerMediaType} from '../lib/chat/stickers.js'
 import {AttachmentDeliveryService} from '../lib/attachments/service.js'
 import {chatTools} from '../lib/chat/tools.js'
@@ -76,12 +76,11 @@ test('terminal tool snapshots stickers, respects revocation, and never sends to 
   assert.deepEqual(tool.output.presentationMeta({},outcome),outcome)
   events=[start,user,{type:'assistant/message',seq:3,data:{message:{content:[{type:'text',text:'留给你的。'},{type:'tool-call',id:'mixed',name:'partner_chat_reply',arguments:'{}'}]}}}]
   const mixed=await tool.execute({messages:[{stickerId:'builtin-happy'}]},{...exec,callId:'mixed'})
-  assert.deepEqual(mixed.parts.map(p=>p.type),['text','image'])
-  assert.equal(mixed.parts[0].text,'留给你的。')
+  assert.deepEqual(mixed.parts.map(p=>p.type),['image'],'surrounding prose is not part of the explicit sticker payload')
   const transmitted=channelReplyPartsAfter([start,user,{...result,data:{...result.data,meta:mixed}},end],0)
   assert.deepEqual(transmitted.chatParts,mixed.parts)
-  assert.match(transmitted.text,/留给你的/)
-  assert.match(tool.output.render({},mixed)[0].text,/留给你的/)
+  assert.doesNotMatch(transmitted.text,/留给你的/)
+  assert.doesNotMatch(tool.output.render({},mixed)[0].text,/留给你的/)
   card.stickersEnabled=false
   await assert.rejects(tool.execute({messages:[{stickerId:'builtin-happy'}]},exec),/未开启/)
   assert.equal(conclusions,2)
@@ -227,25 +226,6 @@ test('structured replies from browser or another channel cannot be forwarded by 
   }
 })
 
-
-test('mixed provider speech belongs only to its exact terminal call, never reasoning or prior steps',()=>{
-  const input=[{stickerId:'builtin-happy'}]
-  const message={type:'assistant/message',seq:3,data:{message:{content:[{type:'reasoning',text:'private analysis'},{type:'text',text:'来了，给你留着呢。'},{type:'tool-call',id:'chat-1',name:'partner_chat_reply',arguments:'{}'}]}}}
-  const events=[start,user,message]
-  assert.deepEqual(withChatCompanionText(input,events,'chat-1'),[{text:'来了，给你留着呢。'},...input])
-  for(const id of [undefined,'other-call'])assert.deepEqual(withChatCompanionText(input,events,id),input)
-  assert.deepEqual(withChatCompanionText(input,[...events,{...start,seq:5}],'chat-1'),input)
-  assert.deepEqual(withChatCompanionText(input,[...events,{...user,seq:5}],'chat-1'),input)
-  assert.deepEqual(withChatCompanionText(input,[start,user,{...message,data:{...message.data,interrupted:true}}],'chat-1'),input)
-  const mixed=structuredClone(message);mixed.data.message.content.push({type:'tool-call',id:'work',name:'exec',arguments:'{}'})
-  assert.deepEqual(withChatCompanionText(input,[start,user,mixed],'chat-1'),input)
-  const explicit=[{text:'来了，给你留着呢。'},...input]
-  assert.deepEqual(withChatCompanionText(explicit,events,'chat-1'),explicit)
-  const final=[{text:'另一句最终回复'},...input]
-  assert.deepEqual(withChatCompanionText(final,events,'chat-1'),final)
-  const split=[{text:'来了，'},{text:'给你留着呢。'},...input]
-  assert.deepEqual(withChatCompanionText(split,events,'chat-1'),split)
-})
 
 test('QQ origin selects native emoji without dropping text or creating a default sticker attachment',async()=>{
  const {StickerAdapters}=await import('../lib/chat/sticker-adapter.js'),{qqStickerAdapter}=await import('../lib/channels/qq/sticker-adapter.js')

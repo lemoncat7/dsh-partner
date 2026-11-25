@@ -1,3 +1,4 @@
+import {requiresChatReplyReceipt} from '../chat/protocol.js'
 import { createHash } from 'node:crypto'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PartnerState } from '../domain.js'
@@ -76,7 +77,7 @@ export class PushObserver {
     // Requirement delivery has its own single receipt. Internal review/heartbeat
     // turns never become user notifications just because a model turn ended.
     if (turn.some(isRequirementDeliveryReceipt)) return
-    const parts = channelReplyPartsAfter(turn, -1, isAutonomousDeliveryTurn(turn, history))
+    const parts = channelReplyPartsAfter(turn, -1, isAutonomousDeliveryTurn(turn, history),requiresChatReplyReceipt(companion.characterCard))
     if (!parts.text) return
     this.submit({ id: `reply:${session.id}:${event.data.turn}`, companionId: companion.id,
       title: `${companion.name} · 回复完成`, text: parts.text, createdAt: Date.now(), outcome: 'completed' })

@@ -27,7 +27,7 @@ import type { AttachmentDeliveryService } from '../attachments/service.js'
 import { questionOrigin } from '../channels/question-origin.js'
 import { safeMediaName } from '../channel-message.js'
 import { isInternalTaskNotice, isRequirementDeliveryReceipt,isQuietStatus } from '../channels/delivery-policy.js'
-import { parseChatInput, segmentChatInput, withChatCompanionText, type ChatPart } from './protocol.js'
+import { parseChatInput, segmentChatInput, type ChatPart } from './protocol.js'
 import type { StickerLibrary } from './stickers.js'
 import { stickerMediaType } from './stickers.js'
 import { validEmojiPreview, StickerAdapters } from './sticker-adapter.js'
@@ -146,7 +146,9 @@ export function chatTools(owner:string, store:PartnerStore, library:StickerLibra
         return {kind:'partner-chat-v1',parts:[],silent:true,originRouteId:audience!.id}
       }
       if((raw as {expression?:unknown}).expression!==undefined||(raw as {workReply?:unknown}).workReply!==undefined)throw Error('不再二次生成人格回复；请直接按当前人物在 messages 写要发送的正文。')
-      const original=withChatCompanionText(parseChatInput(raw),events,exec.rootCallId??exec.callId).filter(p=>!('text'in p)||!isQuietStatus(p.text))
+      // Only the explicit messages payload is public speech. Surrounding model
+      // prose may contain deliberation even when the provider labels it text.
+      const original=parseChatInput(raw).filter(p=>!('text'in p)||!isQuietStatus(p.text))
       if(!original.length){
         const audience=questionOrigin(agent.session.id,events,state.sessions)
         if(!continuing){await saveNext();exec.concludeTurn()}

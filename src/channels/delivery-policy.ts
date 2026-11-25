@@ -51,8 +51,8 @@ export interface ChannelReplyParts {
   referenceTexts: string[]
 }
 
-/** Select the last non-tool answer per eligible turn, never tool preambles. */
-export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq: number, autonomous = false): ChannelReplyParts {
+/** Select submitted chat parts, or ordinary final text when that chat mode allows it. */
+export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq: number, autonomous = false, requireChatReceipt = false): ChannelReplyParts {
   let direct = autonomous
   let answer = ''
   let chat: ChatPart[] | undefined
@@ -67,8 +67,8 @@ export function channelReplyPartsAfter(events: readonly SessionEvent[], fromSeq:
     if (direct) {
       if(chatDelivered){alreadyDelivered=true;if(!chat&&!answer)hasChat=true}
       if (chat) { ordered.push(...chat); hasChat = true; messages.push(chat.map(p => p.type === 'text' ? p.text : `[表情：${p.type==='emoji'?p.emoji.label:p.label}]`).join('\n\n')) }
-      else if (answer) { messages.push(answer); ordered.push({type:'text',text:answer}) }
-      referenceTexts.push(...references)
+      else if (answer&&!requireChatReceipt) { messages.push(answer); ordered.push({type:'text',text:answer}) }
+      if(!requireChatReceipt)referenceTexts.push(...references)
     }
     answer = ''; references = []; chat = undefined; chatDelivered=false
   }
