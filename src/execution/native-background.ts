@@ -35,11 +35,12 @@ type ChildModel=Pick<Parameters<Agent['model']['select']>[0],'provider'|'model'>
 interface ModelSelectionSettings {current():{enabled:boolean;allowedModels:ChildModel[]}}
 interface ActiveChild {run:ExecutionRun;parent:Agent;startup:AbortController;resumeModel?:ChildModel;agent?:Agent;finalizing?:boolean;fault?:string;activation?:BackgroundActivation|undefined;disposeScope?:()=>void;disposers?:Array<()=>void>}
 const workTools=new Set(['partner_workflow','partner_skill','partner_browser','partner_mcp','partner_bilibili'])
+const MAX_COMPLETION_RESUMES=2
 const forbidden=new Set(['partner_background_task','partner_chat_reply','partner_chat_say','partner_chat_progress','partner_voice_reply','partner_qq_reply','partner_send_attachment','partner_activity_finish','partner_identity','partner_affection','partner_thoughts','partner_habits','partner_sleep','partner_agreement','partner_access_grants','partner_collaborate','partner_requirement','partner_task','partner_schedule'])
 const outputSchema:BackgroundActivationSpec['outputSchema']={type:'object',additionalProperties:false,required:['text','files'],properties:{text:{type:'string'},files:{type:'array',description:'本次交付附件，最多八个',items:{type:'object',additionalProperties:false,required:['path','name','mediaType'],properties:{path:{type:'string'},name:{type:'string'},mediaType:{type:'string'}}}}}}
 function canResume(run:ExecutionRun):boolean{
  const b=run.background
- return !!b&&run.status==='canceled'&&!run.sessionCleanup?.deletedAt&&!b.discardedAt&&!b.stoppedAt&&!b.result&&!b.deliveredAt
+ return !!b&&!run.sessionCleanup?.deletedAt&&!b.discardedAt&&!b.stoppedAt&&(run.status==='waiting'||run.status==='canceled'&&!b.result&&!b.deliveredAt)
 }
 function active(run:ExecutionRun):boolean{
  return run.status==='queued'||run.status==='running'
@@ -50,7 +51,7 @@ function sameGroupReferenceImages(current:ImageReferencePlan|undefined,next:Imag
  const previous=current?.selected??[]
  return previous.length===next.selected.length&&previous.every((image,index)=>image.id===next.selected[index]?.id)
 }
-const instruction='长耗时的单条命令可用原生 bash/terminal_send run_in_background:true，在本子会话通过 job_output 核实完成和产物，再提交最终清单；不能把 jobId 或已启动当成任务成功。只执行本次任务，使用真实工具，不直接发送聊天消息。完成后提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
+const instruction='长耗时的单条命令可用原生 bash/terminal_send run_in_background:true，在本子会话通过 job_output 核实完成和产物，再提交最终清单；不能把 jobId 或已启动当成任务成功。只执行本次任务，使用真实工具，不直接发送聊天消息。仅当完整任务目标实际完成才作为完成成果提交，不能只做检查、测量或准备就停止并假定前台会继续。确实受阻无法推进时如实说明尚未完成的原目标和具体阻碍，不声称根代理正在代做。结束时提交 text 和 files：text 如实说明成果、失败和未完成项；files 只填本次需要交付的产物，附文件名与 MIME；输入参考图、已发布到其他地方的原图不因任务中使用过就再作为附件返回。仅当用户明确要求发送该现有文件时交付原文件；平台会保存交付副本。附件报告按需提供，files 可以为空，单次最多八个附件；超过时按需要打包已有文件，无法打包也要提交已有进度并说明剩余项。图片、现有产物或简短结果足够时直接交付，不额外写任务报告或验收说明。用户要求文件、详细分析或长资料确有保留价值时再提供完整附件。聊天表达由平台在交付时处理。工作工具按当前工具列表直接调用。'
 /** DSH Agents execute the work. The plugin owns task identity and channel delivery. */
 export class NativeBackgroundTasks {
  private readonly children=new Map<string,ActiveChild>()
@@ -133,7 +134,7 @@ export class NativeBackgroundTasks {
   return model
  }
  tool(owner:string):ToolDefinition {
-  return {name:'partner_background_task',description:'用 start 将需要独立推理与连续多步处理的工作委派给 DSH 原生子 agent，例如连续调查、整理报告、编程、生图或多步浏览器操作；接收后立刻返回前台。单条长命令、下载、转码、构建或测试直接用原生 bash/terminal_send run_in_background:true 及 job_list/job_output/job_kill，不必为耗时命令再开子 agent。普通闲聊、可直接查完的只读查询、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
+  return {name:'partner_background_task',description:'用 start 将需要独立推理与连续多步处理的工作委派给 DSH 原生子 agent，例如连续调查、整理报告、编程、生图或多步浏览器操作；接收后立刻返回前台。status 为 waiting 时任务尚未完成，保留原子会话；发起人补充材料或确认继续后用 resume 和原 taskId，不要新开同一任务。单条长命令、下载、转码、构建或测试直接用原生 bash/terminal_send run_in_background:true 及 job_list/job_output/job_kill，不必为耗时命令再开子 agent。普通闲聊、可直接查完的只读查询、准备好内容后的一次渠道发布（例如发说说）由原会话完成。input 只写本次任务要求、约束和所需文件；后台从空白会话开始。交付由原前台按伙伴人设简短接话，按需附上已有产物。list/status 查询任务，QQ 群内包含本群其他成员的任务。重复请求复用同一任务；群友补充或修正同一目标用 update 和原 taskId。发起人明确暂停、稍后继续用 pause 保留进度，继续用 resume 和原 taskId。要求停止、关掉或取消并结束任务时用 stop，自动回收子会话并保留已有文件。明确彻底放弃也可用 discard。cancel 是旧版暂停入口。完成交付后自动回收。',
    parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['start','list','status','update','pause','cancel','resume','stop','discard']},label:{type:'string',maxLength:80},input:{type:'string',maxLength:16000},taskId:{type:'string',maxLength:120},referenceImages:{type:'array',maxItems:8,items:{type:'string',minLength:1,maxLength:4096},description:'start、update、resume 时，按顺序交接任务需要的同会话图片编号或归档文件路径。没有参考图变更时省略；明确改为文生图时传空数组。'}}},
    output:{schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},presentCall:()=>({card:'generic',title:'子 agent 工作委派'}),
    execute:async(raw,exec)=>{
@@ -180,7 +181,7 @@ export class NativeBackgroundTasks {
     }
     if(args.action==='list'){
      const tasks=visible(runtimeSnapshot(this.store).executionRuns)
-     return {tasks:[...tasks.filter(active),...tasks.filter(r=>!active(r)).slice(-12).reverse()].map(r=>({taskId:r.id,label:r.background!.label,status:r.status,...(r.background!.interruptedAt?{interrupted:true}:{}),retries:r.background!.retries??0,canResume:owned(r)&&canResume(r),delivered:!!r.background!.deliveredAt}))}
+     return {tasks:[...tasks.filter(r=>active(r)||r.status==='waiting'),...tasks.filter(r=>!active(r)&&r.status!=='waiting').slice(-12).reverse()].map(r=>({taskId:r.id,label:r.background!.label,status:r.status,...(r.background!.interruptedAt?{interrupted:true}:{}),retries:r.background!.retries??0,canResume:owned(r)&&canResume(r),delivered:!!r.background!.deliveredAt}))}
     }
     if(args.action!=='start'){
      const id=requiredText(args.taskId,'taskId',120),run=visible(runtimeSnapshot(this.store).executionRuns).find(r=>r.id===id);if(!run)throw Error('当前会话没有这项后台任务')
@@ -206,7 +207,8 @@ export class NativeBackgroundTasks {
        if(!r||!b||!canResume(r))throw Error('任务状态已变化，请重新查看')
        if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&['queued','running'].includes(r.status)).length>=3)throw Error('当前发起人已有三项执行中的后台任务')
        r.status='queued';delete r.completedAt;delete r.error
-       b.attempt=(b.attempt??0)+1;b.resumeInputId=user.data.id;delete b.retryMode;b.retries=0
+       b.attempt=(b.attempt??0)+1;b.resumeInputId=user.data.id;delete b.retryMode;b.retries=0;b.completionResumes=0
+       delete b.result;delete b.deliveredAt;delete b.deliveryError
        if(imageReferences&&(imageReferences.requested||imageReferences.issue||!b.imageReferences||b.imageReferences.files))b.imageReferences=imageReferences
        else if(b.imageReferences?.files)delete b.imageReferences
        delete b.review;delete b.foregroundMessageId;delete b.foregroundReply;claimed=true
@@ -214,18 +216,19 @@ export class NativeBackgroundTasks {
       if(!claimed)throw Error('任务恢复未接收')
       const restored=runtimeSnapshot(this.store).executionRuns.find(r=>r.id===id)!
       try{
-       const activation=await this.activate(restored,parent,events,exec.signal,'原发起人明确要求继续这个已取消的任务。保留此前任务上下文与已有产物，只推进未完成部分；已完成或结果未知的外部操作先核实，不重复执行。'+(supplement?'\n本次补充：'+supplement:''),true)
+       const activation=await this.activate(restored,parent,events,exec.signal,'原发起人明确要求继续这个保留进度的任务。保留此前任务上下文与已有产物，只推进未完成部分；已完成或结果未知的外部操作先核实，不重复执行。'+(supplement?'\n本次补充：'+supplement:''),true)
        return {kind:'partner-background-v1',taskId:id,childSessionId:activation.childId,name:activation.name,status:'running',resumed:true,independent:true}
       }catch(error){await this.save(id,r=>{if(r.background?.attempt===restored.background!.attempt){r.status='canceled';r.error='恢复未接收：'+String(error).slice(0,800)}});throw error}
      }
      const child=this.children.get(run.sessionId)
      if(args.action==='pause'||args.action==='cancel'||args.action==='stop'||args.action==='discard'){
-      if(!['queued','running','canceled','failed'].includes(run.status))throw Error('任务已完成，不能再次取消或删除')
+      if(!['queued','running','waiting','canceled','failed'].includes(run.status))throw Error('任务已完成，不能再次取消或删除')
       const retire=args.action==='stop'||args.action==='discard'
       await this.save(id,r=>{
        const b=r.background!
        if(r.status==='completed'||!retire&&(b.stoppedAt||b.discardedAt||r.sessionCleanup?.deletedAt))return
        const now=Date.now()
+       if(r.status==='waiting'&&!retire){delete b.result;delete b.deliveredAt;delete b.foregroundMessageId;delete b.foregroundReply}
        r.status='canceled';r.completedAt??=now
        delete b.retryMode;delete b.review;delete b.interruptedAt
        if(!b.deliveredAt)delete b.result
@@ -263,7 +266,7 @@ export class NativeBackgroundTasks {
      existing=visible(s.executionRuns).find(fromInput)??matches(s.executionRuns)
      if(existing)return
      if(s.executionRuns.filter(r=>r.background?.routeId===route.id&&active(r)).length>=3)throw Error('当前发起人已有三项执行中的后台任务')
-     if(s.executionRuns.length>=500){const i=s.executionRuns.findIndex(r=>!active(r)&&(r.status!=='canceled'||!!r.background?.discardedAt)&&!(r.background?.review&&!r.background.review.doneAt)&&!(r.background?.result&&!r.background.deliveredAt));if(i<0)throw Error('任务记录已满');s.executionRuns.splice(i,1)}
+     if(s.executionRuns.length>=500){const i=s.executionRuns.findIndex(r=>!active(r)&&r.status!=='waiting'&&(r.status!=='canceled'||!!r.background?.discardedAt)&&!(r.background?.review&&!r.background.review.doneAt)&&!(r.background?.result&&!r.background.deliveredAt));if(i<0)throw Error('任务记录已满');s.executionRuns.splice(i,1)}
      s.executionRuns.push(run)
     })
     if(existing)return reuse(existing)
@@ -444,8 +447,10 @@ export class NativeBackgroundTasks {
    let claimed=false
    await this.save(id,r=>{
     const source=r.background!
-    if(!source.review?.canResume||source.review.doneAt||source.reviewResumed||source.discardedAt||source.review?.decision?.action!=='continue')return
-    source.reviewResumed=true;source.attempt=(source.attempt??0)+1;r.status='queued';delete r.completedAt
+    if(!source.review?.canResume||source.review.doneAt||source.review.kind!=='completion'&&source.reviewResumed||source.discardedAt||source.review?.decision?.action!=='continue')return
+    if(source.review.kind==='completion')source.completionResumes=(source.completionResumes??0)+1
+    else source.reviewResumed=true
+    source.attempt=(source.attempt??0)+1;r.status='queued';delete r.completedAt
     delete r.error;delete source.review;delete source.foregroundMessageId;delete source.foregroundReply;delete source.deliveryError;claimed=true
    })
    if(!claimed)return
@@ -454,15 +459,31 @@ export class NativeBackgroundTasks {
    catch(error){await this.failed(id,error,next.background!.attempt)}
    return
   }
+  if(decision.action==='wait'){
+   await this.save(id,r=>{
+    const source=r.background!
+    if(!source.review||source.review.doneAt||(source.attempt??0)!==(b.attempt??0)||source.discardedAt)return
+    const alreadyWaiting=r.status==='waiting'&&source.result?.text===decision.text
+    r.status='waiting';delete r.completedAt;delete r.error;r.outputSummary=decision.text
+    if(!alreadyWaiting){
+     source.result={text:decision.text,files:[]};delete source.deliveredAt;delete source.deliveryError
+     if(source.sourceKind==='local'){delete source.foregroundMessageId;delete source.foregroundReply}
+     else source.foregroundReply={text:decision.text}
+    }
+   })
+   if(current()?.status==='waiting')await this.deliverResult(id)
+   if(!current()?.background?.deliveredAt)return
+  }
   if(decision.action==='deliver'){
    const files=decision.files.map(i=>{const {path,name,mediaType}=review.files[i]!;return {path,name,mediaType}})
    await this.save(id,r=>{if(r.background?.review?.decision?.action==='deliver'&&!r.background.review.doneAt&&(r.background.attempt??0)===(b.attempt??0)&&!r.background.discardedAt&&!r.background.result){r.background.result={text:decision.text,files}
       if(r.background.sourceKind==='local'){delete r.background.foregroundMessageId;delete r.background.foregroundReply}
-      else r.background.foregroundReply={text:decision.text}}})
+      else r.background.foregroundReply={text:decision.text}
+      if(r.background.review.kind==='completion'){r.status='completed';r.completedAt=Date.now();delete r.error}}})
    if(current()?.background?.result)await this.deliverResult(id)
    if(!current()?.background?.deliveredAt)return
   }
-  await this.save(id,r=>{if(r.background?.review&&!r.background.review.doneAt&&(r.background.attempt??0)===(b.attempt??0)){r.outputSummary=decision.text;r.background.review.doneAt=Date.now();delete r.background.deliveryError}})
+  await this.save(id,r=>{if(r.background?.review&&!r.background.review.doneAt&&(r.background.attempt??0)===(b.attempt??0)){r.outputSummary=decision.text;r.background.review.doneAt=Date.now();delete r.background.deliveryError;if(decision.action==='hold'&&r.background.review.kind==='completion'){r.status='waiting';delete r.completedAt}}})
   this.onSettled?.(b.sourceSessionId)
  }
  private async finished(id:string,result:{stopReason:string;structured?:unknown},attempt?:number):Promise<void>{
@@ -501,6 +522,21 @@ export class NativeBackgroundTasks {
    }
    files.push({path,name:requiredText(file.name,'name',240)||basename(path),mediaType:requiredText(file.mediaType,'mediaType',200)})
   }
+  if(this.review){
+   const events=await this.readChildEvents(run)
+   const review=await reviewEvidence(run,events,'后台本轮执行已结束，须核对原请求；准备、测量或脚本测试不等于任务已经完成',{text,files})
+   review.kind='completion';review.resultText=text;review.allowQuiet=run.background!.audience==='activity'
+   review.canResume=!!this.agents.resumeActivation&&events.length>0&&!run.sessionCleanup?.deletedAt&&(run.background!.completionResumes??0)<MAX_COMPLETION_RESUMES
+   let pending=false
+   await this.save(id,r=>{
+    if(r.status==='canceled'||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return
+    r.status='running';delete r.completedAt;delete r.error;r.outputSummary=text
+    r.background!.review=review;delete r.background!.result;delete r.background!.retryMode
+    delete r.background!.foregroundMessageId;delete r.background!.foregroundReply;pending=true
+   })
+   if(pending){this.releaseChild(run.sessionId);this.queueOutcome(id)}
+   return
+  }
   let committed=false
   await this.save(id,r=>{if(r.status==='canceled'||attempt!==undefined&&(r.background!.attempt??0)!==attempt)return;committed=true;r.status='completed';delete r.error;r.completedAt=Date.now();r.outputSummary=text;r.background!.result={text,files};delete r.background!.retryMode;delete r.background!.review;delete r.background!.interruptedAt})
   if(committed)await this.deliverResult(id)
@@ -527,12 +563,14 @@ export class NativeBackgroundTasks {
    for(const run of runtimeSnapshot(this.store).executionRuns){
     const b=run.background
     if(!b||b.discardedAt)continue
-    if(['queued','running'].includes(run.status)){
+    if(b.review?.kind==='completion'&&!b.review.doneAt){
+     if((b.review.retryAt??0)<=Date.now())void this.reviewOnce(run.id).catch(error=>this.ctx.logger.warn('后台结果核对：'+diagnostic(error)))
+    }else if(['queued','running'].includes(run.status)){
      if(this.children.has(run.sessionId)||(this.ctx.get('agents') as {get?:(id:string)=>unknown}|undefined)?.get?.(run.sessionId))continue
      let recoveryError='服务已重启，任务保留进度，转回原前台判断'
      try{if(await this.recoverSavedOutput(run))continue}catch(error){recoveryError+='；'+diagnostic(error)}
      await this.failed(run.id,recoveryError,b.attempt??0,true)
-    }else if(run.status==='completed'&&b.result&&!b.deliveredAt){
+    }else if(['completed','waiting'].includes(run.status)&&b.result&&!b.deliveredAt){
      await this.deliverResult(run.id)
     }else if(b.review){
      if(!b.review.doneAt&&(b.review.retryAt??0)<=Date.now())

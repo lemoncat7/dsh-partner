@@ -691,3 +691,99 @@ test('failed native seeded recovery retains the original legacy session for a la
  assert.deepEqual(f.state.executionRuns[0].background.previousSessionIds,[])
  assert.equal(f.state.executionRuns[0].status,'canceled')
 })
+
+test('a successful native stop with only measurements resumes the same task instead of delivering completion',async t=>{
+ const f=await fixture(t);childLog(f,[{type:'turn/end',data:{reason:{kind:'completed'}}}])
+ let reviews=0
+ f.service.review=async run=>{
+  reviews++
+  assert.equal(run.background.review.kind,'completion')
+  assert.equal(run.status,'running');assert.equal(run.completedAt,undefined)
+  const complete=run.background.review.files.length>0
+  await f.store.update(s=>{s.executionRuns[0].background.review.decision={action:complete?'deliver':'continue',text:complete?'七格文字加好了':'复用已量出的坐标，实际渲染七组标签并交付最终 PNG',files:complete?[0]:[]}})
+ }
+ const accepted=await f.start(),run=f.state.executionRuns[0]
+ f.result.resolve({stopReason:'completed',structured:{text:'只测量了七格位置，未生成或改动文件',files:[]}})
+ await waitFor(()=>f.resumes.length===1)
+ assert.equal(run.id,accepted.taskId);assert.equal(run.sessionId,accepted.childSessionId)
+ assert.equal(run.background.result,undefined);assert.equal(run.background.deliveredAt,undefined)
+ assert.equal(f.sent.length,0);assert.equal(f.calls.length,1)
+ assert.equal(f.resumes[0].childId,accepted.childSessionId)
+ assert.match(f.resumes[0].prompt[0].text,/实际渲染/)
+ await writeFile(join(run.background.cwd,'finished.png'),'final image')
+ f.resumeResult.resolve({stopReason:'completed',structured:{text:'最终 PNG 已完成',files:[{path:'finished.png',name:'finished.png',mediaType:'image/png'}]}})
+ await waitFor(()=>run.background.deliveredAt&&run.background.review?.doneAt)
+ assert.equal(reviews,2);assert.equal(run.status,'completed');assert.ok(run.completedAt)
+ assert.equal(f.sent.length,1);assert.equal(f.sent[0].reply.attachments[0].name,'finished.png')
+})
+
+test('blocked completion asks the original user once and preserves the child for an explicit same-task resume',async t=>{
+ const f=await fixture(t);childLog(f,[{type:'turn/end',data:{reason:{kind:'completed'}}}])
+ f.service.review=async run=>{
+  const done=run.background.review.resultText==='最终成果'
+  await f.store.update(s=>{s.executionRuns[0].background.review.decision={action:done?'deliver':'wait',text:done?'这版完成了':'还缺无字底图，请把原图发来',files:[]}})
+ }
+ const accepted=await f.start(),run=f.state.executionRuns[0]
+ f.result.resolve({stopReason:'completed',structured:{text:'只有字体测试，尚缺底图',files:[]}})
+ await waitFor(()=>run.background.review?.doneAt)
+ assert.equal(run.status,'waiting');assert.equal(run.completedAt,undefined)
+ assert.equal(f.sent.length,1);assert.match(f.sent[0].reply.text,/还缺无字底图/)
+ const status=await f.tool.execute({action:'status',taskId:accepted.taskId},f.exec)
+ assert.equal(status.status,'waiting');assert.equal(status.canResume,true)
+ const {cleanupWorkSession}=await import('../lib/execution/session-cleanup.js')
+ assert.equal(await cleanupWorkSession(f.ctx,f.store,run),false)
+ await f.service.recoverDeliveries();assert.equal(f.sent.length,1);assert.equal(f.resumes.length,0)
+ f.setEvents([f.event('update')])
+ const resumed=await f.tool.execute({action:'resume',taskId:accepted.taskId,input:'底图已补好，只继续原任务'},f.exec)
+ assert.equal(resumed.childSessionId,accepted.childSessionId);assert.equal(f.calls.length,1)
+ assert.equal(run.background.deliveredAt,undefined);assert.equal(run.background.result,undefined)
+ f.resumeResult.resolve({stopReason:'completed',structured:{text:'最终成果',files:[]}})
+ await waitFor(()=>run.status==='completed'&&run.background.deliveredAt)
+ assert.equal(f.sent.length,2);assert.equal(f.sent[1].reply.text,'这版完成了')
+})
+
+test('a complete text answer needs no attachment but still passes foreground completion review',async t=>{
+ const f=await fixture(t);let inspected=0
+ f.service.review=async run=>{
+  inspected++;assert.equal(run.background.review.canResume,false)
+  assert.equal(run.background.review.resultText,'五条建议均已答完')
+  await f.store.update(s=>{s.executionRuns[0].background.review.decision={action:'deliver',text:'五条建议均已答完',files:[]}})
+ }
+ await f.start();f.result.resolve({stopReason:'completed',structured:{text:'五条建议均已答完',files:[]}})
+ await waitFor(()=>f.state.executionRuns[0].background.deliveredAt)
+ assert.equal(inspected,1);assert.equal(f.sent.length,1)
+ assert.equal(f.state.executionRuns[0].status,'completed')
+})
+
+test('automatic completion continuation is bounded and unfinished work stays waiting without cleanup',async t=>{
+ const f=await fixture(t);childLog(f,[{type:'turn/end',data:{reason:{kind:'completed'}}}])
+ const attempts=[deferred(),deferred()];let decisions=[]
+ f.native.resumeActivation=async spec=>{
+  const result=attempts[f.resumes.length];assert.ok(result,'must not resume endlessly')
+  f.resumes.push(spec);return {childId:spec.childId,name:'agent-1',result:result.promise,dispose:async()=>{}}
+ }
+ f.service.review=async run=>{
+  decisions.push(run.background.review.canResume)
+  await f.store.update(s=>{s.executionRuns[0].background.review.decision={action:run.background.review.canResume?'continue':'wait',text:run.background.review.canResume?'继续未完成的渲染':'这轮仍未完成，需要你确认是否继续',files:[]}})
+ }
+ await f.start();f.result.resolve({stopReason:'completed',structured:{text:'只做了准备',files:[]}})
+ await waitFor(()=>f.resumes.length===1)
+ attempts[0].resolve({stopReason:'completed',structured:{text:'只做了测量',files:[]}})
+ await waitFor(()=>f.resumes.length===2)
+ attempts[1].resolve({stopReason:'completed',structured:{text:'仍未输出',files:[]}})
+ const run=f.state.executionRuns[0];await waitFor(()=>run.status==='waiting'&&run.background.review?.doneAt)
+ assert.deepEqual(decisions,[true,true,false]);assert.equal(f.sent.length,1)
+ assert.equal(run.background.completionResumes,2);assert.equal(run.completedAt,undefined)
+ await f.service.recoverDeliveries();assert.equal(f.resumes.length,2);assert.equal(f.sent.length,1)
+})
+
+test('pending completion review survives recovery and explicit stop prevents a late decision from sending',async t=>{
+ const f=await fixture(t);childLog(f,[{type:'turn/end',data:{reason:{kind:'completed'}}}]);const gate=deferred();let reviews=0
+ f.service.review=async run=>{reviews++;await gate.promise;await f.store.update(s=>{if(s.executionRuns[0].background.review)s.executionRuns[0].background.review.decision={action:'deliver',text:'旧回复',files:[]}})}
+ const accepted=await f.start();f.result.resolve({stopReason:'completed',structured:{text:'阶段结果',files:[]}})
+ await waitFor(()=>reviews===1);await f.service.recoverDeliveries()
+ const run=f.state.executionRuns[0];assert.equal(run.status,'running');assert.equal(run.error,undefined);assert.equal(reviews,1)
+ await f.tool.execute({action:'stop',taskId:accepted.taskId},f.exec)
+ gate.resolve();await waitFor(()=>!f.service.reviews.size)
+ assert.equal(run.status,'canceled');assert.ok(run.background.stoppedAt);assert.equal(f.sent.length,0)
+})

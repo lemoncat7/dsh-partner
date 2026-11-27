@@ -1,5 +1,5 @@
 export type ExecutionKind = 'work' | 'schedule' | 'delegation' | 'review' | 'skill'
-export type ExecutionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled' | 'timed-out'
+export type ExecutionStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'canceled' | 'timed-out'
 
 export interface ExecutionRun {
   sessionCleanup?:{parentSessionId?:string;deletedAt?:number;catalogRemovedAt?:number}
@@ -8,7 +8,7 @@ export interface ExecutionRun {
     previousSessionIds?:string[];
     imageReferences?:import('../attachments/image-references.js').ImageReferencePlan;
     retries?:number; retryMode?:import('./background-retry.js').BackgroundRetryMode; stoppedAt?:number; interruptedAt?:number; supplementInputIds?:string[];
-    review?:import('./background-review.js').BackgroundReview;reviewResumed?:boolean;
+    review?:import('./background-review.js').BackgroundReview;reviewResumed?:boolean;completionResumes?:number;
     audience?:'member'|'activity'; activityKind?:import('../character/idle-contact.js').IdleContactState['kind'];
     sourceKind?:'local'|'channel'; localMessageId?:string;sourceCwd?:string;foregroundMessageId?:string;foregroundReply?:{text:string};
     routeId:string; sourceSessionId:string; channelId:string; userId:string; inputId:string;

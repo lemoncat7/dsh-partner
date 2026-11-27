@@ -593,12 +593,15 @@ export class ChannelManager {
   }
   async deliverBackgroundResult(run:import('../execution/domain.js').ExecutionRun,reply:PartnerReply):Promise<void> {
     const b=run.background;if(!b)throw Error('后台任务缺少原始来源')
-    if(runtimeSnapshot(this.store).recentReceipts.includes('background:'+run.id))return
+    const waiting=run.status==='waiting'&&b.review?.decision?.action==='wait'
+    const receipt=waiting?`background-wait:${run.id}:${b.attempt??0}`:'background:'+run.id
+    if(runtimeSnapshot(this.store).recentReceipts.includes(receipt))return
     const current=()=>{
       const state=runtimeSnapshot(this.store)
       if(b.review){
         const live=state.executionRuns.find(item=>item.id===run.id)?.background
-        if(!live?.result||live.discardedAt||live.review?.decision?.action!=='deliver'||(live.attempt??0)!==(b.attempt??0))return false
+        if(!live?.result||live.discardedAt||live.review?.decision?.action!==(waiting?'wait':'deliver')||(live.attempt??0)!==(b.attempt??0))return false
+        if(waiting&&state.executionRuns.find(item=>item.id===run.id)?.status!=='waiting')return false
       }
       return backgroundSourceAllowed(state,run)
     }
@@ -608,7 +611,7 @@ export class ChannelManager {
     const payload:PartnerReply={...voiced,directSource:{routeId:b.routeId,sessionId:b.sourceSessionId,accountId:b.accountId,baseUrl:b.baseUrl,targetId:b.targetId}}
     this.checkChatSource(b.channelId,b.userId,payload)
     const route=runtimeSnapshot(this.store).sessions.find(r=>r.id===b.routeId)!
-    await this.queueProactive(route,'background:'+run.id,payload,current,true)
+    await this.queueProactive(route,receipt,payload,current,true)
   }
 
   private async queueProactive(route: ChannelSession, receipt: string, reply: PartnerReply, stillValid?: () => boolean, exactOrigin = false): Promise<boolean> {

@@ -565,3 +565,21 @@ test('a caption ten seconds after an admitted photo joins the unfinished reply o
   assert.equal(f.sent.length,1)
  }
 })
+
+test('a waiting-materials notification does not consume the final result receipt and keeps its original audience',async()=>{
+ const f=fixture();f.state.companions[0].capabilities=[]
+ f.channel.qq.identityBinding={enabled:true,qqIds:['22345678']};f.manager.sender=()=>f.api
+ f.agents.prepareBackgroundDelivery=async(_run,reply)=>reply
+ const run={id:'waiting-task',status:'waiting',ownerCompanionId:'c',background:{routeId:'r',sourceSessionId:'s',channelId:'qq',userId:f.peer,accountId:f.channel.accountId,baseUrl:'ws://local',targetId:f.target,capabilities:[],attempt:0,result:{text:'请补底图',files:[]},review:{decision:{action:'wait'}}}}
+ f.state.executionRuns=[run]
+ const {backgroundSourceAllowed}=await import('../lib/execution/background-routing.js')
+ assert.equal(backgroundSourceAllowed(f.state,run),true)
+ await f.manager.deliverBackgroundResult(run,{text:'请补底图',attachments:[]})
+ await f.manager.deliverBackgroundResult(run,{text:'请补底图',attachments:[]})
+ assert.equal(f.sent.length,1);assert.ok(f.state.recentReceipts.includes('background-wait:waiting-task:0'))
+ assert.equal(f.state.recentReceipts.includes('background:waiting-task'),false)
+ run.status='completed';run.background.attempt=1;run.background.result={text:'好了',files:[]};run.background.review.decision={action:'deliver'}
+ await f.manager.deliverBackgroundResult(run,{text:'好了',attachments:[]})
+ await f.manager.deliverBackgroundResult(run,{text:'好了',attachments:[]})
+ assert.deepEqual(f.sent.map(v=>v.text),['请补底图','好了']);assert.ok(f.sent.every(v=>v.userId===f.peer))
+})

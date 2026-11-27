@@ -7,7 +7,7 @@ import type {PartnerStore} from '../store.js'
 import type {ExecutionRun} from './domain.js'
 
 type Persistence={stat(id:string):Promise<{header:{id:string;cwd?:string;parentSession?:string};location?:{kind:string;path:string}}|undefined>;open(id:string,access:'write'):Promise<{close():Promise<void>}>}
-const terminal=(run:ExecutionRun)=>!['queued','running'].includes(run.status)
+const terminal=(run:ExecutionRun)=>!['queued','running','waiting'].includes(run.status)
 const parentOf=(run:ExecutionRun)=>run.background?.sourceSessionId??run.sessionCleanup?.parentSessionId
 const cleaned='plugin:dsh-partner/subagent-cleaned'
 type CleanupRecord={version:1;childId:string;runId:string;ownerCompanionId:string}

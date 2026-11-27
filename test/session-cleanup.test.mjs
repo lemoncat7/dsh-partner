@@ -91,3 +91,10 @@ test('a child finishing sweeps eligible siblings and filters only retired catalo
  cleaner.close()
  assert.equal(def.wire.view(catalog),catalog.items)
 })
+
+test('waiting for materials retains the native session even after its notification was delivered',async t=>{
+ const f=await fixture(t);f.run.status='waiting'
+ f.run.background={sourceSessionId:'parent',deliveredAt:1,result:{text:'请补底图',files:[]},review:{kind:'completion',doneAt:1,decision:{action:'wait'}}}
+ assert.equal(await cleanupWorkSession(f.ctx,f.store,f.run),false)
+ await access(f.file);assert.equal(f.run.sessionCleanup,undefined)
+})

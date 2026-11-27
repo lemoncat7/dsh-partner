@@ -722,7 +722,7 @@ export class PartnerAgentRuntime {
     const key=route.sessionId
     const pending=this.replyQueue.enqueue(key,'delivery',undefined,async()=>{
       const agent=await this.ensureAgent(c,route)
-      if (!this.backgroundArtifacts || !run.background?.result) return composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
+      if (!this.backgroundArtifacts || !run.background?.result || run.status==='waiting') return composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)
       const current=()=>assertBackgroundArtifactOrigin(this.store,run,origin=>this.closed||this.isArchived(origin))
       const localText=route.kind==='local'&&!c.characterCard?.enabled ? reply.text : undefined
       const result=await composeBackgroundDelivery(this.ctx,this.store,run,agent,reply)

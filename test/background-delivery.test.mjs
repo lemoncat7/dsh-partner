@@ -327,3 +327,39 @@ test('web delivery publishes native attachments on the original turn without a n
  assert.equal(missingOrigin.snapshotEvents().some(event=>event.type==='deliverables/presented'),false)
  assert.deepEqual((await readdir(root)).sort(),['other.md','task'])
 })
+
+test('completion review receives the original assignment and full partial result; continuation is a decision, not speech',async()=>{
+ const f=fixture(JSON.stringify({action:'continue',text:'按已有坐标实际贴字并输出最终 PNG',files:[]}))
+ delete f.run.background.result;f.run.background.input='把七组文字贴到底图，交付最终 PNG'
+ f.run.background.review={kind:'completion',reason:'本轮执行结束',resultText:'只测量了坐标，未生成或改动文件',tools:['bash (完成)'],files:[],canResume:true}
+ const reply=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,{text:'',attachments:[]})
+ assert.equal(reply.text,'');assert.equal(f.run.background.foregroundReply,undefined)
+ assert.equal(f.run.background.review.decision.action,'continue')
+ const prompt=f.events.find(isInternalTaskNotice).data.content[0].text
+ assert.match(prompt,/不证明原请求已完成/);assert.match(prompt,/实际贴字|交付最终 PNG/)
+ assert.match(prompt,/只测量了坐标，未生成或改动文件/);assert.match(prompt,/恢复同一子会话/)
+ assert.equal(channelReplyPartsAfter(f.events,1).text,'')
+})
+
+test('waiting delivery in a local session asks for the real missing input instead of claiming completion',async()=>{
+ const f=fixture('还缺无字底图，发来后才能继续')
+ f.run.status='waiting';f.run.background.result={text:'还缺无字底图，发来后才能继续',files:[]}
+ f.reply={text:f.run.background.result.text,attachments:[]}
+ const answer=await composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,f.reply)
+ assert.match(answer.text,/还缺无字底图/)
+ const prompt=f.events.find(isInternalTaskNotice).data.content[0].text
+ assert.match(prompt,/任务尚未完成/);assert.match(prompt,/不承诺自动继续/)
+ assert.doesNotMatch(prompt,/本轮是已完成后台任务/)
+})
+
+test('an accepted user task cannot quietly hold a partial success; autonomous work may stay quiet',async()=>{
+ for(const allowQuiet of [false,true]){
+  const f=fixture(JSON.stringify({action:'hold',text:'暂不打扰',files:[]}))
+  delete f.run.background.result
+  f.run.background.review={kind:'completion',allowQuiet,reason:'执行结束',resultText:'只做了字体准备',tools:[],files:[],canResume:true}
+  const pending=composeBackgroundDelivery(f.ctx,f.store,f.run,f.agent,{text:'',attachments:[]})
+  if(allowQuiet){await pending;assert.equal(f.run.background.review.decision.action,'hold')}
+  else {await assert.rejects(pending,/处置格式无效/);assert.equal(f.run.background.review.decision,undefined)}
+  assert.equal(channelReplyPartsAfter(f.events,1).text,'')
+ }
+})

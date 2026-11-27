@@ -5,12 +5,15 @@ import type {ExecutionRun} from './domain.js'
 
 export interface ReviewFile {sourcePath?:string;path:string;name:string;mediaType:string}
 export interface BackgroundReview {
+ kind?:'completion'
+ resultText?:string
+ allowQuiet?:boolean
  reason:string
  lastStatement?:string
  tools:string[]
  files:ReviewFile[]
  canResume:boolean
- decision?:{action:'deliver'|'continue'|'hold';text:string;files:number[]}
+ decision?:{action:'deliver'|'continue'|'hold'|'wait';text:string;files:number[]}
  doneAt?:number
  retryAt?:number
 }
@@ -83,7 +86,7 @@ export async function reviewEvidence(run:ExecutionRun,events:readonly SessionEve
 }
 export function reviewDecision(text:string,review:BackgroundReview):NonNullable<BackgroundReview['decision']>{
  const v=JSON.parse(text.trim().replace(/^\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60$/gi,''))
- if(!v||!['hold','deliver','continue'].includes(v.action)||typeof v.text!=='string'||!v.text.trim()||!Array.isArray(v.files)||v.files.length>8||
-   v.files.some((n:unknown)=>typeof n!=='number'||!Number.isInteger(n)||!review.files[n])||v.action==='continue'&&!review.canResume||v.action!=='deliver'&&v.files.length)throw Error('前台任务处置格式无效')
+ if(!v||!['hold','deliver','continue','wait'].includes(v.action)||typeof v.text!=='string'||!v.text.trim()||!Array.isArray(v.files)||v.files.length>8||
+   v.files.some((n:unknown)=>typeof n!=='number'||!Number.isInteger(n)||!review.files[n])||v.action==='continue'&&!review.canResume||v.action!=='deliver'&&v.files.length||v.action==='hold'&&review.kind==='completion'&&!review.allowQuiet)throw Error('前台任务处置格式无效')
  return {action:v.action,text:v.text.trim(),files:[...new Set<number>(v.files)]}
 }
